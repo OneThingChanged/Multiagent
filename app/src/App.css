@@ -218,6 +218,98 @@ body,
   background: var(--app-success-hover);
 }
 
+.project-list {
+  flex: 0 0 auto;
+  max-height: 38vh;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--app-border);
+  padding: 6px 0;
+}
+
+.sidebar-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 8px 2px 0;
+}
+
+.sidebar-section-title {
+  color: var(--app-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 12px;
+  text-transform: uppercase;
+}
+
+.section-action-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  background: var(--app-button-bg);
+  color: var(--app-text);
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.section-action-btn:hover {
+  background: var(--app-button-hover);
+  color: var(--app-heading);
+  border-color: var(--app-accent);
+}
+
+.sidebar-section-title-list {
+  list-style: none;
+}
+
+.project-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--app-text);
+  cursor: pointer;
+  font-family: inherit;
+  padding: 8px 12px 8px 10px;
+  text-align: left;
+}
+.project-item:hover {
+  background: var(--app-panel-hover);
+}
+.project-item-active {
+  background: var(--app-active-bg-strong);
+  border-left-color: var(--app-accent);
+}
+
+.project-name,
+.project-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-name {
+  color: var(--app-heading);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.project-meta {
+  color: var(--app-soft-text);
+  font-size: 11px;
+}
+
 .agent-list {
   list-style: none;
   margin: 0;
@@ -1597,6 +1689,43 @@ body.docs-resizing * {
   flex: 1;
   min-width: 0;
 }
+
+.session-project-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  background: var(--app-panel-soft);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  padding: 9px 10px;
+}
+
+.session-project-label {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.session-project-name {
+  min-width: 0;
+  color: var(--app-heading);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-project-folder {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--app-soft-text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .browse-btn {
   background: var(--app-button-bg);
   color: var(--app-text);

@@ -53,6 +53,7 @@ export function ContextMenu({
       | "tab"
       | "split-h"
       | "split-v"
+      | "rename"
       | "pin-session"
       | "clear-session-pin"
   ) => void;
@@ -95,6 +96,9 @@ export function ContextMenu({
           disabled={!hasActive || !canPlaceInActive}
         >
           아래로 분할
+        </button>
+        <button className="ctx-item" onClick={() => onAction("rename")}>
+          세션 별명 변경
         </button>
         <div className="ctx-separator" />
         <button

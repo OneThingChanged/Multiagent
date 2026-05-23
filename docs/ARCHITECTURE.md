@@ -19,7 +19,7 @@ K:\AI\MultiAgent\
 ├─ docs/                ← 본 문서들
 └─ app/                 ← Tauri 프로젝트
    ├─ src/              ← 프론트엔드 (React + TS)
-   │  ├─ App.tsx        ← 최상위 상태·listener·콜백 (~750줄)
+   │  ├─ App.tsx        ← 최상위 상태·listener·콜백
    │  ├─ types.ts       ← 공용 타입 + AI_TOOLS + LS 키
    │  ├─ lib/
    │  │  ├─ layout.ts       ← 트리 연산 (getAt/setAt/pruneAgent/…)
@@ -34,7 +34,9 @@ K:\AI\MultiAgent\
    │  │  ├─ Splitter.tsx
    │  │  ├─ DocsPanel.tsx     ← Markdown 목록/트리/뷰어
    │  │  ├─ SettingsModal.tsx ← 전역 설정/테마 팝업
-   │  │  ├─ NewAgentModal.tsx
+   │  │  ├─ NewProjectModal.tsx
+   │  │  ├─ NewAgentModal.tsx   ← 새 세션 생성 모달
+   │  │  ├─ RenameSessionModal.tsx
    │  │  ├─ Toast.tsx
    │  │  └─ Menus.tsx         ← ContextMenu + TabContextMenu
    │  ├─ App.css
@@ -58,7 +60,7 @@ K:\AI\MultiAgent\
 | `resize_pty` | id, cols, rows | master.resize() (ConPTY → 자식에 SIGWINCH 상응) |
 | `kill_pty` | id | child.kill() + state에서 제거 |
 | `confirm_close` | (none) | 창 닫기 확인 플래그 true 세팅 + window.close() — 프론트의 graceful shutdown 완료 후 호출 |
-| `list_markdown_files` | folder | 에이전트 폴더 아래 Markdown 파일을 재귀 스캔해 `{ name, relative_path }[]` 반환. 최대 500개 |
+| `list_markdown_files` | folder | 프로젝트 폴더 아래 Markdown 파일을 재귀 스캔해 `{ name, relative_path }[]` 반환. 최대 500개 |
 | `read_markdown_file` | folder, relative_path | Markdown 파일을 읽어 문자열 반환. 폴더 밖 경로와 2MB 초과 파일은 거부 |
 | `resolve_markdown_path` | folder, path | 터미널에서 클릭된 Markdown 경로를 검증하고 Docs 패널용 상대 경로로 정규화 |
 
@@ -118,13 +120,15 @@ PowerShell 계열로 시작될 때는 `-NoLogo` 인자 추가.
 ### 상태
 
 ```ts
-agents: Agent[]                    // 에이전트 메타 (id, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
-groups: Group[]                    // 각 그룹 = layout 트리 + 선택적 세션 고정값
+projects: Project[]                // 프로젝트 메타 (id, name, folder, createdAt, lastOpenedAt?)
+agents: Agent[]                    // 세션 메타 (id, projectId, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
+groups: Group[]                    // 각 그룹 = projectId + layout 트리 + 선택적 세션 고정값
+activeProjectId: string | null     // 현재 사이드바/Docs 기준 프로젝트
 activeGroupId: string | null       // 현재 표시 중인 그룹
 activePath: Path | null            // 그 그룹 내의 활성 leaf 경로 (number[])
 docsOpen/docsWidth/docsRequest      // Docs 패널 열림, 폭, 터미널 링크 요청
 appTheme: AppThemeId                // Soft/GitHub/Warm/Light 전역 테마
-agents/groups/view/theme/docsWidth/terminalFontSize 모두 localStorage 영구화
+projects/agents/groups/view/theme/docsWidth/terminalFontSize 모두 localStorage 영구화
 ```
 
 ### 레이아웃 트리 (`LayoutNode`)
@@ -141,6 +145,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ### 그룹 모델 불변식
 
 - agents 안의 모든 ID는 groups[*].layout 안에 정확히 한 번씩 등장 (어느 그룹 어느 leaf 어느 tab)
+- 각 agent는 정확히 하나의 projectId를 가진다. 그룹도 projectId를 갖고, activeProjectId 기준으로 필터링된다
+- 기존 `multiagent.agents.v1`만 있던 설치는 agent.folder별로 Project를 자동 생성해 마이그레이션한다
 - 어떤 이유로 누락되면 load 시 solo 그룹 생성으로 복구
 - 그룹 layout이 비면 그 그룹 자동 삭제
 - `sessionPins?: Record<agentId, sessionId>`는 그룹에 고정된 resume 세션 ID
@@ -178,7 +184,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 ### 백엔드 스캔
 
-- `list_markdown_files`는 활성 에이전트의 folder를 root로 보고 `*.md`, `*.markdown` 파일을 재귀 수집
+- `list_markdown_files`는 활성 프로젝트의 folder를 root로 보고 `*.md`, `*.markdown` 파일을 재귀 수집
 - `.git`, `.hg`, `.svn`, `.claude`, `.codex`, `node_modules`, `target`, `dist`, `build`, `.next`, `.venv`, `vendor`는 스캔 제외
 - 최대 파일 수는 500개, 읽기 가능한 단일 Markdown 파일 최대 크기는 2MB
 - `resolve_markdown_path`는 다음 형태를 모두 처리:
@@ -233,9 +239,10 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 ## localStorage 키
 
-- `multiagent.agents.v1` — `StoredAgent[]` (메타만)
-- `multiagent.groups.v1` — `Group[]` (트리 + `sessionPins`/`sessionLocked`)
-- `multiagent.view.v1` — `{ activeGroupId, activePath }`
+- `multiagent.projects.v1` — `StoredProject[]` (프로젝트 이름, 폴더, 최근 사용 시각)
+- `multiagent.agents.v1` — `StoredAgent[]` (세션 메타 + projectId)
+- `multiagent.groups.v1` — `Group[]` (projectId + 트리 + `sessionPins`/`sessionLocked`)
+- `multiagent.view.v1` — `{ activeProjectId, activeGroupId, activePath }`
 - `multiagent.appTheme.v1` — 전역 테마 (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장
 - `multiagent.docsWidth.v1` — Docs 패널 폭

@@ -44,6 +44,7 @@ export function toolForId(id: string): AiTool {
 
 export type Agent = {
   id: string;
+  projectId: string;
   name: string;
   folder: string;
   aiToolId: string;
@@ -56,6 +57,7 @@ export type Agent = {
 
 export type StoredAgent = {
   id: string;
+  projectId?: string;
   name: string;
   folder: string;
   aiToolId: string;
@@ -67,6 +69,16 @@ export type StoredAgent = {
   lastClaudeSessionId?: string;
 };
 
+export type Project = {
+  id: string;
+  name: string;
+  folder: string;
+  createdAt: number;
+  lastOpenedAt?: number;
+};
+
+export type StoredProject = Project;
+
 export type TerminalEntry = {
   term: Terminal;
   fit: FitAddon;
@@ -77,9 +89,13 @@ export type TerminalEntry = {
 
 export type NewAgentPayload = {
   name: string;
-  folder: string;
   aiToolId: string;
   dangerous: boolean;
+};
+
+export type NewProjectPayload = {
+  name: string;
+  folder: string;
 };
 
 export type Toast = {
@@ -107,6 +123,7 @@ export type Path = number[];
 
 export type Group = {
   id: string;
+  projectId?: string;
   layout: LayoutNode;
   sessionPins?: Record<string, string>;
   sessionLocked?: boolean;
@@ -137,6 +154,7 @@ export type DropTargetState = {
 };
 
 export const LS_AGENTS = "multiagent.agents.v1";
+export const LS_PROJECTS = "multiagent.projects.v1";
 export const LS_GROUPS = "multiagent.groups.v1";
 export const LS_VIEW = "multiagent.view.v1";
 export const LS_LAYOUT_LEGACY = "multiagent.layout.v1";

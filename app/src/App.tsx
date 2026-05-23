@@ -18,6 +18,7 @@ import "./App.css";
 import {
   LS_AGENTS,
   LS_GROUPS,
+  LS_PROJECTS,
   LS_VIEW,
   toolForId,
 } from "./types";
@@ -30,13 +31,21 @@ import type {
   DropZone,
   Group,
   NewAgentPayload,
+  NewProjectPayload,
   Path,
+  Project,
   StoredAgent,
+  StoredProject,
   TabCtxState,
   TerminalEntry,
   Toast,
 } from "./types";
-import { activeAgentInLeaf, collectAgentIds, getAt } from "./lib/layout";
+import {
+  activeAgentInLeaf,
+  collectAgentIds,
+  firstLeafPath,
+  getAt,
+} from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
 import { loadBootstrap } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
@@ -47,10 +56,12 @@ import type { AppThemeId } from "./lib/appTheme";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
+import { NewProjectModal } from "./components/NewProjectModal";
 import { ToastContainer } from "./components/Toast";
 import { ContextMenu, TabContextMenu } from "./components/Menus";
 import { DocsPanel } from "./components/DocsPanel";
 import { SettingsModal } from "./components/SettingsModal";
+import { RenameSessionModal } from "./components/RenameSessionModal";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const DEFAULT_DOCS_WIDTH = 640;
@@ -58,7 +69,7 @@ const MIN_DOCS_WIDTH = 360;
 const MIN_WORKSPACE_WIDTH = 260;
 
 type DocsRequest = {
-  agentId: string;
+  projectId: string;
   relativePath: string;
   key: number;
 };
@@ -87,14 +98,20 @@ function App() {
   if (!bootstrapRef.current) bootstrapRef.current = loadBootstrap();
   const boot = bootstrapRef.current;
 
+  const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
   const [groups, setGroups] = useState<Group[]>(boot.groups);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    boot.activeProjectId
+  );
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
     boot.activeGroupId
   );
   const [activePath, setActivePath] = useState<Path | null>(boot.activePath);
 
+  const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
@@ -108,12 +125,22 @@ function App() {
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
+  const projectsRef = useRef<Project[]>([]);
+  const activeProjectIdRef = useRef<string | null>(null);
   const activeGroupIdRef = useRef<string | null>(null);
   const activePathRef = useRef<Path | null>(null);
 
   useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  useEffect(() => {
     agentsRef.current = agents;
   }, [agents]);
+
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
 
   useEffect(() => {
     activeGroupIdRef.current = activeGroupId;
@@ -126,8 +153,22 @@ function App() {
   // ---- Persistence
 
   useEffect(() => {
+    const storedProjects: StoredProject[] = projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      folder: project.folder,
+      createdAt: project.createdAt,
+      lastOpenedAt: project.lastOpenedAt,
+    }));
+    try {
+      localStorage.setItem(LS_PROJECTS, JSON.stringify(storedProjects));
+    } catch {}
+  }, [projects]);
+
+  useEffect(() => {
     const configs: StoredAgent[] = agents.map((a) => ({
       id: a.id,
+      projectId: a.projectId,
       name: a.name,
       folder: a.folder,
       aiToolId: a.aiToolId,
@@ -150,10 +191,10 @@ function App() {
     try {
       localStorage.setItem(
         LS_VIEW,
-        JSON.stringify({ activeGroupId, activePath })
+        JSON.stringify({ activeProjectId, activeGroupId, activePath })
       );
     } catch {}
-  }, [activeGroupId, activePath]);
+  }, [activeProjectId, activeGroupId, activePath]);
 
   useEffect(() => {
     try {
@@ -190,6 +231,27 @@ function App() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (projects.length === 0) {
+      if (activeProjectId !== null) {
+        setActiveProjectId(null);
+        setActiveGroupId(null);
+        setActivePath(null);
+      }
+      return;
+    }
+
+    if (activeProjectId && projects.some((project) => project.id === activeProjectId)) {
+      return;
+    }
+
+    const nextProjectId = projects[0].id;
+    const firstGroup = groups.find((group) => group.projectId === nextProjectId);
+    setActiveProjectId(nextProjectId);
+    setActiveGroupId(firstGroup?.id ?? null);
+    setActivePath(firstGroup ? firstLeafPath(firstGroup.layout) : null);
+  }, [activeProjectId, groups, projects]);
 
   // ---- Notifications
 
@@ -335,18 +397,58 @@ function App() {
   );
 
   const selectAgent = useCallback(
-    (agentId: string) => applyGroupOp((s) => groupOps.selectAgent(s, agentId)),
+    (agentId: string) => {
+      const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
+      if (agent) {
+        setActiveProjectId(agent.projectId);
+        setProjects((prev) =>
+          prev.map((project) =>
+            project.id === agent.projectId
+              ? { ...project, lastOpenedAt: Date.now() }
+              : project
+          )
+        );
+      }
+      applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
+    },
     [applyGroupOp]
   );
 
+  const selectProject = useCallback((projectId: string) => {
+    setActiveProjectId(projectId);
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === projectId ? { ...project, lastOpenedAt: Date.now() } : project
+      )
+    );
+
+    const firstGroup = groups.find((group) => group.projectId === projectId);
+    setActiveGroupId(firstGroup?.id ?? null);
+    setActivePath(firstGroup ? firstLeafPath(firstGroup.layout) : null);
+  }, [groups]);
+
   const openAsTab = useCallback(
-    (agentId: string) => applyGroupOp((s) => groupOps.openAsTab(s, agentId)),
+    (agentId: string) =>
+      applyGroupOp((s) =>
+        groupOps.openAsTab(
+          s,
+          agentId,
+          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+        )
+      ),
     [applyGroupOp]
   );
 
   const splitWith = useCallback(
     (agentId: string, direction: "h" | "v") =>
-      applyGroupOp((s) => groupOps.splitWith(s, agentId, direction)),
+      applyGroupOp((s) =>
+        groupOps.splitWith(
+          s,
+          agentId,
+          direction,
+          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+        )
+      ),
     [applyGroupOp]
   );
 
@@ -378,8 +480,27 @@ function App() {
 
   // ---- Agent CRUD (side effects + layout via groupOps)
 
+  const createProject = useCallback((payload: NewProjectPayload) => {
+    const id = crypto.randomUUID();
+    const project: Project = {
+      id,
+      name: payload.name.trim() || "Project",
+      folder: payload.folder.trim(),
+      createdAt: Date.now(),
+      lastOpenedAt: Date.now(),
+    };
+    setProjects((prev) => [project, ...prev]);
+    setActiveProjectId(id);
+    setActiveGroupId(null);
+    setActivePath(null);
+  }, []);
+
   const createAgent = useCallback(
     (payload: NewAgentPayload) => {
+      const project = projectsRef.current.find(
+        (candidate) => candidate.id === activeProjectIdRef.current
+      );
+      if (!project) return;
       const id = crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
 
@@ -387,8 +508,9 @@ function App() {
         ...prev,
         {
           id,
-          name: payload.name.trim() || `Agent ${prev.length + 1}`,
-          folder: payload.folder,
+          projectId: project.id,
+          name: payload.name.trim() || `Session ${prev.length + 1}`,
+          folder: project.folder,
           aiToolId: tool.id,
           aiLabel: tool.label,
           dangerous: payload.dangerous && !!tool.dangerousFlag,
@@ -396,7 +518,7 @@ function App() {
           createdAt: Date.now(),
         },
       ]);
-      applyGroupOp((s) => groupOps.addNewAgent(s, id));
+      applyGroupOp((s) => groupOps.addNewAgent(s, id, project.id));
     },
     [applyGroupOp]
   );
@@ -416,6 +538,12 @@ function App() {
     },
     [applyGroupOp]
   );
+
+  const renameAgent = useCallback((id: string, name: string) => {
+    setAgents((prev) =>
+      prev.map((agent) => (agent.id === id ? { ...agent, name } : agent))
+    );
+  }, []);
 
   // ---- Context menu
 
@@ -517,6 +645,7 @@ function App() {
         | "tab"
         | "split-h"
         | "split-v"
+        | "rename"
         | "pin-session"
         | "clear-session-pin"
     ) => {
@@ -527,6 +656,7 @@ function App() {
       else if (action === "tab") openAsTab(id);
       else if (action === "split-h") splitWith(id, "h");
       else if (action === "split-v") splitWith(id, "v");
+      else if (action === "rename") setRenameSessionId(id);
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
     },
@@ -576,17 +706,20 @@ function App() {
   const handleOpenMarkdownPath = useCallback(
     async (agentId: string, path: string) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
-      if (!agent?.folder) return;
+      const project = projectsRef.current.find(
+        (candidate) => candidate.id === agent?.projectId
+      );
+      if (!agent || !project?.folder) return;
 
       try {
         const relativePath = await invoke<string>("resolve_markdown_path", {
-          folder: agent.folder,
+          folder: project.folder,
           path,
         });
         selectAgent(agentId);
         setDocsOpen(true);
         setDocsRequest({
-          agentId,
+          projectId: project.id,
           relativePath,
           key: Date.now(),
         });
@@ -599,9 +732,36 @@ function App() {
 
   // ---- Derived
 
+  const activeProject = useMemo(
+    () =>
+      activeProjectId
+        ? projects.find((project) => project.id === activeProjectId) ?? null
+        : null,
+    [activeProjectId, projects]
+  );
+
+  const projectAgents = useMemo(
+    () =>
+      activeProjectId
+        ? agents.filter((agent) => agent.projectId === activeProjectId)
+        : [],
+    [activeProjectId, agents]
+  );
+
+  const projectGroups = useMemo(
+    () =>
+      activeProjectId
+        ? groups.filter((group) => group.projectId === activeProjectId)
+        : [],
+    [activeProjectId, groups]
+  );
+
   const activeGroup = useMemo(
-    () => (activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null),
-    [activeGroupId, groups]
+    () =>
+      activeGroupId
+        ? projectGroups.find((g) => g.id === activeGroupId) ?? null
+        : null,
+    [activeGroupId, projectGroups]
   );
   const activeGroupLayout = activeGroup ? activeGroup.layout : null;
 
@@ -617,8 +777,18 @@ function App() {
   }, [activeGroupLayout, activePath]);
 
   const activeAgent = useMemo(
-    () => (activeAgentId ? agents.find((a) => a.id === activeAgentId) ?? null : null),
-    [activeAgentId, agents]
+    () =>
+      activeAgentId
+        ? projectAgents.find((a) => a.id === activeAgentId) ?? null
+        : null,
+    [activeAgentId, projectAgents]
+  );
+  const renameSession = useMemo(
+    () =>
+      renameSessionId
+        ? agents.find((agent) => agent.id === renameSessionId) ?? null
+        : null,
+    [agents, renameSessionId]
   );
 
   // ---- Render
@@ -626,15 +796,21 @@ function App() {
   return (
     <div className={`app app-theme-${appTheme}`}>
       <Sidebar
+        projects={projects}
         agents={agents}
-        groups={groups}
+        groups={projectGroups}
+        activeProjectId={activeProjectId}
         activeGroupId={activeGroupId}
         activeAgentId={activeAgentId}
         inGroupAgentIds={inGroupAgentIds}
         dragState={dragState}
+        onSelectProject={selectProject}
         onSelect={selectAgent}
         onContextMenu={onSidebarContextMenu}
-        onNew={() => setShowModal(true)}
+        onNewProject={() => setShowProjectModal(true)}
+        onNewSession={() =>
+          activeProject ? setShowModal(true) : setShowProjectModal(true)
+        }
         docsOpen={docsOpen}
         onToggleDocs={() => setDocsOpen((open) => !open)}
         settingsOpen={settingsOpen}
@@ -644,7 +820,7 @@ function App() {
         onDragEnd={handleDragEnd}
       />
       <TerminalArea
-        agents={agents}
+        agents={projectAgents}
         layout={activeGroupLayout}
         sessionPins={activeGroup?.sessionPins ?? null}
         activePath={activePath}
@@ -674,10 +850,11 @@ function App() {
       )}
       <DocsPanel
         open={docsOpen}
-        activeAgent={activeAgent}
+        activeProject={activeProject}
+        activeSession={activeAgent}
         width={docsWidth}
         requestedPath={
-          docsRequest && docsRequest.agentId === activeAgent?.id
+          docsRequest && docsRequest.projectId === activeProject?.id
             ? docsRequest.relativePath
             : null
         }
@@ -692,13 +869,34 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {showProjectModal && (
+        <NewProjectModal
+          defaultName={`Project ${projects.length + 1}`}
+          onCancel={() => setShowProjectModal(false)}
+          onCreate={(payload) => {
+            setShowProjectModal(false);
+            createProject(payload);
+          }}
+        />
+      )}
       {showModal && (
         <NewAgentModal
-          defaultName={`Agent ${agents.length + 1}`}
+          project={activeProject}
+          defaultName={`Session ${projectAgents.length + 1}`}
           onCancel={() => setShowModal(false)}
           onCreate={(payload) => {
             setShowModal(false);
             createAgent(payload);
+          }}
+        />
+      )}
+      {renameSession && (
+        <RenameSessionModal
+          currentName={renameSession.name}
+          onCancel={() => setRenameSessionId(null)}
+          onRename={(name) => {
+            renameAgent(renameSession.id, name);
+            setRenameSessionId(null);
           }}
         />
       )}

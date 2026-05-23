@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { toolForId } from "../types";
-import type { Agent, DragState, Group } from "../types";
+import type { Agent, DragState, Group, Project } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
 import { folderTail } from "../lib/path";
 
@@ -12,15 +12,19 @@ type Section = {
 };
 
 export function Sidebar({
+  projects,
   agents,
   groups,
+  activeProjectId,
   activeGroupId,
   activeAgentId,
   inGroupAgentIds,
   dragState,
+  onSelectProject,
   onSelect,
   onContextMenu,
-  onNew,
+  onNewProject,
+  onNewSession,
   docsOpen,
   onToggleDocs,
   settingsOpen,
@@ -29,15 +33,19 @@ export function Sidebar({
   onDragStart,
   onDragEnd,
 }: {
+  projects: Project[];
   agents: Agent[];
   groups: Group[];
+  activeProjectId: string | null;
   activeGroupId: string | null;
   activeAgentId: string | null;
   inGroupAgentIds: Set<string>;
   dragState: DragState | null;
+  onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
-  onNew: () => void;
+  onNewProject: () => void;
+  onNewSession: () => void;
   docsOpen: boolean;
   onToggleDocs: () => void;
   settingsOpen: boolean;
@@ -46,8 +54,24 @@ export function Sidebar({
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
 }) {
+  const activeAgents = useMemo(
+    () =>
+      activeProjectId
+        ? agents.filter((agent) => agent.projectId === activeProjectId)
+        : [],
+    [activeProjectId, agents]
+  );
+
+  const projectSessionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const agent of agents) {
+      counts.set(agent.projectId, (counts.get(agent.projectId) ?? 0) + 1);
+    }
+    return counts;
+  }, [agents]);
+
   const sections = useMemo<Section[]>(() => {
-    const agentById = new Map(agents.map((a) => [a.id, a]));
+    const agentById = new Map(activeAgents.map((a) => [a.id, a]));
     const seen = new Set<string>();
     const out: Section[] = [];
     for (const g of groups) {
@@ -69,7 +93,7 @@ export function Sidebar({
         });
       }
     }
-    const orphans = agents.filter((a) => !seen.has(a.id));
+    const orphans = activeAgents.filter((a) => !seen.has(a.id));
     if (orphans.length > 0) {
       out.push({
         groupId: "__orphans__",
@@ -79,7 +103,7 @@ export function Sidebar({
       });
     }
     return out;
-  }, [agents, groups]);
+  }, [activeAgents, groups]);
 
   const renderItem = (
     a: Agent,
@@ -139,9 +163,9 @@ export function Sidebar({
           {a.dangerous && (
             <span
               className="agent-danger"
-              title="Dangerous mode — running without permission prompts"
+              title="Dangerous mode - running without permission prompts"
             >
-              ⚠
+              !
             </span>
           )}
           <button
@@ -150,16 +174,14 @@ export function Sidebar({
               e.stopPropagation();
               onRemove(a.id);
             }}
-            title="Remove"
+            title="Remove session"
           >
-            ×
+            x
           </button>
         </div>
-        {a.folder && (
-          <div className="agent-folder" title={a.folder}>
-            {folderTail(a.folder)}
-          </div>
-        )}
+        <div className="agent-folder" title={a.lastSessionId ?? ""}>
+          {a.lastSessionId ? `session ${a.lastSessionId.slice(0, 8)}` : "new session"}
+        </div>
       </li>
     );
   };
@@ -184,27 +206,68 @@ export function Sidebar({
           >
             설정
           </button>
-          <button className="new-btn" onClick={onNew} title="New agent">
+          <button
+            className="new-btn"
+            onClick={onNewSession}
+            title={activeProjectId ? "New session" : "New project"}
+          >
             +
           </button>
         </div>
       </div>
-      <ul className="agent-list">
-        {sections.map((section, idx) => (
-          <Fragment key={section.groupId}>
-            {idx > 0 && <li className="group-separator" />}
-            {section.members.map((a) =>
-              renderItem(
-                a,
-                section.groupId,
-                section.multi,
-                section.sessionLocked
-              )
-            )}
-          </Fragment>
+      <div className="project-list">
+        <div className="sidebar-section-heading">
+          <div className="sidebar-section-title">Projects</div>
+          <button
+            className="section-action-btn"
+            onClick={onNewProject}
+            title="New project"
+          >
+            +
+          </button>
+        </div>
+        {projects.map((project) => (
+          <button
+            key={project.id}
+            className={`project-item ${
+              project.id === activeProjectId ? "project-item-active" : ""
+            }`}
+            onClick={() => onSelectProject(project.id)}
+            title={project.folder}
+          >
+            <span className="project-name">{project.name}</span>
+            <span className="project-meta">
+              {folderTail(project.folder)} · {projectSessionCounts.get(project.id) ?? 0}
+            </span>
+          </button>
         ))}
-        {agents.length === 0 && (
-          <li className="empty-hint">Click + to start an agent</li>
+        {projects.length === 0 && (
+          <div className="empty-hint">Click + to add a project</div>
+        )}
+      </div>
+      <ul className="agent-list">
+        <li className="sidebar-section-title sidebar-section-title-list">
+          Sessions
+        </li>
+        {activeProjectId &&
+          sections.map((section, idx) => (
+            <Fragment key={section.groupId}>
+              {idx > 0 && <li className="group-separator" />}
+              {section.members.map((a) =>
+                renderItem(
+                  a,
+                  section.groupId,
+                  section.multi,
+                  section.sessionLocked
+                )
+              )}
+            </Fragment>
+          ))}
+        {activeProjectId && activeAgents.length === 0 && (
+          <li className="empty-hint">Click + to start a session</li>
+        )}
+        {!activeProjectId && projects.length > 0 && (
+          <li className="empty-hint">Select a project first</li>
         )}
       </ul>
     </aside>

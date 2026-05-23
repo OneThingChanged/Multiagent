@@ -4,7 +4,7 @@ import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import type { Agent } from "../types";
+import type { Agent, Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
 
 type MarkdownFile = {
@@ -131,7 +131,8 @@ function ancestorFolderPaths(path: string) {
 
 export function DocsPanel({
   open,
-  activeAgent,
+  activeProject,
+  activeSession,
   width,
   requestedPath,
   requestKey,
@@ -139,14 +140,15 @@ export function DocsPanel({
   onClose,
 }: {
   open: boolean;
-  activeAgent: Agent | null;
+  activeProject: Project | null;
+  activeSession: Agent | null;
   width: number;
   requestedPath: string | null;
   requestKey: number;
   theme: AppThemeId;
   onClose: () => void;
 }) {
-  const folder = activeAgent?.folder ?? "";
+  const folder = activeProject?.folder ?? "";
   const [files, setFiles] = useState<MarkdownFile[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -322,8 +324,12 @@ export function DocsPanel({
       <div className="docs-header">
         <div className="docs-title-block">
           <div className="docs-title">Docs</div>
-          <div className="docs-subtitle" title={activeAgent?.folder ?? ""}>
-            {activeAgent ? activeAgent.name : "No active agent"}
+          <div className="docs-subtitle" title={activeProject?.folder ?? ""}>
+            {activeProject
+              ? `${activeProject.name}${
+                  activeSession ? ` / ${activeSession.name}` : ""
+                }`
+              : "No active project"}
           </div>
         </div>
         <button className="docs-icon-btn" onClick={onClose} title="Close docs">
@@ -365,15 +371,15 @@ export function DocsPanel({
         </button>
       </div>
 
-      {!activeAgent && (
-        <div className="docs-empty">에이전트를 선택하면 문서를 볼 수 있습니다.</div>
+      {!activeProject && (
+        <div className="docs-empty">프로젝트를 선택하면 문서를 볼 수 있습니다.</div>
       )}
 
-      {activeAgent && !folder && (
-        <div className="docs-empty">선택된 에이전트에 폴더가 없습니다.</div>
+      {activeProject && !folder && (
+        <div className="docs-empty">선택된 프로젝트에 폴더가 없습니다.</div>
       )}
 
-      {activeAgent && folder && (
+      {activeProject && folder && (
         <>
           <div className={`docs-main docs-nav-${navMode}`}>
             {navMode !== "hidden" && (

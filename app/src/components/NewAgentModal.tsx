@@ -1,38 +1,31 @@
 import { useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AI_TOOLS, toolForId } from "../types";
-import type { NewAgentPayload } from "../types";
+import type { NewAgentPayload, Project } from "../types";
+import { folderTail } from "../lib/path";
 
 export function NewAgentModal({
+  project,
   defaultName,
   onCancel,
   onCreate,
 }: {
+  project: Project | null;
   defaultName: string;
   onCancel: () => void;
   onCreate: (payload: NewAgentPayload) => void;
 }) {
   const [name, setName] = useState(defaultName);
-  const [folder, setFolder] = useState("");
   const [aiToolId, setAiToolId] = useState<string>(AI_TOOLS[0].id);
   const [dangerous, setDangerous] = useState(false);
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!selectedTool.dangerousFlag;
 
-  const browse = async () => {
-    try {
-      const selected = await openDialog({ directory: true, multiple: false });
-      if (typeof selected === "string") setFolder(selected);
-    } catch {}
-  };
-
-  const canSubmit = name.trim().length > 0 && folder.trim().length > 0;
+  const canSubmit = !!project && name.trim().length > 0;
 
   const submit = () => {
     if (!canSubmit) return;
     onCreate({
       name: name.trim(),
-      folder: folder.trim(),
       aiToolId,
       dangerous: dangerous && supportsDangerous,
     });
@@ -41,10 +34,22 @@ export function NewAgentModal({
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h2 className="modal-title">New Agent</h2>
+        <h2 className="modal-title">New Session</h2>
+
+        <div className="session-project-summary">
+          <span className="session-project-label">Project</span>
+          <span className="session-project-name">
+            {project ? project.name : "No project selected"}
+          </span>
+          {project && (
+            <span className="session-project-folder" title={project.folder}>
+              {folderTail(project.folder)}
+            </span>
+          )}
+        </div>
 
         <label className="field">
-          <span className="field-label">Name</span>
+          <span className="field-label">Session alias</span>
           <input
             autoFocus
             value={name}
@@ -53,26 +58,8 @@ export function NewAgentModal({
               if (e.key === "Enter") submit();
               if (e.key === "Escape") onCancel();
             }}
-            placeholder="e.g. WebCanvas"
+            placeholder="e.g. Combat camera pass"
           />
-        </label>
-
-        <label className="field">
-          <span className="field-label">Folder</span>
-          <div className="folder-row">
-            <input
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              placeholder="C:\path\to\project"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-                if (e.key === "Escape") onCancel();
-              }}
-            />
-            <button type="button" className="browse-btn" onClick={browse}>
-              Browse…
-            </button>
-          </div>
         </label>
 
         <label className="field">

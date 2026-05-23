@@ -23,10 +23,14 @@ export type GroupState = {
   activePath: Path | null;
 };
 
-function placeIntoSoloGroup(state: GroupState, agentId: string): GroupState {
+function placeIntoSoloGroup(
+  state: GroupState,
+  agentId: string,
+  projectId?: string
+): GroupState {
   const newId = crypto.randomUUID();
   return {
-    groups: [...state.groups, { id: newId, layout: makeLeaf(agentId) }],
+    groups: [...state.groups, { id: newId, projectId, layout: makeLeaf(agentId) }],
     activeGroupId: newId,
     activePath: [],
   };
@@ -47,7 +51,11 @@ function preventsOutgoing(
   return !!group?.sessionLocked && group.id !== activeGroupId;
 }
 
-export function selectAgent(state: GroupState, agentId: string): GroupState {
+export function selectAgent(
+  state: GroupState,
+  agentId: string,
+  projectId?: string
+): GroupState {
   const existing = groupOf(state.groups, agentId);
   if (existing) {
     const path = findLeafPath(existing.layout, agentId);
@@ -60,17 +68,25 @@ export function selectAgent(state: GroupState, agentId: string): GroupState {
       };
     }
   }
-  return placeIntoSoloGroup(state, agentId);
+  return placeIntoSoloGroup(state, agentId, projectId);
 }
 
-export function addNewAgent(state: GroupState, agentId: string): GroupState {
-  return placeIntoSoloGroup(state, agentId);
+export function addNewAgent(
+  state: GroupState,
+  agentId: string,
+  projectId?: string
+): GroupState {
+  return placeIntoSoloGroup(state, agentId, projectId);
 }
 
-export function openAsTab(state: GroupState, agentId: string): GroupState {
+export function openAsTab(
+  state: GroupState,
+  agentId: string,
+  projectId?: string
+): GroupState {
   const activeGroup = state.groups.find((g) => g.id === state.activeGroupId);
   if (!activeGroup || !state.activePath) {
-    return selectAgent(state, agentId);
+    return selectAgent(state, agentId, projectId);
   }
 
   if (preventsIncoming(activeGroup, agentId)) {
@@ -114,7 +130,8 @@ export function openAsTab(state: GroupState, agentId: string): GroupState {
 export function splitWith(
   state: GroupState,
   agentId: string,
-  direction: "h" | "v"
+  direction: "h" | "v",
+  projectId?: string
 ): GroupState {
   const activeGroup = state.groups.find((g) => g.id === state.activeGroupId);
 
@@ -127,7 +144,7 @@ export function splitWith(
         activePath: findLeafPath(existing.layout, agentId),
       };
     }
-    return placeIntoSoloGroup(state, agentId);
+    return placeIntoSoloGroup(state, agentId, projectId);
   }
 
   if (preventsIncoming(activeGroup, agentId)) {
@@ -200,7 +217,11 @@ export function closeTab(
   let nextGroups = updateGroup(state.groups, state.activeGroupId!, newLayout);
   nextGroups = [
     ...nextGroups,
-    { id: crypto.randomUUID(), layout: makeLeaf(agentId) },
+    {
+      id: crypto.randomUUID(),
+      projectId: activeGroup.projectId,
+      layout: makeLeaf(agentId),
+    },
   ];
 
   if (!newLayout) {

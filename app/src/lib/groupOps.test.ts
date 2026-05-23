@@ -40,13 +40,20 @@ describe("selectAgent", () => {
     expect(collectAgentIds(next.groups[1].layout).has("z")).toBe(true);
     expect(next.activeGroupId).toBe(next.groups[1].id);
   });
+
+  it("keeps project id when it creates a missing agent group", () => {
+    const s = leafState(["a"]);
+    const next = ops.selectAgent(s, "z", "project-1");
+    expect(next.groups[1].projectId).toBe("project-1");
+  });
 });
 
 describe("openAsTab", () => {
   it("falls back to selectAgent when no active group", () => {
     const s: ops.GroupState = { groups: [], activeGroupId: null, activePath: null };
-    const next = ops.openAsTab(s, "x");
+    const next = ops.openAsTab(s, "x", "project-1");
     expect(next.groups.length).toBe(1);
+    expect(next.groups[0].projectId).toBe("project-1");
     expect(collectAgentIds(next.groups[0].layout).has("x")).toBe(true);
   });
 
@@ -160,6 +167,16 @@ describe("closeTab", () => {
     if (leaf?.type === "leaf") {
       expect(leaf.tabs).toEqual(["a"]);
     }
+  });
+
+  it("keeps project id on the solo group created from a closed tab", () => {
+    const s = leafState(["a"]);
+    s.groups[0] = { ...s.groups[0], projectId: "project-1" };
+    const withTab = ops.openAsTab(s, "b");
+    const next = ops.closeTab(withTab, [], "b");
+    const last = next.groups[next.groups.length - 1];
+    expect(last.projectId).toBe("project-1");
+    expect(collectAgentIds(last.layout).has("b")).toBe(true);
   });
 
   it("prunes session pins when a tab leaves a locked group", () => {
