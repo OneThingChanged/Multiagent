@@ -871,6 +871,7 @@ function App() {
         dragState={dragState}
         onSelectProject={selectProject}
         onSelect={selectAgent}
+        onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
         onNewProject={() => setShowProjectModal(true)}
         onNewSession={() =>

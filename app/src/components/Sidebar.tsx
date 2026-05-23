@@ -51,6 +51,7 @@ export function Sidebar({
   dragState,
   onSelectProject,
   onSelect,
+  onRenameSession,
   onContextMenu,
   onNewProject,
   onNewSession,
@@ -72,6 +73,7 @@ export function Sidebar({
   dragState: DragState | null;
   onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
+  onRenameSession: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
   onNewSession: () => void;
@@ -251,6 +253,13 @@ export function Sidebar({
         onPointerCancel={() => {
           pendingSessionClickRef.current = null;
         }}
+        onDoubleClick={(e) => {
+          if ((e.target as HTMLElement).closest("button")) return;
+          pendingSessionClickRef.current = null;
+          e.preventDefault();
+          e.stopPropagation();
+          onRenameSession(a.id);
+        }}
         onDragStart={(e) => {
           const pending = pendingSessionClickRef.current;
           if (pending?.agentId === a.id) {
@@ -281,7 +290,7 @@ export function Sidebar({
           >
             {toolForId(a.aiToolId).icon}
           </span>
-          <span className="agent-name" title={a.name}>
+          <span className="agent-name" title={`${a.name} - 더블클릭으로 별명 변경`}>
             {a.name}
           </span>
           {sessionLocked && (
