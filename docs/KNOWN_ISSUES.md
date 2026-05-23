@@ -35,6 +35,11 @@
 - 고정값은 다음 spawn부터 적용된다. 이미 실행 중인 Codex/Claude 프로세스는 자동 재시작하지 않음
 - 고정된 세션 ID가 도구 쪽에서 더 이상 resume 불가하면 사용자가 고정을 해제하거나 새 세션을 시작해야 함
 
+### 수동 업데이트 확인
+- 설정창의 업데이트 확인은 GitHub Release를 조회하고 브라우저를 여는 수동 방식
+- 설치 파일 다운로드와 설치는 사용자가 직접 진행해야 함
+- Tauri updater의 서명 기반 자동 다운로드/설치는 아직 없음
+
 ### dev 모드에서 부모 죽으면 자식 stale 가능
 - app.exe 강제종료 시 PowerShell 자식이 즉시 안 죽고 orphan이 될 수 있음
 - 정상 종료 (창 X) 경로에선 portable-pty가 master drop → slave EIO → child 종료 cascade

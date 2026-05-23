@@ -25,6 +25,7 @@ K:\AI\MultiAgent\
    │  │  ├─ layout.ts       ← 트리 연산 (getAt/setAt/pruneAgent/…)
    │  │  ├─ persistence.ts  ← localStorage load + bootstrap
    │  │  ├─ appTheme.ts     ← 전역 테마 정의 + localStorage 저장
+   │  │  ├─ appInfo.ts      ← 앱 버전, GitHub repo URL, 수동 업데이트 version helper
    │  │  └─ terminal.ts     ← createEntry / xterm 테마 / Markdown 링크 / zoom / notifyDone / computeDropZone
    │  ├─ components/
    │  │  ├─ Sidebar.tsx
@@ -164,6 +165,14 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - Ctrl+휠은 모든 터미널의 `fontSize`를 함께 변경하고 `multiagent.terminalFontSize.v1`에 저장
 - 전역 테마가 바뀌면 모든 살아있는 xterm 인스턴스의 `term.options.theme`을 갱신
 - `registerLinkProvider`가 `.md/.markdown` 경로를 링크로 노출. xterm의 1-based buffer 좌표에 맞춰 range를 만들고, 클릭 시 `resolve_markdown_path` 후 Docs 패널을 엶
+
+## 수동 업데이트 확인
+
+- `SettingsModal.tsx`의 Update 섹션에서 현재 `APP_VERSION`과 GitHub 최신 릴리즈를 표시
+- `appInfo.ts`가 `APP_VERSION`, repo URL, releases URL, latest release API URL, semver 비교 helper를 제공
+- `Check` 버튼은 `https://api.github.com/repos/OneThingChanged/Multiagent/releases/latest`를 조회
+- 새 버전이 있으면 사용자가 `Releases` 버튼으로 브라우저에서 GitHub Release 페이지를 열어 설치 파일을 직접 내려받는 수동 업데이트 방식
+- Tauri updater 플러그인 기반 자동 업데이트는 아직 적용하지 않음
 
 ## Docs / Markdown 뷰어
 

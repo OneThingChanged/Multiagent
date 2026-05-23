@@ -1511,6 +1511,28 @@ body.docs-resizing * {
   text-decoration: underline;
 }
 
+.app-update-message {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 7px 0 2px;
+}
+
+.app-update-error {
+  color: var(--app-danger);
+}
+
+.app-update-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.app-update-btn {
+  flex: 1;
+  padding: 6px 10px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
