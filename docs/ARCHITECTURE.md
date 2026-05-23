@@ -118,7 +118,7 @@ PowerShell 계열로 시작될 때는 `-NoLogo` 인자 추가.
 
 ```ts
 agents: Agent[]                    // 에이전트 메타 (id, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
-groups: Group[]                    // 각 그룹 = layout 트리. 그룹 단위가 디스플레이 단위
+groups: Group[]                    // 각 그룹 = layout 트리 + 선택적 세션 고정값
 activeGroupId: string | null       // 현재 표시 중인 그룹
 activePath: Path | null            // 그 그룹 내의 활성 leaf 경로 (number[])
 docsOpen/docsWidth/docsRequest      // Docs 패널 열림, 폭, 터미널 링크 요청
@@ -142,6 +142,17 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - agents 안의 모든 ID는 groups[*].layout 안에 정확히 한 번씩 등장 (어느 그룹 어느 leaf 어느 tab)
 - 어떤 이유로 누락되면 load 시 solo 그룹 생성으로 복구
 - 그룹 layout이 비면 그 그룹 자동 삭제
+- `sessionPins?: Record<agentId, sessionId>`는 그룹에 고정된 resume 세션 ID
+- `sessionLocked?: true`이면 외부 에이전트를 해당 그룹에 탭/분할/드래그로 추가하지 않음
+- layout에서 제거된 에이전트의 session pin은 `updateGroup`에서 같이 정리됨
+
+### 그룹 세션 고정
+
+- 사이드바 우클릭 메뉴에서 `현재 세션으로 그룹 고정`을 실행하면, 해당 그룹 멤버 중 `lastSessionId`가 있는 에이전트들을 `group.sessionPins`에 저장
+- spawn 시 `PaneSlot`은 `group.sessionPins[agentId]`를 먼저 보고, 없으면 `agent.lastSessionId`를 사용
+- 고정된 그룹은 사이드바에 `PIN` 배지를 표시
+- `groupOps.openAsTab`, `splitWith`, `performDrop`은 locked group 안으로 외부 agent가 들어오거나 locked source group에서 agent가 빠져나가는 이동을 막음
+- 현재 구현은 과거 세션 목록을 따로 보관하지 않고 "현재 저장된 세션 ID"만 고정한다
 
 ### xterm 라이프사이클
 
@@ -214,7 +225,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ## localStorage 키
 
 - `multiagent.agents.v1` — `StoredAgent[]` (메타만)
-- `multiagent.groups.v1` — `Group[]` (트리)
+- `multiagent.groups.v1` — `Group[]` (트리 + `sessionPins`/`sessionLocked`)
 - `multiagent.view.v1` — `{ activeGroupId, activePath }`
 - `multiagent.appTheme.v1` — 전역 테마 (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장

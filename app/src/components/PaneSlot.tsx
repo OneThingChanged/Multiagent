@@ -21,6 +21,7 @@ import {
 
 export type RenderCtx = {
   agents: Agent[];
+  sessionPins: Record<string, string> | null;
   activePath: Path | null;
   dragState: DragState | null;
   dropTarget: DropTargetState | null;
@@ -113,11 +114,12 @@ export function PaneSlot({
         let initCommand: string | null = null;
         if (tool.command) {
           let cmd = tool.command;
-          if (cur.lastSessionId) {
+          const sessionId = ctx.sessionPins?.[cur.id] ?? cur.lastSessionId;
+          if (sessionId) {
             if (cur.aiToolId === "codex") {
-              cmd = `${cmd} resume ${cur.lastSessionId}`;
+              cmd = `${cmd} resume ${sessionId}`;
             } else if (cur.aiToolId === "claude") {
-              cmd = `${cmd} --resume ${cur.lastSessionId}`;
+              cmd = `${cmd} --resume ${sessionId}`;
             }
           }
           if (cur.dangerous && tool.dangerousFlag) {
@@ -206,7 +208,13 @@ export function PaneSlot({
         capture: true,
       } as EventListenerOptions);
     };
-  }, [activeAgent?.id, termsRef, setAgentStatus, ctx.onOpenMarkdownPath]);
+  }, [
+    activeAgent?.id,
+    termsRef,
+    setAgentStatus,
+    ctx.onOpenMarkdownPath,
+    ctx.sessionPins,
+  ]);
 
   useEffect(() => {
     if (!active || !activeAgent) return;

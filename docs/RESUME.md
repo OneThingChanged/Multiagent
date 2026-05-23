@@ -45,11 +45,12 @@ PaneSlot의 apply에서:
 
 ```ts
 let cmd = tool.command;  // "codex"
-if (agent.lastSessionId) {
+const sessionId = group.sessionPins?.[agent.id] ?? agent.lastSessionId;
+if (sessionId) {
   if (agent.aiToolId === "codex") {
-    cmd = `${cmd} resume ${agent.lastSessionId}`;
+    cmd = `${cmd} resume ${sessionId}`;
   } else if (agent.aiToolId === "claude") {
-    cmd = `${cmd} --resume ${agent.lastSessionId}`;
+    cmd = `${cmd} --resume ${sessionId}`;
   }
 }
 if (agent.dangerous && tool.dangerousFlag) {
@@ -61,6 +62,12 @@ if (agent.dangerous && tool.dangerousFlag) {
 결과 예: `codex resume 019e3eda-7a41-77e2-9165-cb5e11e13021 --dangerously-bypass-approvals-and-sandbox`
 Claude 결과 예: `claude --resume <session_id> --dangerously-skip-permissions`
 
+## 그룹 세션 고정
+
+사이드바 우클릭 메뉴의 **현재 세션으로 그룹 고정**은 그룹 멤버들의 현재 `lastSessionId`를 `Group.sessionPins`에 저장한다. 이후 해당 그룹에서 spawn되는 에이전트는 최신 `lastSessionId`보다 그룹의 고정 세션 ID를 우선 사용한다.
+
+고정 그룹은 `sessionLocked` 상태가 되어 외부 에이전트를 탭/분할/드래그로 추가할 수 없다. 이미 실행 중인 터미널 프로세스는 자동 재시작하지 않으므로 고정값은 다음 spawn부터 적용된다.
+
 ## 한계 / 미지원
 
 - **Shell only 모드**: `/quit` 명령이 PowerShell에 없어 에러 메시지가 잠깐 보일 수 있음 (해롭진 않음). 어차피 resume 대상 아님
@@ -70,3 +77,5 @@ Claude 결과 예: `claude --resume <session_id> --dangerously-skip-permissions`
 ## persistence
 
 `StoredAgent.lastSessionId?: string`이 `multiagent.agents.v1` localStorage 키에 같이 저장됨. 기존 `lastResumeToken`, `lastClaudeSessionId`는 로드 시 `lastSessionId`로 마이그레이션되는 legacy 필드다.
+
+그룹 고정 세션은 `multiagent.groups.v1` 안의 `Group.sessionPins`와 `Group.sessionLocked`에 저장된다.

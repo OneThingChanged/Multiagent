@@ -108,6 +108,8 @@ export type Path = number[];
 export type Group = {
   id: string;
   layout: LayoutNode;
+  sessionPins?: Record<string, string>;
+  sessionLocked?: boolean;
 };
 
 export type ContextMenuState = {

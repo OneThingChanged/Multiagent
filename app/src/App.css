@@ -265,6 +265,18 @@ body,
   line-height: 1;
 }
 
+.agent-session-pin {
+  flex-shrink: 0;
+  color: var(--app-accent);
+  background: var(--app-active-bg);
+  border: 1px solid var(--app-accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .agent-folder {
   padding-left: 16px;
   font-size: 11px;
@@ -1290,6 +1302,12 @@ body.docs-resizing * {
 .ctx-item:disabled {
   color: var(--app-soft-text);
   cursor: not-allowed;
+}
+
+.ctx-separator {
+  height: 1px;
+  background: var(--app-border);
+  margin: 4px 2px;
 }
 
 /* Sidebar "in active group" indicator */

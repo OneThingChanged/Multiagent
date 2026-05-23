@@ -35,13 +35,27 @@ export function TabContextMenu({
 export function ContextMenu({
   state,
   hasActive,
+  canPlaceInActive,
+  isSessionLocked,
+  canPinSession,
   onClose,
   onAction,
 }: {
   state: ContextMenuState;
   hasActive: boolean;
+  canPlaceInActive: boolean;
+  isSessionLocked: boolean;
+  canPinSession: boolean;
   onClose: () => void;
-  onAction: (action: "open" | "tab" | "split-h" | "split-v") => void;
+  onAction: (
+    action:
+      | "open"
+      | "tab"
+      | "split-h"
+      | "split-v"
+      | "pin-session"
+      | "clear-session-pin"
+  ) => void;
 }) {
   return (
     <>
@@ -64,23 +78,38 @@ export function ContextMenu({
         <button
           className="ctx-item"
           onClick={() => onAction("tab")}
-          disabled={!hasActive}
+          disabled={!hasActive || !canPlaceInActive}
         >
           탭으로 추가
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("split-h")}
-          disabled={!hasActive}
+          disabled={!hasActive || !canPlaceInActive}
         >
           오른쪽 분할
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("split-v")}
-          disabled={!hasActive}
+          disabled={!hasActive || !canPlaceInActive}
         >
           아래로 분할
+        </button>
+        <div className="ctx-separator" />
+        <button
+          className="ctx-item"
+          onClick={() => onAction("pin-session")}
+          disabled={!canPinSession}
+        >
+          현재 세션으로 그룹 고정
+        </button>
+        <button
+          className="ctx-item"
+          onClick={() => onAction("clear-session-pin")}
+          disabled={!isSessionLocked}
+        >
+          그룹 세션 고정 해제
         </button>
       </div>
     </>

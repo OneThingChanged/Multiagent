@@ -15,6 +15,7 @@ import { Splitter } from "./Splitter";
 export function TerminalArea({
   agents,
   layout,
+  sessionPins,
   activePath,
   dragState,
   dropTarget,
@@ -33,6 +34,7 @@ export function TerminalArea({
 }: {
   agents: Agent[];
   layout: LayoutNode | null;
+  sessionPins: Record<string, string> | null;
   activePath: Path | null;
   dragState: DragState | null;
   dropTarget: DropTargetState | null;
@@ -51,6 +53,7 @@ export function TerminalArea({
 }) {
   const ctx: RenderCtx = {
     agents,
+    sessionPins,
     activePath,
     dragState,
     dropTarget,

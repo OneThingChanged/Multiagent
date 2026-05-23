@@ -426,8 +426,100 @@ function App() {
     []
   );
 
+  const contextGroup = useMemo(() => {
+    if (!contextMenu) return null;
+    return (
+      groups.find((g) => collectAgentIds(g.layout).has(contextMenu.agentId)) ??
+      null
+    );
+  }, [contextMenu, groups]);
+
+  const canPinContextGroupSession = useMemo(() => {
+    if (!contextGroup) return false;
+    const ids = collectAgentIds(contextGroup.layout);
+    return agents.some(
+      (agent) => ids.has(agent.id) && !!agent.lastSessionId
+    );
+  }, [agents, contextGroup]);
+
+  const canPlaceContextAgentInActiveGroup = useMemo(() => {
+    const active = activeGroupId
+      ? groups.find((g) => g.id === activeGroupId) ?? null
+      : null;
+    if (!contextMenu || !active || !activePath) return false;
+    const activeIds = collectAgentIds(active.layout);
+    const alreadyInActiveGroup = activeIds.has(contextMenu.agentId);
+    if (active.sessionLocked && !alreadyInActiveGroup) return false;
+    if (contextGroup?.sessionLocked && contextGroup.id !== active.id) {
+      return false;
+    }
+    return true;
+  }, [activeGroupId, activePath, contextGroup, contextMenu, groups]);
+
+  const pinContextGroupSessions = useCallback(
+    (agentId: string) => {
+      const group = groups.find((g) => collectAgentIds(g.layout).has(agentId));
+      const targetAgent = agents.find((a) => a.id === agentId);
+      if (!group || !targetAgent) return;
+
+      const ids = collectAgentIds(group.layout);
+      const pins: Record<string, string> = {};
+      for (const agent of agents) {
+        if (ids.has(agent.id) && agent.lastSessionId) {
+          pins[agent.id] = agent.lastSessionId;
+        }
+      }
+
+      const pinCount = Object.keys(pins).length;
+      if (pinCount === 0) {
+        pushToast(agentId, targetAgent.name, "저장된 세션 ID가 없습니다.");
+        return;
+      }
+
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === group.id
+            ? { ...g, sessionPins: pins, sessionLocked: true }
+            : g
+        )
+      );
+      pushToast(
+        agentId,
+        targetAgent.name,
+        `그룹 세션 ${pinCount}개를 고정했습니다.`
+      );
+    },
+    [agents, groups, pushToast]
+  );
+
+  const clearContextGroupSessionPins = useCallback(
+    (agentId: string) => {
+      const group = groups.find((g) => collectAgentIds(g.layout).has(agentId));
+      const targetAgent = agents.find((a) => a.id === agentId);
+      if (!group || !targetAgent) return;
+
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === group.id
+            ? { ...g, sessionPins: undefined, sessionLocked: undefined }
+            : g
+        )
+      );
+      pushToast(agentId, targetAgent.name, "그룹 세션 고정을 해제했습니다.");
+    },
+    [agents, groups, pushToast]
+  );
+
   const onContextAction = useCallback(
-    (action: "open" | "tab" | "split-h" | "split-v") => {
+    (
+      action:
+        | "open"
+        | "tab"
+        | "split-h"
+        | "split-v"
+        | "pin-session"
+        | "clear-session-pin"
+    ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
       setContextMenu(null);
@@ -435,8 +527,17 @@ function App() {
       else if (action === "tab") openAsTab(id);
       else if (action === "split-h") splitWith(id, "h");
       else if (action === "split-v") splitWith(id, "v");
+      else if (action === "pin-session") pinContextGroupSessions(id);
+      else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
     },
-    [contextMenu, selectAgent, openAsTab, splitWith]
+    [
+      contextMenu,
+      selectAgent,
+      openAsTab,
+      splitWith,
+      pinContextGroupSessions,
+      clearContextGroupSessionPins,
+    ]
   );
 
   // ---- Stable drag callbacks
@@ -545,6 +646,7 @@ function App() {
       <TerminalArea
         agents={agents}
         layout={activeGroupLayout}
+        sessionPins={activeGroup?.sessionPins ?? null}
         activePath={activePath}
         dragState={dragState}
         dropTarget={dropTarget}
@@ -609,6 +711,9 @@ function App() {
         <ContextMenu
           state={contextMenu}
           hasActive={!!activeGroupLayout && !!activePath}
+          canPlaceInActive={canPlaceContextAgentInActiveGroup}
+          isSessionLocked={!!contextGroup?.sessionLocked}
+          canPinSession={canPinContextGroupSession}
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}
         />

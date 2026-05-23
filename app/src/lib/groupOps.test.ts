@@ -77,6 +77,30 @@ describe("openAsTab", () => {
     const active = leafAt(next, "g-a", []);
     if (active?.type === "leaf") expect(active.tabs).toEqual(["a", "b"]);
   });
+
+  it("does not add an outside agent into a session-locked active group", () => {
+    const s = leafState(["a", "b"]);
+    s.groups[0] = {
+      ...s.groups[0],
+      sessionLocked: true,
+      sessionPins: { a: "session-a" },
+    };
+
+    const next = ops.openAsTab(s, "b");
+    expect(next).toBe(s);
+  });
+
+  it("does not move an agent out of another session-locked group", () => {
+    const s = leafState(["a", "b"]);
+    s.groups[1] = {
+      ...s.groups[1],
+      sessionLocked: true,
+      sessionPins: { b: "session-b" },
+    };
+
+    const next = ops.openAsTab(s, "b");
+    expect(next).toBe(s);
+  });
 });
 
 describe("splitWith", () => {
@@ -136,6 +160,30 @@ describe("closeTab", () => {
     if (leaf?.type === "leaf") {
       expect(leaf.tabs).toEqual(["a"]);
     }
+  });
+
+  it("prunes session pins when a tab leaves a locked group", () => {
+    const s = leafState(["a"]);
+    const withTab = ops.openAsTab(s, "b");
+    const group = withTab.groups.find((g) => g.id === "g-a");
+    expect(group).toBeTruthy();
+    if (!group) return;
+
+    const locked: ops.GroupState = {
+      ...withTab,
+      groups: [
+        {
+          ...group,
+          sessionLocked: true,
+          sessionPins: { a: "session-a", b: "session-b" },
+        },
+      ],
+    };
+
+    const next = ops.closeTab(locked, [], "b");
+    const remaining = next.groups.find((g) => g.id === "g-a");
+    expect(remaining?.sessionLocked).toBe(true);
+    expect(remaining?.sessionPins).toEqual({ a: "session-a" });
   });
 });
 

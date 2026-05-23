@@ -13,7 +13,13 @@ import type {
   Path,
   StoredAgent,
 } from "../types";
-import { firstLeafPath, getAt, makeLeaf, validateLayout } from "./layout";
+import {
+  collectAgentIds,
+  firstLeafPath,
+  getAt,
+  makeLeaf,
+  validateLayout,
+} from "./layout";
 
 export function loadStoredAgents(): Agent[] {
   try {
@@ -70,7 +76,16 @@ export function loadStoredGroups(validIds: Set<string>): Group[] {
       const lay = validateLayout(g.layout, validIds, seen);
       if (lay) {
         for (const aid of seen) used.add(aid);
-        groups.push({ id: g.id || crypto.randomUUID(), layout: lay });
+        const sessionPins = sanitizeSessionPins(g.sessionPins, lay);
+        groups.push({
+          id: g.id || crypto.randomUUID(),
+          layout: lay,
+          sessionPins,
+          sessionLocked:
+            !!g.sessionLocked && Object.keys(sessionPins ?? {}).length > 0
+              ? true
+              : undefined,
+        });
       }
     }
 
@@ -89,6 +104,23 @@ export function loadStoredGroups(validIds: Set<string>): Group[] {
       layout: makeLeaf(aid),
     }));
   }
+}
+
+function sanitizeSessionPins(
+  rawPins: unknown,
+  layout: LayoutNode
+): Record<string, string> | undefined {
+  if (!rawPins || typeof rawPins !== "object") return undefined;
+
+  const agentIds = collectAgentIds(layout);
+  const pins: Record<string, string> = {};
+  for (const [agentId, sessionId] of Object.entries(rawPins)) {
+    if (!agentIds.has(agentId)) continue;
+    if (typeof sessionId !== "string" || !sessionId.trim()) continue;
+    pins[agentId] = sessionId;
+  }
+
+  return Object.keys(pins).length > 0 ? pins : undefined;
 }
 
 export function loadStoredView(

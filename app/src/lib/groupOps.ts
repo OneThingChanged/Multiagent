@@ -32,6 +32,21 @@ function placeIntoSoloGroup(state: GroupState, agentId: string): GroupState {
   };
 }
 
+function groupContainsAgent(group: Group | null | undefined, agentId: string) {
+  return !!group && !!findLeafPath(group.layout, agentId);
+}
+
+function preventsIncoming(group: Group | null | undefined, agentId: string) {
+  return !!group?.sessionLocked && !groupContainsAgent(group, agentId);
+}
+
+function preventsOutgoing(
+  group: Group | null | undefined,
+  activeGroupId: string | null
+) {
+  return !!group?.sessionLocked && group.id !== activeGroupId;
+}
+
 export function selectAgent(state: GroupState, agentId: string): GroupState {
   const existing = groupOf(state.groups, agentId);
   if (existing) {
@@ -58,6 +73,10 @@ export function openAsTab(state: GroupState, agentId: string): GroupState {
     return selectAgent(state, agentId);
   }
 
+  if (preventsIncoming(activeGroup, agentId)) {
+    return state;
+  }
+
   const activeLeaf = getAt(activeGroup.layout, state.activePath);
   if (
     activeLeaf &&
@@ -73,6 +92,9 @@ export function openAsTab(state: GroupState, agentId: string): GroupState {
 
   let nextGroups = state.groups;
   const source = groupOf(nextGroups, agentId);
+  if (preventsOutgoing(source, state.activeGroupId)) {
+    return state;
+  }
   if (source) {
     const newSourceLayout = pruneAgent(source.layout, agentId);
     nextGroups = updateGroup(nextGroups, source.id, newSourceLayout);
@@ -108,6 +130,10 @@ export function splitWith(
     return placeIntoSoloGroup(state, agentId);
   }
 
+  if (preventsIncoming(activeGroup, agentId)) {
+    return state;
+  }
+
   const inActive = findLeafPath(activeGroup.layout, agentId);
   if (inActive) {
     const lay = setLeafActiveTab(activeGroup.layout, inActive, agentId);
@@ -120,6 +146,9 @@ export function splitWith(
 
   let nextGroups = state.groups;
   const source = groupOf(nextGroups, agentId);
+  if (preventsOutgoing(source, state.activeGroupId)) {
+    return state;
+  }
   if (source) {
     const newSourceLayout = pruneAgent(source.layout, agentId);
     nextGroups = updateGroup(nextGroups, source.id, newSourceLayout);
@@ -257,6 +286,14 @@ export function performDrop(
 
   const sourceGroup = groupOf(state.groups, fromAgentId);
   const sourceInActive = sourceGroup?.id === state.activeGroupId;
+
+  if (activeGroup.sessionLocked && !sourceInActive) {
+    return state;
+  }
+
+  if (preventsOutgoing(sourceGroup, state.activeGroupId)) {
+    return state;
+  }
 
   if (sourceInActive) {
     const sourceLeafPath = findLeafPath(activeGroup.layout, fromAgentId);

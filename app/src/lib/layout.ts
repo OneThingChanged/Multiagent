@@ -376,6 +376,25 @@ export function updateGroup(
     return groups.filter((g) => g.id !== groupId);
   }
   return groups.map((g) =>
-    g.id === groupId ? { ...g, layout: newLayout } : g
+    g.id === groupId ? normalizeGroupForLayout(g, newLayout) : g
   );
+}
+
+function normalizeGroupForLayout(group: Group, layout: LayoutNode): Group {
+  const agentIds = collectAgentIds(layout);
+  const sessionPins: Record<string, string> = {};
+
+  for (const [agentId, sessionId] of Object.entries(group.sessionPins ?? {})) {
+    if (agentIds.has(agentId) && sessionId.trim()) {
+      sessionPins[agentId] = sessionId;
+    }
+  }
+
+  const hasPins = Object.keys(sessionPins).length > 0;
+  return {
+    ...group,
+    layout,
+    sessionPins: hasPins ? sessionPins : undefined,
+    sessionLocked: group.sessionLocked && hasPins ? true : undefined,
+  };
 }

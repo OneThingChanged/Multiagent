@@ -7,6 +7,7 @@ import { folderTail } from "../lib/path";
 type Section = {
   groupId: string;
   multi: boolean;
+  sessionLocked: boolean;
   members: Agent[];
 };
 
@@ -63,18 +64,29 @@ export function Sidebar({
         out.push({
           groupId: g.id,
           multi: members.length > 1,
+          sessionLocked: !!g.sessionLocked,
           members,
         });
       }
     }
     const orphans = agents.filter((a) => !seen.has(a.id));
     if (orphans.length > 0) {
-      out.push({ groupId: "__orphans__", multi: false, members: orphans });
+      out.push({
+        groupId: "__orphans__",
+        multi: false,
+        sessionLocked: false,
+        members: orphans,
+      });
     }
     return out;
   }, [agents, groups]);
 
-  const renderItem = (a: Agent, groupId: string, multi: boolean) => {
+  const renderItem = (
+    a: Agent,
+    groupId: string,
+    multi: boolean,
+    sessionLocked: boolean
+  ) => {
     const inGroup = inGroupAgentIds.has(a.id);
     const isDragging = dragState?.fromAgentId === a.id;
     const isActiveGroup = groupId === activeGroupId;
@@ -116,6 +128,14 @@ export function Sidebar({
           <span className="agent-name" title={a.name}>
             {a.name}
           </span>
+          {sessionLocked && (
+            <span
+              className="agent-session-pin"
+              title="이 그룹은 고정된 세션으로 열립니다"
+            >
+              PIN
+            </span>
+          )}
           {a.dangerous && (
             <span
               className="agent-danger"
@@ -174,7 +194,12 @@ export function Sidebar({
           <Fragment key={section.groupId}>
             {idx > 0 && <li className="group-separator" />}
             {section.members.map((a) =>
-              renderItem(a, section.groupId, section.multi)
+              renderItem(
+                a,
+                section.groupId,
+                section.multi,
+                section.sessionLocked
+              )
             )}
           </Fragment>
         ))}
