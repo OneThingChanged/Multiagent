@@ -289,7 +289,7 @@ export function PaneSlot({
   return (
     <div
       className={`pane-slot ${active ? "pane-active" : ""}`}
-      onMouseDown={() => ctx.setActivePath(path)}
+      onClick={() => ctx.setActivePath(path)}
       onDragOver={onPaneDragOver}
       onDragLeave={onPaneDragLeave}
       onDrop={onPaneDrop}
@@ -309,6 +309,9 @@ export function PaneSlot({
               onDragStart={(e) => onTabDragStart(e, tabAgentId)}
               onDragEnd={onTabDragEnd}
               onMouseDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
                 e.stopPropagation();
                 ctx.onSelectTab(path, tabAgentId);
               }}

@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { toolForId } from "../types";
 import type { Agent, DragState, Group, Project } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
@@ -11,6 +18,14 @@ type Section = {
   multi: boolean;
   sessionLocked: boolean;
   members: Agent[];
+};
+
+type PendingSessionClick = {
+  agentId: string;
+  x: number;
+  y: number;
+  moved: boolean;
+  dragging: boolean;
 };
 
 function loadExpandedProjects(projects: Project[]) {
@@ -71,6 +86,7 @@ export function Sidebar({
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => loadExpandedProjects(projects)
   );
+  const pendingSessionClickRef = useRef<PendingSessionClick | null>(null);
 
   useEffect(() => {
     setExpandedProjectIds((current) => {
@@ -166,6 +182,45 @@ export function Sidebar({
     onSelectProject(projectId);
   };
 
+  const startSessionPointer = (
+    agentId: string,
+    event: ReactPointerEvent<HTMLElement>
+  ) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button")) return;
+    pendingSessionClickRef.current = {
+      agentId,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+      dragging: false,
+    };
+  };
+
+  const updateSessionPointer = (
+    agentId: string,
+    event: ReactPointerEvent<HTMLElement>
+  ) => {
+    const pending = pendingSessionClickRef.current;
+    if (!pending || pending.agentId !== agentId) return;
+    if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 4) {
+      pending.moved = true;
+    }
+  };
+
+  const finishSessionPointer = (
+    agentId: string,
+    event: ReactPointerEvent<HTMLElement>
+  ) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const pending = pendingSessionClickRef.current;
+    pendingSessionClickRef.current = null;
+    if (!pending || pending.agentId !== agentId) return;
+    if (!pending.moved && !pending.dragging) {
+      onSelect(agentId);
+    }
+  };
+
   const renderItem = (
     a: Agent,
     groupId: string,
@@ -190,15 +245,29 @@ export function Sidebar({
           .filter(Boolean)
           .join(" ")}
         draggable
+        onPointerDown={(e) => startSessionPointer(a.id, e)}
+        onPointerMove={(e) => updateSessionPointer(a.id, e)}
+        onPointerUp={(e) => finishSessionPointer(a.id, e)}
+        onPointerCancel={() => {
+          pendingSessionClickRef.current = null;
+        }}
         onDragStart={(e) => {
+          const pending = pendingSessionClickRef.current;
+          if (pending?.agentId === a.id) {
+            pending.dragging = true;
+            pending.moved = true;
+          }
           e.dataTransfer.effectAllowed = "move";
           e.dataTransfer.setData("text/plain", a.id);
           e.dataTransfer.setData("application/x-multiagent-agent", a.id);
           onDragStart(a.id);
         }}
-        onDragEnd={onDragEnd}
-        onClick={() => onSelect(a.id)}
+        onDragEnd={() => {
+          pendingSessionClickRef.current = null;
+          onDragEnd();
+        }}
         onContextMenu={(e) => {
+          pendingSessionClickRef.current = null;
           e.preventDefault();
           onContextMenu(a.id, e.clientX, e.clientY);
         }}
