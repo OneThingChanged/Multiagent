@@ -1,5 +1,10 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
+
+const CREATOR_NAME = "OneThingChanged";
+const CREATOR_GITHUB = "https://github.com/OneThingChanged";
+const CREATOR_GITHUB_LABEL = "@OneThingChanged";
 
 export function SettingsModal({
   theme,
@@ -10,6 +15,12 @@ export function SettingsModal({
   onThemeChange: (theme: AppThemeId) => void;
   onClose: () => void;
 }) {
+  const handleOpenGitHub = () => {
+    openUrl(CREATOR_GITHUB).catch((error) => {
+      console.error("Failed to open creator GitHub", error);
+    });
+  };
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
@@ -42,6 +53,27 @@ export function SettingsModal({
                 {option.label}
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Creator</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">Name</span>
+              <span className="app-about-value">{CREATOR_NAME}</span>
+            </div>
+            <div className="app-about-row">
+              <span className="app-about-label">GitHub</span>
+              <button
+                className="app-about-link"
+                type="button"
+                onClick={handleOpenGitHub}
+                title={CREATOR_GITHUB}
+              >
+                {CREATOR_GITHUB_LABEL}
+              </button>
+            </div>
           </div>
         </div>
 

@@ -1436,6 +1436,63 @@ body.docs-resizing * {
   background: var(--app-button-active);
 }
 
+.app-about-card {
+  margin-top: 8px;
+  background: var(--app-panel-soft);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.app-about-row {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-about-row + .app-about-row {
+  border-top: 1px solid var(--app-border);
+}
+
+.app-about-label {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.app-about-value {
+  min-width: 0;
+  color: var(--app-heading);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-about-link {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--app-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-about-link:hover {
+  color: var(--app-heading);
+  text-decoration: underline;
+}
+
 .field {
   display: flex;
   flex-direction: column;
