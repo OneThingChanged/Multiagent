@@ -39,8 +39,8 @@ npm run tauri -- build --debug
 | 종류 | 경로 |
 |---|---|
 | 디버그 EXE | `src-tauri/target/debug/app.exe` |
-| 디버그 NSIS 인스톨러 | `src-tauri/target/debug/bundle/nsis/MultiAgent_0.2.0_x64-setup.exe` |
-| 디버그 MSI 인스톨러 | `src-tauri/target/debug/bundle/msi/MultiAgent_0.2.0_x64_en-US.msi` |
+| 디버그 NSIS 인스톨러 | `src-tauri/target/debug/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe` |
+| 디버그 MSI 인스톨러 | `src-tauri/target/debug/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi` |
 
 디버그 빌드는 dev profile이라 최적화가 약하지만, 릴리즈보다 빌드가 빠르고 로컬 확인용으로 적합.
 
@@ -56,8 +56,8 @@ npm run tauri build
 | 종류 | 크기 | 경로 |
 |---|---|---|
 | 단독 실행 EXE | ~9-10MB | `src-tauri/target/release/app.exe` |
-| NSIS 인스톨러 | ~2MB | `src-tauri/target/release/bundle/nsis/MultiAgent_0.2.0_x64-setup.exe` |
-| MSI 인스톨러 | ~3MB | `src-tauri/target/release/bundle/msi/MultiAgent_0.2.0_x64_en-US.msi` |
+| NSIS 인스톨러 | ~2MB | `src-tauri/target/release/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe` |
+| MSI 인스톨러 | ~3MB | `src-tauri/target/release/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi` |
 
 > Cargo 패키지 이름이 `app`이라 단독 EXE는 `app.exe`로 빌드됨. `MultiAgent.exe`로 바꾸려면 `Cargo.toml`의 `[package].name`을 변경 (`[lib].name`은 유지).
 

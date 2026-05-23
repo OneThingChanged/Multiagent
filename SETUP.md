@@ -46,8 +46,8 @@ npm run tauri build
 - 1~3분 (incremental은 1분 내)
 - 결과물:
   - `app/src-tauri/target/release/app.exe` — 단독 실행 ~11MB
-  - `app/src-tauri/target/release/bundle/msi/MultiAgent_0.1.0_x64_en-US.msi`
-  - `app/src-tauri/target/release/bundle/nsis/MultiAgent_0.1.0_x64-setup.exe`
+  - `app/src-tauri/target/release/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi`
+  - `app/src-tauri/target/release/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe`
 
 ### 테스트 실행
 ```powershell
