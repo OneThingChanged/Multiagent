@@ -193,6 +193,7 @@ export function Sidebar({
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = "move";
           e.dataTransfer.setData("text/plain", a.id);
+          e.dataTransfer.setData("application/x-multiagent-agent", a.id);
           onDragStart(a.id);
         }}
         onDragEnd={onDragEnd}

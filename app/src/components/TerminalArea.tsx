@@ -29,6 +29,7 @@ export function TerminalArea({
   onDragEnd,
   onDropTargetChange,
   onDrop,
+  onDropToEmpty,
   onTabContextMenu,
   onOpenMarkdownPath,
 }: {
@@ -48,6 +49,7 @@ export function TerminalArea({
   onDragEnd: () => void;
   onDropTargetChange: (t: DropTargetState | null) => void;
   onDrop: (from: string, target: string, zone: DropZone) => void;
+  onDropToEmpty: (agentId: string) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   onOpenMarkdownPath: (agentId: string, path: string) => void;
 }) {
@@ -75,7 +77,30 @@ export function TerminalArea({
       {layout ? (
         <NodeRenderer node={layout} path={[]} ctx={ctx} />
       ) : (
-        <div className="empty-state">세션을 선택하세요</div>
+        <div
+          className="empty-state"
+          onDragOver={(event) => {
+            const agentId =
+              dragState?.fromAgentId ||
+              event.dataTransfer.getData("application/x-multiagent-agent") ||
+              event.dataTransfer.getData("text/plain");
+            if (!agentId) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={(event) => {
+            const agentId =
+              dragState?.fromAgentId ||
+              event.dataTransfer.getData("application/x-multiagent-agent") ||
+              event.dataTransfer.getData("text/plain");
+            if (!agentId) return;
+            event.preventDefault();
+            onDropToEmpty(agentId);
+            onDragEnd();
+          }}
+        >
+          세션을 선택하세요
+        </div>
       )}
     </main>
   );

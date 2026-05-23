@@ -901,6 +901,7 @@ function App() {
         onDragEnd={handleDragEnd}
         onDropTargetChange={setDropTarget}
         onDrop={performDrop}
+        onDropToEmpty={selectAgent}
         onTabContextMenu={(path, agentId, x, y) =>
           setTabContextMenu({ path, agentId, x, y })
         }

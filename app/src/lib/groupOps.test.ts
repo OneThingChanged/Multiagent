@@ -296,6 +296,23 @@ describe("performDrop", () => {
     }
   });
 
+  it("can split an agent from another project into the active group", () => {
+    const s = setup();
+    s.groups[0] = { ...s.groups[0], projectId: "project-a" };
+    s.groups[1] = { ...s.groups[1], projectId: "project-b" };
+    const targetLeafId = (leafAt(s, "g-a", []) as { id: string }).id;
+    const next = ops.performDrop(s, "b", targetLeafId, "right");
+
+    expect(next.activeGroupId).toBe("g-a");
+    expect(next.groups.some((g) => g.id === "g-b")).toBe(false);
+    const root = leafAt(next, "g-a", []);
+    expect(root?.type).toBe("split");
+    if (root?.type === "split") {
+      expect(findLeafPath(root, "a")).toEqual([0]);
+      expect(findLeafPath(root, "b")).toEqual([1]);
+    }
+  });
+
   it("same-leaf single-tab drop is a no-op", () => {
     const s = leafState(["a"]);
     const targetLeafId = (leafAt(s, "g-a", []) as { id: string }).id;

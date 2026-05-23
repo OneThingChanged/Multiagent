@@ -225,26 +225,33 @@ export function PaneSlot({
   }, [active, activeAgent?.id, termsRef]);
 
   const dragFrom = ctx.dragState?.fromAgentId ?? null;
-  const sourceInThisLeaf = !!dragFrom && leaf.tabs.includes(dragFrom);
-  const onlyTabSource = sourceInThisLeaf && leaf.tabs.length === 1;
-  const dragActive = !!ctx.dragState;
-  const isDropTarget = dragActive && !onlyTabSource;
   const overlayZone =
     ctx.dropTarget && ctx.dropTarget.leafId === leaf.id
       ? ctx.dropTarget.zone
       : null;
 
+  const dragAgentIdFromEvent = (e: React.DragEvent) =>
+    ctx.dragState?.fromAgentId ||
+    e.dataTransfer.getData("application/x-multiagent-agent") ||
+    e.dataTransfer.getData("text/plain");
+
+  const canDropAgent = (agentId: string | null) => {
+    if (!agentId) return false;
+    return !(leaf.tabs.includes(agentId) && leaf.tabs.length === 1);
+  };
+
   const onTabDragStart = (e: React.DragEvent, tabAgentId: string) => {
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", tabAgentId);
+    e.dataTransfer.setData("application/x-multiagent-agent", tabAgentId);
     ctx.onDragStart(tabAgentId);
   };
   const onTabDragEnd = () => {
     ctx.onDragEnd();
   };
-  const onBodyDragOver = (e: React.DragEvent) => {
-    if (!ctx.dragState) return;
-    if (onlyTabSource) return;
+  const onPaneDragOver = (e: React.DragEvent) => {
+    const agentId = dragAgentIdFromEvent(e);
+    if (!canDropAgent(agentId)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -257,18 +264,25 @@ export function PaneSlot({
       ctx.onDropTargetChange({ leafId: leaf.id, zone });
     }
   };
-  const onBodyDragLeave = () => {
+  const onPaneDragLeave = (e: React.DragEvent) => {
+    const nextTarget = e.relatedTarget;
+    if (
+      nextTarget instanceof Node &&
+      e.currentTarget.contains(nextTarget)
+    ) {
+      return;
+    }
     if (ctx.dropTarget?.leafId === leaf.id) {
       ctx.onDropTargetChange(null);
     }
   };
-  const onBodyDrop = (e: React.DragEvent) => {
-    if (!ctx.dragState) return;
-    if (onlyTabSource) return;
+  const onPaneDrop = (e: React.DragEvent) => {
+    const agentId = dragAgentIdFromEvent(e);
+    if (!canDropAgent(agentId)) return;
     e.preventDefault();
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
     const zone = computeDropZone(rect, e.clientX, e.clientY);
-    ctx.onDrop(ctx.dragState.fromAgentId, leaf.id, zone);
+    ctx.onDrop(agentId, leaf.id, zone);
     ctx.onDragEnd();
   };
 
@@ -276,6 +290,9 @@ export function PaneSlot({
     <div
       className={`pane-slot ${active ? "pane-active" : ""}`}
       onMouseDown={() => ctx.setActivePath(path)}
+      onDragOver={onPaneDragOver}
+      onDragLeave={onPaneDragLeave}
+      onDrop={onPaneDrop}
     >
       <div className="pane-tabs">
         {leaf.tabs.map((tabAgentId) => {
@@ -329,14 +346,6 @@ export function PaneSlot({
         })}
       </div>
       <div ref={bodyRef} className="pane-body" />
-      {isDropTarget && (
-        <div
-          className="drop-capture"
-          onDragOver={onBodyDragOver}
-          onDragLeave={onBodyDragLeave}
-          onDrop={onBodyDrop}
-        />
-      )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />
       )}
