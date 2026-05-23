@@ -75,7 +75,7 @@ export function TerminalArea({
       {layout ? (
         <NodeRenderer node={layout} path={[]} ctx={ctx} />
       ) : (
-        <div className="empty-state">에이전트를 선택하세요</div>
+        <div className="empty-state">세션을 선택하세요</div>
       )}
     </main>
   );

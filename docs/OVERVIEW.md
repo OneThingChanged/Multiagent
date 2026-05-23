@@ -23,7 +23,7 @@
 
 | 기능 | 설명 |
 |---|---|
-| 프로젝트/세션 모델 | 프로젝트를 먼저 등록하고, 선택 프로젝트 안에서 별명 있는 세션을 생성 |
+| 프로젝트/세션 모델 | 프로젝트를 먼저 등록하고, 접이식 프로젝트 트리 안에서 별명 있는 세션을 생성 |
 | 세션 생성 모달 | 세션 별명·AI 도구·Dangerous 모드 |
 | 세션 별명 변경 | 사이드바 우클릭 메뉴에서 기존 세션 이름 수정 |
 | PowerShell 7 우선 | Store판 `pwsh.exe` → MSI판 → 5.1 → cmd.exe 순 |
@@ -33,7 +33,7 @@
 | 그룹 개념 | 분할로 묶인 에이전트들이 한 그룹. 사이드바에서 누구를 클릭하든 그 그룹 전체가 보임 |
 | 그룹 세션 고정 | 사이드바 우클릭 메뉴에서 현재 저장된 세션 ID를 그룹에 고정. 고정 그룹은 해당 세션으로만 resume하고 외부 에이전트 추가를 막음 |
 | 사이드바 그룹 정렬 | 같은 그룹 멤버가 사이드바에서 연속해서 표시 + 구분선 + 왼쪽 막대 |
-| 드래그 앤 드롭 | 탭/사이드바 아이템을 패널 위로 끌어서 center=탭 합치기 / 4-edge=분할 재배치 |
+| 드래그 앤 드롭 | 탭/사이드바 세션을 패널 위로 끌어서 center=탭 합치기 / 4-edge=분할 재배치. 다른 프로젝트 세션도 같은 작업 화면에 배치 가능 |
 | Working/Done 감지 | Claude Code hook(UserPromptSubmit/Stop) → 로컬 HTTP → 노란 펄스/완료 토스트+OS 알림 |
 | 영구화 | localStorage에 projects·agents·groups·view(activeProjectId/activeGroupId/activePath) 저장 |
 | Codex 세션 Resume | 창 닫을 때 자동으로 `/quit` → `codex resume <token>` 토큰 캡처 → 다음 실행 시 자동 재개 (자세한 건 [RESUME.md](RESUME.md)) |

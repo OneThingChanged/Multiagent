@@ -218,11 +218,10 @@ body,
   background: var(--app-success-hover);
 }
 
-.project-list {
-  flex: 0 0 auto;
-  max-height: 38vh;
+.project-tree {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-bottom: 1px solid var(--app-border);
   padding: 6px 0;
 }
 
@@ -291,6 +290,54 @@ body,
   border-left-color: var(--app-accent);
 }
 
+.project-node {
+  border-left: 2px solid transparent;
+}
+
+.project-node-active {
+  border-left-color: var(--app-accent);
+}
+
+.project-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.project-caret-btn {
+  width: 24px;
+  flex: 0 0 24px;
+  background: transparent;
+  border: 0;
+  color: var(--app-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+}
+
+.project-caret-btn:hover {
+  background: var(--app-panel-hover);
+  color: var(--app-heading);
+}
+
+.project-tree-project {
+  flex: 1;
+  min-width: 0;
+  border-left: 0;
+  padding-left: 2px;
+}
+
+.project-node-active .project-tree-project {
+  background: var(--app-active-bg-strong);
+}
+
+.project-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+
 .project-name,
 .project-meta {
   min-width: 0;
@@ -326,6 +373,16 @@ body,
   cursor: pointer;
   font-size: 13px;
   border-left: 2px solid transparent;
+}
+
+.agent-item-nested {
+  padding-left: 24px;
+  padding-right: 10px;
+}
+
+.project-empty-hint {
+  padding: 10px 12px 12px 28px;
+  text-align: left;
 }
 .agent-item:hover {
   background: var(--app-panel-hover);

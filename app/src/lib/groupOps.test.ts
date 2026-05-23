@@ -179,6 +179,16 @@ describe("closeTab", () => {
     expect(collectAgentIds(last.layout).has("b")).toBe(true);
   });
 
+  it("uses the closed agent's project id when it leaves a mixed-project group", () => {
+    const s = leafState(["a"]);
+    s.groups[0] = { ...s.groups[0], projectId: "project-a" };
+    const withTab = ops.openAsTab(s, "b", "project-b");
+    const next = ops.closeTab(withTab, [], "b", "project-b");
+    const last = next.groups[next.groups.length - 1];
+    expect(last.projectId).toBe("project-b");
+    expect(collectAgentIds(last.layout).has("b")).toBe(true);
+  });
+
   it("prunes session pins when a tab leaves a locked group", () => {
     const s = leafState(["a"]);
     const withTab = ops.openAsTab(s, "b");

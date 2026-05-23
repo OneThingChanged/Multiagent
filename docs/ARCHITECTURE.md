@@ -122,7 +122,7 @@ PowerShell 계열로 시작될 때는 `-NoLogo` 인자 추가.
 ```ts
 projects: Project[]                // 프로젝트 메타 (id, name, folder, createdAt, lastOpenedAt?)
 agents: Agent[]                    // 세션 메타 (id, projectId, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
-groups: Group[]                    // 각 그룹 = projectId + layout 트리 + 선택적 세션 고정값
+groups: Group[]                    // 각 그룹 = layout 트리 + 선택적 기준 projectId + 세션 고정값
 activeProjectId: string | null     // 현재 사이드바/Docs 기준 프로젝트
 activeGroupId: string | null       // 현재 표시 중인 그룹
 activePath: Path | null            // 그 그룹 내의 활성 leaf 경로 (number[])
@@ -145,20 +145,21 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ### 그룹 모델 불변식
 
 - agents 안의 모든 ID는 groups[*].layout 안에 정확히 한 번씩 등장 (어느 그룹 어느 leaf 어느 tab)
-- 각 agent는 정확히 하나의 projectId를 가진다. 그룹도 projectId를 갖고, activeProjectId 기준으로 필터링된다
+- 각 agent는 정확히 하나의 projectId를 가진다
+- 그룹은 여러 프로젝트 세션을 함께 담을 수 있다. `group.projectId`는 새 solo 그룹 생성이나 legacy fallback에 쓰는 기준 프로젝트일 뿐, 멤버 프로젝트를 제한하지 않는다
 - 기존 `multiagent.agents.v1`만 있던 설치는 agent.folder별로 Project를 자동 생성해 마이그레이션한다
 - 어떤 이유로 누락되면 load 시 solo 그룹 생성으로 복구
 - 그룹 layout이 비면 그 그룹 자동 삭제
 - `sessionPins?: Record<agentId, sessionId>`는 그룹에 고정된 resume 세션 ID
-- `sessionLocked?: true`이면 외부 에이전트를 해당 그룹에 탭/분할/드래그로 추가하지 않음
-- layout에서 제거된 에이전트의 session pin은 `updateGroup`에서 같이 정리됨
+- `sessionLocked?: true`이면 외부 세션을 해당 그룹에 탭/분할/드래그로 추가하지 않음
+- layout에서 제거된 세션의 session pin은 `updateGroup`에서 같이 정리됨
 
 ### 그룹 세션 고정
 
-- 사이드바 우클릭 메뉴에서 `현재 세션으로 그룹 고정`을 실행하면, 해당 그룹 멤버 중 `lastSessionId`가 있는 에이전트들을 `group.sessionPins`에 저장
+- 사이드바 우클릭 메뉴에서 `현재 세션으로 그룹 고정`을 실행하면, 해당 그룹 멤버 중 `lastSessionId`가 있는 세션들을 `group.sessionPins`에 저장
 - spawn 시 `PaneSlot`은 `group.sessionPins[agentId]`를 먼저 보고, 없으면 `agent.lastSessionId`를 사용
 - 고정된 그룹은 사이드바에 `PIN` 배지를 표시
-- `groupOps.openAsTab`, `splitWith`, `performDrop`은 locked group 안으로 외부 agent가 들어오거나 locked source group에서 agent가 빠져나가는 이동을 막음
+- `groupOps.openAsTab`, `splitWith`, `performDrop`은 locked group 안으로 외부 세션이 들어오거나 locked source group에서 세션이 빠져나가는 이동을 막음
 - 현재 구현은 과거 세션 목록을 따로 보관하지 않고 "현재 저장된 세션 ID"만 고정한다
 
 ### xterm 라이프사이클
@@ -241,7 +242,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 - `multiagent.projects.v1` — `StoredProject[]` (프로젝트 이름, 폴더, 최근 사용 시각)
 - `multiagent.agents.v1` — `StoredAgent[]` (세션 메타 + projectId)
-- `multiagent.groups.v1` — `Group[]` (projectId + 트리 + `sessionPins`/`sessionLocked`)
+- `multiagent.groups.v1` — `Group[]` (트리 + 선택적 projectId + `sessionPins`/`sessionLocked`)
 - `multiagent.view.v1` — `{ activeProjectId, activeGroupId, activePath }`
 - `multiagent.appTheme.v1` — 전역 테마 (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장

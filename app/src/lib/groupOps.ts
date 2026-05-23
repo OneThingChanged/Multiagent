@@ -189,7 +189,8 @@ export function splitWith(
 export function closeTab(
   state: GroupState,
   path: Path,
-  agentId: string
+  agentId: string,
+  projectId?: string
 ): GroupState {
   const activeGroup = state.groups.find((g) => g.id === state.activeGroupId);
   if (!activeGroup) return state;
@@ -219,7 +220,7 @@ export function closeTab(
     ...nextGroups,
     {
       id: crypto.randomUUID(),
-      projectId: activeGroup.projectId,
+      projectId: projectId ?? activeGroup.projectId,
       layout: makeLeaf(agentId),
     },
   ];

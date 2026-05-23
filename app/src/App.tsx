@@ -43,7 +43,7 @@ import type {
 import {
   activeAgentInLeaf,
   collectAgentIds,
-  firstLeafPath,
+  findLeafPath,
   getAt,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
@@ -90,6 +90,25 @@ function loadDocsWidth() {
   } catch {
     return DEFAULT_DOCS_WIDTH;
   }
+}
+
+function firstProjectSessionFocus(
+  projectId: string,
+  agents: Agent[],
+  groups: Group[]
+): { agentId: string; groupId: string; path: Path } | null {
+  const projectAgentIds = agents
+    .filter((agent) => agent.projectId === projectId)
+    .map((agent) => agent.id);
+
+  for (const group of groups) {
+    for (const agentId of projectAgentIds) {
+      const path = findLeafPath(group.layout, agentId);
+      if (path) return { agentId, groupId: group.id, path };
+    }
+  }
+
+  return null;
 }
 
 function App() {
@@ -247,11 +266,11 @@ function App() {
     }
 
     const nextProjectId = projects[0].id;
-    const firstGroup = groups.find((group) => group.projectId === nextProjectId);
+    const firstFocus = firstProjectSessionFocus(nextProjectId, agents, groups);
     setActiveProjectId(nextProjectId);
-    setActiveGroupId(firstGroup?.id ?? null);
-    setActivePath(firstGroup ? firstLeafPath(firstGroup.layout) : null);
-  }, [activeProjectId, groups, projects]);
+    setActiveGroupId(firstFocus?.groupId ?? null);
+    setActivePath(firstFocus?.path ?? null);
+  }, [activeProjectId, agents, groups, projects]);
 
   // ---- Notifications
 
@@ -396,22 +415,26 @@ function App() {
     []
   );
 
+  const activateAgentProject = useCallback((agentId: string) => {
+    const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
+    if (!agent) return null;
+    setActiveProjectId(agent.projectId);
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === agent.projectId
+          ? { ...project, lastOpenedAt: Date.now() }
+          : project
+      )
+    );
+    return agent;
+  }, []);
+
   const selectAgent = useCallback(
     (agentId: string) => {
-      const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
-      if (agent) {
-        setActiveProjectId(agent.projectId);
-        setProjects((prev) =>
-          prev.map((project) =>
-            project.id === agent.projectId
-              ? { ...project, lastOpenedAt: Date.now() }
-              : project
-          )
-        );
-      }
+      const agent = activateAgentProject(agentId);
       applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
     },
-    [applyGroupOp]
+    [activateAgentProject, applyGroupOp]
   );
 
   const selectProject = useCallback((projectId: string) => {
@@ -422,39 +445,56 @@ function App() {
       )
     );
 
-    const firstGroup = groups.find((group) => group.projectId === projectId);
-    setActiveGroupId(firstGroup?.id ?? null);
-    setActivePath(firstGroup ? firstLeafPath(firstGroup.layout) : null);
-  }, [groups]);
+    const firstFocus = firstProjectSessionFocus(projectId, agents, groups);
+    if (firstFocus) {
+      applyGroupOp((s) =>
+        groupOps.selectAgent(s, firstFocus.agentId, projectId)
+      );
+      return;
+    }
+    setActiveGroupId(null);
+    setActivePath(null);
+  }, [agents, applyGroupOp, groups]);
 
   const openAsTab = useCallback(
-    (agentId: string) =>
+    (agentId: string) => {
+      const agent = activateAgentProject(agentId);
       applyGroupOp((s) =>
         groupOps.openAsTab(
           s,
           agentId,
-          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+          agent?.projectId
         )
-      ),
-    [applyGroupOp]
+      );
+    },
+    [activateAgentProject, applyGroupOp]
   );
 
   const splitWith = useCallback(
-    (agentId: string, direction: "h" | "v") =>
+    (agentId: string, direction: "h" | "v") => {
+      const agent = activateAgentProject(agentId);
       applyGroupOp((s) =>
         groupOps.splitWith(
           s,
           agentId,
           direction,
-          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+          agent?.projectId
         )
-      ),
-    [applyGroupOp]
+      );
+    },
+    [activateAgentProject, applyGroupOp]
   );
 
   const closeTab = useCallback(
     (path: Path, agentId: string) =>
-      applyGroupOp((s) => groupOps.closeTab(s, path, agentId)),
+      applyGroupOp((s) =>
+        groupOps.closeTab(
+          s,
+          path,
+          agentId,
+          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+        )
+      ),
     [applyGroupOp]
   );
 
@@ -465,17 +505,21 @@ function App() {
   );
 
   const setActiveTabInPane = useCallback(
-    (path: Path, agentId: string) =>
-      applyGroupOp((s) => groupOps.setActiveTabInPane(s, path, agentId)),
-    [applyGroupOp]
+    (path: Path, agentId: string) => {
+      activateAgentProject(agentId);
+      applyGroupOp((s) => groupOps.setActiveTabInPane(s, path, agentId));
+    },
+    [activateAgentProject, applyGroupOp]
   );
 
   const performDrop = useCallback(
-    (fromAgentId: string, targetLeafId: string, zone: DropZone) =>
+    (fromAgentId: string, targetLeafId: string, zone: DropZone) => {
+      activateAgentProject(fromAgentId);
       applyGroupOp((s) =>
         groupOps.performDrop(s, fromAgentId, targetLeafId, zone)
-      ),
-    [applyGroupOp]
+      );
+    },
+    [activateAgentProject, applyGroupOp]
   );
 
   // ---- Agent CRUD (side effects + layout via groupOps)
@@ -730,6 +774,27 @@ function App() {
     [pushToast, selectAgent]
   );
 
+  const setActivePathForPane = useCallback(
+    (path: Path | null) => {
+      if (!path) {
+        setActivePath(null);
+        return;
+      }
+
+      const group = activeGroupIdRef.current
+        ? groups.find((candidate) => candidate.id === activeGroupIdRef.current)
+        : null;
+      const leaf = group ? getAt(group.layout, path) : null;
+      const agentId =
+        leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
+      if (agentId) {
+        activateAgentProject(agentId);
+      }
+      setActivePath(path);
+    },
+    [activateAgentProject, groups]
+  );
+
   // ---- Derived
 
   const activeProject = useMemo(
@@ -748,20 +813,12 @@ function App() {
     [activeProjectId, agents]
   );
 
-  const projectGroups = useMemo(
-    () =>
-      activeProjectId
-        ? groups.filter((group) => group.projectId === activeProjectId)
-        : [],
-    [activeProjectId, groups]
-  );
-
   const activeGroup = useMemo(
     () =>
       activeGroupId
-        ? projectGroups.find((g) => g.id === activeGroupId) ?? null
+        ? groups.find((g) => g.id === activeGroupId) ?? null
         : null,
-    [activeGroupId, projectGroups]
+    [activeGroupId, groups]
   );
   const activeGroupLayout = activeGroup ? activeGroup.layout : null;
 
@@ -779,9 +836,17 @@ function App() {
   const activeAgent = useMemo(
     () =>
       activeAgentId
-        ? projectAgents.find((a) => a.id === activeAgentId) ?? null
+        ? agents.find((a) => a.id === activeAgentId) ?? null
         : null,
-    [activeAgentId, projectAgents]
+    [activeAgentId, agents]
+  );
+  const activeSessionProject = useMemo(
+    () =>
+      activeAgent
+        ? projects.find((project) => project.id === activeAgent.projectId) ??
+          activeProject
+        : activeProject,
+    [activeAgent, activeProject, projects]
   );
   const renameSession = useMemo(
     () =>
@@ -798,7 +863,7 @@ function App() {
       <Sidebar
         projects={projects}
         agents={agents}
-        groups={projectGroups}
+        groups={groups}
         activeProjectId={activeProjectId}
         activeGroupId={activeGroupId}
         activeAgentId={activeAgentId}
@@ -820,7 +885,7 @@ function App() {
         onDragEnd={handleDragEnd}
       />
       <TerminalArea
-        agents={projectAgents}
+        agents={agents}
         layout={activeGroupLayout}
         sessionPins={activeGroup?.sessionPins ?? null}
         activePath={activePath}
@@ -828,7 +893,7 @@ function App() {
         dropTarget={dropTarget}
         termsRef={termsRef}
         setAgentStatus={setAgentStatus}
-        setActivePath={setActivePath}
+        setActivePath={setActivePathForPane}
         onCloseTab={closeTab}
         onSelectTab={setActiveTabInPane}
         onResizeAt={resizeAt}
@@ -850,11 +915,11 @@ function App() {
       )}
       <DocsPanel
         open={docsOpen}
-        activeProject={activeProject}
+        activeProject={activeSessionProject}
         activeSession={activeAgent}
         width={docsWidth}
         requestedPath={
-          docsRequest && docsRequest.projectId === activeProject?.id
+          docsRequest && docsRequest.projectId === activeSessionProject?.id
             ? docsRequest.relativePath
             : null
         }

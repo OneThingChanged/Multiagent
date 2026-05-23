@@ -1,8 +1,10 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toolForId } from "../types";
 import type { Agent, DragState, Group, Project } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
 import { folderTail } from "../lib/path";
+
+const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 
 type Section = {
   groupId: string;
@@ -10,6 +12,18 @@ type Section = {
   sessionLocked: boolean;
   members: Agent[];
 };
+
+function loadExpandedProjects(projects: Project[]) {
+  try {
+    const raw = localStorage.getItem(LS_EXPANDED_PROJECTS);
+    if (raw) {
+      const saved = JSON.parse(raw) as string[];
+      return new Set(saved.filter((id) => projects.some((p) => p.id === id)));
+    }
+  } catch {}
+
+  return new Set(projects.map((project) => project.id));
+}
 
 export function Sidebar({
   projects,
@@ -54,13 +68,29 @@ export function Sidebar({
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
 }) {
-  const activeAgents = useMemo(
-    () =>
-      activeProjectId
-        ? agents.filter((agent) => agent.projectId === activeProjectId)
-        : [],
-    [activeProjectId, agents]
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
+    () => loadExpandedProjects(projects)
   );
+
+  useEffect(() => {
+    setExpandedProjectIds((current) => {
+      const validProjectIds = new Set(projects.map((project) => project.id));
+      const next = new Set(
+        Array.from(current).filter((id) => validProjectIds.has(id))
+      );
+      if (activeProjectId) next.add(activeProjectId);
+      return next;
+    });
+  }, [activeProjectId, projects]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LS_EXPANDED_PROJECTS,
+        JSON.stringify(Array.from(expandedProjectIds))
+      );
+    } catch {}
+  }, [expandedProjectIds]);
 
   const projectSessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -70,40 +100,71 @@ export function Sidebar({
     return counts;
   }, [agents]);
 
-  const sections = useMemo<Section[]>(() => {
-    const agentById = new Map(activeAgents.map((a) => [a.id, a]));
-    const seen = new Set<string>();
-    const out: Section[] = [];
-    for (const g of groups) {
-      const ids = collectAgentIdsInOrder(g.layout);
-      const members: Agent[] = [];
-      for (const id of ids) {
-        const a = agentById.get(id);
-        if (a && !seen.has(id)) {
-          members.push(a);
-          seen.add(id);
+  const sectionsByProject = useMemo(() => {
+    const result = new Map<string, Section[]>();
+
+    for (const project of projects) {
+      const projectAgents = agents.filter(
+        (agent) => agent.projectId === project.id
+      );
+      const agentById = new Map(projectAgents.map((agent) => [agent.id, agent]));
+      const seen = new Set<string>();
+      const sections: Section[] = [];
+
+      for (const group of groups) {
+        const ids = collectAgentIdsInOrder(group.layout);
+        const members: Agent[] = [];
+        for (const id of ids) {
+          const agent = agentById.get(id);
+          if (agent && !seen.has(id)) {
+            members.push(agent);
+            seen.add(id);
+          }
+        }
+        if (members.length > 0) {
+          sections.push({
+            groupId: group.id,
+            multi: ids.length > 1,
+            sessionLocked: !!group.sessionLocked,
+            members,
+          });
         }
       }
-      if (members.length > 0) {
-        out.push({
-          groupId: g.id,
-          multi: members.length > 1,
-          sessionLocked: !!g.sessionLocked,
-          members,
+
+      const orphans = projectAgents.filter((agent) => !seen.has(agent.id));
+      if (orphans.length > 0) {
+        sections.push({
+          groupId: `${project.id}__orphans__`,
+          multi: false,
+          sessionLocked: false,
+          members: orphans,
         });
       }
+
+      result.set(project.id, sections);
     }
-    const orphans = activeAgents.filter((a) => !seen.has(a.id));
-    if (orphans.length > 0) {
-      out.push({
-        groupId: "__orphans__",
-        multi: false,
-        sessionLocked: false,
-        members: orphans,
-      });
-    }
-    return out;
-  }, [activeAgents, groups]);
+
+    return result;
+  }, [agents, groups, projects]);
+
+  const toggleProjectExpanded = (projectId: string) => {
+    setExpandedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
+
+  const selectProject = (projectId: string) => {
+    setExpandedProjectIds((current) => {
+      if (current.has(projectId)) return current;
+      const next = new Set(current);
+      next.add(projectId);
+      return next;
+    });
+    onSelectProject(projectId);
+  };
 
   const renderItem = (
     a: Agent,
@@ -119,6 +180,7 @@ export function Sidebar({
         key={a.id}
         className={[
           "agent-item",
+          "agent-item-nested",
           activeAgentId === a.id ? "active" : "",
           inGroup ? "in-group" : "",
           isDragging ? "agent-dragging" : "",
@@ -215,7 +277,7 @@ export function Sidebar({
           </button>
         </div>
       </div>
-      <div className="project-list">
+      <div className="project-tree">
         <div className="sidebar-section-heading">
           <div className="sidebar-section-title">Projects</div>
           <button
@@ -226,50 +288,66 @@ export function Sidebar({
             +
           </button>
         </div>
-        {projects.map((project) => (
-          <button
-            key={project.id}
-            className={`project-item ${
-              project.id === activeProjectId ? "project-item-active" : ""
-            }`}
-            onClick={() => onSelectProject(project.id)}
-            title={project.folder}
-          >
-            <span className="project-name">{project.name}</span>
-            <span className="project-meta">
-              {folderTail(project.folder)} · {projectSessionCounts.get(project.id) ?? 0}
-            </span>
-          </button>
-        ))}
+        {projects.map((project) => {
+          const expanded = expandedProjectIds.has(project.id);
+          const sections = sectionsByProject.get(project.id) ?? [];
+          const sessionCount = projectSessionCounts.get(project.id) ?? 0;
+
+          return (
+            <div
+              key={project.id}
+              className={`project-node ${
+                project.id === activeProjectId ? "project-node-active" : ""
+              }`}
+            >
+              <div className="project-row">
+                <button
+                  className="project-caret-btn"
+                  onClick={() => toggleProjectExpanded(project.id)}
+                  title={expanded ? "Collapse project" : "Expand project"}
+                >
+                  {expanded ? "v" : ">"}
+                </button>
+                <button
+                  className="project-item project-tree-project"
+                  onClick={() => selectProject(project.id)}
+                  title={project.folder}
+                >
+                  <span className="project-name">{project.name}</span>
+                  <span className="project-meta">
+                    {folderTail(project.folder)} · {sessionCount}
+                  </span>
+                </button>
+              </div>
+              {expanded && (
+                <ul className="project-session-list">
+                  {sections.map((section, idx) => (
+                    <Fragment key={`${project.id}-${section.groupId}`}>
+                      {idx > 0 && <li className="group-separator" />}
+                      {section.members.map((agent) =>
+                        renderItem(
+                          agent,
+                          section.groupId,
+                          section.multi,
+                          section.sessionLocked
+                        )
+                      )}
+                    </Fragment>
+                  ))}
+                  {sessionCount === 0 && (
+                    <li className="empty-hint project-empty-hint">
+                      Select project, then click + to start a session
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          );
+        })}
         {projects.length === 0 && (
           <div className="empty-hint">Click + to add a project</div>
         )}
       </div>
-      <ul className="agent-list">
-        <li className="sidebar-section-title sidebar-section-title-list">
-          Sessions
-        </li>
-        {activeProjectId &&
-          sections.map((section, idx) => (
-            <Fragment key={section.groupId}>
-              {idx > 0 && <li className="group-separator" />}
-              {section.members.map((a) =>
-                renderItem(
-                  a,
-                  section.groupId,
-                  section.multi,
-                  section.sessionLocked
-                )
-              )}
-            </Fragment>
-          ))}
-        {activeProjectId && activeAgents.length === 0 && (
-          <li className="empty-hint">Click + to start a session</li>
-        )}
-        {!activeProjectId && projects.length > 0 && (
-          <li className="empty-hint">Select a project first</li>
-        )}
-      </ul>
     </aside>
   );
 }

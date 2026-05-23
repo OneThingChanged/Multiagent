@@ -19,9 +19,9 @@ import type {
 import {
   collectAgentIds,
   firstLeafPath,
+  findLeafPath,
   getAt,
   makeLeaf,
-  normalizeSizes,
   validateLayout,
 } from "./layout";
 
@@ -150,19 +150,12 @@ export function loadStoredGroups(
           Array.from(seen)
             .map((agentId) => agentProjectIds.get(agentId))
             .find(Boolean);
-        const projectAgentIds = new Set(
-          Array.from(seen).filter(
-            (agentId) => agentProjectIds.get(agentId) === projectId
-          )
-        );
-        const projectLayout = pruneAgentsOutsideProject(lay, projectAgentIds);
-        if (!projectId || !projectLayout) continue;
-        for (const aid of projectAgentIds) used.add(aid);
-        const sessionPins = sanitizeSessionPins(g.sessionPins, projectLayout);
+        for (const aid of seen) used.add(aid);
+        const sessionPins = sanitizeSessionPins(g.sessionPins, lay);
         groups.push({
           id: g.id || crypto.randomUUID(),
           projectId,
-          layout: projectLayout,
+          layout: lay,
           sessionPins,
           sessionLocked:
             !!g.sessionLocked && Object.keys(sessionPins ?? {}).length > 0
@@ -189,46 +182,6 @@ export function loadStoredGroups(
       layout: makeLeaf(aid),
     }));
   }
-}
-
-function pruneAgentsOutsideProject(
-  layout: LayoutNode,
-  projectAgentIds: Set<string>
-): LayoutNode | null {
-  let next: LayoutNode | null = layout;
-  for (const agentId of collectAgentIds(layout)) {
-    if (!projectAgentIds.has(agentId)) {
-      next = next ? pruneAgentFromLayout(next, agentId) : null;
-    }
-  }
-  return next;
-}
-
-function pruneAgentFromLayout(
-  layout: LayoutNode,
-  agentId: string
-): LayoutNode | null {
-  if (layout.type === "leaf") {
-    const tabs = layout.tabs.filter((tab) => tab !== agentId);
-    if (tabs.length === 0) return null;
-    return {
-      ...layout,
-      tabs,
-      activeIndex: Math.min(layout.activeIndex, tabs.length - 1),
-    };
-  }
-  const children: LayoutNode[] = [];
-  const sizes: number[] = [];
-  for (let i = 0; i < layout.children.length; i += 1) {
-    const child = pruneAgentFromLayout(layout.children[i], agentId);
-    if (child) {
-      children.push(child);
-      sizes.push(layout.sizes[i] ?? 1);
-    }
-  }
-  if (children.length === 0) return null;
-  if (children.length === 1) return children[0];
-  return { ...layout, children, sizes: normalizeSizes(sizes) };
 }
 
 function sanitizeSessionPins(
@@ -316,20 +269,36 @@ export function loadBootstrap(): Bootstrap {
       ? view.activeProjectId
       : null;
   const activeProjectId =
-    activeGroup?.projectId ?? savedProjectId ?? projects[0]?.id ?? null;
-  const fallbackGroup =
+    savedProjectId ?? activeGroup?.projectId ?? projects[0]?.id ?? null;
+  const fallbackFocus =
     !activeGroup && activeProjectId
-      ? groups.find((group) => group.projectId === activeProjectId)
+      ? firstProjectSessionFocus(activeProjectId, agents, groups)
       : null;
   return {
     projects,
     agents,
     groups,
     activeProjectId,
-    activeGroupId: activeGroup?.id ?? fallbackGroup?.id ?? null,
-    activePath:
-      activeGroup || !fallbackGroup
-        ? view.activePath
-        : firstLeafPath(fallbackGroup.layout),
+    activeGroupId: activeGroup?.id ?? fallbackFocus?.groupId ?? null,
+    activePath: activeGroup ? view.activePath : fallbackFocus?.path ?? null,
   };
+}
+
+function firstProjectSessionFocus(
+  projectId: string,
+  agents: Agent[],
+  groups: Group[]
+): { groupId: string; path: Path } | null {
+  const projectAgentIds = agents
+    .filter((agent) => agent.projectId === projectId)
+    .map((agent) => agent.id);
+
+  for (const group of groups) {
+    for (const agentId of projectAgentIds) {
+      const path = findLeafPath(group.layout, agentId);
+      if (path) return { groupId: group.id, path };
+    }
+  }
+
+  return null;
 }
