@@ -288,6 +288,12 @@ export function createEntry(
       return false;
     }
 
+    if (isPlainCtrlKey && event.key === "Enter") {
+      event.preventDefault();
+      invoke("write_pty", { id, data: "\n" }).catch(() => {});
+      return false;
+    }
+
     if (isPlainCtrlKey && event.key.toLowerCase() === "v") {
       event.preventDefault();
       navigator.clipboard
