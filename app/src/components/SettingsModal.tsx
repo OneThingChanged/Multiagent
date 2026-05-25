@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
 import {
@@ -13,19 +14,52 @@ const CREATOR_NAME = "OneThingChanged";
 const CREATOR_GITHUB = "https://github.com/OneThingChanged";
 const CREATOR_GITHUB_LABEL = "@OneThingChanged";
 
+type ReleaseAsset = {
+  name?: string;
+  browser_download_url?: string;
+};
+
 type LatestRelease = {
   tag_name?: string;
   html_url?: string;
   name?: string;
+  assets?: ReleaseAsset[];
 };
+
+type SetupAsset = { name: string; url: string };
 
 type UpdateCheckState =
   | { status: "idle" }
   | { status: "checking" }
   | { status: "current"; latestVersion: string; latestUrl: string }
-  | { status: "available"; latestVersion: string; latestUrl: string }
+  | {
+      status: "available";
+      latestVersion: string;
+      latestUrl: string;
+      setup?: SetupAsset;
+    }
   | { status: "ahead"; latestVersion: string; latestUrl: string }
   | { status: "error"; message: string };
+
+type InstallState =
+  | { status: "idle" }
+  | { status: "downloading" }
+  | { status: "installing" }
+  | { status: "error"; message: string };
+
+function pickSetupAsset(assets: ReleaseAsset[] | undefined): SetupAsset | undefined {
+  if (!assets) return undefined;
+  const nsis = assets.find(
+    (a) =>
+      a.browser_download_url &&
+      a.name &&
+      /x64-setup\.exe$/i.test(a.name)
+  );
+  if (nsis && nsis.name && nsis.browser_download_url) {
+    return { name: nsis.name, url: nsis.browser_download_url };
+  }
+  return undefined;
+}
 
 export function SettingsModal({
   theme,
@@ -39,6 +73,7 @@ export function SettingsModal({
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>({
     status: "idle",
   });
+  const [install, setInstall] = useState<InstallState>({ status: "idle" });
 
   const handleOpenGitHub = () => {
     openUrl(CREATOR_GITHUB).catch((error) => {
@@ -50,6 +85,28 @@ export function SettingsModal({
     openUrl(url).catch((error) => {
       console.error("Failed to open release page", error);
     });
+  };
+
+  const handleInstallUpdate = async (setup: SetupAsset) => {
+    setInstall({ status: "downloading" });
+    try {
+      const path = await invoke<string>("download_installer", {
+        url: setup.url,
+        fileName: setup.name,
+      });
+      setInstall({ status: "installing" });
+      await invoke("run_installer_and_quit", { path });
+    } catch (error) {
+      setInstall({
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "Failed to install update",
+      });
+    }
   };
 
   const handleCheckForUpdates = async () => {
@@ -71,7 +128,13 @@ export function SettingsModal({
       }
 
       if (isNewerVersion(latestVersion, APP_VERSION)) {
-        setUpdateCheck({ status: "available", latestVersion, latestUrl });
+        const setup = pickSetupAsset(latest.assets);
+        setUpdateCheck({
+          status: "available",
+          latestVersion,
+          latestUrl,
+          setup,
+        });
       } else if (isNewerVersion(APP_VERSION, latestVersion)) {
         setUpdateCheck({ status: "ahead", latestVersion, latestUrl });
       } else {
@@ -163,29 +226,69 @@ export function SettingsModal({
               )}
             <div
               className={`app-update-message ${
-                updateCheck.status === "error" ? "app-update-error" : ""
+                updateCheck.status === "error" ||
+                install.status === "error"
+                  ? "app-update-error"
+                  : ""
               }`}
             >
-              {updateCheck.status === "idle" &&
+              {install.status === "downloading" && "Downloading installer..."}
+              {install.status === "installing" &&
+                "Launching installer. The app will close."}
+              {install.status === "error" &&
+                `Update install failed: ${install.message}`}
+              {install.status === "idle" &&
+                updateCheck.status === "idle" &&
                 "Check GitHub Releases manually."}
-              {updateCheck.status === "checking" && "Checking releases..."}
-              {updateCheck.status === "available" &&
-                "A newer release is available."}
-              {updateCheck.status === "current" &&
+              {install.status === "idle" &&
+                updateCheck.status === "checking" &&
+                "Checking releases..."}
+              {install.status === "idle" &&
+                updateCheck.status === "available" &&
+                (updateCheck.setup
+                  ? "A newer release is available."
+                  : "A newer release is available, but no installer asset was found.")}
+              {install.status === "idle" &&
+                updateCheck.status === "current" &&
                 "You are using the latest release."}
-              {updateCheck.status === "ahead" &&
+              {install.status === "idle" &&
+                updateCheck.status === "ahead" &&
                 "This build is newer than the latest release."}
-              {updateCheck.status === "error" &&
+              {install.status === "idle" &&
+                updateCheck.status === "error" &&
                 `Update check failed: ${updateCheck.message}`}
             </div>
             <div className="app-update-actions">
               <button
                 className="btn-secondary app-update-btn"
                 onClick={handleCheckForUpdates}
-                disabled={updateCheck.status === "checking"}
+                disabled={
+                  updateCheck.status === "checking" ||
+                  install.status === "downloading" ||
+                  install.status === "installing"
+                }
               >
                 Check
               </button>
+              {updateCheck.status === "available" && updateCheck.setup && (
+                <button
+                  className="btn-primary app-update-btn"
+                  onClick={() =>
+                    updateCheck.setup &&
+                    handleInstallUpdate(updateCheck.setup)
+                  }
+                  disabled={
+                    install.status === "downloading" ||
+                    install.status === "installing"
+                  }
+                >
+                  {install.status === "downloading"
+                    ? "Downloading..."
+                    : install.status === "installing"
+                      ? "Installing..."
+                      : "Update"}
+                </button>
+              )}
               <button
                 className="btn-secondary app-update-btn"
                 onClick={() =>

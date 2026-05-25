@@ -668,6 +668,67 @@ fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
     }
 }
 
+fn updater_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("multiagent-updater");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+#[tauri::command]
+fn download_installer(url: String, file_name: String) -> Result<String, String> {
+    if file_name.is_empty()
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains("..")
+    {
+        return Err("invalid file name".to_string());
+    }
+    let dir = updater_dir()?;
+    let target = dir.join(&file_name);
+
+    let response = ureq::get(&url)
+        .set("User-Agent", "MultiAgent-Updater")
+        .set("Accept", "application/octet-stream")
+        .call()
+        .map_err(|e| format!("download request failed: {}", e))?;
+
+    let mut reader = response.into_reader();
+    let mut file = fs::File::create(&target)
+        .map_err(|e| format!("create installer file: {}", e))?;
+    std::io::copy(&mut reader, &mut file)
+        .map_err(|e| format!("write installer file: {}", e))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn run_installer_and_quit(
+    path: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("installer file not found".to_string());
+    }
+    let root = updater_dir()?
+        .canonicalize()
+        .map_err(|e| format!("canonicalize updater dir: {}", e))?;
+    let canon = p
+        .canonicalize()
+        .map_err(|e| format!("canonicalize installer: {}", e))?;
+    if !canon.starts_with(&root) {
+        return Err("installer is outside updater directory".to_string());
+    }
+    std::process::Command::new(&canon)
+        .spawn()
+        .map_err(|e| format!("spawn installer: {}", e))?;
+    *state.close_confirmed.lock().unwrap() = true;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.close();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -721,7 +782,9 @@ pub fn run() {
             confirm_close,
             list_markdown_files,
             read_markdown_file,
-            resolve_markdown_path
+            resolve_markdown_path,
+            download_installer,
+            run_installer_and_quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
