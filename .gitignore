@@ -11,6 +11,10 @@ pnpm-debug.log*
 .env.*
 *.local
 
+# Tauri updater signing keys — never commit private keys
+/signing/
+*.key
+
 # OS/editor files
 .DS_Store
 Thumbs.db

@@ -1,64 +1,32 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { invoke } from "@tauri-apps/api/core";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
-import {
-  APP_VERSION,
-  LATEST_RELEASE_API_URL,
-  RELEASES_URL,
-  isNewerVersion,
-} from "../lib/appInfo";
+import { APP_VERSION, RELEASES_URL } from "../lib/appInfo";
 
 const CREATOR_NAME = "OneThingChanged";
 const CREATOR_GITHUB = "https://github.com/OneThingChanged";
 const CREATOR_GITHUB_LABEL = "@OneThingChanged";
 
-type ReleaseAsset = {
-  name?: string;
-  browser_download_url?: string;
-};
-
-type LatestRelease = {
-  tag_name?: string;
-  html_url?: string;
-  name?: string;
-  assets?: ReleaseAsset[];
-};
-
-type SetupAsset = { name: string; url: string };
-
 type UpdateCheckState =
   | { status: "idle" }
   | { status: "checking" }
-  | { status: "current"; latestVersion: string; latestUrl: string }
-  | {
-      status: "available";
-      latestVersion: string;
-      latestUrl: string;
-      setup?: SetupAsset;
-    }
-  | { status: "ahead"; latestVersion: string; latestUrl: string }
+  | { status: "current" }
+  | { status: "available"; update: Update }
   | { status: "error"; message: string };
 
 type InstallState =
   | { status: "idle" }
-  | { status: "downloading" }
+  | { status: "downloading"; downloaded: number; total: number | null }
   | { status: "installing" }
   | { status: "error"; message: string };
 
-function pickSetupAsset(assets: ReleaseAsset[] | undefined): SetupAsset | undefined {
-  if (!assets) return undefined;
-  const nsis = assets.find(
-    (a) =>
-      a.browser_download_url &&
-      a.name &&
-      /x64-setup\.exe$/i.test(a.name)
-  );
-  if (nsis && nsis.name && nsis.browser_download_url) {
-    return { name: nsis.name, url: nsis.browser_download_url };
-  }
-  return undefined;
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function SettingsModal({
@@ -81,21 +49,52 @@ export function SettingsModal({
     });
   };
 
-  const handleOpenReleases = (url = RELEASES_URL) => {
-    openUrl(url).catch((error) => {
+  const handleOpenReleases = () => {
+    openUrl(RELEASES_URL).catch((error) => {
       console.error("Failed to open release page", error);
     });
   };
 
-  const handleInstallUpdate = async (setup: SetupAsset) => {
-    setInstall({ status: "downloading" });
+  const handleCheckForUpdates = async () => {
+    setInstall({ status: "idle" });
+    setUpdateCheck({ status: "checking" });
     try {
-      const path = await invoke<string>("download_installer", {
-        url: setup.url,
-        fileName: setup.name,
+      const update = await check();
+      if (update) {
+        setUpdateCheck({ status: "available", update });
+      } else {
+        setUpdateCheck({ status: "current" });
+      }
+    } catch (error) {
+      setUpdateCheck({
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "Failed to check for updates",
       });
-      setInstall({ status: "installing" });
-      await invoke("run_installer_and_quit", { path });
+    }
+  };
+
+  const handleInstallUpdate = async (update: Update) => {
+    setInstall({ status: "downloading", downloaded: 0, total: null });
+    try {
+      let total: number | null = null;
+      let downloaded = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? null;
+          setInstall({ status: "downloading", downloaded: 0, total });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setInstall({ status: "downloading", downloaded, total });
+        } else if (event.event === "Finished") {
+          setInstall({ status: "installing" });
+        }
+      });
+      await relaunch();
     } catch (error) {
       setInstall({
         status: "error",
@@ -109,47 +108,10 @@ export function SettingsModal({
     }
   };
 
-  const handleCheckForUpdates = async () => {
-    setUpdateCheck({ status: "checking" });
-    try {
-      const response = await fetch(LATEST_RELEASE_API_URL, {
-        headers: { Accept: "application/vnd.github+json" },
-      });
-
-      if (!response.ok) {
-        throw new Error(`GitHub returned ${response.status}`);
-      }
-
-      const latest = (await response.json()) as LatestRelease;
-      const latestVersion = latest.tag_name ?? latest.name ?? "";
-      const latestUrl = latest.html_url ?? RELEASES_URL;
-      if (!latestVersion) {
-        throw new Error("Latest release version is missing");
-      }
-
-      if (isNewerVersion(latestVersion, APP_VERSION)) {
-        const setup = pickSetupAsset(latest.assets);
-        setUpdateCheck({
-          status: "available",
-          latestVersion,
-          latestUrl,
-          setup,
-        });
-      } else if (isNewerVersion(APP_VERSION, latestVersion)) {
-        setUpdateCheck({ status: "ahead", latestVersion, latestUrl });
-      } else {
-        setUpdateCheck({ status: "current", latestVersion, latestUrl });
-      }
-    } catch (error) {
-      setUpdateCheck({
-        status: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to check for updates",
-      });
-    }
-  };
+  const isBusy =
+    updateCheck.status === "checking" ||
+    install.status === "downloading" ||
+    install.status === "installing";
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -214,16 +176,14 @@ export function SettingsModal({
               <span className="app-about-label">Current</span>
               <span className="app-about-value">v{APP_VERSION}</span>
             </div>
-            {updateCheck.status !== "idle" &&
-              updateCheck.status !== "checking" &&
-              updateCheck.status !== "error" && (
-                <div className="app-about-row">
-                  <span className="app-about-label">Latest</span>
-                  <span className="app-about-value">
-                    {updateCheck.latestVersion}
-                  </span>
-                </div>
-              )}
+            {updateCheck.status === "available" && (
+              <div className="app-about-row">
+                <span className="app-about-label">Latest</span>
+                <span className="app-about-value">
+                  v{updateCheck.update.version}
+                </span>
+              </div>
+            )}
             <div
               className={`app-update-message ${
                 updateCheck.status === "error" ||
@@ -232,28 +192,26 @@ export function SettingsModal({
                   : ""
               }`}
             >
-              {install.status === "downloading" && "Downloading installer..."}
+              {install.status === "downloading" &&
+                (install.total
+                  ? `Downloading... ${formatBytes(install.downloaded)} / ${formatBytes(install.total)}`
+                  : `Downloading... ${formatBytes(install.downloaded)}`)}
               {install.status === "installing" &&
-                "Launching installer. The app will close."}
+                "Installing. The app will restart shortly."}
               {install.status === "error" &&
                 `Update install failed: ${install.message}`}
               {install.status === "idle" &&
                 updateCheck.status === "idle" &&
-                "Check GitHub Releases manually."}
+                "Click Check to see if a new release is available."}
               {install.status === "idle" &&
                 updateCheck.status === "checking" &&
-                "Checking releases..."}
+                "Checking for updates..."}
               {install.status === "idle" &&
                 updateCheck.status === "available" &&
-                (updateCheck.setup
-                  ? "A newer release is available."
-                  : "A newer release is available, but no installer asset was found.")}
+                "A newer release is available."}
               {install.status === "idle" &&
                 updateCheck.status === "current" &&
                 "You are using the latest release."}
-              {install.status === "idle" &&
-                updateCheck.status === "ahead" &&
-                "This build is newer than the latest release."}
               {install.status === "idle" &&
                 updateCheck.status === "error" &&
                 `Update check failed: ${updateCheck.message}`}
@@ -262,25 +220,15 @@ export function SettingsModal({
               <button
                 className="btn-secondary app-update-btn"
                 onClick={handleCheckForUpdates}
-                disabled={
-                  updateCheck.status === "checking" ||
-                  install.status === "downloading" ||
-                  install.status === "installing"
-                }
+                disabled={isBusy}
               >
                 Check
               </button>
-              {updateCheck.status === "available" && updateCheck.setup && (
+              {updateCheck.status === "available" && (
                 <button
                   className="btn-primary app-update-btn"
-                  onClick={() =>
-                    updateCheck.setup &&
-                    handleInstallUpdate(updateCheck.setup)
-                  }
-                  disabled={
-                    install.status === "downloading" ||
-                    install.status === "installing"
-                  }
+                  onClick={() => handleInstallUpdate(updateCheck.update)}
+                  disabled={isBusy}
                 >
                   {install.status === "downloading"
                     ? "Downloading..."
@@ -291,15 +239,7 @@ export function SettingsModal({
               )}
               <button
                 className="btn-secondary app-update-btn"
-                onClick={() =>
-                  handleOpenReleases(
-                    updateCheck.status === "available" ||
-                      updateCheck.status === "current" ||
-                      updateCheck.status === "ahead"
-                      ? updateCheck.latestUrl
-                      : RELEASES_URL
-                  )
-                }
+                onClick={handleOpenReleases}
               >
                 Releases
               </button>
