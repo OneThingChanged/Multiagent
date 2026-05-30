@@ -62,6 +62,8 @@ export function Sidebar({
   onRemove,
   onDragStart,
   onDragEnd,
+  onReorderProject,
+  onProjectContextMenu,
 }: {
   projects: Project[];
   agents: Agent[];
@@ -84,10 +86,17 @@ export function Sidebar({
   onRemove: (id: string) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
+  onReorderProject: (draggedId: string, targetId: string, before: boolean) => void;
+  onProjectContextMenu: (projectId: string, x: number, y: number) => void;
 }) {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => loadExpandedProjects(projects)
   );
+  const [projectDropTarget, setProjectDropTarget] = useState<{
+    id: string;
+    before: boolean;
+  } | null>(null);
+  const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
   const pendingSessionClickRef = useRef<PendingSessionClick | null>(null);
 
   useEffect(() => {
@@ -372,14 +381,87 @@ export function Sidebar({
           const sections = sectionsByProject.get(project.id) ?? [];
           const sessionCount = projectSessionCounts.get(project.id) ?? 0;
 
+          const isDropTarget = projectDropTarget?.id === project.id;
+          const dropBefore = isDropTarget && projectDropTarget?.before;
+          const dropAfter = isDropTarget && !projectDropTarget?.before;
+          const isDraggingThis = draggingProjectId === project.id;
           return (
             <div
               key={project.id}
-              className={`project-node ${
-                project.id === activeProjectId ? "project-node-active" : ""
-              }`}
+              className={[
+                "project-node",
+                project.id === activeProjectId ? "project-node-active" : "",
+                dropBefore ? "project-node-drop-before" : "",
+                dropAfter ? "project-node-drop-after" : "",
+                isDraggingThis ? "project-node-dragging" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              draggable
+              onDragStart={(e) => {
+                if ((e.target as HTMLElement).closest(".project-session-list")) {
+                  return;
+                }
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData(
+                  "application/x-multiagent-project",
+                  project.id
+                );
+                setDraggingProjectId(project.id);
+              }}
+              onDragOver={(e) => {
+                if (
+                  !e.dataTransfer.types.includes(
+                    "application/x-multiagent-project"
+                  )
+                ) {
+                  return;
+                }
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const rect = e.currentTarget.getBoundingClientRect();
+                const before = e.clientY - rect.top < rect.height / 2;
+                setProjectDropTarget((cur) =>
+                  cur?.id === project.id && cur.before === before
+                    ? cur
+                    : { id: project.id, before }
+                );
+              }}
+              onDragLeave={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (next && e.currentTarget.contains(next)) return;
+                setProjectDropTarget((cur) =>
+                  cur?.id === project.id ? null : cur
+                );
+              }}
+              onDrop={(e) => {
+                const draggedId = e.dataTransfer.getData(
+                  "application/x-multiagent-project"
+                );
+                if (!draggedId) return;
+                e.preventDefault();
+                const target = projectDropTarget;
+                setProjectDropTarget(null);
+                setDraggingProjectId(null);
+                if (target && draggedId !== project.id) {
+                  onReorderProject(draggedId, project.id, target.before);
+                }
+              }}
+              onDragEnd={() => {
+                setProjectDropTarget(null);
+                setDraggingProjectId(null);
+              }}
             >
-              <div className="project-row">
+              <div
+                className="project-row"
+                onContextMenu={(e) => {
+                  if ((e.target as HTMLElement).closest("button.project-caret-btn")) {
+                    return;
+                  }
+                  e.preventDefault();
+                  onProjectContextMenu(project.id, e.clientX, e.clientY);
+                }}
+              >
                 <button
                   className="project-caret-btn"
                   onClick={() => toggleProjectExpanded(project.id)}

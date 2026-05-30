@@ -1,4 +1,40 @@
-import type { ContextMenuState, TabCtxState } from "../types";
+import type {
+  ContextMenuState,
+  ProjectContextMenuState,
+  TabCtxState,
+} from "../types";
+
+export function ProjectContextMenu({
+  state,
+  onClose,
+  onAction,
+}: {
+  state: ProjectContextMenuState;
+  onClose: () => void;
+  onAction: (action: "rename") => void;
+}) {
+  return (
+    <>
+      <div
+        className="ctx-backdrop"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
+      <div
+        className="ctx-menu"
+        style={{ left: state.x, top: state.y }}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <button className="ctx-item" onClick={() => onAction("rename")}>
+          프로젝트 이름 변경
+        </button>
+      </div>
+    </>
+  );
+}
 
 export function TabContextMenu({
   state,

@@ -292,10 +292,35 @@ body,
 
 .project-node {
   border-left: 2px solid transparent;
+  position: relative;
 }
 
 .project-node-active {
   border-left-color: var(--app-accent);
+}
+
+.project-node-dragging {
+  opacity: 0.5;
+}
+
+.project-node-drop-before::before,
+.project-node-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--app-accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.project-node-drop-before::before {
+  top: -1px;
+}
+
+.project-node-drop-after::after {
+  bottom: -1px;
 }
 
 .project-row {
@@ -1579,6 +1604,34 @@ body.docs-resizing * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  margin-top: 8px;
+}
+
+.app-sound-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.app-sound-custom-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.app-sound-pick-btn,
+.app-sound-test-btn {
+  flex: 0 0 auto;
+}
+
+.app-sound-actions {
+  display: flex;
+  justify-content: flex-end;
   margin-top: 8px;
 }
 

@@ -668,6 +668,33 @@ fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
     }
 }
 
+#[cfg(windows)]
+extern "system" {
+    fn MessageBeep(u_type: u32) -> i32;
+}
+
+#[tauri::command]
+fn play_system_sound() -> Result<(), String> {
+    #[cfg(windows)]
+    unsafe {
+        MessageBeep(0); // MB_OK
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_audio_file(path: String) -> Result<Vec<u8>, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("audio file not found".to_string());
+    }
+    let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > 10 * 1024 * 1024 {
+        return Err("audio file too large (max 10 MB)".to_string());
+    }
+    fs::read(&p).map_err(|e| e.to_string())
+}
+
 fn updater_dir() -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("multiagent-updater");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -786,7 +813,9 @@ pub fn run() {
             read_markdown_file,
             resolve_markdown_path,
             download_installer,
-            run_installer_and_quit
+            run_installer_and_quit,
+            play_system_sound,
+            read_audio_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

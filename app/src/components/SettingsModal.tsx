@@ -2,9 +2,28 @@ import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
 import { APP_VERSION, RELEASES_URL } from "../lib/appInfo";
+import {
+  loadNotificationSound,
+  saveNotificationSound,
+  playNotificationSound,
+  type NotificationSoundConfig,
+  type NotificationSoundMode,
+} from "../lib/notificationSound";
+
+const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "custom", label: "Custom" },
+  { id: "off", label: "Off" },
+];
+
+function tailPath(path: string) {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 
 const CREATOR_NAME = "OneThingChanged";
 const CREATOR_GITHUB = "https://github.com/OneThingChanged";
@@ -42,6 +61,40 @@ export function SettingsModal({
     status: "idle",
   });
   const [install, setInstall] = useState<InstallState>({ status: "idle" });
+  const [sound, setSound] = useState<NotificationSoundConfig>(() =>
+    loadNotificationSound()
+  );
+
+  const applySound = (next: NotificationSoundConfig) => {
+    setSound(next);
+    saveNotificationSound(next);
+  };
+
+  const handleSoundModeChange = (mode: NotificationSoundMode) => {
+    applySound({ ...sound, mode });
+  };
+
+  const handlePickCustomFile = async () => {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        filters: [
+          { name: "Audio", extensions: ["wav", "mp3", "ogg", "m4a", "flac"] },
+        ],
+      });
+      if (typeof selected === "string" && selected) {
+        applySound({ mode: "custom", customPath: selected });
+      }
+    } catch (err) {
+      console.error("pick sound file failed", err);
+    }
+  };
+
+  const handleTestSound = () => {
+    playNotificationSound(sound).catch((err) =>
+      console.error("test sound failed", err)
+    );
+  };
 
   const handleOpenGitHub = () => {
     openUrl(CREATOR_GITHUB).catch((error) => {
@@ -145,6 +198,50 @@ export function SettingsModal({
                 {option.label}
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Notification sound</div>
+          <div className="app-theme-options">
+            {SOUND_MODES.map((option) => (
+              <button
+                key={option.id}
+                className={`app-theme-option ${
+                  option.id === sound.mode ? "app-theme-option-active" : ""
+                }`}
+                onClick={() => handleSoundModeChange(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {sound.mode === "custom" && (
+            <div className="app-sound-custom-row">
+              <span
+                className="app-sound-custom-path"
+                title={sound.customPath ?? ""}
+              >
+                {sound.customPath
+                  ? tailPath(sound.customPath)
+                  : "No file selected"}
+              </span>
+              <button
+                className="btn-secondary app-sound-pick-btn"
+                onClick={handlePickCustomFile}
+              >
+                Choose...
+              </button>
+            </div>
+          )}
+          <div className="app-sound-actions">
+            <button
+              className="btn-secondary app-sound-test-btn"
+              onClick={handleTestSound}
+              disabled={sound.mode === "custom" && !sound.customPath}
+            >
+              Test
+            </button>
           </div>
         </div>
 

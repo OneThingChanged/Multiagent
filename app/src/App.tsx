@@ -34,6 +34,7 @@ import type {
   NewProjectPayload,
   Path,
   Project,
+  ProjectContextMenuState,
   StoredAgent,
   StoredProject,
   TabCtxState,
@@ -50,6 +51,7 @@ import * as groupOps from "./lib/groupOps";
 import { loadBootstrap } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, notifyDone } from "./lib/terminal";
+import { playNotificationSound } from "./lib/notificationSound";
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 
@@ -58,10 +60,11 @@ import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { ToastContainer } from "./components/Toast";
-import { ContextMenu, TabContextMenu } from "./components/Menus";
+import { ContextMenu, ProjectContextMenu, TabContextMenu } from "./components/Menus";
 import { DocsPanel } from "./components/DocsPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
+import { RenameProjectModal } from "./components/RenameProjectModal";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const DEFAULT_DOCS_WIDTH = 640;
@@ -131,6 +134,7 @@ function App() {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
+  const [renameProjectId, setRenameProjectId] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
@@ -138,6 +142,8 @@ function App() {
   const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [projectContextMenu, setProjectContextMenu] =
+    useState<ProjectContextMenuState | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<TabCtxState | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
@@ -370,6 +376,7 @@ function App() {
           const target = agentsRef.current.find((a) => a.id === id);
           if (target && target.status === "working") {
             notifyDone(target.name);
+            playNotificationSound();
             pushToast(target.id, target.name, "작업이 끝났어요");
           }
           setAgents((cur) =>
@@ -539,6 +546,26 @@ function App() {
     setActivePath(null);
   }, []);
 
+  const reorderProject = useCallback(
+    (draggedId: string, targetId: string, before: boolean) => {
+      if (draggedId === targetId) return;
+      setProjects((prev) => {
+        const dragged = prev.find((p) => p.id === draggedId);
+        if (!dragged) return prev;
+        const without = prev.filter((p) => p.id !== draggedId);
+        const targetIdx = without.findIndex((p) => p.id === targetId);
+        if (targetIdx === -1) return prev;
+        const insertIdx = before ? targetIdx : targetIdx + 1;
+        return [
+          ...without.slice(0, insertIdx),
+          dragged,
+          ...without.slice(insertIdx),
+        ];
+      });
+    },
+    []
+  );
+
   const createAgent = useCallback(
     (payload: NewAgentPayload) => {
       const project = projectsRef.current.find(
@@ -597,6 +624,19 @@ function App() {
     },
     []
   );
+
+  const onSidebarProjectContextMenu = useCallback(
+    (projectId: string, x: number, y: number) => {
+      setProjectContextMenu({ projectId, x, y });
+    },
+    []
+  );
+
+  const renameProject = useCallback((id: string, name: string) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, name } : p))
+    );
+  }, []);
 
   const contextGroup = useMemo(() => {
     if (!contextMenu) return null;
@@ -884,6 +924,8 @@ function App() {
         onRemove={removeAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onReorderProject={reorderProject}
+        onProjectContextMenu={onSidebarProjectContextMenu}
       />
       <TerminalArea
         agents={agents}
@@ -967,6 +1009,21 @@ function App() {
           }}
         />
       )}
+      {renameProjectId &&
+        (() => {
+          const target = projects.find((p) => p.id === renameProjectId);
+          if (!target) return null;
+          return (
+            <RenameProjectModal
+              currentName={target.name}
+              onCancel={() => setRenameProjectId(null)}
+              onRename={(name) => {
+                renameProject(target.id, name);
+                setRenameProjectId(null);
+              }}
+            />
+          );
+        })()}
       <ToastContainer
         toasts={toasts}
         onSelect={selectAgent}
@@ -981,6 +1038,18 @@ function App() {
           canPinSession={canPinContextGroupSession}
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}
+        />
+      )}
+      {projectContextMenu && (
+        <ProjectContextMenu
+          state={projectContextMenu}
+          onClose={() => setProjectContextMenu(null)}
+          onAction={(action) => {
+            if (action === "rename") {
+              setRenameProjectId(projectContextMenu.projectId);
+            }
+            setProjectContextMenu(null);
+          }}
         />
       )}
       {tabContextMenu && (

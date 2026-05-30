@@ -135,6 +135,12 @@ export type ContextMenuState = {
   agentId: string;
 };
 
+export type ProjectContextMenuState = {
+  x: number;
+  y: number;
+  projectId: string;
+};
+
 export type TabCtxState = {
   x: number;
   y: number;

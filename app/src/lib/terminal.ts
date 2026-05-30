@@ -4,6 +4,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -256,7 +257,14 @@ export function createEntry(
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(
+    new WebLinksAddon((event, uri) => {
+      event.preventDefault();
+      openUrl(uri).catch((err) => {
+        console.error("open url failed", err);
+      });
+    })
+  );
   if (onMarkdownPath) {
     registerMarkdownLinkProvider(term, id, onMarkdownPath);
   }

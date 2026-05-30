@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.3.3";
+export const APP_VERSION = "0.3.4";
 export const GITHUB_OWNER = "OneThingChanged";
 export const GITHUB_REPO = "Multiagent";
 export const REPOSITORY_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`;
