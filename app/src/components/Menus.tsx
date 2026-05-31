@@ -74,6 +74,7 @@ export function ContextMenu({
   canPlaceInActive,
   isSessionLocked,
   canPinSession,
+  canRestart,
   onClose,
   onAction,
 }: {
@@ -82,6 +83,7 @@ export function ContextMenu({
   canPlaceInActive: boolean;
   isSessionLocked: boolean;
   canPinSession: boolean;
+  canRestart: boolean;
   onClose: () => void;
   onAction: (
     action:
@@ -92,6 +94,7 @@ export function ContextMenu({
       | "rename"
       | "pin-session"
       | "clear-session-pin"
+      | "restart"
   ) => void;
 }) {
   return (
@@ -135,6 +138,13 @@ export function ContextMenu({
         </button>
         <button className="ctx-item" onClick={() => onAction("rename")}>
           세션 별명 변경
+        </button>
+        <button
+          className="ctx-item"
+          onClick={() => onAction("restart")}
+          disabled={!canRestart}
+        >
+          세션 재시작
         </button>
         <div className="ctx-separator" />
         <button

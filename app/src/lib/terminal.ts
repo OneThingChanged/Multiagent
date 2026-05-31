@@ -8,6 +8,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { DropZone, TerminalEntry } from "../types";
 import { loadAppTheme, type AppThemeId } from "./appTheme";
@@ -257,6 +259,10 @@ export function createEntry(
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  const search = new SearchAddon();
+  term.loadAddon(search);
+  const serialize = new SerializeAddon();
+  term.loadAddon(serialize);
   term.loadAddon(
     new WebLinksAddon((event, uri) => {
       event.preventDefault();
@@ -297,8 +303,13 @@ export function createEntry(
     }
 
     if (isPlainCtrlKey && event.key === "Enter") {
+      if (event.isComposing || event.keyCode === 229) {
+        // Let IME finish committing the in-progress character first.
+        // The newline will be sent on the next Ctrl+Enter press.
+        return true;
+      }
       event.preventDefault();
-      invoke("write_pty", { id, data: "\n" }).catch(() => {});
+      invoke("write_pty", { id, data: "\x1b\r" }).catch(() => {});
       return false;
     }
 
@@ -321,7 +332,7 @@ export function createEntry(
     return true;
   });
 
-  return { term, fit, el, opened: false, spawned: false };
+  return { term, fit, search, serialize, el, opened: false, spawned: false };
 }
 
 export function computeDropZone(

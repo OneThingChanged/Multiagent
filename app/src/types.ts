@@ -1,5 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { SearchAddon } from "@xterm/addon-search";
+import type { SerializeAddon } from "@xterm/addon-serialize";
 
 export type AgentStatus = "idle" | "starting" | "running" | "working" | "exited";
 
@@ -82,6 +84,8 @@ export type StoredProject = Project;
 export type TerminalEntry = {
   term: Terminal;
   fit: FitAddon;
+  search: SearchAddon;
+  serialize: SerializeAddon;
   el: HTMLDivElement;
   opened: boolean;
   spawned: boolean;

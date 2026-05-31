@@ -18,6 +18,7 @@ import {
   createEntry,
   saveTerminalFontSize,
 } from "../lib/terminal";
+import { loadScrollback } from "../lib/scrollback";
 
 export type RenderCtx = {
   agents: Agent[];
@@ -69,9 +70,11 @@ export function PaneSlot({
     const agentId = activeAgent.id;
 
     let entry = termsRef.current.get(agentId);
+    let freshlyCreated = false;
     if (!entry) {
       entry = createEntry(agentId, ctx.onOpenMarkdownPath);
       termsRef.current.set(agentId, entry);
+      freshlyCreated = true;
     }
 
     if (
@@ -83,6 +86,15 @@ export function PaneSlot({
     if (!entry.opened) {
       entry.term.open(entry.el);
       entry.opened = true;
+      if (freshlyCreated) {
+        const saved = loadScrollback(agentId);
+        if (saved) {
+          entry.term.write(saved);
+          entry.term.write(
+            "\r\n\x1b[2m--- restored from previous session ---\x1b[0m\r\n"
+          );
+        }
+      }
     }
 
     let lastCols = 0;
@@ -210,6 +222,7 @@ export function PaneSlot({
     };
   }, [
     activeAgent?.id,
+    activeAgent?.status === "idle",
     termsRef,
     setAgentStatus,
     ctx.onOpenMarkdownPath,

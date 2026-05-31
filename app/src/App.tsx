@@ -52,6 +52,11 @@ import { loadBootstrap } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
+import {
+  clearScrollback,
+  pruneScrollback,
+  saveScrollback,
+} from "./lib/scrollback";
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 
@@ -65,6 +70,7 @@ import { DocsPanel } from "./components/DocsPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
+import { SearchBar } from "./components/SearchBar";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const DEFAULT_DOCS_WIDTH = 640;
@@ -121,7 +127,10 @@ function App() {
   const boot = bootstrapRef.current;
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
-  const [agents, setAgents] = useState<Agent[]>(boot.agents);
+  const [agents, setAgents] = useState<Agent[]>(() => {
+    pruneScrollback(new Set(boot.agents.map((a) => a.id)));
+    return boot.agents;
+  });
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
@@ -147,10 +156,12 @@ function App() {
   const [tabContextMenu, setTabContextMenu] = useState<TabCtxState | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
   const projectsRef = useRef<Project[]>([]);
+  const groupsRef = useRef<Group[]>([]);
   const activeProjectIdRef = useRef<string | null>(null);
   const activeGroupIdRef = useRef<string | null>(null);
   const activePathRef = useRef<Path | null>(null);
@@ -162,6 +173,10 @@ function App() {
   useEffect(() => {
     agentsRef.current = agents;
   }, [agents]);
+
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -243,6 +258,72 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen]);
+
+  const closeTabRef = useRef<
+    ((path: Path, agentId: string) => void) | null
+  >(null);
+  const selectAgentRef = useRef<((agentId: string) => void) | null>(null);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const inField =
+        !!target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      if (event.key === "Escape" && searchOpen) {
+        event.preventDefault();
+        setSearchOpen(false);
+        return;
+      }
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "f") {
+        if (inField) return;
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (key === "t") {
+        if (inField) return;
+        event.preventDefault();
+        if (activeProjectIdRef.current) setShowModal(true);
+        else setShowProjectModal(true);
+        return;
+      }
+      if (key === "w") {
+        if (inField) return;
+        event.preventDefault();
+        const groupId = activeGroupIdRef.current;
+        const path = activePathRef.current;
+        if (!groupId || !path) return;
+        const group = groupsRef.current.find((g) => g.id === groupId);
+        if (!group) return;
+        const node = getAt(group.layout, path);
+        if (!node || node.type !== "leaf") return;
+        const activeId = node.tabs[node.activeIndex];
+        if (activeId) closeTabRef.current?.(path, activeId);
+        return;
+      }
+      if (key >= "1" && key <= "9") {
+        if (inField) return;
+        const idx = parseInt(key, 10) - 1;
+        const groupId = activeGroupIdRef.current;
+        const path = activePathRef.current;
+        if (!groupId || !path) return;
+        const group = groupsRef.current.find((g) => g.id === groupId);
+        if (!group) return;
+        const node = getAt(group.layout, path);
+        if (!node || node.type !== "leaf") return;
+        if (idx < node.tabs.length) {
+          event.preventDefault();
+          selectAgentRef.current?.(node.tabs[idx]);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [searchOpen]);
 
   const handleThemeChange = useCallback((theme: AppThemeId) => {
     setAppTheme(theme);
@@ -331,10 +412,16 @@ function App() {
 
     listen<{ id: string }>("pty:exit", (e) => {
       if (cancelled) return;
+      const id = e.payload.id;
+      const entry = termsRef.current.get(id);
+      if (entry) {
+        try {
+          const data = entry.serialize.serialize({ scrollback: 1000 });
+          saveScrollback(id, data);
+        } catch {}
+      }
       setAgents((prev) =>
-        prev.map((a) =>
-          a.id === e.payload.id ? { ...a, status: "exited" } : a
-        )
+        prev.map((a) => (a.id === id ? { ...a, status: "exited" } : a))
       );
     }).then(track);
 
@@ -356,6 +443,14 @@ function App() {
       await new Promise((r) =>
         setTimeout(r, targets.length > 0 ? 300 : 50)
       );
+      for (const [agentId, entry] of termsRef.current) {
+        try {
+          const data = entry.serialize.serialize({ scrollback: 1000 });
+          saveScrollback(agentId, data);
+        } catch (err) {
+          console.warn("serialize failed", agentId, err);
+        }
+      }
       await invoke("confirm_close").catch(() => {});
     }).then(track);
 
@@ -436,13 +531,33 @@ function App() {
     return agent;
   }, []);
 
+  const restartAgent = useCallback((id: string) => {
+    const entry = termsRef.current.get(id);
+    if (entry) {
+      entry.term.dispose();
+      termsRef.current.delete(id);
+    }
+    clearScrollback(id);
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+    );
+  }, []);
+
   const selectAgent = useCallback(
     (agentId: string) => {
       const agent = activateAgentProject(agentId);
       applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
+      const current = agentsRef.current.find((a) => a.id === agentId);
+      if (current?.status === "exited") {
+        restartAgent(agentId);
+      }
     },
-    [activateAgentProject, applyGroupOp]
+    [activateAgentProject, applyGroupOp, restartAgent]
   );
+
+  useEffect(() => {
+    selectAgentRef.current = selectAgent;
+  }, [selectAgent]);
 
   const selectProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
@@ -504,6 +619,10 @@ function App() {
       ),
     [applyGroupOp]
   );
+
+  useEffect(() => {
+    closeTabRef.current = closeTab;
+  }, [closeTab]);
 
   const resizeAt = useCallback(
     (path: Path, sizes: number[]) =>
@@ -604,6 +723,7 @@ function App() {
       const entry = termsRef.current.get(id);
       entry?.term.dispose();
       termsRef.current.delete(id);
+      clearScrollback(id);
       setAgents((prev) => prev.filter((a) => a.id !== id));
       applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
     },
@@ -732,6 +852,7 @@ function App() {
         | "rename"
         | "pin-session"
         | "clear-session-pin"
+        | "restart"
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
@@ -743,6 +864,10 @@ function App() {
       else if (action === "rename") setRenameSessionId(id);
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
+      else if (action === "restart") {
+        selectAgent(id);
+        restartAgent(id);
+      }
     },
     [
       contextMenu,
@@ -751,6 +876,7 @@ function App() {
       splitWith,
       pinContextGroupSessions,
       clearContextGroupSessionPins,
+      restartAgent,
     ]
   );
 
@@ -1029,6 +1155,31 @@ function App() {
         onSelect={selectAgent}
         onDismiss={dismissToast}
       />
+      {searchOpen && (
+        <SearchBar
+          onFindNext={(q) => {
+            const id = activeAgentId;
+            if (!id || !q) return;
+            const entry = termsRef.current.get(id);
+            entry?.search.findNext(q, { incremental: false });
+          }}
+          onFindPrev={(q) => {
+            const id = activeAgentId;
+            if (!id || !q) return;
+            const entry = termsRef.current.get(id);
+            entry?.search.findPrevious(q, { incremental: false });
+          }}
+          onClose={() => {
+            setSearchOpen(false);
+            const id = activeAgentId;
+            if (id) {
+              const entry = termsRef.current.get(id);
+              entry?.search.clearDecorations();
+              entry?.term.focus();
+            }
+          }}
+        />
+      )}
       {contextMenu && (
         <ContextMenu
           state={contextMenu}
@@ -1036,6 +1187,10 @@ function App() {
           canPlaceInActive={canPlaceContextAgentInActiveGroup}
           isSessionLocked={!!contextGroup?.sessionLocked}
           canPinSession={canPinContextGroupSession}
+          canRestart={
+            agents.find((a) => a.id === contextMenu.agentId)?.status ===
+            "exited"
+          }
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}
         />

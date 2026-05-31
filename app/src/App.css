@@ -2,6 +2,56 @@
   color-scheme: dark;
 }
 
+.term-search-bar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--app-bg-elevated, #1f2937);
+  border: 1px solid var(--app-border, #30363d);
+  border-radius: 6px;
+  padding: 4px 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.term-search-input {
+  background: var(--app-bg, #0d1117);
+  border: 1px solid var(--app-border, #30363d);
+  border-radius: 4px;
+  color: var(--app-fg, #c9d1d9);
+  font-size: 13px;
+  padding: 4px 8px;
+  width: 220px;
+  outline: none;
+}
+
+.term-search-input:focus {
+  border-color: var(--app-accent, #58a6ff);
+}
+
+.term-search-btn {
+  background: transparent;
+  border: none;
+  color: var(--app-muted, #8b949e);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.term-search-btn:hover {
+  background: var(--app-bg-hover, #21262d);
+  color: var(--app-fg, #c9d1d9);
+}
+
+.term-search-close {
+  font-size: 16px;
+  line-height: 1;
+}
+
 * {
   box-sizing: border-box;
 }
