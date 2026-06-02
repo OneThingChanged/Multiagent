@@ -1528,6 +1528,14 @@ body.docs-resizing * {
   cursor: not-allowed;
 }
 
+.ctx-item-danger {
+  color: #f87171;
+}
+.ctx-item-danger:hover:not(:disabled) {
+  background: #b91c1c;
+  color: #fff;
+}
+
 .ctx-separator {
   height: 1px;
   background: var(--app-border);

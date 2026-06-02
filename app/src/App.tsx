@@ -685,6 +685,45 @@ function App() {
     []
   );
 
+  const removeProject = useCallback(
+    async (projectId: string) => {
+      const project = projectsRef.current.find((p) => p.id === projectId);
+      if (!project) return;
+      const members = agentsRef.current.filter(
+        (a) => a.projectId === projectId
+      );
+      const sessionLine =
+        members.length > 0
+          ? `\n세션 ${members.length}개도 함께 삭제됩니다.`
+          : "";
+      const ok = window.confirm(
+        `"${project.name}" 프로젝트를 삭제할까요?${sessionLine}\n이 동작은 되돌릴 수 없습니다.`
+      );
+      if (!ok) return;
+
+      for (const a of members) {
+        await invoke("kill_pty", { id: a.id }).catch(() => {});
+        const entry = termsRef.current.get(a.id);
+        entry?.term.dispose();
+        termsRef.current.delete(a.id);
+        clearScrollback(a.id);
+      }
+
+      const memberIds = new Set(members.map((m) => m.id));
+      setAgents((prev) => prev.filter((a) => !memberIds.has(a.id)));
+      for (const id of memberIds) {
+        applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      if (activeProjectIdRef.current === projectId) {
+        setActiveProjectId(null);
+        setActiveGroupId(null);
+        setActivePath(null);
+      }
+    },
+    [applyGroupOp]
+  );
+
   const createAgent = useCallback(
     (payload: NewAgentPayload) => {
       const project = projectsRef.current.find(
@@ -1202,6 +1241,8 @@ function App() {
           onAction={(action) => {
             if (action === "rename") {
               setRenameProjectId(projectContextMenu.projectId);
+            } else if (action === "delete") {
+              removeProject(projectContextMenu.projectId);
             }
             setProjectContextMenu(null);
           }}

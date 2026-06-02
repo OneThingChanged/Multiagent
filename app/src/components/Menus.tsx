@@ -11,7 +11,7 @@ export function ProjectContextMenu({
 }: {
   state: ProjectContextMenuState;
   onClose: () => void;
-  onAction: (action: "rename") => void;
+  onAction: (action: "rename" | "delete") => void;
 }) {
   return (
     <>
@@ -30,6 +30,13 @@ export function ProjectContextMenu({
       >
         <button className="ctx-item" onClick={() => onAction("rename")}>
           프로젝트 이름 변경
+        </button>
+        <div className="ctx-separator" />
+        <button
+          className="ctx-item ctx-item-danger"
+          onClick={() => onAction("delete")}
+        >
+          프로젝트 삭제
         </button>
       </div>
     </>
