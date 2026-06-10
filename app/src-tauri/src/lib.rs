@@ -353,7 +353,12 @@ fn normalize_relative_path(path: &Path) -> String {
 fn is_markdown_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown"))
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "html" | "htm"
+            )
+        })
         .unwrap_or(false)
 }
 

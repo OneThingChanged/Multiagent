@@ -61,7 +61,7 @@ export function applyTerminalTheme(term: Terminal, theme: AppThemeId) {
   term.options.theme = TERMINAL_THEMES[theme] ?? TERMINAL_THEME;
 }
 const MARKDOWN_PATH_RE =
-  /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:md|markdown)(?::\d+(?::\d+)?)?/gi;
+  /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:md|markdown|html|htm)(?::\d+(?::\d+)?)?/gi;
 
 export type MarkdownPathHandler = (agentId: string, path: string) => void;
 
@@ -112,7 +112,7 @@ function cleanMarkdownPathCandidate(candidate: string) {
     .trim()
     .replace(/^[`"'(<\[]+/, "")
     .replace(/[>`"')\].,;]+$/, "")
-    .replace(/(\.(?:md|markdown)):\d+(?::\d+)?$/i, "$1")
+    .replace(/(\.(?:md|markdown|html|htm)):\d+(?::\d+)?$/i, "$1")
     .replace(/[>`"')\].,;]+$/, "");
 }
 

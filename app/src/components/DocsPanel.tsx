@@ -52,6 +52,11 @@ function bestInitialPath(files: MarkdownFile[]) {
   );
 }
 
+function isHtmlPath(path: string) {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".html") || lower.endsWith(".htm");
+}
+
 function displayPath(path: string) {
   return path.replace(/\//g, " / ");
 }
@@ -282,20 +287,29 @@ export function DocsPanel({
 
   const renderTreeNode = (node: DocsTreeNode, depth: number): ReactNode => (
     <>
-      {node.files.map((file) => (
-        <button
-          key={file.relative_path}
-          className={`docs-tree-file ${
-            file.relative_path === selectedPath ? "docs-file-active" : ""
-          }`}
-          style={{ paddingLeft: 12 + depth * 14 }}
-          onClick={() => setSelectedPath(file.relative_path)}
-          title={file.relative_path}
-        >
-          <span className="docs-tree-icon docs-tree-icon-md">MD</span>
-          <span className="docs-tree-file-name">{file.name}</span>
-        </button>
-      ))}
+      {node.files.map((file) => {
+        const isHtml = isHtmlPath(file.relative_path);
+        return (
+          <button
+            key={file.relative_path}
+            className={`docs-tree-file ${
+              file.relative_path === selectedPath ? "docs-file-active" : ""
+            }`}
+            style={{ paddingLeft: 12 + depth * 14 }}
+            onClick={() => setSelectedPath(file.relative_path)}
+            title={file.relative_path}
+          >
+            <span
+              className={`docs-tree-icon ${
+                isHtml ? "docs-tree-icon-html" : "docs-tree-icon-md"
+              }`}
+            >
+              {isHtml ? "HTML" : "MD"}
+            </span>
+            <span className="docs-tree-file-name">{file.name}</span>
+          </button>
+        );
+      })}
       {node.folders.map((folderNode) => {
         const expanded = expandedFolders.has(folderNode.path);
         return (
@@ -386,7 +400,7 @@ export function DocsPanel({
               <div className="docs-file-list">
                 {listLoading && <div className="docs-empty">Loading...</div>}
                 {!listLoading && files.length === 0 && (
-                  <div className="docs-empty">Markdown 파일이 없습니다.</div>
+                  <div className="docs-empty">문서 파일이 없습니다.</div>
                 )}
                 {!listLoading &&
                   navMode === "list" &&
@@ -423,18 +437,28 @@ export function DocsPanel({
                   <div className="docs-current" title={selectedFile.relative_path}>
                     {displayPath(selectedFile.relative_path)}
                   </div>
-                  <div className="docs-content">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[[rehypeHighlight, { detect: true }]]}
-                    >
-                      {content}
-                    </ReactMarkdown>
-                  </div>
+                  {isHtmlPath(selectedFile.relative_path) ? (
+                    <iframe
+                      key={selectedFile.relative_path}
+                      className="docs-html-frame"
+                      title={selectedFile.name}
+                      srcDoc={content}
+                      sandbox=""
+                    />
+                  ) : (
+                    <div className="docs-content">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+                      >
+                        {content}
+                      </ReactMarkdown>
+                    </div>
+                  )}
                 </>
               )}
               {!error && !docLoading && !selectedFile && files.length === 0 && (
-                <div className="docs-empty">Markdown 파일이 없습니다.</div>
+                <div className="docs-empty">문서 파일이 없습니다.</div>
               )}
             </div>
           </div>
