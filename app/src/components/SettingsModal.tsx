@@ -62,6 +62,10 @@ type AccessList = {
 type RemoteConfig = {
   client_id: string;
   owner: string;
+  tunnel_token: string;
+  public_hostname: string;
+  server_port: number;
+  client_secret: string;
 };
 
 type SettingsTab = "general" | "remote" | "about";
@@ -117,6 +121,10 @@ export function SettingsModal({
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>({
     client_id: "",
     owner: "",
+    tunnel_token: "",
+    public_hostname: "",
+    server_port: 0,
+    client_secret: "",
   });
   const [configSaved, setConfigSaved] = useState(false);
 
@@ -534,10 +542,79 @@ export function SettingsModal({
                 }
               />
             </label>
+            <label className="field app-remote-field">
+              <span className="field-label">
+                Client Secret (선택 — 고정 도메인일 때 리다이렉트 로그인)
+              </span>
+              <input
+                type="password"
+                value={remoteConfig.client_secret}
+                placeholder="비우면 Device Flow 사용"
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({
+                    ...c,
+                    client_secret: e.target.value,
+                  }))
+                }
+              />
+            </label>
             <div className="app-update-message">
-              github.com/settings/developers에서 OAuth App을 만들고 Device Flow를
-              활성화한 뒤 Client ID를 입력하세요. Owner 계정은 승인 없이 항상
-              접속할 수 있습니다.
+              github.com/settings/developers에서 OAuth App을 만들고 Client ID를
+              입력하세요. Client Secret + Public hostname까지 설정하면 코드 입력
+              없는 리다이렉트 로그인이 되고 (callback URL:
+              https://호스트네임/auth/callback), 비우면 Device Flow를 사용합니다.
+              Owner 계정은 승인 없이 항상 접속할 수 있습니다.
+            </div>
+
+            <div className="app-remote-divider" />
+            <div className="app-about-row">
+              <span className="app-about-label">Fixed domain (named tunnel)</span>
+            </div>
+            <label className="field app-remote-field">
+              <span className="field-label">Cloudflare tunnel token (비우면 quick tunnel)</span>
+              <input
+                value={remoteConfig.tunnel_token}
+                placeholder="eyJhIjoi..."
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({ ...c, tunnel_token: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field app-remote-field">
+              <span className="field-label">Public hostname</span>
+              <input
+                value={remoteConfig.public_hostname}
+                placeholder="agent.example.com"
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({
+                    ...c,
+                    public_hostname: e.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field app-remote-field">
+              <span className="field-label">로컬 서버 포트 (0 = 랜덤, named tunnel은 고정 필요)</span>
+              <input
+                type="number"
+                min={0}
+                max={65535}
+                value={remoteConfig.server_port}
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({
+                    ...c,
+                    server_port: Math.max(
+                      0,
+                      Math.min(65535, Number(e.target.value) || 0)
+                    ),
+                  }))
+                }
+              />
+            </label>
+            <div className="app-update-message">
+              Cloudflare Zero Trust → Networks → Tunnels에서 만든 토큰을
+              입력하면 고정 도메인으로 서비스됩니다. 대시보드의 Public hostname
+              service는 여기 설정한 포트의 http://localhost를 가리켜야 합니다.
             </div>
             <div className="app-update-actions">
               <button

@@ -75,6 +75,18 @@ function showWaiting(user) {
   }, 3000);
 }
 
+// Prefer the redirect web flow when the server has it configured.
+let webFlow = false;
+(async () => {
+  try {
+    const res = await fetch("/auth/mode");
+    if (res.ok) {
+      const json = await res.json();
+      webFlow = !!json.web;
+    }
+  } catch {}
+})();
+
 // If already logged in but unapproved, jump straight to the waiting view.
 (async () => {
   try {
@@ -86,6 +98,10 @@ function showWaiting(user) {
 })();
 
 $("#login").onclick = async () => {
+  if (webFlow) {
+    location.href = "/auth/login";
+    return;
+  }
   $("#login").disabled = true;
   $("#err1").classList.add("hidden");
   try {

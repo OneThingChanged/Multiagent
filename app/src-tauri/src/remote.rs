@@ -20,21 +20,27 @@ const MAX_BUFFER: usize = 128 * 1024;
 
 const SESSION_TTL: StdDuration = StdDuration::from_secs(7 * 24 * 60 * 60);
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct RemoteConfig {
     /// GitHub OAuth App client ID (Device Flow enabled).
     pub client_id: String,
     /// GitHub username that is always allowed without approval.
     pub owner: String,
-}
-
-impl Default for RemoteConfig {
-    fn default() -> Self {
-        Self {
-            client_id: String::new(),
-            owner: String::new(),
-        }
-    }
+    /// Cloudflare named-tunnel token. Empty = use a quick tunnel.
+    #[serde(default)]
+    pub tunnel_token: String,
+    /// Public hostname mapped to the tunnel (e.g. agent.example.com).
+    #[serde(default)]
+    pub public_hostname: String,
+    /// Fixed local server port. 0 = random. Must match the tunnel's
+    /// service URL when a named tunnel is used.
+    #[serde(default)]
+    pub server_port: u16,
+    /// GitHub OAuth App client secret. When set (together with
+    /// public_hostname), login uses the redirect web flow instead of
+    /// Device Flow. Never sent to browsers.
+    #[serde(default)]
+    pub client_secret: String,
 }
 
 struct Session {
@@ -83,6 +89,7 @@ pub struct RemoteHub {
     access_path: Mutex<Option<std::path::PathBuf>>,
     config: Mutex<RemoteConfig>,
     config_path: Mutex<Option<std::path::PathBuf>>,
+    oauth_states: Mutex<HashMap<String, SystemTime>>,
 }
 
 impl RemoteHub {
@@ -101,7 +108,32 @@ impl RemoteHub {
             access_path: Mutex::new(None),
             config: Mutex::new(RemoteConfig::default()),
             config_path: Mutex::new(None),
+            oauth_states: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn issue_oauth_state(&self) -> String {
+        let state = uuid::Uuid::new_v4().to_string();
+        let mut states = self.oauth_states.lock().unwrap();
+        let now = SystemTime::now();
+        states.retain(|_, expires| *expires > now);
+        states.insert(state.clone(), now + StdDuration::from_secs(600));
+        state
+    }
+
+    fn consume_oauth_state(&self, state: &str) -> bool {
+        let mut states = self.oauth_states.lock().unwrap();
+        match states.remove(state) {
+            Some(expires) => expires > SystemTime::now(),
+            None => false,
+        }
+    }
+
+    fn web_flow_enabled(&self) -> bool {
+        let config = self.config.lock().unwrap();
+        !config.client_id.is_empty()
+            && !config.client_secret.is_empty()
+            && !config.public_hostname.is_empty()
     }
 
     fn save_config(&self) {
@@ -264,9 +296,20 @@ pub async fn start(app: AppHandle) -> Result<RemoteStatus, String> {
         }
     }
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", 0))
+    let fixed_port = {
+        let state = app.state::<AppState>();
+        let config = state.remote.config.lock().unwrap();
+        config.server_port
+    };
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", fixed_port))
         .await
-        .map_err(|e| format!("bind remote listener: {}", e))?;
+        .map_err(|e| {
+            if fixed_port != 0 {
+                format!("bind port {} failed (in use?): {}", fixed_port, e)
+            } else {
+                format!("bind remote listener: {}", e)
+            }
+        })?;
     let port = listener
         .local_addr()
         .map_err(|e| e.to_string())?
@@ -280,6 +323,9 @@ pub async fn start(app: AppHandle) -> Result<RemoteStatus, String> {
         .route("/auth/start", post(auth_start))
         .route("/auth/poll", post(auth_poll))
         .route("/auth/me", get(auth_me))
+        .route("/auth/mode", get(auth_mode))
+        .route("/auth/login", get(auth_login))
+        .route("/auth/callback", get(auth_callback))
         .route("/auth/logout", post(auth_logout))
         .with_state(app.clone());
 
@@ -417,6 +463,16 @@ pub fn config_set(hub: &RemoteHub, config: RemoteConfig) -> RemoteConfig {
         let mut current = hub.config.lock().unwrap();
         current.client_id = config.client_id.trim().to_string();
         current.owner = config.owner.trim().to_string();
+        current.tunnel_token = config.tunnel_token.trim().to_string();
+        current.public_hostname = config
+            .public_hostname
+            .trim()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_string();
+        current.server_port = config.server_port;
+        current.client_secret = config.client_secret.trim().to_string();
     }
     hub.save_config();
     config_get(hub)
@@ -465,23 +521,35 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
         }
     }
 
-    let port = {
+    let (port, config) = {
         let state = app.state::<AppState>();
         let server = state.remote.server.lock().unwrap();
-        server.as_ref().map(|s| s.port).ok_or("server not running")?
+        let port = server.as_ref().map(|s| s.port).ok_or("server not running")?;
+        let config = state.remote.config.lock().unwrap().clone();
+        (port, config)
     };
 
     let app_for_task = app.clone();
     let (child, url) = tokio::task::spawn_blocking(
         move || -> Result<(std::process::Child, String), String> {
             let bin = ensure_cloudflared(&app_for_task)?;
+            let named = !config.tunnel_token.is_empty();
             let mut cmd = std::process::Command::new(&bin);
-            cmd.args([
-                "tunnel",
-                "--url",
-                &format!("http://127.0.0.1:{}", port),
-                "--no-autoupdate",
-            ]);
+            if named {
+                cmd.args([
+                    "tunnel",
+                    "run",
+                    "--token",
+                    &config.tunnel_token,
+                ]);
+            } else {
+                cmd.args([
+                    "tunnel",
+                    "--url",
+                    &format!("http://127.0.0.1:{}", port),
+                    "--no-autoupdate",
+                ]);
+            }
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
             #[cfg(windows)]
@@ -495,33 +563,56 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
 
             let stderr = child.stderr.take().ok_or("cloudflared stderr missing")?;
             let stdout = child.stdout.take();
-            let (url_tx, url_rx) = std::sync::mpsc::channel::<String>();
+            let (line_tx, line_rx) = std::sync::mpsc::channel::<String>();
 
-            let tx_err = url_tx.clone();
+            let tx_err = line_tx.clone();
             std::thread::spawn(move || {
                 use std::io::BufRead;
                 for line in std::io::BufReader::new(stderr).lines().map_while(Result::ok) {
-                    if let Some(url) = find_tunnel_url(&line) {
-                        let _ = tx_err.send(url);
-                    }
+                    let _ = tx_err.send(line);
                 }
             });
             if let Some(stdout) = stdout {
                 std::thread::spawn(move || {
                     use std::io::BufRead;
                     for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
-                        if let Some(url) = find_tunnel_url(&line) {
-                            let _ = url_tx.send(url);
-                        }
+                        let _ = line_tx.send(line);
                     }
                 });
             }
 
-            match url_rx.recv_timeout(std::time::Duration::from_secs(45)) {
-                Ok(url) => Ok((child, url)),
-                Err(_) => {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+            loop {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
                     let _ = child.kill();
-                    Err("cloudflared did not report a tunnel URL within 45s".to_string())
+                    return Err(if named {
+                        "cloudflared did not connect within 45s (check tunnel token)".to_string()
+                    } else {
+                        "cloudflared did not report a tunnel URL within 45s".to_string()
+                    });
+                }
+                let line = match line_rx.recv_timeout(remaining) {
+                    Ok(line) => line,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        let _ = child.kill();
+                        return Err(
+                            "cloudflared exited before the tunnel was ready".to_string()
+                        );
+                    }
+                };
+                if named {
+                    if line.contains("Registered tunnel connection") {
+                        let url = if config.public_hostname.is_empty() {
+                            "(Cloudflare 대시보드의 Public hostname으로 접속)".to_string()
+                        } else {
+                            format!("https://{}", config.public_hostname)
+                        };
+                        return Ok((child, url));
+                    }
+                } else if let Some(url) = find_tunnel_url(&line) {
+                    return Ok((child, url));
                 }
             }
         },
@@ -723,12 +814,26 @@ async fn auth_poll(
         return Json(serde_json::json!({ "error": "github login missing" })).into_response();
     }
 
+    let (cookie, approved) = register_login(&app, &login);
+    let body = if approved {
+        serde_json::json!({ "ok": true, "user": login })
+    } else {
+        serde_json::json!({ "ok": false, "pending_approval": true, "user": login })
+    };
+    ([(header::SET_COOKIE, cookie)], Json(body)).into_response()
+}
+
+/// Register a verified GitHub login: unknown users land in the pending
+/// queue, and a session cookie identifying the user is always issued.
+/// Whether the session grants terminal access is decided live by the
+/// approval list.
+fn register_login(app: &AppHandle, login: &str) -> (String, bool) {
     let hub = app.state::<AppState>().remote.clone();
-    let level = hub.access_level(&login);
+    let level = hub.access_level(login);
     if level == AccessLevel::Unknown {
         {
             let mut access = hub.access.lock().unwrap();
-            access.pending.push(login.clone());
+            access.pending.push(login.to_string());
         }
         hub.save_access();
         let _ = app.emit(
@@ -736,23 +841,127 @@ async fn auth_poll(
             serde_json::json!({ "login": login }),
         );
     }
-
-    // Always issue a session cookie identifying the GitHub user; whether it
-    // grants terminal access is decided live by the approval list.
-    let sid = hub.create_session(&login);
+    let sid = hub.create_session(login);
     let cookie = format!(
         "ma_session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         sid,
         SESSION_TTL.as_secs()
     );
-
     let approved = matches!(level, AccessLevel::Owner | AccessLevel::Approved);
-    let body = if approved {
-        serde_json::json!({ "ok": true, "user": login })
-    } else {
-        serde_json::json!({ "ok": false, "pending_approval": true, "user": login })
+    (cookie, approved)
+}
+
+fn url_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
+}
+
+async fn auth_mode(State(app): State<AppHandle>) -> Response {
+    let web = app.state::<AppState>().remote.web_flow_enabled();
+    Json(serde_json::json!({ "web": web })).into_response()
+}
+
+async fn auth_login(State(app): State<AppHandle>) -> Response {
+    let hub = app.state::<AppState>().remote.clone();
+    if !hub.web_flow_enabled() {
+        return (StatusCode::NOT_FOUND, "web flow not configured").into_response();
+    }
+    let config = hub.config.lock().unwrap().clone();
+    let state = hub.issue_oauth_state();
+    let redirect_uri = format!("https://{}/auth/callback", config.public_hostname);
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read%3Auser",
+        url_encode(&config.client_id),
+        url_encode(&redirect_uri),
+        state
+    );
+    axum::response::Redirect::temporary(&url).into_response()
+}
+
+async fn auth_callback(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let hub = app.state::<AppState>().remote.clone();
+    let code = q.get("code").cloned().unwrap_or_default();
+    let state = q.get("state").cloned().unwrap_or_default();
+    if code.is_empty() || !hub.consume_oauth_state(&state) {
+        return (StatusCode::BAD_REQUEST, "invalid oauth state — try logging in again")
+            .into_response();
+    }
+
+    let config = hub.config.lock().unwrap().clone();
+    let redirect_uri = format!("https://{}/auth/callback", config.public_hostname);
+    let token_result = tokio::task::spawn_blocking(move || {
+        github_json(
+            ureq::post("https://github.com/login/oauth/access_token")
+                .set("Accept", "application/json")
+                .set("User-Agent", "MultiAgent")
+                .send_form(&[
+                    ("client_id", config.client_id.as_str()),
+                    ("client_secret", config.client_secret.as_str()),
+                    ("code", code.as_str()),
+                    ("redirect_uri", redirect_uri.as_str()),
+                ]),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+
+    let token_json = match token_result {
+        Ok(j) => j,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("token exchange: {}", e)).into_response(),
     };
-    ([(header::SET_COOKIE, cookie)], Json(body)).into_response()
+    let Some(access_token) = token_json.get("access_token").and_then(|t| t.as_str()) else {
+        let err = token_json
+            .get("error_description")
+            .or_else(|| token_json.get("error"))
+            .and_then(|e| e.as_str())
+            .unwrap_or("no access token");
+        return (StatusCode::BAD_GATEWAY, format!("github: {}", err)).into_response();
+    };
+    let access_token = access_token.to_string();
+
+    let user_result = tokio::task::spawn_blocking(move || {
+        github_json(
+            ureq::get("https://api.github.com/user")
+                .set("Accept", "application/json")
+                .set("User-Agent", "MultiAgent")
+                .set("Authorization", &format!("Bearer {}", access_token))
+                .call(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+
+    let login = match user_result {
+        Ok(j) => j
+            .get("login")
+            .and_then(|l| l.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("github user: {}", e)).into_response(),
+    };
+    if login.is_empty() {
+        return (StatusCode::BAD_GATEWAY, "github login missing").into_response();
+    }
+
+    let (cookie, _approved) = register_login(&app, &login);
+    (
+        [(header::SET_COOKIE, cookie)],
+        axum::response::Redirect::to("/"),
+    )
+        .into_response()
 }
 
 async fn auth_me(State(app): State<AppHandle>, headers: HeaderMap) -> Response {
