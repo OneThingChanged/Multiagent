@@ -78,6 +78,7 @@ pub struct ServerInfo {
 
 pub struct RemoteHub {
     pub agents: Mutex<Vec<RemoteAgentInfo>>,
+    pub view: Mutex<String>,
     buffers: Mutex<HashMap<String, Vec<u8>>>,
     tx: tokio::sync::broadcast::Sender<(String, Vec<u8>)>,
     server: Mutex<Option<ServerInfo>>,
@@ -97,6 +98,7 @@ impl RemoteHub {
         let (tx, _) = tokio::sync::broadcast::channel(1024);
         Self {
             agents: Mutex::new(Vec::new()),
+            view: Mutex::new("{}".to_string()),
             buffers: Mutex::new(HashMap::new()),
             tx,
             server: Mutex::new(None),
@@ -319,6 +321,8 @@ pub async fn start(app: AppHandle) -> Result<RemoteStatus, String> {
     let router = Router::new()
         .route("/", get(page))
         .route("/api/agents", get(agents))
+        .route("/api/view", get(view))
+        .route("/api/command", post(command))
         .route("/ws", get(ws_upgrade))
         .route("/auth/start", post(auth_start))
         .route("/auth/poll", post(auth_poll))
@@ -665,6 +669,47 @@ async fn agents(
     }
     let list = state.remote.agents.lock().unwrap().clone();
     Json(serde_json::json!({ "agents": list })).into_response()
+}
+
+async fn view(
+    State(app): State<AppHandle>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let state = app.state::<AppState>();
+    if !state.remote.authorized(&headers, query_token(&q)) {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    let json = state.remote.view.lock().unwrap().clone();
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        json,
+    )
+        .into_response()
+}
+
+async fn command(
+    State(app): State<AppHandle>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let state = app.state::<AppState>();
+    // Commands carry no query string, so authenticate by session cookie only.
+    if state.remote.session_user(&headers).is_none()
+        && !state.remote.authorized(&headers, "")
+    {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    let cmd = body.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let id = body.get("id").and_then(|i| i.as_str()).unwrap_or("");
+    if cmd.is_empty() || id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "type and id required").into_response();
+    }
+    let _ = app.emit(
+        "remote:command",
+        serde_json::json!({ "type": cmd, "id": id }),
+    );
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 async fn ws_upgrade(
@@ -1040,7 +1085,27 @@ async fn handle_client_msg(app: &AppHandle, id: &str, raw: &str, socket: &mut We
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return;
     };
-    if value.get("type").and_then(|t| t.as_str()) != Some("input") {
+    let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+    if msg_type == "resize" {
+        let cols = value.get("cols").and_then(|c| c.as_u64()).unwrap_or(0) as u16;
+        let rows = value.get("rows").and_then(|r| r.as_u64()).unwrap_or(0) as u16;
+        if cols >= 2 && rows >= 2 {
+            let state = app.state::<AppState>();
+            let ptys = state.ptys.lock().unwrap();
+            if let Some(pty) = ptys.get(id) {
+                let _ = pty.master.resize(portable_pty::PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+        }
+        return;
+    }
+
+    if msg_type != "input" {
         return;
     }
     let Some(data) = value.get("data").and_then(|d| d.as_str()) else {

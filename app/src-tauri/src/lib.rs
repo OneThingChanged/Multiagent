@@ -692,6 +692,11 @@ fn sync_remote_agents(state: State<'_, AppState>, agents: Vec<remote::RemoteAgen
 }
 
 #[tauri::command]
+fn sync_remote_view(state: State<'_, AppState>, view: String) {
+    *state.remote.view.lock().unwrap() = view;
+}
+
+#[tauri::command]
 async fn start_tunnel(app: AppHandle) -> Result<remote::TunnelStatus, String> {
     remote::start_tunnel(app).await
 }
@@ -897,6 +902,7 @@ pub fn run() {
             stop_remote_server,
             remote_server_status,
             sync_remote_agents,
+            sync_remote_view,
             start_tunnel,
             stop_tunnel,
             tunnel_status,

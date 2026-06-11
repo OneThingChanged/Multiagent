@@ -193,6 +193,35 @@ function App() {
     }).catch(() => {});
   }, [agents, projects]);
 
+  // Mirror the full desktop view (projects, sessions, groups, active
+  // selection) so the remote web client can render the same layout.
+  useEffect(() => {
+    const view = {
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        folder: p.folder,
+      })),
+      agents: agents.map((a) => ({
+        id: a.id,
+        projectId: a.projectId,
+        name: a.name,
+        status: a.status,
+        aiToolId: a.aiToolId,
+        lastSessionId: a.lastSessionId ?? null,
+      })),
+      groups: groups.map((g) => ({
+        id: g.id,
+        projectId: g.projectId ?? null,
+        layout: g.layout,
+      })),
+      activeProjectId,
+      activeGroupId,
+      activePath,
+    };
+    invoke("sync_remote_view", { view: JSON.stringify(view) }).catch(() => {});
+  }, [projects, agents, groups, activeProjectId, activeGroupId, activePath]);
+
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
   }, [activeProjectId]);
@@ -278,6 +307,7 @@ function App() {
     ((path: Path, agentId: string) => void) | null
   >(null);
   const selectAgentRef = useRef<((agentId: string) => void) | null>(null);
+  const selectProjectRef = useRef<((projectId: string) => void) | null>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -450,6 +480,16 @@ function App() {
       );
     }).then(track);
 
+    listen<{ type: string; id: string }>("remote:command", (e) => {
+      if (cancelled) return;
+      const { type, id } = e.payload;
+      if (type === "select-project") {
+        selectProjectRef.current?.(id);
+      } else if (type === "select-agent") {
+        selectAgentRef.current?.(id);
+      }
+    }).then(track);
+
     listen<void>("app:close-requested", async () => {
       if (cancelled) return;
       // Session IDs are already captured at SessionStart time; close path just
@@ -602,6 +642,10 @@ function App() {
     setActiveGroupId(null);
     setActivePath(null);
   }, [agents, applyGroupOp, groups]);
+
+  useEffect(() => {
+    selectProjectRef.current = selectProject;
+  }, [selectProject]);
 
   const openAsTab = useCallback(
     (agentId: string) => {
