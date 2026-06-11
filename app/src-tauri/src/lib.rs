@@ -12,6 +12,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
+mod remote;
+
 struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
@@ -28,6 +30,7 @@ struct AppState {
     ptys: Mutex<HashMap<String, PtyHandle>>,
     hook_info: HookInfo,
     close_confirmed: Mutex<bool>,
+    remote: Arc<remote::RemoteHub>,
 }
 
 #[derive(Clone, Serialize)]
@@ -591,12 +594,14 @@ fn spawn_pty(
 
     let id_for_thread = id.clone();
     let app_for_thread = app.clone();
+    let hub_for_thread = state.remote.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    hub_for_thread.push(&id_for_thread, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = app_for_thread.emit(
                         "pty:data",
@@ -662,11 +667,76 @@ fn kill_pty(state: State<'_, AppState>, id: String) -> Result<(), String> {
     if let Some(mut pty) = ptys.remove(&id) {
         let _ = pty.child.kill();
     }
+    state.remote.drop_agent(&id);
     Ok(())
 }
 
 #[tauri::command]
+async fn start_remote_server(app: AppHandle) -> Result<remote::RemoteStatus, String> {
+    remote::start(app).await
+}
+
+#[tauri::command]
+fn stop_remote_server(app: AppHandle) -> remote::RemoteStatus {
+    remote::stop(&app)
+}
+
+#[tauri::command]
+fn remote_server_status(state: State<'_, AppState>) -> remote::RemoteStatus {
+    remote::status(&state.remote)
+}
+
+#[tauri::command]
+fn sync_remote_agents(state: State<'_, AppState>, agents: Vec<remote::RemoteAgentInfo>) {
+    *state.remote.agents.lock().unwrap() = agents;
+}
+
+#[tauri::command]
+async fn start_tunnel(app: AppHandle) -> Result<remote::TunnelStatus, String> {
+    remote::start_tunnel(app).await
+}
+
+#[tauri::command]
+fn stop_tunnel(app: AppHandle) -> remote::TunnelStatus {
+    remote::stop_tunnel(&app)
+}
+
+#[tauri::command]
+fn tunnel_status(state: State<'_, AppState>) -> remote::TunnelStatus {
+    remote::tunnel_status_of(&state.remote)
+}
+
+#[tauri::command]
+fn remote_access_list(state: State<'_, AppState>) -> remote::AccessStore {
+    remote::access_list(&state.remote)
+}
+
+#[tauri::command]
+fn remote_access_approve(state: State<'_, AppState>, login: String) -> remote::AccessStore {
+    remote::access_approve(&state.remote, &login)
+}
+
+#[tauri::command]
+fn remote_access_revoke(state: State<'_, AppState>, login: String) -> remote::AccessStore {
+    remote::access_revoke(&state.remote, &login)
+}
+
+#[tauri::command]
+fn remote_config_get(state: State<'_, AppState>) -> remote::RemoteConfig {
+    remote::config_get(&state.remote)
+}
+
+#[tauri::command]
+fn remote_config_set(
+    state: State<'_, AppState>,
+    config: remote::RemoteConfig,
+) -> remote::RemoteConfig {
+    remote::config_set(&state.remote, config)
+}
+
+#[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
+    state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.close();
@@ -786,7 +856,9 @@ pub fn run() {
                     helper_path: helper_path.to_string_lossy().to_string(),
                 },
                 close_confirmed: Mutex::new(false),
+                remote: Arc::new(remote::RemoteHub::new()),
             });
+            remote::load_access(app.handle());
 
             // Intercept window close: emit event to frontend so it can
             // gracefully /quit running agents and capture resume tokens.
@@ -820,7 +892,19 @@ pub fn run() {
             download_installer,
             run_installer_and_quit,
             play_system_sound,
-            read_audio_file
+            read_audio_file,
+            start_remote_server,
+            stop_remote_server,
+            remote_server_status,
+            sync_remote_agents,
+            start_tunnel,
+            stop_tunnel,
+            tunnel_status,
+            remote_access_list,
+            remote_access_approve,
+            remote_access_revoke,
+            remote_config_get,
+            remote_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>MultiAgent Remote</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: #0d1117; color: #c9d1d9;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .hidden { display: none !important; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; }
+  header button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 6px; padding: 6px 12px; font-size: 15px; }
+  #list-view { display: flex; flex-direction: column; height: 100%; }
+  #agents { flex: 1; overflow-y: auto; padding: 10px; }
+  .agent { display: flex; align-items: center; gap: 10px; width: 100%;
+    background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 10px;
+    padding: 14px 14px; margin-bottom: 8px; font-size: 15px; text-align: left; }
+  .agent:active { background: #1f2937; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; background: #6b7280; }
+  .dot.running { background: #22c55e; }
+  .dot.working { background: #eab308; animation: pulse 1.2s ease-in-out infinite; }
+  .dot.starting { background: #eab308; }
+  @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+  .nm { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .pj { color: #8b949e; font-size: 12px; flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .st { color: #8b949e; font-size: 12px; flex: 0 0 auto; }
+  #empty { color: #8b949e; text-align: center; padding: 40px 0; }
+  #term-view { display: flex; flex-direction: column; height: 100%; }
+  #term-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  #term { flex: 1; min-height: 0; padding: 4px; }
+  #keys { display: flex; gap: 6px; padding: 6px 8px; background: #161b22;
+    border-top: 1px solid #30363d; overflow-x: auto; }
+  #keys button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 6px; padding: 8px 14px; font-size: 13px; flex: 0 0 auto; }
+  #inputbar { display: flex; gap: 6px; padding: 8px; background: #161b22;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  #msg { flex: 1; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 8px; padding: 10px 12px; font-size: 16px; resize: none; }
+  #send { background: #1f6feb; color: #fff; border: none; border-radius: 8px;
+    padding: 0 18px; font-size: 15px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="list-view">
+  <header>MultiAgent Remote</header>
+  <div id="agents"></div>
+</div>
+
+<div id="term-view" class="hidden">
+  <header>
+    <button id="back">←</button>
+    <span id="term-title"></span>
+  </header>
+  <div id="term"></div>
+  <div id="keys">
+    <button data-k="enter">Enter</button>
+    <button data-k="esc">Esc</button>
+    <button data-k="ctrlc">^C</button>
+    <button data-k="up">↑</button>
+    <button data-k="down">↓</button>
+    <button data-k="tab">Tab</button>
+  </div>
+  <div id="inputbar">
+    <textarea id="msg" rows="1" placeholder="명령 입력 후 Send"></textarea>
+    <button id="send">Send</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+const token = new URLSearchParams(location.search).get("token") || "";
+const CR = String.fromCharCode(13), ESCC = String.fromCharCode(27), CRLF = CR + String.fromCharCode(10);
+const $ = (s) => document.querySelector(s);
+const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+let ws = null, term = null, fit = null, currentId = null;
+
+async function loadAgents() {
+  try {
+    const res = await fetch(`/api/agents?token=${encodeURIComponent(token)}`);
+    if (!res.ok) { $("#agents").innerHTML = '<div id="empty">인증 실패 — URL을 다시 확인하세요</div>'; return; }
+    const json = await res.json();
+    renderAgents(json.agents || []);
+  } catch { /* transient network error; keep last list */ }
+}
+
+function renderAgents(list) {
+  const el = $("#agents");
+  if (!list.length) { el.innerHTML = '<div id="empty">세션이 없습니다</div>'; return; }
+  el.innerHTML = "";
+  for (const a of list) {
+    const btn = document.createElement("button");
+    btn.className = "agent";
+    btn.innerHTML = `<span class="dot ${esc(a.status)}"></span>` +
+      `<span class="nm">${esc(a.name)}</span>` +
+      `<span class="pj">${esc(a.project)}</span>` +
+      `<span class="st">${esc(a.status)}</span>`;
+    btn.onclick = () => openTerm(a);
+    el.appendChild(btn);
+  }
+}
+
+function openTerm(agent) {
+  currentId = agent.id;
+  $("#list-view").classList.add("hidden");
+  $("#term-view").classList.remove("hidden");
+  $("#term-title").textContent = `${agent.name} · ${agent.project}`;
+
+  if (!term) {
+    const TermCtor = window.Terminal && (window.Terminal.Terminal || window.Terminal);
+    const FitCtor = window.FitAddon && (window.FitAddon.FitAddon || window.FitAddon);
+    term = new TermCtor({
+      fontSize: 12,
+      scrollback: 3000,
+      theme: { background: "#0d1117", foreground: "#c9d1d9" },
+    });
+    fit = new FitCtor();
+    term.loadAddon(fit);
+    term.open($("#term"));
+    term.onData((d) => sendInput(d));
+  }
+  term.reset();
+  fit.fit();
+
+  if (ws) { ws.onclose = null; ws.close(); }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws?id=${encodeURIComponent(agent.id)}&token=${encodeURIComponent(token)}`);
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (e) => {
+    if (typeof e.data === "string") {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === "error") term.write(CRLF + ESCC + "[31m" + m.message + ESCC + "[0m" + CRLF);
+      } catch {}
+    } else {
+      term.write(new Uint8Array(e.data));
+    }
+  };
+  ws.onclose = () => { if (term) term.write(CRLF + ESCC + "[2m[connection closed]" + ESCC + "[0m" + CRLF); };
+}
+
+function sendInput(data) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "input", data }));
+}
+
+$("#back").onclick = () => {
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  currentId = null;
+  $("#term-view").classList.add("hidden");
+  $("#list-view").classList.remove("hidden");
+};
+
+$("#send").onclick = () => {
+  const value = $("#msg").value;
+  if (!value) return;
+  sendInput(value + CR);
+  $("#msg").value = "";
+};
+
+const KEYS = { enter: CR, esc: ESCC, ctrlc: String.fromCharCode(3), up: ESCC + "[A", down: ESCC + "[B", tab: String.fromCharCode(9) };
+document.querySelectorAll("#keys button").forEach((btn) => {
+  btn.onclick = () => { const k = KEYS[btn.dataset.k]; if (k) sendInput(k); };
+});
+
+window.addEventListener("resize", () => { if (fit && currentId) fit.fit(); });
+setInterval(loadAgents, 3000);
+loadAgents();
+</script>
+</body>
+</html>

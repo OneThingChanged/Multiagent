@@ -1641,7 +1641,44 @@ body.docs-resizing * {
 }
 
 .app-settings-modal {
-  width: 360px;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  max-height: min(640px, calc(100vh - 80px));
+}
+
+.app-settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--app-border);
+  margin-bottom: 12px;
+}
+
+.app-settings-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--app-soft-text);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-settings-tab:hover {
+  color: var(--app-text);
+}
+
+.app-settings-tab-active {
+  color: var(--app-accent);
+  border-bottom-color: var(--app-accent);
+}
+
+.app-settings-body {
+  flex: 1;
+  min-height: 240px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .app-settings-header {
@@ -1713,6 +1750,66 @@ body.docs-resizing * {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+.app-remote-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.app-remote-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--app-accent);
+}
+
+.app-remote-divider {
+  height: 1px;
+  background: var(--app-border);
+  margin: 10px 0;
+}
+
+.app-access-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.app-access-user {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.app-access-pending {
+  color: var(--app-warning, #d29922);
+}
+
+.app-access-btn {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.app-remote-field {
+  margin-top: 8px;
+}
+
+.app-remote-field input {
+  width: 100%;
+  font-size: 13px;
 }
 
 .app-theme-option {

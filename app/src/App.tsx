@@ -178,6 +178,21 @@ function App() {
     groupsRef.current = groups;
   }, [groups]);
 
+  // Mirror agent metadata into the Rust remote hub so the remote web
+  // client can list sessions and show live status.
+  useEffect(() => {
+    const projectNames = new Map(projects.map((p) => [p.id, p.name]));
+    invoke("sync_remote_agents", {
+      agents: agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        project: projectNames.get(a.projectId) ?? "",
+        status: a.status,
+        tool: a.aiToolId,
+      })),
+    }).catch(() => {});
+  }, [agents, projects]);
+
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
   }, [activeProjectId]);
@@ -422,6 +437,16 @@ function App() {
       }
       setAgents((prev) =>
         prev.map((a) => (a.id === id ? { ...a, status: "exited" } : a))
+      );
+    }).then(track);
+
+    listen<{ login: string }>("remote:access-request", (e) => {
+      if (cancelled) return;
+      playNotificationSound();
+      pushToast(
+        "",
+        "원격 접속 요청",
+        `GitHub @${e.payload.login} — 설정 > Remote access에서 승인하세요`
       );
     }).then(track);
 

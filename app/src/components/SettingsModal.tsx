@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -42,6 +43,35 @@ type InstallState =
   | { status: "installing" }
   | { status: "error"; message: string };
 
+type RemoteStatus = {
+  running: boolean;
+  url: string | null;
+  port: number | null;
+};
+
+type TunnelStatus = {
+  running: boolean;
+  publicUrl: string | null;
+};
+
+type AccessList = {
+  pending: string[];
+  approved: string[];
+};
+
+type RemoteConfig = {
+  client_id: string;
+  owner: string;
+};
+
+type SettingsTab = "general" | "remote" | "about";
+
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "remote", label: "Remote" },
+  { id: "about", label: "About" },
+];
+
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -57,6 +87,7 @@ export function SettingsModal({
   onThemeChange: (theme: AppThemeId) => void;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<SettingsTab>("general");
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -64,6 +95,130 @@ export function SettingsModal({
   const [sound, setSound] = useState<NotificationSoundConfig>(() =>
     loadNotificationSound()
   );
+  const [remote, setRemote] = useState<RemoteStatus>({
+    running: false,
+    url: null,
+    port: null,
+  });
+  const [remoteBusy, setRemoteBusy] = useState(false);
+  const [remoteCopied, setRemoteCopied] = useState(false);
+  const [tunnel, setTunnel] = useState<TunnelStatus>({
+    running: false,
+    publicUrl: null,
+  });
+  const [tunnelBusy, setTunnelBusy] = useState(false);
+  const [tunnelError, setTunnelError] = useState<string | null>(null);
+  const [tunnelCopied, setTunnelCopied] = useState(false);
+
+  const [access, setAccess] = useState<AccessList>({
+    pending: [],
+    approved: [],
+  });
+  const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>({
+    client_id: "",
+    owner: "",
+  });
+  const [configSaved, setConfigSaved] = useState(false);
+
+  useEffect(() => {
+    invoke<RemoteConfig>("remote_config_get")
+      .then(setRemoteConfig)
+      .catch(() => {});
+  }, []);
+
+  const handleSaveRemoteConfig = () => {
+    invoke<RemoteConfig>("remote_config_set", { config: remoteConfig })
+      .then((saved) => {
+        setRemoteConfig(saved);
+        setConfigSaved(true);
+        setTimeout(() => setConfigSaved(false), 1500);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    invoke<RemoteStatus>("remote_server_status")
+      .then(setRemote)
+      .catch(() => {});
+    invoke<TunnelStatus>("tunnel_status")
+      .then(setTunnel)
+      .catch(() => {});
+    const loadAccess = () =>
+      invoke<AccessList>("remote_access_list")
+        .then(setAccess)
+        .catch(() => {});
+    loadAccess();
+    const interval = setInterval(loadAccess, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleApprove = (login: string) => {
+    invoke<AccessList>("remote_access_approve", { login })
+      .then(setAccess)
+      .catch(() => {});
+  };
+
+  const handleRevoke = (login: string) => {
+    invoke<AccessList>("remote_access_revoke", { login })
+      .then(setAccess)
+      .catch(() => {});
+  };
+
+  const handleTunnelToggle = async () => {
+    setTunnelBusy(true);
+    setTunnelError(null);
+    try {
+      if (tunnel.running) {
+        setTunnel(await invoke<TunnelStatus>("stop_tunnel"));
+      } else {
+        setTunnel(await invoke<TunnelStatus>("start_tunnel"));
+        const status = await invoke<RemoteStatus>("remote_server_status");
+        setRemote(status);
+      }
+    } catch (err) {
+      setTunnelError(
+        err instanceof Error ? err.message : typeof err === "string" ? err : "tunnel failed"
+      );
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
+
+  const handleCopyTunnelUrl = () => {
+    if (!tunnel.publicUrl) return;
+    navigator.clipboard
+      .writeText(tunnel.publicUrl)
+      .then(() => {
+        setTunnelCopied(true);
+        setTimeout(() => setTunnelCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+
+  const handleRemoteToggle = async () => {
+    setRemoteBusy(true);
+    try {
+      const next = remote.running
+        ? await invoke<RemoteStatus>("stop_remote_server")
+        : await invoke<RemoteStatus>("start_remote_server");
+      setRemote(next);
+    } catch (err) {
+      console.error("remote server toggle failed", err);
+    } finally {
+      setRemoteBusy(false);
+    }
+  };
+
+  const handleCopyRemoteUrl = () => {
+    if (!remote.url) return;
+    navigator.clipboard
+      .writeText(remote.url)
+      .then(() => {
+        setRemoteCopied(true);
+        setTimeout(() => setRemoteCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
 
   const applySound = (next: NotificationSoundConfig) => {
     setSound(next);
@@ -184,6 +339,23 @@ export function SettingsModal({
           </button>
         </div>
 
+        <div className="app-settings-tabs">
+          {SETTINGS_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`app-settings-tab ${
+                tab === t.id ? "app-settings-tab-active" : ""
+              }`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="app-settings-body">
+        {tab === "general" && (
+        <>
         <div className="app-settings-section">
           <div className="field-label">Theme</div>
           <div className="app-theme-options">
@@ -244,7 +416,186 @@ export function SettingsModal({
             </button>
           </div>
         </div>
+        </>
+        )}
 
+        {tab === "remote" && (
+        <div className="app-settings-section">
+          <div className="field-label">Remote access</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">Status</span>
+              <span className="app-about-value">
+                {remote.running ? `running (port ${remote.port})` : "off"}
+              </span>
+            </div>
+            {remote.running && remote.url && (
+              <div className="app-remote-url-row">
+                <span className="app-remote-url" title={remote.url}>
+                  {remote.url}
+                </span>
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handleCopyRemoteUrl}
+                >
+                  {remoteCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            )}
+            <div className="app-update-message">
+              {remote.running
+                ? "같은 네트워크의 폰/PC 브라우저에서 위 URL로 접속하세요. 외부에서 접속하려면 Tailscale 같은 VPN을 권장합니다."
+                : "원격 모니터링/입력 서버를 켭니다. 같은 Wi-Fi의 브라우저에서 세션을 보고 명령을 보낼 수 있습니다."}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className={
+                  remote.running
+                    ? "btn-secondary app-update-btn"
+                    : "btn-primary app-update-btn"
+                }
+                onClick={handleRemoteToggle}
+                disabled={remoteBusy}
+              >
+                {remoteBusy ? "..." : remote.running ? "Stop" : "Start"}
+              </button>
+            </div>
+
+            <div className="app-remote-divider" />
+            <div className="app-about-row">
+              <span className="app-about-label">External</span>
+              <span className="app-about-value">
+                {tunnel.running ? "public tunnel on" : "off"}
+              </span>
+            </div>
+            {tunnel.running && tunnel.publicUrl && (
+              <div className="app-remote-url-row">
+                <span className="app-remote-url" title={tunnel.publicUrl}>
+                  {tunnel.publicUrl}
+                </span>
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handleCopyTunnelUrl}
+                >
+                  {tunnelCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            )}
+            <div
+              className={`app-update-message ${tunnelError ? "app-update-error" : ""}`}
+            >
+              {tunnelError
+                ? `Tunnel error: ${tunnelError}`
+                : tunnelBusy && !tunnel.running
+                  ? "터널 시작 중... 처음이면 cloudflared 다운로드(~60MB) 때문에 오래 걸릴 수 있어요."
+                  : tunnel.running
+                    ? "외부 어디서든 위 HTTPS 주소로 접속할 수 있습니다. 주소는 터널을 새로 켤 때마다 바뀝니다."
+                    : "Cloudflare Tunnel로 공개 HTTPS 주소를 발급해 외부 인터넷에서 접속할 수 있게 합니다."}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className={
+                  tunnel.running
+                    ? "btn-secondary app-update-btn"
+                    : "btn-primary app-update-btn"
+                }
+                onClick={handleTunnelToggle}
+                disabled={tunnelBusy}
+              >
+                {tunnelBusy
+                  ? "..."
+                  : tunnel.running
+                    ? "Stop tunnel"
+                    : "Start tunnel"}
+              </button>
+            </div>
+
+            <div className="app-remote-divider" />
+            <div className="app-about-row">
+              <span className="app-about-label">GitHub OAuth</span>
+            </div>
+            <label className="field app-remote-field">
+              <span className="field-label">Client ID</span>
+              <input
+                value={remoteConfig.client_id}
+                placeholder="Ov23li..."
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({ ...c, client_id: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field app-remote-field">
+              <span className="field-label">Owner GitHub username (항상 허용)</span>
+              <input
+                value={remoteConfig.owner}
+                placeholder="my-github-id"
+                onChange={(e) =>
+                  setRemoteConfig((c) => ({ ...c, owner: e.target.value }))
+                }
+              />
+            </label>
+            <div className="app-update-message">
+              github.com/settings/developers에서 OAuth App을 만들고 Device Flow를
+              활성화한 뒤 Client ID를 입력하세요. Owner 계정은 승인 없이 항상
+              접속할 수 있습니다.
+            </div>
+            <div className="app-update-actions">
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleSaveRemoteConfig}
+              >
+                {configSaved ? "Saved!" : "Save"}
+              </button>
+            </div>
+
+            <div className="app-remote-divider" />
+            <div className="app-about-row">
+              <span className="app-about-label">Access</span>
+              <span className="app-about-value">
+                승인 대기 {access.pending.length} · 승인됨 {access.approved.length}
+              </span>
+            </div>
+            {access.pending.map((login) => (
+              <div className="app-access-row" key={`p-${login}`}>
+                <span className="app-access-user app-access-pending">
+                  @{login}
+                </span>
+                <button
+                  className="btn-primary app-access-btn"
+                  onClick={() => handleApprove(login)}
+                >
+                  승인
+                </button>
+                <button
+                  className="btn-secondary app-access-btn"
+                  onClick={() => handleRevoke(login)}
+                >
+                  거절
+                </button>
+              </div>
+            ))}
+            {access.approved.map((login) => (
+              <div className="app-access-row" key={`a-${login}`}>
+                <span className="app-access-user">@{login}</span>
+                <button
+                  className="btn-secondary app-access-btn"
+                  onClick={() => handleRevoke(login)}
+                >
+                  해제
+                </button>
+              </div>
+            ))}
+            {access.pending.length === 0 && access.approved.length === 0 && (
+              <div className="app-update-message">
+                외부 사용자가 GitHub로 로그인하면 여기에 승인 요청이 표시됩니다.
+              </div>
+            )}
+          </div>
+        </div>
+        )}
+
+        {tab === "about" && (
+        <>
         <div className="app-settings-section">
           <div className="field-label">Creator</div>
           <div className="app-about-card">
@@ -342,6 +693,9 @@ export function SettingsModal({
               </button>
             </div>
           </div>
+        </div>
+        </>
+        )}
         </div>
 
         <div className="modal-actions">

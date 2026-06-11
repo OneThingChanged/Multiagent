@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MultiAgent Remote - Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: #0d1117; color: #c9d1d9;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { min-height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; padding: 24px; }
+  h1 { font-size: 20px; }
+  p { color: #8b949e; font-size: 14px; text-align: center; line-height: 1.6; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+    padding: 24px; max-width: 360px; width: 100%; display: flex;
+    flex-direction: column; gap: 14px; align-items: center; }
+  button { background: #238636; color: #fff; border: none; border-radius: 8px;
+    padding: 12px 20px; font-size: 15px; font-weight: 600; width: 100%; }
+  button:disabled { opacity: .6; }
+  .code { font-family: Consolas, monospace; font-size: 28px; font-weight: 700;
+    letter-spacing: 4px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 8px; padding: 12px 18px; user-select: all; }
+  a { color: #58a6ff; font-size: 14px; word-break: break-all; }
+  .err { color: #f87171; font-size: 13px; text-align: center; }
+  .hidden { display: none !important; }
+  .spin { color: #8b949e; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MultiAgent Remote</h1>
+  <div class="card" id="step1">
+    <p>이 서버에 접근하려면 허용된 GitHub 계정으로 로그인해야 합니다.</p>
+    <button id="login">GitHub로 로그인</button>
+    <div class="err hidden" id="err1"></div>
+  </div>
+  <div class="card hidden" id="step2">
+    <p>아래 코드를 GitHub 인증 페이지에 입력하세요.</p>
+    <div class="code" id="code"></div>
+    <a id="verify-link" target="_blank" rel="noopener">github.com/login/device 열기</a>
+    <div class="spin" id="poll-status">인증 대기 중...</div>
+    <div class="err hidden" id="err2"></div>
+  </div>
+  <div class="card hidden" id="step3">
+    <p><strong id="wait-user"></strong> 계정으로 로그인되었습니다.</p>
+    <p>서버 관리자의 <strong>접속 승인</strong>을 기다리는 중입니다.<br>
+       승인되면 자동으로 입장합니다.</p>
+    <div class="spin" id="wait-status">승인 대기 중...</div>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+let device = null;
+let timer = null;
+let waitTimer = null;
+
+function showWaiting(user) {
+  $("#step1").classList.add("hidden");
+  $("#step2").classList.add("hidden");
+  $("#step3").classList.remove("hidden");
+  $("#wait-user").textContent = "@" + user;
+  if (waitTimer) clearInterval(waitTimer);
+  waitTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/auth/me");
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.approved) {
+        clearInterval(waitTimer);
+        $("#wait-status").textContent = "승인됨! 이동 중...";
+        location.reload();
+      }
+    } catch { /* keep polling */ }
+  }, 3000);
+}
+
+// If already logged in but unapproved, jump straight to the waiting view.
+(async () => {
+  try {
+    const res = await fetch("/auth/me");
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.user && !json.approved) showWaiting(json.user);
+  } catch {}
+})();
+
+$("#login").onclick = async () => {
+  $("#login").disabled = true;
+  $("#err1").classList.add("hidden");
+  try {
+    const res = await fetch("/auth/start", { method: "POST" });
+    const json = await res.json();
+    if (!json.device_code) throw new Error(json.error || "device flow start failed");
+    device = json;
+    $("#code").textContent = json.user_code;
+    $("#verify-link").href = json.verification_uri;
+    $("#step1").classList.add("hidden");
+    $("#step2").classList.remove("hidden");
+    const interval = ((json.interval || 5) + 1) * 1000;
+    timer = setInterval(poll, interval);
+  } catch (e) {
+    $("#err1").textContent = String(e.message || e);
+    $("#err1").classList.remove("hidden");
+    $("#login").disabled = false;
+  }
+};
+
+async function poll() {
+  try {
+    const res = await fetch("/auth/poll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_code: device.device_code }),
+    });
+    const json = await res.json();
+    if (json.ok) {
+      clearInterval(timer);
+      $("#poll-status").textContent = "로그인 성공! 이동 중...";
+      location.reload();
+    } else if (json.pending_approval) {
+      clearInterval(timer);
+      showWaiting(json.user || "");
+    } else if (json.pending) {
+      // keep polling
+    } else if (json.error) {
+      clearInterval(timer);
+      $("#err2").textContent = json.error;
+      $("#err2").classList.remove("hidden");
+      $("#poll-status").textContent = "";
+    }
+  } catch { /* transient network error; keep polling */ }
+}
+</script>
+</body>
+</html>

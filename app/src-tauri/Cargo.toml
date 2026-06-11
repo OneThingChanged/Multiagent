@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.3.8"
+version = "0.4.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -28,6 +28,8 @@ tauri-plugin-notification = "2"
 tiny_http = "0.12"
 uuid = { version = "1", features = ["v4"] }
 toml_edit = "0.22"
-ureq = "2"
+ureq = { version = "2", features = ["json"] }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["net", "sync", "macros", "time"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
