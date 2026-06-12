@@ -322,7 +322,6 @@ pub async fn start(app: AppHandle) -> Result<RemoteStatus, String> {
         .route("/", get(page))
         .route("/api/agents", get(agents))
         .route("/api/view", get(view))
-        .route("/api/command", post(command))
         .route("/ws", get(ws_upgrade))
         .route("/auth/start", post(auth_start))
         .route("/auth/poll", post(auth_poll))
@@ -686,30 +685,6 @@ async fn view(
         json,
     )
         .into_response()
-}
-
-async fn command(
-    State(app): State<AppHandle>,
-    headers: HeaderMap,
-    Json(body): Json<serde_json::Value>,
-) -> Response {
-    let state = app.state::<AppState>();
-    // Commands carry no query string, so authenticate by session cookie only.
-    if state.remote.session_user(&headers).is_none()
-        && !state.remote.authorized(&headers, "")
-    {
-        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
-    }
-    let cmd = body.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    let id = body.get("id").and_then(|i| i.as_str()).unwrap_or("");
-    if cmd.is_empty() || id.is_empty() {
-        return (StatusCode::BAD_REQUEST, "type and id required").into_response();
-    }
-    let _ = app.emit(
-        "remote:command",
-        serde_json::json!({ "type": cmd, "id": id }),
-    );
-    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 async fn ws_upgrade(

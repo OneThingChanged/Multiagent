@@ -193,8 +193,9 @@ function App() {
     }).catch(() => {});
   }, [agents, projects]);
 
-  // Mirror the full desktop view (projects, sessions, groups, active
-  // selection) so the remote web client can render the same layout.
+  // Mirror projects + sessions so the remote web client can list them.
+  // The web client is an independent viewer: it picks which session to
+  // view locally, so desktop active/layout is intentionally not synced.
   useEffect(() => {
     const view = {
       projects: projects.map((p) => ({
@@ -208,19 +209,10 @@ function App() {
         name: a.name,
         status: a.status,
         aiToolId: a.aiToolId,
-        lastSessionId: a.lastSessionId ?? null,
       })),
-      groups: groups.map((g) => ({
-        id: g.id,
-        projectId: g.projectId ?? null,
-        layout: g.layout,
-      })),
-      activeProjectId,
-      activeGroupId,
-      activePath,
     };
     invoke("sync_remote_view", { view: JSON.stringify(view) }).catch(() => {});
-  }, [projects, agents, groups, activeProjectId, activeGroupId, activePath]);
+  }, [projects, agents]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -307,7 +299,6 @@ function App() {
     ((path: Path, agentId: string) => void) | null
   >(null);
   const selectAgentRef = useRef<((agentId: string) => void) | null>(null);
-  const selectProjectRef = useRef<((projectId: string) => void) | null>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -480,15 +471,6 @@ function App() {
       );
     }).then(track);
 
-    listen<{ type: string; id: string }>("remote:command", (e) => {
-      if (cancelled) return;
-      const { type, id } = e.payload;
-      if (type === "select-project") {
-        selectProjectRef.current?.(id);
-      } else if (type === "select-agent") {
-        selectAgentRef.current?.(id);
-      }
-    }).then(track);
 
     listen<void>("app:close-requested", async () => {
       if (cancelled) return;
@@ -642,10 +624,6 @@ function App() {
     setActiveGroupId(null);
     setActivePath(null);
   }, [agents, applyGroupOp, groups]);
-
-  useEffect(() => {
-    selectProjectRef.current = selectProject;
-  }, [selectProject]);
 
   const openAsTab = useCallback(
     (agentId: string) => {

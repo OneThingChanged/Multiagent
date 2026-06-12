@@ -23,16 +23,14 @@
   #projects { flex: 1; overflow-y: auto; padding: 6px; }
   .sb-project { margin-bottom: 4px; }
   .sb-project-head { width: 100%; text-align: left; background: transparent;
-    border: none; color: #c9d1d9; font-weight: 600; font-size: 13px;
-    padding: 7px 8px; border-radius: 6px; cursor: pointer; border-left: 2px solid transparent; }
-  .sb-project.active > .sb-project-head { border-left-color: #1f6feb; background: #161b22; }
-  .sb-project-head:hover { background: #161b22; }
+    border: none; color: #8b949e; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em; padding: 8px 8px 4px; }
   .sb-session { width: 100%; display: flex; align-items: center; gap: 8px;
     background: transparent; border: none; color: #c9d1d9; font-size: 12px;
-    padding: 6px 8px 6px 18px; border-radius: 6px; cursor: pointer; text-align: left; }
+    padding: 6px 8px 6px 14px; border-radius: 6px; cursor: pointer; text-align: left; }
   .sb-session:hover { background: #161b22; }
   .sb-session.active { background: #1f2937; }
-  .sb-empty { color: #8b949e; font-size: 12px; padding: 6px 8px 6px 18px; }
+  .sb-empty { color: #8b949e; font-size: 12px; padding: 6px 8px 6px 14px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: #6b7280; }
   .dot.running { background: #22c55e; }
   .dot.working { background: #eab308; animation: pulse 1.2s ease-in-out infinite; }
@@ -41,26 +39,20 @@
   @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
   .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  #workspace { flex: 1; min-width: 0; position: relative; }
-  #layout-root { position: absolute; inset: 0; display: flex; }
-  #empty-ws { position: absolute; inset: 0; display: flex; align-items: center;
-    justify-content: center; color: #8b949e; font-size: 14px; }
-
-  .split { display: flex; flex: 1; min-width: 0; min-height: 0; }
-  .split.row { flex-direction: row; }
-  .split.col { flex-direction: column; }
-  .cell { min-width: 0; min-height: 0; display: flex; }
-  .leaf { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
-    border: 1px solid #161b22; }
-  .leaf.focused { border-color: #1f6feb; }
-  .tabbar { display: flex; gap: 2px; background: #0d1117; border-bottom: 1px solid #21262d;
-    overflow-x: auto; flex: 0 0 auto; }
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #tabs { display: flex; gap: 2px; background: #0d1117; border-bottom: 1px solid #21262d;
+    overflow-x: auto; flex: 0 0 auto; min-height: 34px; }
   .tab { display: flex; align-items: center; gap: 6px; background: transparent;
     border: none; border-bottom: 2px solid transparent; color: #8b949e;
-    font-size: 12px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+    font-size: 12px; padding: 7px 8px 7px 12px; cursor: pointer; white-space: nowrap; }
   .tab.active { color: #c9d1d9; border-bottom-color: #1f6feb; }
-  .leaf-body { flex: 1; min-height: 0; position: relative; }
+  .tab-close { background: transparent; border: none; color: #6b7280;
+    font-size: 14px; cursor: pointer; padding: 0 2px; border-radius: 4px; }
+  .tab-close:hover { color: #f87171; background: #21262d; }
+  #term-area { flex: 1; min-height: 0; position: relative; }
   .term-host { position: absolute; inset: 0; padding: 4px; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #8b949e; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -72,9 +64,11 @@
     </div>
     <div id="projects"></div>
   </aside>
-  <main id="workspace">
-    <div id="layout-root"></div>
-    <div id="empty-ws">왼쪽에서 프로젝트와 세션을 선택하세요</div>
+  <main id="main">
+    <div id="tabs"></div>
+    <div id="term-area">
+      <div id="empty">왼쪽에서 세션을 선택하세요</div>
+    </div>
   </main>
 </div>
 
@@ -87,23 +81,13 @@ const CRLF = CR + String.fromCharCode(10);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
-let view = null;
-let lastLayoutSig = "";
+let view = { projects: [], agents: [] };
+let openTabs = []; // agentId[]
+let activeTab = null;
 const pool = new Map(); // agentId -> { term, fit, ws, host, ro }
 
 const TermCtor = window.Terminal && (window.Terminal.Terminal || window.Terminal);
 const FitCtor = window.FitAddon && (window.FitAddon.FitAddon || window.FitAddon);
-
-async function sendCommand(type, id) {
-  try {
-    await fetch("/api/command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, id }),
-    });
-  } catch {}
-  setTimeout(loadView, 150);
-}
 
 $("#logout").onclick = async () => {
   try { await fetch("/auth/logout", { method: "POST" }); } catch {}
@@ -115,44 +99,34 @@ async function loadView() {
     const res = await fetch("/api/view");
     if (!res.ok) { if (res.status === 401) location.reload(); return; }
     view = await res.json();
+    if (!view.projects) view.projects = [];
+    if (!view.agents) view.agents = [];
+    pruneClosed();
     renderSidebar();
-    renderWorkspace();
+    renderTabs();
   } catch { /* transient */ }
 }
 
-function agentsOf(projectId) {
-  return (view.agents || []).filter((a) => a.projectId === projectId);
-}
-function activeGroup() {
-  return (view.groups || []).find((g) => g.id === view.activeGroupId) || null;
-}
-function collectActiveIds(node, out) {
-  if (!node) return;
-  if (node.type === "leaf") {
-    const id = node.tabs[node.activeIndex];
-    if (id) out.add(id);
-  } else if (node.type === "split") {
-    for (const c of node.children) collectActiveIds(c, out);
+function agentById(id) { return (view.agents || []).find((a) => a.id === id) || null; }
+function agentsOf(projectId) { return (view.agents || []).filter((a) => a.projectId === projectId); }
+
+function pruneClosed() {
+  // Close tabs whose session no longer exists.
+  const live = new Set((view.agents || []).map((a) => a.id));
+  for (const id of [...openTabs]) {
+    if (!live.has(id)) closeTab(id, true);
   }
-}
-function activeIdSet() {
-  const set = new Set();
-  const g = activeGroup();
-  if (g) collectActiveIds(g.layout, set);
-  return set;
 }
 
 function renderSidebar() {
   const el = $("#projects");
-  const active = activeIdSet();
   el.innerHTML = "";
   for (const p of view.projects || []) {
     const pdiv = document.createElement("div");
-    pdiv.className = "sb-project" + (p.id === view.activeProjectId ? " active" : "");
-    const head = document.createElement("button");
+    pdiv.className = "sb-project";
+    const head = document.createElement("div");
     head.className = "sb-project-head";
     head.textContent = p.name;
-    head.onclick = () => sendCommand("select-project", p.id);
     pdiv.appendChild(head);
     const sessions = agentsOf(p.id);
     if (sessions.length === 0) {
@@ -163,87 +137,78 @@ function renderSidebar() {
     }
     for (const a of sessions) {
       const s = document.createElement("button");
-      s.className = "sb-session" + (active.has(a.id) ? " active" : "");
+      s.className = "sb-session" + (a.id === activeTab ? " active" : "");
       s.innerHTML = `<span class="dot ${esc(a.status)}"></span><span class="nm">${esc(a.name)}</span>`;
-      s.onclick = () => sendCommand("select-agent", a.id);
+      s.onclick = () => openSession(a.id);
       pdiv.appendChild(s);
     }
     el.appendChild(pdiv);
   }
 }
 
-function renderWorkspace() {
-  const g = activeGroup();
-  const sig = JSON.stringify({ gid: view.activeGroupId, layout: g ? g.layout : null });
-  const visible = activeIdSet();
-  if (sig === lastLayoutSig) {
-    refreshTabLabels();
-    return;
+function renderTabs() {
+  const el = $("#tabs");
+  el.innerHTML = "";
+  for (const id of openTabs) {
+    const a = agentById(id);
+    const tab = document.createElement("div");
+    tab.className = "tab" + (id === activeTab ? " active" : "");
+    const label = document.createElement("span");
+    label.innerHTML = `<span class="dot ${a ? esc(a.status) : ""}"></span>${esc(a ? a.name : id)}`;
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+    label.style.gap = "6px";
+    label.onclick = () => setActive(id);
+    const close = document.createElement("button");
+    close.className = "tab-close";
+    close.textContent = "×";
+    close.onclick = (ev) => { ev.stopPropagation(); closeTab(id); };
+    tab.appendChild(label);
+    tab.appendChild(close);
+    el.appendChild(tab);
   }
-  lastLayoutSig = sig;
-
-  if (!g) {
-    $("#layout-root").replaceChildren();
-    $("#empty-ws").style.display = "flex";
-    cleanupPool(new Set());
-    return;
-  }
-  $("#empty-ws").style.display = "none";
-  for (const id of visible) ensureTerm(id);
-  cleanupPool(visible);
-  $("#layout-root").replaceChildren(buildNode(g.layout));
-  requestAnimationFrame(() => {
-    for (const id of visible) {
-      const e = pool.get(id);
-      if (e) sendResize(e);
-    }
-  });
 }
 
-function refreshTabLabels() {
-  // Update status dots in tabs/sidebar without rebuilding terminals.
-  document.querySelectorAll("[data-agent-dot]").forEach((dot) => {
-    const a = (view.agents || []).find((x) => x.id === dot.getAttribute("data-agent-dot"));
-    dot.className = "dot " + (a ? a.status : "");
-  });
+function openSession(id) {
+  if (!agentById(id)) return;
+  ensureTerm(id);
+  if (!openTabs.includes(id)) openTabs.push(id);
+  setActive(id);
 }
 
-function buildNode(node) {
-  if (node.type === "leaf") {
-    const wrap = document.createElement("div");
-    wrap.className = "leaf";
-    if (node.tabs.length > 1) {
-      const tabbar = document.createElement("div");
-      tabbar.className = "tabbar";
-      node.tabs.forEach((tid, i) => {
-        const a = (view.agents || []).find((x) => x.id === tid);
-        const t = document.createElement("button");
-        t.className = "tab" + (i === node.activeIndex ? " active" : "");
-        t.innerHTML = `<span class="dot ${a ? esc(a.status) : ""}" data-agent-dot="${esc(tid)}"></span>${esc(a ? a.name : tid)}`;
-        t.onclick = () => sendCommand("select-agent", tid);
-        tabbar.appendChild(t);
-      });
-      wrap.appendChild(tabbar);
-    }
-    const body = document.createElement("div");
-    body.className = "leaf-body";
-    const id = node.tabs[node.activeIndex];
-    const e = id ? pool.get(id) : null;
-    if (e) body.appendChild(e.host);
-    wrap.appendChild(body);
-    return wrap;
+function setActive(id) {
+  activeTab = id;
+  const area = $("#term-area");
+  const e = pool.get(id);
+  $("#empty").style.display = e ? "none" : "flex";
+  // Detach any other hosts, attach the active one.
+  for (const [tid, entry] of pool) {
+    if (tid !== id && entry.host.parentNode === area) area.removeChild(entry.host);
   }
-  const split = document.createElement("div");
-  split.className = "split " + (node.direction === "h" ? "row" : "col");
-  node.children.forEach((c, i) => {
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    cell.style.flexGrow = String((node.sizes && node.sizes[i]) || 1);
-    cell.style.flexBasis = "0";
-    cell.appendChild(buildNode(c));
-    split.appendChild(cell);
-  });
-  return split;
+  if (e && e.host.parentNode !== area) area.appendChild(e.host);
+  renderSidebar();
+  renderTabs();
+  if (e) {
+    requestAnimationFrame(() => { sendResize(e); e.term.focus(); });
+  }
+}
+
+function closeTab(id, silent) {
+  openTabs = openTabs.filter((t) => t !== id);
+  const e = pool.get(id);
+  if (e) {
+    try { e.ro.disconnect(); } catch {}
+    try { if (e.ws) { e.ws.onclose = null; e.ws.close(); } } catch {}
+    try { e.term.dispose(); } catch {}
+    if (e.host.parentNode) e.host.parentNode.removeChild(e.host);
+    pool.delete(id);
+  }
+  if (activeTab === id) {
+    activeTab = openTabs[openTabs.length - 1] || null;
+    if (activeTab) setActive(activeTab);
+    else { $("#empty").style.display = "flex"; }
+  }
+  if (!silent) { renderSidebar(); renderTabs(); }
 }
 
 function ensureTerm(id) {
@@ -285,31 +250,23 @@ function ensureTerm(id) {
       term.write(new Uint8Array(ev.data));
     }
   };
-  const ro = new ResizeObserver(() => { const e = pool.get(id); if (e) sendResize(e); });
+  ws.onclose = () => { term.write(CRLF + ESCC + "[2m[connection closed]" + ESCC + "[0m" + CRLF); };
+  const ro = new ResizeObserver(() => { const e = pool.get(id); if (e && id === activeTab) sendResize(e); });
   ro.observe(host);
   pool.set(id, { term, fit, ws, host, ro });
 }
 
 function sendResize(e) {
+  if (!e.host.parentNode) return;
   try { e.fit.fit(); } catch { return; }
   if (e.ws && e.ws.readyState === 1) {
     e.ws.send(JSON.stringify({ type: "resize", cols: e.term.cols, rows: e.term.rows }));
   }
 }
 
-function cleanupPool(visible) {
-  for (const [id, e] of [...pool]) {
-    if (!visible.has(id)) {
-      try { e.ro.disconnect(); } catch {}
-      try { if (e.ws) { e.ws.onclose = null; e.ws.close(); } } catch {}
-      try { e.term.dispose(); } catch {}
-      pool.delete(id);
-    }
-  }
-}
-
 window.addEventListener("resize", () => {
-  for (const e of pool.values()) sendResize(e);
+  const e = activeTab ? pool.get(activeTab) : null;
+  if (e) sendResize(e);
 });
 setInterval(loadView, 2000);
 loadView();
