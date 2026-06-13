@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   isPermissionGranted,
+  onAction,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import "@xterm/xterm/css/xterm.css";
@@ -449,6 +450,23 @@ function App() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    onAction(() => {
+      invoke("show_main_window").catch(() => {});
+    })
+      .then((listener) => {
+        if (cancelled) listener.unregister();
+        else unsubscribe = () => listener.unregister();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
   // ---- PTY + hook event listeners
 
   useEffect(() => {
@@ -546,9 +564,14 @@ function App() {
         } else if (event === "done") {
           const target = agentsRef.current.find((a) => a.id === id);
           if (target && target.status === "working") {
-            notifyDone(target.name);
+            const project = projectsRef.current.find(
+              (candidate) => candidate.id === target.projectId
+            );
+            const projectName = project?.name || "Unknown project";
+            const title = `${projectName} / ${target.name}`;
+            notifyDone({ projectName, sessionName: target.name });
             playNotificationSound();
-            pushToast(target.id, target.name, "작업이 끝났어요");
+            pushToast(target.id, title, "작업이 끝났어요");
           }
           setAgents((cur) =>
             cur.map((a) =>

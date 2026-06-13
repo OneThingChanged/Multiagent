@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
@@ -102,12 +101,28 @@ export function saveTerminalFontSize(fontSize: number) {
   } catch {}
 }
 
-export async function notifyDone(name: string) {
+export async function notifyDone({
+  projectName,
+  sessionName,
+}: {
+  projectName: string;
+  sessionName: string;
+}) {
   try {
     let granted = await isPermissionGranted();
     if (!granted) granted = (await requestPermission()) === "granted";
     if (!granted) return;
-    sendNotification({ title: name, body: "작업이 끝났어요" });
+    const notification = new window.Notification(
+      `${projectName} / ${sessionName}`,
+      {
+        body: "작업이 끝났어요",
+        tag: `multiagent:${projectName}:${sessionName}`,
+      }
+    );
+    notification.onclick = () => {
+      notification.close();
+      invoke("show_main_window").catch(() => {});
+    };
   } catch {}
 }
 

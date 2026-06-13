@@ -848,6 +848,16 @@ fn usage_ingest_now(state: State<'_, AppState>) -> usage::IngestSummary {
 }
 
 #[tauri::command]
+fn show_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    let _ = window.unminimize();
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
     state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
@@ -1082,7 +1092,8 @@ pub fn run() {
             usage_server_status,
             usage_config_get,
             usage_config_set,
-            usage_ingest_now
+            usage_ingest_now,
+            show_main_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

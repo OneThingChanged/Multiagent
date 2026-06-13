@@ -63,6 +63,8 @@ npm run tauri build
 
 코드 서명을 안 했으므로 첫 실행 시 Windows SmartScreen 경고. "추가 정보 → 실행" 으로 진행.
 
+> 배포(GitHub Releases 게시 + updater 서명 + latest.json)는 [RELEASE.md](RELEASE.md) 참고. 위 `npm run tauri build`는 서명 없는 로컬 빌드이고, 배포용은 서명 키 환경변수를 줘야 한다.
+
 ## dev 트러블슈팅
 
 - **포트 1420 점유**: `Get-NetTCPConnection -LocalPort 1420 | Stop-Process` 또는 vite 띄운 node를 죽임

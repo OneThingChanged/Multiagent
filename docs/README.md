@@ -8,7 +8,8 @@
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — 프로세스 구조, Rust 백엔드 / React 프론트 데이터 모델, hook / 창 닫기 인터셉트
 - **[UX.md](UX.md)** — 조작법 (사이드바·탭·드롭존·상태점·창 닫기·paste)
 - **[RESUME.md](RESUME.md)** — Codex 세션 resume 동작 흐름, 토큰 캡처/사용, 한계
-- **[BUILD.md](BUILD.md)** — 개발·릴리즈 빌드 방법, 트러블슈팅
+- **[BUILD.md](BUILD.md)** — 개발·디버그·릴리즈 빌드 방법, 트러블슈팅
+- **[RELEASE.md](RELEASE.md)** — 코드 서명 + GitHub 릴리즈 게시 + 자동 업데이터 절차/체크리스트
 - **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** — 알려진 제약 + 향후 개선 후보
 - **[USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)** — 토큰 사용량 측정 + 대시보드 웹서버
 
