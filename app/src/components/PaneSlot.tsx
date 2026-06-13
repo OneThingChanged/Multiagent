@@ -123,34 +123,56 @@ export function PaneSlot({
         if (cur.status === "idle") {
           setAgentStatus(agentId, "starting");
         }
-        const tool = toolForId(cur.aiToolId);
-        let initCommand: string | null = null;
-        if (tool.command) {
-          let cmd = tool.command;
-          const sessionId = ctx.sessionPins?.[cur.id] ?? cur.lastSessionId;
-          if (sessionId) {
-            if (cur.aiToolId === "codex") {
-              cmd = `${cmd} resume ${sessionId}`;
-            } else if (cur.aiToolId === "claude") {
-              cmd = `${cmd} --resume ${sessionId}`;
+        const spawn = async () => {
+          const tool = toolForId(cur.aiToolId);
+          let initCommand: string | null = null;
+          if (tool.command) {
+            let cmd = tool.command;
+            const pinnedSessionId = ctx.sessionPins?.[cur.id] ?? null;
+            let sessionId = pinnedSessionId ?? cur.lastSessionId ?? null;
+            if (
+              !pinnedSessionId &&
+              cur.folder &&
+              (cur.aiToolId === "codex" || cur.aiToolId === "claude")
+            ) {
+              try {
+                const resolved = await invoke<string | null>(
+                  "resolve_cli_session",
+                  {
+                    aiToolId: cur.aiToolId,
+                    folder: cur.folder,
+                    agentName: cur.name,
+                    preferredSessionId: cur.lastSessionId ?? null,
+                  }
+                );
+                if (resolved) sessionId = resolved;
+              } catch {}
             }
+            if (sessionId) {
+              if (cur.aiToolId === "codex") {
+                cmd = `${cmd} resume ${sessionId}`;
+              } else if (cur.aiToolId === "claude") {
+                cmd = `${cmd} --resume ${sessionId}`;
+              }
+            }
+            if (cur.dangerous && tool.dangerousFlag) {
+              cmd = `${cmd} ${tool.dangerousFlag}`;
+            }
+            initCommand = cmd;
           }
-          if (cur.dangerous && tool.dangerousFlag) {
-            cmd = `${cmd} ${tool.dangerousFlag}`;
-          }
-          initCommand = cmd;
-        }
-        invoke("spawn_pty", {
-          id: agentId,
-          shell: null,
-          cwd: cur.folder || null,
-          initCommand,
-          aiToolId: cur.aiToolId,
-          cols,
-          rows,
-        }).catch((err) => {
-          e.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
-        });
+          invoke("spawn_pty", {
+            id: agentId,
+            shell: null,
+            cwd: cur.folder || null,
+            initCommand,
+            aiToolId: cur.aiToolId,
+            cols,
+            rows,
+          }).catch((err) => {
+            e.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
+          });
+        };
+        void spawn();
       } else if (cols !== lastCols || rows !== lastRows) {
         lastCols = cols;
         lastRows = rows;

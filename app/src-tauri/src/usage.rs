@@ -165,14 +165,13 @@ impl UsageHub {
             .get(agent_id)
             .cloned()
             .or_else(|| agent.last_session_id.clone());
-        let no_session_peer_count = catalog
+        let tool_peer_count = catalog
             .agents
             .iter()
             .filter(|candidate| {
                 candidate.project_id == agent.project_id
+                    && candidate.folder == agent.folder
                     && candidate.ai_tool_id == agent.ai_tool_id
-                    && candidate.last_session_id.is_none()
-                    && !live_sessions.contains_key(&candidate.id)
             })
             .count();
         let path = self.resolve_transcript_path(
@@ -181,7 +180,7 @@ impl UsageHub {
             transcript_path.as_deref(),
             Some(agent.folder.as_str()),
             Some(agent.name.as_str()),
-            no_session_peer_count > 1,
+            tool_peer_count > 1,
         )?;
         self.ingest_file(&agent, project.as_ref(), session_id.as_deref(), &path)
     }
@@ -198,7 +197,7 @@ impl UsageHub {
         let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
         let size = metadata.len() as i64;
         let (mut offset, last_size) = source_progress(&conn, &path_string)?;
-        if last_size > size {
+        if last_size > size || source_owner_mismatch(&conn, &path_string, agent, project)? {
             offset = 0;
         }
 
@@ -272,22 +271,58 @@ impl UsageHub {
             }
         }
         let root = source_root(tool)?;
-        if let Some(session_id) = session_id {
-            return find_session_file(&root, tool, session_id)
-                .ok_or_else(|| format!("usage transcript not found for {}", session_id))
-                .and_then(|path| self.allowed_source_path(tool, &path));
+        let session_path = session_id.and_then(|session_id| {
+            find_session_file(&root, tool, session_id).filter(|path| {
+                folder_hint
+                    .map(|folder| transcript_matches_project(path, folder, None, false))
+                    .unwrap_or(true)
+            })
+        });
+        let project_path = folder_hint
+            .filter(|value| !value.trim().is_empty())
+            .and_then(|folder| {
+                find_project_transcript_file(
+                    &root,
+                    folder,
+                    agent_name_hint,
+                    require_agent_name_match,
+                )
+            });
+
+        if let Some(path) = newer_path(session_path, project_path) {
+            return self.allowed_source_path(tool, &path);
         }
-        if let Some(folder) = folder_hint.filter(|value| !value.trim().is_empty()) {
-            if let Some(path) = find_project_transcript_file(
-                &root,
-                folder,
-                agent_name_hint,
-                require_agent_name_match,
-            ) {
-                return self.allowed_source_path(tool, &path);
-            }
+        if let Some(session_id) = session_id {
+            return Err(format!("usage transcript not found for {}", session_id));
         }
         Err("session id is missing".to_string())
+    }
+
+    pub fn resolve_latest_session(
+        &self,
+        tool: &str,
+        folder: &str,
+        agent_name: Option<&str>,
+        preferred_session_id: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let root = source_root(tool)?;
+        let session_path = preferred_session_id.and_then(|session_id| {
+            find_session_file(&root, tool, session_id)
+                .filter(|path| transcript_matches_project(path, folder, None, false))
+        });
+        let project_path = find_project_transcript_file(
+            &root,
+            folder,
+            agent_name,
+            agent_name
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false),
+        );
+        let Some(path) = newer_path(session_path, project_path) else {
+            return Ok(None);
+        };
+        self.allowed_source_path(tool, &path)?;
+        Ok(session_id_from_transcript_file(&path, tool))
     }
 
     fn allowed_source_path(&self, tool: &str, path: &Path) -> Result<PathBuf, String> {
@@ -1027,9 +1062,28 @@ fn save_source_progress(
     .map_err(|e| e.to_string())
 }
 
+fn source_owner_mismatch(
+    conn: &Connection,
+    path: &str,
+    agent: &UsageAgentInfo,
+    project: Option<&UsageProjectInfo>,
+) -> Result<bool, String> {
+    let project_id = project.map(|p| p.id.as_str()).unwrap_or("");
+    conn.query_row(
+        "SELECT COUNT(*)
+         FROM usage_events
+         WHERE source_path = ?1
+           AND (COALESCE(agent_id, '') <> ?2 OR COALESCE(project_id, '') <> ?3)",
+        params![path, agent.id.as_str(), project_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+    .map_err(|e| e.to_string())
+}
+
 fn insert_event(conn: &Connection, event: &UsageEvent) -> Result<usize, String> {
     conn.execute(
-        "INSERT OR IGNORE INTO usage_events (
+        "INSERT INTO usage_events (
             source_key, ts, project_id, project_name, agent_id, agent_name,
             session_id, tool, model, cwd, source_path, source_offset,
             input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
@@ -1037,7 +1091,26 @@ fn insert_event(conn: &Connection, event: &UsageEvent) -> Result<usize, String> 
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
             ?13, ?14, ?15, ?16, ?17, ?18, ?19
-         )",
+         )
+         ON CONFLICT(source_key) DO UPDATE SET
+            ts = excluded.ts,
+            project_id = excluded.project_id,
+            project_name = excluded.project_name,
+            agent_id = excluded.agent_id,
+            agent_name = excluded.agent_name,
+            session_id = excluded.session_id,
+            tool = excluded.tool,
+            model = excluded.model,
+            cwd = excluded.cwd,
+            source_path = excluded.source_path,
+            source_offset = excluded.source_offset,
+            input_tokens = excluded.input_tokens,
+            output_tokens = excluded.output_tokens,
+            cache_read_tokens = excluded.cache_read_tokens,
+            cache_write_tokens = excluded.cache_write_tokens,
+            reasoning_output_tokens = excluded.reasoning_output_tokens,
+            total_tokens = excluded.total_tokens,
+            raw_kind = excluded.raw_kind",
         params![
             &event.source_key,
             event.ts,
@@ -1301,6 +1374,83 @@ fn find_session_file(root: &Path, tool: &str, session_id: &str) -> Option<PathBu
         }
     }
     best.map(|(path, _)| path)
+}
+
+fn newer_path(left: Option<PathBuf>, right: Option<PathBuf>) -> Option<PathBuf> {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if modified_time(&right) > modified_time(&left) {
+                Some(right)
+            } else {
+                Some(left)
+            }
+        }
+        (Some(path), None) | (None, Some(path)) => Some(path),
+        (None, None) => None,
+    }
+}
+
+fn modified_time(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn session_id_from_transcript_file(path: &Path, tool: &str) -> Option<String> {
+    if tool == "claude" {
+        return path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+    }
+
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let mut bytes_read = 0usize;
+    loop {
+        line.clear();
+        let bytes = reader.read_line(&mut line).ok()?;
+        if bytes == 0 {
+            break;
+        }
+        bytes_read += bytes;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            if value.get("type").and_then(|v| v.as_str()) == Some("session_meta") {
+                if let Some(id) = value
+                    .get("payload")
+                    .and_then(|payload| string_field(payload, "id"))
+                {
+                    return Some(id);
+                }
+            }
+        }
+        if bytes_read > 1024 * 1024 {
+            break;
+        }
+    }
+
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(uuid_tail)
+}
+
+fn uuid_tail(value: &str) -> Option<String> {
+    if value.len() < 36 {
+        return None;
+    }
+    let tail = &value[value.len() - 36..];
+    let bytes = tail.as_bytes();
+    let hyphen_positions = [8, 13, 18, 23];
+    let valid = bytes.iter().enumerate().all(|(idx, byte)| {
+        if hyphen_positions.contains(&idx) {
+            *byte == b'-'
+        } else {
+            byte.is_ascii_hexdigit()
+        }
+    });
+    valid.then(|| tail.to_string())
 }
 
 fn find_project_transcript_file(
