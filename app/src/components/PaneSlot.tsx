@@ -133,6 +133,7 @@ export function PaneSlot({
             const candidateSessionId = pinnedSessionId ?? cur.lastSessionId ?? null;
             let sessionId: string | null = null;
             if (
+              candidateSessionId &&
               cur.folder &&
               (cur.aiToolId === "codex" || cur.aiToolId === "claude")
             ) {

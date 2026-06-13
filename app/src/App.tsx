@@ -172,6 +172,7 @@ function App() {
   const activeProjectIdRef = useRef<string | null>(null);
   const activeGroupIdRef = useRef<string | null>(null);
   const activePathRef = useRef<Path | null>(null);
+  const validatedSessionKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -179,6 +180,65 @@ function App() {
 
   useEffect(() => {
     agentsRef.current = agents;
+  }, [agents]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const targets = agents.filter(
+      (agent) =>
+        !!agent.lastSessionId &&
+        !!agent.folder &&
+        (agent.aiToolId === "codex" || agent.aiToolId === "claude")
+    );
+
+    for (const agent of targets) {
+      const expectedSessionId = agent.lastSessionId;
+      if (!expectedSessionId) continue;
+      const key = `${agent.id}:${expectedSessionId}`;
+      if (validatedSessionKeysRef.current.has(key)) continue;
+      validatedSessionKeysRef.current.add(key);
+
+      invoke<string | null>("resolve_cli_session", {
+        aiToolId: agent.aiToolId,
+        folder: agent.folder,
+        agentName: agent.name,
+        preferredSessionId: expectedSessionId,
+      })
+        .then((resolved) => {
+          if (cancelled) return;
+          if (!resolved) clearScrollback(agent.id);
+          setAgents((prev) =>
+            prev.map((current) => {
+              if (
+                current.id !== agent.id ||
+                current.lastSessionId !== expectedSessionId
+              ) {
+                return current;
+              }
+              return {
+                ...current,
+                lastSessionId: resolved || undefined,
+              };
+            })
+          );
+        })
+        .catch(() => {
+          if (cancelled) return;
+          clearScrollback(agent.id);
+          setAgents((prev) =>
+            prev.map((current) =>
+              current.id === agent.id &&
+              current.lastSessionId === expectedSessionId
+                ? { ...current, lastSessionId: undefined }
+                : current
+            )
+          );
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [agents]);
 
   useEffect(() => {

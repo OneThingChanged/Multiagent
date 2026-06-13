@@ -305,11 +305,14 @@ impl UsageHub {
         agent_name: Option<&str>,
         preferred_session_id: Option<&str>,
     ) -> Result<Option<String>, String> {
+        let Some(preferred_session_id) =
+            preferred_session_id.filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(None);
+        };
         let root = source_root(tool)?;
-        let session_path = preferred_session_id.and_then(|session_id| {
-            find_session_file(&root, tool, session_id)
-                .filter(|path| transcript_matches_project(path, folder, None, false))
-        });
+        let session_path = find_session_file(&root, tool, preferred_session_id)
+            .filter(|path| transcript_matches_project(path, folder, None, false));
         let project_path = find_project_transcript_file(
             &root,
             folder,
@@ -1650,5 +1653,26 @@ mod tests {
         ));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn cli_session_resolution_without_candidate_starts_fresh() {
+        let hub = UsageHub::new();
+
+        assert_eq!(
+            hub.resolve_latest_session("claude", "E:/_DevTool/Sub5torage", Some("Session 1"), None)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            hub.resolve_latest_session(
+                "codex",
+                "G:/UProject/ProjectA",
+                Some("ToonShader"),
+                Some("")
+            )
+            .unwrap(),
+            None
+        );
     }
 }
