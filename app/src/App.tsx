@@ -855,6 +855,16 @@ function App() {
     setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
   }, []);
 
+  const setAgentSessionId = useCallback((id: string, sessionId: string | null) => {
+    setAgents((prev) =>
+      prev.map((agent) =>
+        agent.id === id
+          ? { ...agent, lastSessionId: sessionId || undefined }
+          : agent
+      )
+    );
+  }, []);
+
   const removeAgent = useCallback(
     async (id: string) => {
       await invoke("kill_pty", { id }).catch(() => {});
@@ -1229,6 +1239,7 @@ function App() {
         dropTarget={dropTarget}
         termsRef={termsRef}
         setAgentStatus={setAgentStatus}
+        setAgentSessionId={setAgentSessionId}
         setActivePath={setActivePathForPane}
         onCloseTab={closeTab}
         onSelectTab={setActiveTabInPane}

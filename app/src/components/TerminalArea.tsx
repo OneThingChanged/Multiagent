@@ -21,6 +21,7 @@ export function TerminalArea({
   dropTarget,
   termsRef,
   setAgentStatus,
+  setAgentSessionId,
   setActivePath,
   onCloseTab,
   onSelectTab,
@@ -42,6 +43,7 @@ export function TerminalArea({
   dropTarget: DropTargetState | null;
   termsRef: React.MutableRefObject<Map<string, TerminalEntry>>;
   setAgentStatus: (id: string, status: AgentStatus) => void;
+  setAgentSessionId: (id: string, sessionId: string | null) => void;
   setActivePath: (path: Path | null) => void;
   onCloseTab: (path: Path, agentId: string) => void;
   onSelectTab: (path: Path, agentId: string) => void;
@@ -63,6 +65,7 @@ export function TerminalArea({
     dropTarget,
     termsRef,
     setAgentStatus,
+    setAgentSessionId,
     setActivePath,
     onCloseTab,
     onSelectTab,

@@ -28,6 +28,7 @@ export type RenderCtx = {
   dropTarget: DropTargetState | null;
   termsRef: React.MutableRefObject<Map<string, TerminalEntry>>;
   setAgentStatus: (id: string, status: AgentStatus) => void;
+  setAgentSessionId: (id: string, sessionId: string | null) => void;
   setActivePath: (path: Path | null) => void;
   onCloseTab: (path: Path, agentId: string) => void;
   onSelectTab: (path: Path, agentId: string) => void;
@@ -56,7 +57,7 @@ export function PaneSlot({
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
-  const { termsRef, setAgentStatus } = ctx;
+  const { termsRef, setAgentStatus, setAgentSessionId } = ctx;
 
   // Latest-agent ref read inside the spawn effect; lets that effect depend
   // only on agent.id (not on status, which flips often).
@@ -129,9 +130,9 @@ export function PaneSlot({
           if (tool.command) {
             let cmd = tool.command;
             const pinnedSessionId = ctx.sessionPins?.[cur.id] ?? null;
-            let sessionId = pinnedSessionId ?? cur.lastSessionId ?? null;
+            const candidateSessionId = pinnedSessionId ?? cur.lastSessionId ?? null;
+            let sessionId: string | null = null;
             if (
-              !pinnedSessionId &&
               cur.folder &&
               (cur.aiToolId === "codex" || cur.aiToolId === "claude")
             ) {
@@ -142,11 +143,18 @@ export function PaneSlot({
                     aiToolId: cur.aiToolId,
                     folder: cur.folder,
                     agentName: cur.name,
-                    preferredSessionId: cur.lastSessionId ?? null,
+                    preferredSessionId: candidateSessionId,
                   }
                 );
-                if (resolved) sessionId = resolved;
-              } catch {}
+                sessionId = resolved ?? null;
+                if (!pinnedSessionId && cur.lastSessionId !== sessionId) {
+                  setAgentSessionId(cur.id, sessionId);
+                }
+              } catch {
+                if (!pinnedSessionId && cur.lastSessionId) {
+                  setAgentSessionId(cur.id, null);
+                }
+              }
             }
             if (sessionId) {
               if (cur.aiToolId === "codex") {
@@ -248,6 +256,7 @@ export function PaneSlot({
     activeAgent?.status === "idle",
     termsRef,
     setAgentStatus,
+    setAgentSessionId,
     ctx.onOpenMarkdownPath,
     ctx.onOpenImagePath,
     ctx.sessionPins,
