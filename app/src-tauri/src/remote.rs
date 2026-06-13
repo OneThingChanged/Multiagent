@@ -76,11 +76,20 @@ pub struct ServerInfo {
     pub token: String,
 }
 
+#[derive(Clone)]
+enum HubMsg {
+    /// PTY output bytes for a session.
+    Data(String, Vec<u8>),
+    /// Authoritative PTY size for a session (cols, rows).
+    Resize(String, u16, u16),
+}
+
 pub struct RemoteHub {
     pub agents: Mutex<Vec<RemoteAgentInfo>>,
     pub view: Mutex<String>,
     buffers: Mutex<HashMap<String, Vec<u8>>>,
-    tx: tokio::sync::broadcast::Sender<(String, Vec<u8>)>,
+    sizes: Mutex<HashMap<String, (u16, u16)>>,
+    tx: tokio::sync::broadcast::Sender<HubMsg>,
     server: Mutex<Option<ServerInfo>>,
     handle: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     tunnel_child: Mutex<Option<std::process::Child>>,
@@ -100,6 +109,7 @@ impl RemoteHub {
             agents: Mutex::new(Vec::new()),
             view: Mutex::new("{}".to_string()),
             buffers: Mutex::new(HashMap::new()),
+            sizes: Mutex::new(HashMap::new()),
             tx,
             server: Mutex::new(None),
             handle: Mutex::new(None),
@@ -237,11 +247,28 @@ impl RemoteHub {
                 buf.drain(..cut);
             }
         }
-        let _ = self.tx.send((id.to_string(), bytes.to_vec()));
+        let _ = self.tx.send(HubMsg::Data(id.to_string(), bytes.to_vec()));
+    }
+
+    /// Record the authoritative PTY size for a session (set by the
+    /// desktop) and notify connected web viewers so they match it.
+    pub fn set_size(&self, id: &str, cols: u16, rows: u16) {
+        if cols < 2 || rows < 2 {
+            return;
+        }
+        {
+            let mut sizes = self.sizes.lock().unwrap();
+            if sizes.get(id) == Some(&(cols, rows)) {
+                return;
+            }
+            sizes.insert(id.to_string(), (cols, rows));
+        }
+        let _ = self.tx.send(HubMsg::Resize(id.to_string(), cols, rows));
     }
 
     pub fn drop_agent(&self, id: &str) {
         self.buffers.lock().unwrap().remove(id);
+        self.sizes.lock().unwrap().remove(id);
     }
 
     fn token_ok(&self, token: &str) -> bool {
@@ -1023,6 +1050,9 @@ async fn auth_logout(State(app): State<AppHandle>, headers: HeaderMap) -> Respon
 async fn handle_socket(mut socket: WebSocket, app: AppHandle, id: String) {
     let hub = app.state::<AppState>().remote.clone();
 
+    // Subscribe before sending backlog so no size update is missed.
+    let mut rx = hub.tx.subscribe();
+
     let backlog = hub.buffers.lock().unwrap().get(&id).cloned();
     if let Some(bytes) = backlog {
         if !bytes.is_empty() && socket.send(Message::Binary(bytes.into())).await.is_err() {
@@ -1030,15 +1060,34 @@ async fn handle_socket(mut socket: WebSocket, app: AppHandle, id: String) {
         }
     }
 
-    let mut rx = hub.tx.subscribe();
+    // Tell the viewer the current authoritative PTY size up front.
+    let initial_size = hub.sizes.lock().unwrap().get(&id).copied();
+    if let Some((cols, rows)) = initial_size {
+        let msg = format!("{{\"type\":\"resize\",\"cols\":{},\"rows\":{}}}", cols, rows);
+        if socket.send(Message::Text(msg.into())).await.is_err() {
+            return;
+        }
+    }
+
     loop {
         tokio::select! {
             chunk = rx.recv() => match chunk {
-                Ok((cid, bytes)) => {
+                Ok(HubMsg::Data(cid, bytes)) => {
                     if cid == id
                         && socket.send(Message::Binary(bytes.into())).await.is_err()
                     {
                         break;
+                    }
+                }
+                Ok(HubMsg::Resize(cid, cols, rows)) => {
+                    if cid == id {
+                        let msg = format!(
+                            "{{\"type\":\"resize\",\"cols\":{},\"rows\":{}}}",
+                            cols, rows
+                        );
+                        if socket.send(Message::Text(msg.into())).await.is_err() {
+                            break;
+                        }
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -1062,24 +1111,7 @@ async fn handle_client_msg(app: &AppHandle, id: &str, raw: &str, socket: &mut We
     };
     let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    if msg_type == "resize" {
-        let cols = value.get("cols").and_then(|c| c.as_u64()).unwrap_or(0) as u16;
-        let rows = value.get("rows").and_then(|r| r.as_u64()).unwrap_or(0) as u16;
-        if cols >= 2 && rows >= 2 {
-            let state = app.state::<AppState>();
-            let ptys = state.ptys.lock().unwrap();
-            if let Some(pty) = ptys.get(id) {
-                let _ = pty.master.resize(portable_pty::PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
-            }
-        }
-        return;
-    }
-
+    // Web viewers never drive PTY size; the desktop is the authority.
     if msg_type != "input" {
         return;
     }

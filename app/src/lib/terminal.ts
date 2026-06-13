@@ -63,7 +63,11 @@ export function applyTerminalTheme(term: Terminal, theme: AppThemeId) {
 const MARKDOWN_PATH_RE =
   /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:md|markdown|html|htm)(?::\d+(?::\d+)?)?/gi;
 
+const IMAGE_PATH_RE =
+  /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:png|jpe?g|gif|webp|bmp|svg|ico)/gi;
+
 export type MarkdownPathHandler = (agentId: string, path: string) => void;
+export type ImagePathHandler = (agentId: string, path: string) => void;
 
 type MarkdownPathMatch = {
   text: string;
@@ -114,6 +118,31 @@ function cleanMarkdownPathCandidate(candidate: string) {
     .replace(/[>`"')\].,;]+$/, "")
     .replace(/(\.(?:md|markdown|html|htm)):\d+(?::\d+)?$/i, "$1")
     .replace(/[>`"')\].,;]+$/, "");
+}
+
+function cleanImagePathCandidate(candidate: string) {
+  return candidate
+    .trim()
+    .replace(/^[`"'(<\[]+/, "")
+    .replace(/[>`"')\].,;]+$/, "");
+}
+
+function findImagePathMatches(text: string): MarkdownPathMatch[] {
+  const matches: MarkdownPathMatch[] = [];
+  IMAGE_PATH_RE.lastIndex = 0;
+  for (const match of text.matchAll(IMAGE_PATH_RE)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    const cleaned = cleanImagePathCandidate(raw);
+    if (!cleaned) continue;
+    const startColumn = cellWidth(text.slice(0, start));
+    matches.push({
+      text: cleaned,
+      startColumn,
+      endColumn: startColumn + cellWidth(raw),
+    });
+  }
+  return matches;
 }
 
 function charCellWidth(char: string) {
@@ -204,7 +233,8 @@ export function findMarkdownPathAt(
 function registerMarkdownLinkProvider(
   term: Terminal,
   id: string,
-  onMarkdownPath: MarkdownPathHandler
+  onMarkdownPath: MarkdownPathHandler,
+  onImagePath?: ImagePathHandler
 ) {
   term.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
@@ -235,6 +265,26 @@ function registerMarkdownLinkProvider(
         });
       }
 
+      if (onImagePath) {
+        for (const match of findImagePathMatches(text)) {
+          links.push({
+            range: {
+              start: { x: match.startColumn + 1, y: bufferLineNumber },
+              end: { x: match.endColumn, y: bufferLineNumber },
+            },
+            text: match.text,
+            decorations: {
+              pointerCursor: true,
+              underline: true,
+            },
+            activate(event, path) {
+              event.preventDefault();
+              onImagePath(id, path);
+            },
+          });
+        }
+      }
+
       callback(links.length > 0 ? links : undefined);
     },
   });
@@ -242,7 +292,8 @@ function registerMarkdownLinkProvider(
 
 export function createEntry(
   id: string,
-  onMarkdownPath?: MarkdownPathHandler
+  onMarkdownPath?: MarkdownPathHandler,
+  onImagePath?: ImagePathHandler
 ): TerminalEntry {
   const isWindows = navigator.userAgent.includes("Windows");
   const term = new Terminal({
@@ -272,7 +323,7 @@ export function createEntry(
     })
   );
   if (onMarkdownPath) {
-    registerMarkdownLinkProvider(term, id, onMarkdownPath);
+    registerMarkdownLinkProvider(term, id, onMarkdownPath, onImagePath);
   }
 
   const el = document.createElement("div");

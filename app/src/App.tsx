@@ -71,6 +71,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
 import { SearchBar } from "./components/SearchBar";
+import { ImageViewer } from "./components/ImageViewer";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const DEFAULT_DOCS_WIDTH = 640;
@@ -149,6 +150,10 @@ function App() {
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
   const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
+  const [imageViewer, setImageViewer] = useState<{
+    path: string;
+    folder: string | null;
+  } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] =
@@ -212,6 +217,24 @@ function App() {
       })),
     };
     invoke("sync_remote_view", { view: JSON.stringify(view) }).catch(() => {});
+  }, [projects, agents]);
+
+  useEffect(() => {
+    invoke("sync_usage_catalog", {
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        folder: p.folder,
+      })),
+      agents: agents.map((a) => ({
+        id: a.id,
+        projectId: a.projectId,
+        name: a.name,
+        folder: a.folder,
+        aiToolId: a.aiToolId,
+        lastSessionId: a.lastSessionId ?? null,
+      })),
+    }).catch(() => {});
   }, [projects, agents]);
 
   useEffect(() => {
@@ -1026,6 +1049,14 @@ function App() {
     [pushToast, selectAgent]
   );
 
+  const handleOpenImagePath = useCallback((agentId: string, path: string) => {
+    const agent = agentsRef.current.find((a) => a.id === agentId);
+    const project = projectsRef.current.find(
+      (candidate) => candidate.id === agent?.projectId
+    );
+    setImageViewer({ path, folder: project?.folder ?? null });
+  }, []);
+
   const setActivePathForPane = useCallback(
     (path: Path | null) => {
       if (!path) {
@@ -1161,6 +1192,7 @@ function App() {
           setTabContextMenu({ path, agentId, x, y })
         }
         onOpenMarkdownPath={handleOpenMarkdownPath}
+        onOpenImagePath={handleOpenImagePath}
       />
       {docsOpen && (
         <div
@@ -1241,6 +1273,13 @@ function App() {
         onSelect={selectAgent}
         onDismiss={dismissToast}
       />
+      {imageViewer && (
+        <ImageViewer
+          path={imageViewer.path}
+          folder={imageViewer.folder}
+          onClose={() => setImageViewer(null)}
+        />
+      )}
       {searchOpen && (
         <SearchBar
           onFindNext={(q) => {

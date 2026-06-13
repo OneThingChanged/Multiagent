@@ -38,6 +38,7 @@ export type RenderCtx = {
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   onOpenMarkdownPath: (agentId: string, path: string) => void;
+  onOpenImagePath: (agentId: string, path: string) => void;
 };
 
 export function PaneSlot({
@@ -72,7 +73,7 @@ export function PaneSlot({
     let entry = termsRef.current.get(agentId);
     let freshlyCreated = false;
     if (!entry) {
-      entry = createEntry(agentId, ctx.onOpenMarkdownPath);
+      entry = createEntry(agentId, ctx.onOpenMarkdownPath, ctx.onOpenImagePath);
       termsRef.current.set(agentId, entry);
       freshlyCreated = true;
     }
@@ -226,6 +227,7 @@ export function PaneSlot({
     termsRef,
     setAgentStatus,
     ctx.onOpenMarkdownPath,
+    ctx.onOpenImagePath,
     ctx.sessionPins,
   ]);
 

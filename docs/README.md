@@ -10,6 +10,7 @@
 - **[RESUME.md](RESUME.md)** — Codex 세션 resume 동작 흐름, 토큰 캡처/사용, 한계
 - **[BUILD.md](BUILD.md)** — 개발·릴리즈 빌드 방법, 트러블슈팅
 - **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** — 알려진 제약 + 향후 개선 후보
+- **[USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)** — 토큰 사용량 측정 + 대시보드 웹서버
 
 ## 빠른 시작
 

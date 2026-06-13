@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
 mod remote;
+mod usage;
 
 struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -31,6 +32,7 @@ struct AppState {
     hook_info: HookInfo,
     close_confirmed: Mutex<bool>,
     remote: Arc<remote::RemoteHub>,
+    usage: Arc<usage::UsageHub>,
 }
 
 #[derive(Clone, Serialize)]
@@ -50,6 +52,10 @@ struct HookEvent {
     event: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcript_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -119,25 +125,41 @@ $logPath = Join-Path $base "hook.log"
 $infoPath = Join-Path $base "hook-info.json"
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
 $sessionId = $null
-if ($Event -eq "session-start") {
-  try {
-    $stdinText = [Console]::In.ReadToEnd()
-    if ($stdinText) {
-      $payload = $stdinText | ConvertFrom-Json
-      if ($payload.session_id) { $sessionId = [string]$payload.session_id }
-    }
-  } catch {}
-}
-"$ts | event=$Event | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId" | Out-File -FilePath $logPath -Append -Encoding utf8
-if (-not (Test-Path $infoPath)) { "$ts |   ! no hook-info.json" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
+$transcriptPath = $null
+$cwd = $null
 try {
-  $info = Get-Content $infoPath -Raw | ConvertFrom-Json
-  if (-not $info.port) { "$ts |   ! port missing" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
-  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $info.token }
+  $stdinText = [Console]::In.ReadToEnd()
+  if ($stdinText) {
+    $payload = $stdinText | ConvertFrom-Json
+    if ($payload.session_id) { $sessionId = [string]$payload.session_id }
+    if ($payload.transcript_path) { $transcriptPath = [string]$payload.transcript_path }
+    if ($payload.cwd) { $cwd = [string]$payload.cwd }
+  }
+} catch {}
+# Prefer the per-session env vars (set by the app that spawned this
+# session). The session always belongs to a live app, so its port/token
+# are accurate even if another app instance later rewrote hook-info.json.
+$port = $env:MULTIAGENT_PORT
+$token = $env:MULTIAGENT_TOKEN
+if (-not $port -or -not $token) {
+  if (Test-Path $infoPath) {
+    try {
+      $info = Get-Content $infoPath -Raw | ConvertFrom-Json
+      if (-not $port -and $info.port) { $port = [string]$info.port }
+      if (-not $token -and $info.token) { $token = [string]$info.token }
+    } catch {}
+  }
+}
+"$ts | event=$Event | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId | transcript=$transcriptPath | port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
+if (-not $port -or -not $token) { "$ts |   ! no port/token" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
+try {
+  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $token }
   if ($sessionId) { $bodyMap.session_id = $sessionId }
+  if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
+  if ($cwd) { $bodyMap.cwd = $cwd }
   $body = $bodyMap | ConvertTo-Json -Compress
-  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$($info.port)/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
-  "$ts |   posted ok port=$($info.port)" | Out-File -FilePath $logPath -Append -Encoding utf8
+  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
+  "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 } catch {
   "$ts |   error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
 }
@@ -203,13 +225,33 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
                 .get("session_id")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let transcript_path = parsed
+                .get("transcript_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let cwd = parsed
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             if !id.is_empty() && !event.is_empty() {
+                let state: State<AppState> = app.state();
+                if event == "session-start" {
+                    if let Some(session_id) = session_id.as_deref() {
+                        state.usage.note_session(&id, session_id);
+                    }
+                } else if event == "done" {
+                    state
+                        .usage
+                        .ingest_agent(id.clone(), transcript_path.clone());
+                }
                 let _ = app.emit(
                     "agent:hook-event",
                     HookEvent {
                         id,
                         event,
                         session_id,
+                        transcript_path,
+                        cwd,
                     },
                 );
             }
@@ -482,8 +524,19 @@ fn list_markdown_files(folder: String) -> Result<Vec<MarkdownFile>, String> {
 
 #[tauri::command]
 fn read_markdown_file(folder: String, relative_path: String) -> Result<String, String> {
-    let root = resolve_markdown_root(&folder)?;
-    let path = resolve_markdown_file(&root, &relative_path)?;
+    let candidate = PathBuf::from(&relative_path);
+    let path = if candidate.is_absolute() {
+        // Absolute paths (e.g. a doc clicked from terminal output that
+        // lives outside the project folder) are read directly.
+        let canonical = candidate.canonicalize().map_err(|e| e.to_string())?;
+        if !is_markdown_file(&canonical) {
+            return Err("file is not markdown".to_string());
+        }
+        canonical
+    } else {
+        let root = resolve_markdown_root(&folder)?;
+        resolve_markdown_file(&root, &relative_path)?
+    };
     let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
     if metadata.len() > MAX_MARKDOWN_FILE_BYTES {
         return Err("markdown file is too large".to_string());
@@ -503,14 +556,23 @@ fn resolve_markdown_path(folder: String, path: String) -> Result<String, String>
 
     let candidate = PathBuf::from(raw);
 
-    let mut candidates = Vec::new();
+    // Absolute path: if it exists and is markdown, open it directly —
+    // return a project-relative path when inside the folder, otherwise
+    // the canonical absolute path so files outside the project still open.
     if candidate.is_absolute() {
-        candidates.push(candidate);
-    } else {
-        candidates.push(root.join(&candidate));
-        candidates.push(root.join("Docs").join(&candidate));
+        if let Ok(relative) = relative_to_markdown_root(&root, candidate.clone()) {
+            return Ok(relative);
+        }
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|e| format!("markdown file not found: {}", e))?;
+        if !is_markdown_file(&canonical) {
+            return Err("file is not markdown".to_string());
+        }
+        return Ok(canonical.to_string_lossy().into_owned());
     }
 
+    let candidates = [root.join(&candidate), root.join("Docs").join(&candidate)];
     let mut last_error = "markdown file not found".to_string();
     for path in candidates {
         match relative_to_markdown_root(&root, path) {
@@ -622,6 +684,7 @@ fn spawn_pty(
         );
     });
 
+    state.remote.set_size(&id, cols, rows);
     state.ptys.lock().unwrap().insert(
         id,
         PtyHandle {
@@ -648,16 +711,19 @@ fn write_pty(state: State<'_, AppState>, id: String, data: String) -> Result<(),
 
 #[tauri::command]
 fn resize_pty(state: State<'_, AppState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
-    let ptys = state.ptys.lock().unwrap();
-    let pty = ptys.get(&id).ok_or("pty not found")?;
-    pty.master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())?;
+    {
+        let ptys = state.ptys.lock().unwrap();
+        let pty = ptys.get(&id).ok_or("pty not found")?;
+        pty.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    state.remote.set_size(&id, cols, rows);
     Ok(())
 }
 
@@ -740,6 +806,48 @@ fn remote_config_set(
 }
 
 #[tauri::command]
+fn sync_usage_catalog(
+    state: State<'_, AppState>,
+    projects: Vec<usage::UsageProjectInfo>,
+    agents: Vec<usage::UsageAgentInfo>,
+) {
+    state.usage.sync_catalog(projects, agents);
+}
+
+#[tauri::command]
+async fn start_usage_server(app: AppHandle) -> Result<usage::UsageStatus, String> {
+    usage::start(app).await
+}
+
+#[tauri::command]
+fn stop_usage_server(app: AppHandle) -> usage::UsageStatus {
+    usage::stop(&app)
+}
+
+#[tauri::command]
+fn usage_server_status(state: State<'_, AppState>) -> usage::UsageStatus {
+    usage::status(&state.usage)
+}
+
+#[tauri::command]
+fn usage_config_get(state: State<'_, AppState>) -> usage::UsageConfig {
+    usage::config_get(&state.usage)
+}
+
+#[tauri::command]
+fn usage_config_set(
+    state: State<'_, AppState>,
+    config: usage::UsageConfig,
+) -> usage::UsageConfig {
+    usage::config_set(&state.usage, config)
+}
+
+#[tauri::command]
+fn usage_ingest_now(state: State<'_, AppState>) -> usage::IngestSummary {
+    state.usage.ingest_known_now()
+}
+
+#[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
     state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
@@ -773,6 +881,47 @@ fn read_audio_file(path: String) -> Result<Vec<u8>, String> {
         return Err("audio file too large (max 10 MB)".to_string());
     }
     fs::read(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_image_data_url(path: String, folder: Option<String>) -> Result<String, String> {
+    use base64::Engine;
+
+    let raw = PathBuf::from(path.trim());
+    let full = if raw.is_absolute() {
+        raw
+    } else if let Some(f) = folder.filter(|f| !f.trim().is_empty()) {
+        PathBuf::from(f).join(&raw)
+    } else {
+        raw
+    };
+    let canonical = full
+        .canonicalize()
+        .map_err(|e| format!("image not found: {}", e))?;
+
+    let ext = canonical
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => return Err("not a supported image type".to_string()),
+    };
+
+    let meta = fs::metadata(&canonical).map_err(|e| e.to_string())?;
+    if meta.len() > 25 * 1024 * 1024 {
+        return Err("image too large (max 25 MB)".to_string());
+    }
+    let bytes = fs::read(&canonical).map_err(|e| e.to_string())?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, b64))
 }
 
 fn updater_dir() -> Result<PathBuf, String> {
@@ -853,6 +1002,7 @@ pub fn run() {
                 .map_err(|e| format!("start hook server: {}", e))?;
             write_hook_info(&handle, port, &token)
                 .map_err(|e| format!("write hook info: {}", e))?;
+            let usage_hub = Arc::new(usage::UsageHub::new());
             app.manage(AppState {
                 ptys: Mutex::new(HashMap::new()),
                 hook_info: HookInfo {
@@ -862,8 +1012,22 @@ pub fn run() {
                 },
                 close_confirmed: Mutex::new(false),
                 remote: Arc::new(remote::RemoteHub::new()),
+                usage: usage_hub,
             });
             remote::load_access(app.handle());
+            usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
+            {
+                let state: State<AppState> = app.handle().state();
+                if usage::config_get(&state.usage).enabled {
+                    let app_for_usage = app.handle().clone();
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(500));
+                        let _ = tauri::async_runtime::block_on(async move {
+                            usage::start(app_for_usage).await
+                        });
+                    });
+                }
+            }
 
             // Intercept window close: emit event to frontend so it can
             // gracefully /quit running agents and capture resume tokens.
@@ -898,6 +1062,7 @@ pub fn run() {
             run_installer_and_quit,
             play_system_sound,
             read_audio_file,
+            read_image_data_url,
             start_remote_server,
             stop_remote_server,
             remote_server_status,
@@ -910,7 +1075,14 @@ pub fn run() {
             remote_access_approve,
             remote_access_revoke,
             remote_config_get,
-            remote_config_set
+            remote_config_set,
+            sync_usage_catalog,
+            start_usage_server,
+            stop_usage_server,
+            usage_server_status,
+            usage_config_get,
+            usage_config_set,
+            usage_ingest_now
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

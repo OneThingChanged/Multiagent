@@ -50,7 +50,7 @@
     font-size: 14px; cursor: pointer; padding: 0 2px; border-radius: 4px; }
   .tab-close:hover { color: #f87171; background: #21262d; }
   #term-area { flex: 1; min-height: 0; position: relative; }
-  .term-host { position: absolute; inset: 0; padding: 4px; }
+  .term-host { position: absolute; inset: 0; padding: 4px; overflow: auto; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; color: #8b949e; font-size: 14px; }
 </style>
@@ -73,7 +73,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script>
 const CR = String.fromCharCode(13);
 const ESCC = String.fromCharCode(27);
@@ -84,10 +83,9 @@ const esc = (s) => (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt
 let view = { projects: [], agents: [] };
 let openTabs = []; // agentId[]
 let activeTab = null;
-const pool = new Map(); // agentId -> { term, fit, ws, host, ro }
+const pool = new Map(); // agentId -> { term, ws, host }
 
 const TermCtor = window.Terminal && (window.Terminal.Terminal || window.Terminal);
-const FitCtor = window.FitAddon && (window.FitAddon.FitAddon || window.FitAddon);
 
 $("#logout").onclick = async () => {
   try { await fetch("/auth/logout", { method: "POST" }); } catch {}
@@ -189,7 +187,7 @@ function setActive(id) {
   renderSidebar();
   renderTabs();
   if (e) {
-    requestAnimationFrame(() => { sendResize(e); e.term.focus(); });
+    requestAnimationFrame(() => { e.term.focus(); });
   }
 }
 
@@ -197,7 +195,6 @@ function closeTab(id, silent) {
   openTabs = openTabs.filter((t) => t !== id);
   const e = pool.get(id);
   if (e) {
-    try { e.ro.disconnect(); } catch {}
     try { if (e.ws) { e.ws.onclose = null; e.ws.close(); } } catch {}
     try { e.term.dispose(); } catch {}
     if (e.host.parentNode) e.host.parentNode.removeChild(e.host);
@@ -227,8 +224,6 @@ function ensureTerm(id) {
       selectionBackground: "#264f78",
     },
   });
-  const fit = new FitCtor();
-  term.loadAddon(fit);
   term.open(host);
   term.onData((d) => {
     const e = pool.get(id);
@@ -239,35 +234,25 @@ function ensureTerm(id) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws?id=${encodeURIComponent(id)}`);
   ws.binaryType = "arraybuffer";
-  ws.onopen = () => { const e = pool.get(id); if (e) sendResize(e); };
   ws.onmessage = (ev) => {
     if (typeof ev.data === "string") {
       try {
         const m = JSON.parse(ev.data);
-        if (m.type === "error") term.write(CRLF + ESCC + "[31m" + m.message + ESCC + "[0m" + CRLF);
+        if (m.type === "error") {
+          term.write(CRLF + ESCC + "[31m" + m.message + ESCC + "[0m" + CRLF);
+        } else if (m.type === "resize" && m.cols >= 2 && m.rows >= 2) {
+          // The desktop owns the PTY size; match it exactly so wrapping
+          // is identical and we never fight over the terminal dimensions.
+          try { term.resize(m.cols, m.rows); } catch {}
+        }
       } catch {}
     } else {
       term.write(new Uint8Array(ev.data));
     }
   };
   ws.onclose = () => { term.write(CRLF + ESCC + "[2m[connection closed]" + ESCC + "[0m" + CRLF); };
-  const ro = new ResizeObserver(() => { const e = pool.get(id); if (e && id === activeTab) sendResize(e); });
-  ro.observe(host);
-  pool.set(id, { term, fit, ws, host, ro });
+  pool.set(id, { term, ws, host });
 }
-
-function sendResize(e) {
-  if (!e.host.parentNode) return;
-  try { e.fit.fit(); } catch { return; }
-  if (e.ws && e.ws.readyState === 1) {
-    e.ws.send(JSON.stringify({ type: "resize", cols: e.term.cols, rows: e.term.rows }));
-  }
-}
-
-window.addEventListener("resize", () => {
-  const e = activeTab ? pool.get(activeTab) : null;
-  if (e) sendResize(e);
-});
 setInterval(loadView, 2000);
 loadView();
 </script>

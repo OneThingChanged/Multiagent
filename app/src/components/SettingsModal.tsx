@@ -68,10 +68,28 @@ type RemoteConfig = {
   client_secret: string;
 };
 
-type SettingsTab = "general" | "remote" | "about";
+type UsageStatus = {
+  running: boolean;
+  url: string | null;
+  port: number | null;
+};
+
+type UsageConfig = {
+  enabled: boolean;
+  serverPort: number;
+};
+
+type UsageIngestSummary = {
+  files: number;
+  events: number;
+  errors: string[];
+};
+
+type SettingsTab = "general" | "usage" | "remote" | "about";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "usage", label: "Usage" },
   { id: "remote", label: "Remote" },
   { id: "about", label: "About" },
 ];
@@ -127,10 +145,29 @@ export function SettingsModal({
     client_secret: "",
   });
   const [configSaved, setConfigSaved] = useState(false);
+  const [usage, setUsage] = useState<UsageStatus>({
+    running: false,
+    url: null,
+    port: null,
+  });
+  const [usageConfig, setUsageConfig] = useState<UsageConfig>({
+    enabled: false,
+    serverPort: 3004,
+  });
+  const [usageBusy, setUsageBusy] = useState(false);
+  const [usageCopied, setUsageCopied] = useState(false);
+  const [usageSaved, setUsageSaved] = useState(false);
+  const [usageIngest, setUsageIngest] = useState<UsageIngestSummary | null>(
+    null
+  );
+  const [usageError, setUsageError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<RemoteConfig>("remote_config_get")
       .then(setRemoteConfig)
+      .catch(() => {});
+    invoke<UsageConfig>("usage_config_get")
+      .then(setUsageConfig)
       .catch(() => {});
   }, []);
 
@@ -147,6 +184,9 @@ export function SettingsModal({
   useEffect(() => {
     invoke<RemoteStatus>("remote_server_status")
       .then(setRemote)
+      .catch(() => {});
+    invoke<UsageStatus>("usage_server_status")
+      .then(setUsage)
       .catch(() => {});
     invoke<TunnelStatus>("tunnel_status")
       .then(setTunnel)
@@ -226,6 +266,82 @@ export function SettingsModal({
         setTimeout(() => setRemoteCopied(false), 1500);
       })
       .catch(() => {});
+  };
+
+  const handleUsageToggle = async () => {
+    setUsageBusy(true);
+    setUsageError(null);
+    try {
+      const next = usage.running
+        ? await invoke<UsageStatus>("stop_usage_server")
+        : await invoke<UsageStatus>("start_usage_server");
+      setUsage(next);
+    } catch (err) {
+      setUsageError(
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "usage dashboard failed"
+      );
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const handleSaveUsageConfig = () => {
+    invoke<UsageConfig>("usage_config_set", { config: usageConfig })
+      .then((saved) => {
+        setUsageConfig(saved);
+        setUsageSaved(true);
+        setTimeout(() => setUsageSaved(false), 1500);
+      })
+      .catch((err) => {
+        setUsageError(
+          err instanceof Error
+            ? err.message
+            : typeof err === "string"
+              ? err
+              : "usage config save failed"
+        );
+      });
+  };
+
+  const handleUsageReindex = async () => {
+    setUsageBusy(true);
+    setUsageError(null);
+    try {
+      const summary = await invoke<UsageIngestSummary>("usage_ingest_now");
+      setUsageIngest(summary);
+    } catch (err) {
+      setUsageError(
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "usage reindex failed"
+      );
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const handleCopyUsageUrl = () => {
+    if (!usage.url) return;
+    navigator.clipboard
+      .writeText(usage.url)
+      .then(() => {
+        setUsageCopied(true);
+        setTimeout(() => setUsageCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+
+  const handleOpenUsage = () => {
+    if (!usage.url) return;
+    openUrl(usage.url).catch((error) => {
+      console.error("Failed to open usage dashboard", error);
+    });
   };
 
   const applySound = (next: NotificationSoundConfig) => {
@@ -425,6 +541,126 @@ export function SettingsModal({
           </div>
         </div>
         </>
+        )}
+
+        {tab === "usage" && (
+        <div className="app-settings-section">
+          <div className="field-label">Usage dashboard</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">Status</span>
+              <span className="app-about-value">
+                {usage.running ? `running (port ${usage.port})` : "off"}
+              </span>
+            </div>
+            {usage.running && usage.url && (
+              <div className="app-remote-url-row">
+                <span className="app-remote-url" title={usage.url}>
+                  {usage.url}
+                </span>
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handleCopyUsageUrl}
+                >
+                  {usageCopied ? "Copied!" : "Copy"}
+                </button>
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handleOpenUsage}
+                >
+                  Open
+                </button>
+              </div>
+            )}
+            <div
+              className={`app-update-message ${usageError ? "app-update-error" : ""}`}
+            >
+              {usageError
+                ? `Usage error: ${usageError}`
+                : "Claude/Codex JSONL transcript usage를 SQLite에 저장하고 로컬 웹 대시보드에서 봅니다."}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className={
+                  usage.running
+                    ? "btn-secondary app-update-btn"
+                    : "btn-primary app-update-btn"
+                }
+                onClick={handleUsageToggle}
+                disabled={usageBusy}
+              >
+                {usageBusy ? "..." : usage.running ? "Stop" : "Start"}
+              </button>
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleUsageReindex}
+                disabled={usageBusy}
+              >
+                Reindex
+              </button>
+            </div>
+
+            <div className="app-remote-divider" />
+            <label className="field app-remote-field">
+              <span className="field-label">Local dashboard port</span>
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={usageConfig.serverPort}
+                onChange={(e) =>
+                  setUsageConfig((c) => ({
+                    ...c,
+                    serverPort: Math.max(
+                      1,
+                      Math.min(65535, Number(e.target.value) || 3004)
+                    ),
+                  }))
+                }
+              />
+            </label>
+            <label className="app-checkbox-row">
+              <input
+                type="checkbox"
+                checked={usageConfig.enabled}
+                onChange={(e) =>
+                  setUsageConfig((c) => ({
+                    ...c,
+                    enabled: e.target.checked,
+                  }))
+                }
+              />
+              <span>Start usage dashboard when MultiAgent starts</span>
+            </label>
+            <div className="app-update-message">
+              기본값은 3004입니다. 포트 변경은 다음 Start부터 적용됩니다.
+            </div>
+            <div className="app-update-actions">
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleSaveUsageConfig}
+              >
+                {usageSaved ? "Saved!" : "Save"}
+              </button>
+            </div>
+            {usageIngest && (
+              <>
+                <div className="app-remote-divider" />
+                <div className="app-about-row">
+                  <span className="app-about-label">Last reindex</span>
+                  <span className="app-about-value">
+                    {usageIngest.files} files · {usageIngest.events} new events
+                  </span>
+                </div>
+                {usageIngest.errors.length > 0 && (
+                  <div className="app-update-message app-update-error">
+                    {usageIngest.errors.slice(0, 3).join(" / ")}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
         )}
 
         {tab === "remote" && (
