@@ -13,6 +13,7 @@ import {
   onAction,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
+import { openPath } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 
@@ -102,6 +103,18 @@ function loadDocsWidth() {
   } catch {
     return DEFAULT_DOCS_WIDTH;
   }
+}
+
+function isHtmlDocumentPath(path: string) {
+  return /\.(?:html|htm)$/i.test(path.trim());
+}
+
+function isAbsoluteFsPath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+function joinFsPath(folder: string, relativePath: string) {
+  return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
 }
 
 function firstProjectSessionFocus(
@@ -1134,6 +1147,13 @@ function App() {
           folder: project.folder,
           path,
         });
+        if (isHtmlDocumentPath(relativePath)) {
+          const fullPath = isAbsoluteFsPath(relativePath)
+            ? relativePath
+            : joinFsPath(project.folder, relativePath);
+          await openPath(fullPath);
+          return;
+        }
         setDocsOpen(true);
         setDocsRequest({
           projectId: project.id,
@@ -1142,7 +1162,7 @@ function App() {
           key: Date.now(),
         });
       } catch {
-        pushToast(agentId, agent.name, "Markdown 파일을 찾을 수 없습니다.");
+        pushToast(agentId, agent.name, "문서 파일을 열 수 없습니다.");
       }
     },
     [pushToast]

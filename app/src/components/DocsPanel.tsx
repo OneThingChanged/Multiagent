@@ -41,13 +41,14 @@ function nextNavMode(mode: DocsNavMode): DocsNavMode {
 }
 
 function bestInitialPath(files: MarkdownFile[]) {
+  const markdownFiles = files.filter((file) => !isHtmlPath(file.relative_path));
   return (
-    files.find((file) => file.relative_path.toLowerCase() === "readme.md")
+    markdownFiles.find((file) => file.relative_path.toLowerCase() === "readme.md")
       ?.relative_path ??
-    files.find((file) =>
+    markdownFiles.find((file) =>
       file.relative_path.toLowerCase().endsWith("/readme.md")
     )?.relative_path ??
-    files[0]?.relative_path ??
+    markdownFiles[0]?.relative_path ??
     null
   );
 }
@@ -238,6 +239,11 @@ export function DocsPanel({
       setContent("");
       return;
     }
+    if (isHtmlPath(selectedPath)) {
+      setContent("");
+      setDocLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setDocLoading(true);
@@ -276,6 +282,16 @@ export function DocsPanel({
   const selectedFullPath =
     folder && selectedPath ? joinFolderPath(folder, selectedPath) : null;
 
+  const openDocsFile = (file: MarkdownFile) => {
+    if (isHtmlPath(file.relative_path)) {
+      openPath(joinFolderPath(folder, file.relative_path)).catch((err) =>
+        setError(String(err))
+      );
+      return;
+    }
+    setSelectedPath(file.relative_path);
+  };
+
   const toggleFolder = (path: string) => {
     setExpandedFolders((current) => {
       const next = new Set(current);
@@ -296,7 +312,7 @@ export function DocsPanel({
               file.relative_path === selectedPath ? "docs-file-active" : ""
             }`}
             style={{ paddingLeft: 12 + depth * 14 }}
-            onClick={() => setSelectedPath(file.relative_path)}
+            onClick={() => openDocsFile(file)}
             title={file.relative_path}
           >
             <span
@@ -412,7 +428,7 @@ export function DocsPanel({
                           ? "docs-file-active"
                           : ""
                       }`}
-                      onClick={() => setSelectedPath(file.relative_path)}
+                      onClick={() => openDocsFile(file)}
                       title={file.relative_path}
                     >
                       <span className="docs-file-name">{file.name}</span>
@@ -437,24 +453,14 @@ export function DocsPanel({
                   <div className="docs-current" title={selectedFile.relative_path}>
                     {displayPath(selectedFile.relative_path)}
                   </div>
-                  {isHtmlPath(selectedFile.relative_path) ? (
-                    <iframe
-                      key={selectedFile.relative_path}
-                      className="docs-html-frame"
-                      title={selectedFile.name}
-                      srcDoc={content}
-                      sandbox=""
-                    />
-                  ) : (
-                    <div className="docs-content">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[[rehypeHighlight, { detect: true }]]}
-                      >
-                        {content}
-                      </ReactMarkdown>
-                    </div>
-                  )}
+                  <div className="docs-content">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+                    >
+                      {content}
+                    </ReactMarkdown>
+                  </div>
                 </>
               )}
               {!error && !docLoading && !selectedFile && files.length === 0 && (
