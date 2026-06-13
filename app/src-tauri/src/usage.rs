@@ -160,17 +160,28 @@ impl UsageHub {
             .iter()
             .find(|candidate| candidate.id == agent.project_id)
             .cloned();
-        let session_id = self
-            .sessions
-            .lock()
-            .unwrap()
+        let live_sessions = self.sessions.lock().unwrap().clone();
+        let session_id = live_sessions
             .get(agent_id)
             .cloned()
             .or_else(|| agent.last_session_id.clone());
+        let no_session_peer_count = catalog
+            .agents
+            .iter()
+            .filter(|candidate| {
+                candidate.project_id == agent.project_id
+                    && candidate.ai_tool_id == agent.ai_tool_id
+                    && candidate.last_session_id.is_none()
+                    && !live_sessions.contains_key(&candidate.id)
+            })
+            .count();
         let path = self.resolve_transcript_path(
             &agent.ai_tool_id,
             session_id.as_deref(),
             transcript_path.as_deref(),
+            Some(agent.folder.as_str()),
+            Some(agent.name.as_str()),
+            no_session_peer_count > 1,
         )?;
         self.ingest_file(&agent, project.as_ref(), session_id.as_deref(), &path)
     }
@@ -251,17 +262,32 @@ impl UsageHub {
         tool: &str,
         session_id: Option<&str>,
         transcript_path: Option<&str>,
+        folder_hint: Option<&str>,
+        agent_name_hint: Option<&str>,
+        require_agent_name_match: bool,
     ) -> Result<PathBuf, String> {
         if let Some(path) = transcript_path.filter(|p| !p.trim().is_empty()) {
             if let Ok(path) = self.allowed_source_path(tool, Path::new(path)) {
                 return Ok(path);
             }
         }
-        let session_id = session_id.ok_or_else(|| "session id is missing".to_string())?;
         let root = source_root(tool)?;
-        find_session_file(&root, tool, session_id)
-            .ok_or_else(|| format!("usage transcript not found for {}", session_id))
-            .and_then(|path| self.allowed_source_path(tool, &path))
+        if let Some(session_id) = session_id {
+            return find_session_file(&root, tool, session_id)
+                .ok_or_else(|| format!("usage transcript not found for {}", session_id))
+                .and_then(|path| self.allowed_source_path(tool, &path));
+        }
+        if let Some(folder) = folder_hint.filter(|value| !value.trim().is_empty()) {
+            if let Some(path) = find_project_transcript_file(
+                &root,
+                folder,
+                agent_name_hint,
+                require_agent_name_match,
+            ) {
+                return self.allowed_source_path(tool, &path);
+            }
+        }
+        Err("session id is missing".to_string())
     }
 
     fn allowed_source_path(&self, tool: &str, path: &Path) -> Result<PathBuf, String> {
@@ -368,7 +394,42 @@ impl UsageHub {
                 })
             })
             .map_err(|e| e.to_string())?;
-        collect_rows(rows)
+        let mut projects = collect_rows(rows)?;
+
+        for project in self.catalog.lock().unwrap().projects.clone() {
+            if project.id.is_empty()
+                || projects
+                    .iter()
+                    .any(|usage| usage.project_id.as_deref() == Some(project.id.as_str()))
+            {
+                continue;
+            }
+            projects.push(ProjectUsage {
+                project_id: Some(project.id),
+                project_name: if project.name.trim().is_empty() {
+                    "(unknown)".to_string()
+                } else {
+                    project.name
+                },
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: 0,
+                session_count: 0,
+                last_ts: None,
+            });
+        }
+
+        projects.sort_by(|a, b| {
+            b.total_tokens.cmp(&a.total_tokens).then_with(|| {
+                a.project_name
+                    .to_lowercase()
+                    .cmp(&b.project_name.to_lowercase())
+            })
+        });
+        Ok(projects)
     }
 
     fn sessions(&self, range: &str, project_id: Option<&str>) -> Result<Vec<SessionUsage>, String> {
@@ -624,10 +685,7 @@ struct RecentUsage {
 
 pub fn load(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let db_path = dir.join("usage.db");
@@ -801,7 +859,10 @@ async fn page() -> Html<&'static str> {
     Html(PAGE)
 }
 
-async fn summary(State(app): State<AppHandle>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn summary(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let range = q.get("range").map(String::as_str).unwrap_or("today");
     let project_id = query_project_id(&q);
     let hub = app.state::<AppState>().usage.clone();
@@ -811,7 +872,10 @@ async fn summary(State(app): State<AppHandle>, Query(q): Query<HashMap<String, S
     )
 }
 
-async fn projects(State(app): State<AppHandle>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn projects(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let range = q.get("range").map(String::as_str).unwrap_or("today");
     let hub = app.state::<AppState>().usage.clone();
     json_result(
@@ -820,7 +884,10 @@ async fn projects(State(app): State<AppHandle>, Query(q): Query<HashMap<String, 
     )
 }
 
-async fn sessions(State(app): State<AppHandle>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn sessions(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let range = q.get("range").map(String::as_str).unwrap_or("today");
     let project_id = query_project_id(&q);
     let hub = app.state::<AppState>().usage.clone();
@@ -830,7 +897,10 @@ async fn sessions(State(app): State<AppHandle>, Query(q): Query<HashMap<String, 
     )
 }
 
-async fn timeseries(State(app): State<AppHandle>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn timeseries(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let range = q.get("range").map(String::as_str).unwrap_or("today");
     let bucket = q.get("bucket").map(String::as_str).unwrap_or("hour");
     let project_id = query_project_id(&q);
@@ -841,7 +911,10 @@ async fn timeseries(State(app): State<AppHandle>, Query(q): Query<HashMap<String
     )
 }
 
-async fn recent(State(app): State<AppHandle>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn recent(
+    State(app): State<AppHandle>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let range = q.get("range").map(String::as_str).unwrap_or("today");
     let limit = q
         .get("limit")
@@ -1205,8 +1278,7 @@ fn find_session_file(root: &Path, tool: &str, session_id: &str) -> Option<PathBu
                 stack.push(path);
                 continue;
             }
-            if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("jsonl")
-            {
+            if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1229,6 +1301,130 @@ fn find_session_file(root: &Path, tool: &str, session_id: &str) -> Option<PathBu
         }
     }
     best.map(|(path, _)| path)
+}
+
+fn find_project_transcript_file(
+    root: &Path,
+    folder: &str,
+    agent_name_hint: Option<&str>,
+    require_agent_name_match: bool,
+) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    let mut best: Option<(PathBuf, SystemTime)> = None;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            if let Some((_, best_time)) = &best {
+                if *best_time >= modified {
+                    continue;
+                }
+            }
+            if transcript_matches_project(&path, folder, agent_name_hint, require_agent_name_match)
+            {
+                best = Some((path, modified));
+            }
+        }
+    }
+    best.map(|(path, _)| path)
+}
+
+fn transcript_matches_project(
+    path: &Path,
+    folder: &str,
+    agent_name_hint: Option<&str>,
+    require_agent_name_match: bool,
+) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let mut bytes_read = 0usize;
+    let mut lines_read = 0usize;
+    let mut project_match = false;
+    let mut agent_match = !require_agent_name_match;
+    let agent_key = agent_name_hint
+        .filter(|value| !value.trim().is_empty())
+        .map(search_key);
+
+    loop {
+        line.clear();
+        let Ok(bytes) = reader.read_line(&mut line) else {
+            break;
+        };
+        if bytes == 0 {
+            break;
+        }
+        bytes_read += bytes;
+        lines_read += 1;
+        let raw = line.trim();
+        if !agent_match {
+            if let Some(agent_key) = agent_key.as_deref() {
+                if !agent_key.is_empty() && search_key(raw).contains(agent_key) {
+                    agent_match = true;
+                }
+            }
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+            let cwd = string_field(&value, "cwd").or_else(|| {
+                value
+                    .get("payload")
+                    .and_then(|payload| string_field(payload, "cwd"))
+            });
+            if cwd
+                .as_deref()
+                .map(|cwd| path_matches_folder(cwd, folder))
+                .unwrap_or(false)
+            {
+                project_match = true;
+            }
+        }
+        if project_match && agent_match {
+            return true;
+        }
+        if bytes_read > 2 * 1024 * 1024 || lines_read > 500 {
+            break;
+        }
+    }
+
+    false
+}
+
+fn path_matches_folder(path: &str, folder: &str) -> bool {
+    let path = comparable_path(path);
+    let folder = comparable_path(folder);
+    path == folder || path.starts_with(&format!("{}\\", folder))
+}
+
+fn comparable_path(path: &str) -> String {
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn search_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 fn collect_rows<T>(
@@ -1256,5 +1452,53 @@ fn range_start(range: &str) -> i64 {
         "month" => now - 30 * 24 * 60 * 60,
         "all" => 0,
         _ => now - 24 * 60 * 60,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_fallback_matches_project_and_agent_name() {
+        let path = std::env::temp_dir().join(format!(
+            "multiagent-usage-test-{}.jsonl",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let session = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "cwd": "G:\\UProject\\ProjectA"
+            }
+        });
+        let prompt = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "continue toonshader work"
+            }
+        });
+        fs::write(&path, format!("{}\n{}\n", session, prompt)).unwrap();
+
+        assert!(transcript_matches_project(
+            &path,
+            "G:/UProject/ProjectA",
+            Some("ToonShader"),
+            true
+        ));
+        assert!(!transcript_matches_project(
+            &path,
+            "G:/UProject/ProjectA",
+            Some("EditorTools"),
+            true
+        ));
+        assert!(!transcript_matches_project(
+            &path,
+            "G:/UProject/ProjectB",
+            Some("ToonShader"),
+            true
+        ));
+
+        let _ = fs::remove_file(path);
     }
 }

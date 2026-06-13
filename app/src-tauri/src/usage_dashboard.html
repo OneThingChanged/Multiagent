@@ -520,13 +520,14 @@
         rows.push(
           ...projects.map((p) => {
             const active = p.projectId === state.selectedProjectId ? " active-project" : "";
+            const lastUsage = p.lastTs ? ts(p.lastTs) : "no usage in range";
             return `
               <button class="project-row${active}" data-project-id="${safe(p.projectId || "")}">
                 <span class="project-name" title="${safe(p.projectName)}">${safe(p.projectName || "(unknown)")}</span>
                 <span class="project-total">${n(p.totalTokens)}</span>
                 <span class="project-meta">
                   <span>${n(p.sessionCount)} sessions</span>
-                  <span>${ts(p.lastTs)}</span>
+                  <span>${safe(lastUsage)}</span>
                 </span>
               </button>
             `;
