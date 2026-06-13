@@ -20,7 +20,10 @@ use tauri::{AppHandle, Manager};
 use crate::AppState;
 
 const PAGE: &str = include_str!("usage_dashboard.html");
-const DEFAULT_PORT: u16 = 3004;
+const DEFAULT_PORT: u16 = 3141;
+const LEGACY_BLOCKED_PORT: u16 = 3004;
+const FALLBACK_PORT_START: u16 = 3141;
+const FALLBACK_PORT_END: u16 = 3999;
 
 #[derive(Clone, Default)]
 struct UsageCatalog {
@@ -697,9 +700,15 @@ pub async fn start(app: AppHandle) -> Result<UsageStatus, String> {
         let config = state.usage.config.lock().unwrap();
         config.server_port
     };
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", configured_port))
-        .await
-        .map_err(|e| format!("bind usage dashboard port {} failed: {}", configured_port, e))?;
+    let (listener, port) = bind_usage_listener(configured_port).await?;
+    if port != configured_port {
+        let state = app.state::<AppState>();
+        {
+            let mut config = state.usage.config.lock().unwrap();
+            config.server_port = port;
+        }
+        state.usage.save_config();
+    }
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
     let router = Router::new()
@@ -741,7 +750,7 @@ pub fn stop(app: &AppHandle) -> UsageStatus {
 }
 
 fn sanitize_config(mut config: UsageConfig) -> UsageConfig {
-    if config.server_port == 0 {
+    if config.server_port == 0 || config.server_port == LEGACY_BLOCKED_PORT {
         config.server_port = DEFAULT_PORT;
     }
     config
@@ -749,6 +758,43 @@ fn sanitize_config(mut config: UsageConfig) -> UsageConfig {
 
 fn make_url(port: u16) -> String {
     format!("http://127.0.0.1:{}", port)
+}
+
+async fn bind_usage_listener(
+    configured_port: u16,
+) -> Result<(tokio::net::TcpListener, u16), String> {
+    let mut candidates = Vec::new();
+    push_port_candidate(&mut candidates, configured_port);
+    push_port_candidate(&mut candidates, DEFAULT_PORT);
+    for port in FALLBACK_PORT_START..=FALLBACK_PORT_END {
+        push_port_candidate(&mut candidates, port);
+    }
+
+    let mut first_error = None;
+    for port in candidates {
+        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => return Ok((listener, port)),
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err.to_string());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "bind usage dashboard port {} failed: {}; no fallback port available in {}-{}",
+        configured_port,
+        first_error.unwrap_or_else(|| "unknown error".to_string()),
+        FALLBACK_PORT_START,
+        FALLBACK_PORT_END
+    ))
+}
+
+fn push_port_candidate(candidates: &mut Vec<u16>, port: u16) {
+    if port > 0 && !candidates.contains(&port) {
+        candidates.push(port);
+    }
 }
 
 async fn page() -> Html<&'static str> {

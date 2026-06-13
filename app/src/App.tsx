@@ -80,6 +80,7 @@ const MIN_WORKSPACE_WIDTH = 260;
 
 type DocsRequest = {
   projectId: string;
+  agentId: string | null;
   relativePath: string;
   key: number;
 };
@@ -333,6 +334,11 @@ function App() {
         setSearchOpen(false);
         return;
       }
+      if (event.key === "Escape" && docsOpen && !settingsOpen) {
+        event.preventDefault();
+        setDocsOpen(false);
+        return;
+      }
       if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
         return;
       }
@@ -382,7 +388,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [searchOpen]);
+  }, [docsOpen, searchOpen, settingsOpen]);
 
   const handleThemeChange = useCallback((theme: AppThemeId) => {
     setAppTheme(theme);
@@ -1035,10 +1041,10 @@ function App() {
           folder: project.folder,
           path,
         });
-        selectAgent(agentId);
         setDocsOpen(true);
         setDocsRequest({
           projectId: project.id,
+          agentId,
           relativePath,
           key: Date.now(),
         });
@@ -1046,7 +1052,7 @@ function App() {
         pushToast(agentId, agent.name, "Markdown 파일을 찾을 수 없습니다.");
       }
     },
-    [pushToast, selectAgent]
+    [pushToast]
   );
 
   const handleOpenImagePath = useCallback((agentId: string, path: string) => {
@@ -1131,6 +1137,22 @@ function App() {
         : activeProject,
     [activeAgent, activeProject, projects]
   );
+  const docsProject = useMemo(
+    () =>
+      docsRequest
+        ? projects.find((project) => project.id === docsRequest.projectId) ??
+          activeSessionProject
+        : activeSessionProject,
+    [activeSessionProject, docsRequest, projects]
+  );
+  const docsSession = useMemo(
+    () =>
+      docsRequest?.agentId
+        ? agents.find((agent) => agent.id === docsRequest.agentId) ??
+          activeAgent
+        : activeAgent,
+    [activeAgent, agents, docsRequest]
+  );
   const renameSession = useMemo(
     () =>
       renameSessionId
@@ -1161,7 +1183,12 @@ function App() {
           activeProject ? setShowModal(true) : setShowProjectModal(true)
         }
         docsOpen={docsOpen}
-        onToggleDocs={() => setDocsOpen((open) => !open)}
+        onToggleDocs={() =>
+          setDocsOpen((open) => {
+            if (!open) setDocsRequest(null);
+            return !open;
+          })
+        }
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((open) => !open)}
         onRemove={removeAgent}
@@ -1195,26 +1222,30 @@ function App() {
         onOpenImagePath={handleOpenImagePath}
       />
       {docsOpen && (
-        <div
-          className="docs-resizer"
-          onPointerDown={handleDocsResizeStart}
-          title="Resize docs"
-        />
+        <div className="docs-overlay">
+          <div className="docs-drawer-shell" style={{ width: docsWidth + 7 }}>
+            <div
+              className="docs-resizer"
+              onPointerDown={handleDocsResizeStart}
+              title="Resize docs"
+            />
+            <DocsPanel
+              open={docsOpen}
+              activeProject={docsProject}
+              activeSession={docsSession}
+              width={docsWidth}
+              requestedPath={
+                docsRequest && docsRequest.projectId === docsProject?.id
+                  ? docsRequest.relativePath
+                  : null
+              }
+              requestKey={docsRequest?.key ?? 0}
+              theme={appTheme}
+              onClose={() => setDocsOpen(false)}
+            />
+          </div>
+        </div>
       )}
-      <DocsPanel
-        open={docsOpen}
-        activeProject={activeSessionProject}
-        activeSession={activeAgent}
-        width={docsWidth}
-        requestedPath={
-          docsRequest && docsRequest.projectId === activeSessionProject?.id
-            ? docsRequest.relativePath
-            : null
-        }
-        requestKey={docsRequest?.key ?? 0}
-        theme={appTheme}
-        onClose={() => setDocsOpen(false)}
-      />
       {settingsOpen && (
         <SettingsModal
           theme={appTheme}

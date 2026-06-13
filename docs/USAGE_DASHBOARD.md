@@ -16,7 +16,7 @@
 | 용도 | 포트 | 비고 |
 |---|---:|---|
 | CodeCompany / MultiAgent 기본 서버 | 3003 | 기존 할당 |
-| Usage Dashboard | 3004 | 새 기본값. 설정에서 변경 가능하게 설계 |
+| Usage Dashboard | 3141 | 새 기본값. 설정에서 변경 가능하게 설계 |
 
 초안의 `18900`은 사용하지 않는다.
 
@@ -251,7 +251,7 @@ Tauri commands:
 |---|---|
 | `sync_usage_catalog` | 프론트의 project/agent metadata를 Rust usage hub에 반영 |
 | `usage_server_status` | 대시보드 서버 상태 반환 |
-| `start_usage_server` | 127.0.0.1:3004 또는 설정 포트에서 서버 시작 |
+| `start_usage_server` | 127.0.0.1:3141 또는 설정 포트에서 서버 시작 |
 | `stop_usage_server` | 서버 중지 |
 | `usage_config_get` | `{ enabled, server_port }` 반환 |
 | `usage_config_set` | 포트/자동 시작 설정 저장 |
@@ -269,7 +269,7 @@ Hook server 내부 호출:
 첫 버전은 로컬 전용이다.
 
 - bind: `127.0.0.1:<port>`
-- default port: `3004`
+- default port: `3141`
 - 인증: 없음. localhost 전용이므로 외부 노출하지 않는다.
 - 외부 공개가 필요해지면 `remote.rs`의 GitHub OAuth 승인 로직을 공통 auth 모듈로 분리해 재사용한다.
 
@@ -294,7 +294,7 @@ API 응답은 transcript 본문을 절대 포함하지 않는다. 프로젝트�
 
 Controls:
 
-- Status: `off` / `running (port 3004)`
+- Status: `off` / `running (port 3141)`
 - URL 표시 + Copy
 - Start / Stop
 - Port input
@@ -400,7 +400,7 @@ ORDER BY total_tokens DESC;
 7. **검증**
    - `npm run test`
    - `npm run tauri -- build --debug`
-   - 로컬 대시보드 `http://127.0.0.1:3004`
+   - 로컬 대시보드 `http://127.0.0.1:3141`
    - Claude/Codex 각각 한 턴 실행 후 Stop hook에서 usage 증가 확인
 
 ## 리스크와 대응

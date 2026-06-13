@@ -723,12 +723,37 @@ body,
   min-width: 180px;
 }
 
+body.docs-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.docs-resizing * {
+  cursor: col-resize !important;
+}
+
+.docs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.docs-drawer-shell {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  min-width: 0;
+  max-width: calc(100vw - 48px);
+  pointer-events: auto;
+}
+
 .docs-resizer {
   flex: 0 0 7px;
   position: relative;
   cursor: col-resize;
-  background: var(--app-bg);
-  z-index: 30;
+  background: rgba(13, 17, 23, 0.7);
 }
 .docs-resizer::after {
   content: "";
@@ -745,13 +770,6 @@ body.docs-resizing .docs-resizer::after {
   left: 2px;
   width: 3px;
   background: var(--app-accent);
-}
-body.docs-resizing {
-  cursor: col-resize;
-  user-select: none;
-}
-body.docs-resizing * {
-  cursor: col-resize !important;
 }
 
 .docs-panel {
@@ -784,7 +802,7 @@ body.docs-resizing * {
   --docs-code-attr: #7ee787;
   --docs-code-meta: #ffa657;
   min-width: 0;
-  max-width: calc(100vw - 260px);
+  max-width: calc(100vw - 55px);
   flex: 0 0 auto;
   background: var(--docs-bg);
   border-left: 1px solid var(--docs-border);
@@ -792,6 +810,8 @@ body.docs-resizing * {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  box-shadow: -16px 0 36px rgba(0, 0, 0, 0.35);
 }
 
 .docs-theme-github {

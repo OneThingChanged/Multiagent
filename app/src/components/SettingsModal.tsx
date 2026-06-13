@@ -152,7 +152,7 @@ export function SettingsModal({
   });
   const [usageConfig, setUsageConfig] = useState<UsageConfig>({
     enabled: false,
-    serverPort: 3004,
+    serverPort: 3141,
   });
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageCopied, setUsageCopied] = useState(false);
@@ -613,7 +613,7 @@ export function SettingsModal({
                     ...c,
                     serverPort: Math.max(
                       1,
-                      Math.min(65535, Number(e.target.value) || 3004)
+                      Math.min(65535, Number(e.target.value) || 3141)
                     ),
                   }))
                 }
@@ -633,7 +633,7 @@ export function SettingsModal({
               <span>Start usage dashboard when MultiAgent starts</span>
             </label>
             <div className="app-update-message">
-              기본값은 3004입니다. 포트 변경은 다음 Start부터 적용됩니다.
+              기본값은 3141입니다. 포트 변경은 다음 Start부터 적용됩니다.
             </div>
             <div className="app-update-actions">
               <button
