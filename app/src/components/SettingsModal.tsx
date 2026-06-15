@@ -6,7 +6,12 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
-import { APP_VERSION, RELEASES_URL } from "../lib/appInfo";
+import {
+  APP_VERSION,
+  BUILD_VARIANT,
+  IS_COMPANY_BUILD,
+  RELEASES_URL,
+} from "../lib/appInfo";
 import {
   loadNotificationSound,
   saveNotificationSound,
@@ -87,12 +92,15 @@ type UsageIngestSummary = {
 
 type SettingsTab = "general" | "usage" | "remote" | "about";
 
-const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "usage", label: "Usage" },
   { id: "remote", label: "Remote" },
   { id: "about", label: "About" },
 ];
+const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(
+  (tab) => !IS_COMPANY_BUILD || tab.id !== "remote"
+);
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -163,15 +171,18 @@ export function SettingsModal({
   const [usageError, setUsageError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<RemoteConfig>("remote_config_get")
-      .then(setRemoteConfig)
-      .catch(() => {});
+    if (!IS_COMPANY_BUILD) {
+      invoke<RemoteConfig>("remote_config_get")
+        .then(setRemoteConfig)
+        .catch(() => {});
+    }
     invoke<UsageConfig>("usage_config_get")
       .then(setUsageConfig)
       .catch(() => {});
   }, []);
 
   const handleSaveRemoteConfig = () => {
+    if (IS_COMPANY_BUILD) return;
     invoke<RemoteConfig>("remote_config_set", { config: remoteConfig })
       .then((saved) => {
         setRemoteConfig(saved);
@@ -182,11 +193,13 @@ export function SettingsModal({
   };
 
   useEffect(() => {
-    invoke<RemoteStatus>("remote_server_status")
-      .then(setRemote)
-      .catch(() => {});
     invoke<UsageStatus>("usage_server_status")
       .then(setUsage)
+      .catch(() => {});
+    if (IS_COMPANY_BUILD) return;
+
+    invoke<RemoteStatus>("remote_server_status")
+      .then(setRemote)
       .catch(() => {});
     invoke<TunnelStatus>("tunnel_status")
       .then(setTunnel)
@@ -201,18 +214,21 @@ export function SettingsModal({
   }, []);
 
   const handleApprove = (login: string) => {
+    if (IS_COMPANY_BUILD) return;
     invoke<AccessList>("remote_access_approve", { login })
       .then(setAccess)
       .catch(() => {});
   };
 
   const handleRevoke = (login: string) => {
+    if (IS_COMPANY_BUILD) return;
     invoke<AccessList>("remote_access_revoke", { login })
       .then(setAccess)
       .catch(() => {});
   };
 
   const handleTunnelToggle = async () => {
+    if (IS_COMPANY_BUILD) return;
     setTunnelBusy(true);
     setTunnelError(null);
     try {
@@ -244,6 +260,7 @@ export function SettingsModal({
   };
 
   const handleRemoteToggle = async () => {
+    if (IS_COMPANY_BUILD) return;
     setRemoteBusy(true);
     try {
       const next = remote.running
@@ -936,6 +953,12 @@ export function SettingsModal({
             <div className="app-about-row">
               <span className="app-about-label">Current</span>
               <span className="app-about-value">v{APP_VERSION}</span>
+            </div>
+            <div className="app-about-row">
+              <span className="app-about-label">Channel</span>
+              <span className="app-about-value">
+                {BUILD_VARIANT === "company" ? "Company" : "Standard"}
+              </span>
             </div>
             {updateCheck.status === "available" && (
               <div className="app-about-row">

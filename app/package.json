@@ -1,13 +1,18 @@
 {
   "name": "app",
   "private": true,
-  "version": "0.4.12",
+  "version": "0.4.13",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:build:standard": "node scripts/build-variant.mjs standard",
+    "tauri:build:company": "node scripts/build-variant.mjs company",
+    "tauri:build:all": "node scripts/build-all-variants.mjs",
+    "release:build:all": "node scripts/build-all-variants.mjs --require-signed",
+    "release:manifests": "node scripts/write-latest-json.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

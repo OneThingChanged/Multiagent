@@ -65,7 +65,14 @@ const MARKDOWN_PATH_RE =
 const IMAGE_PATH_RE =
   /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:png|jpe?g|gif|webp|bmp|svg|ico)/gi;
 
+const ABSOLUTE_PATH_RE =
+  /(?:[A-Za-z]:[\\/]|\\\\[^<>"|?*\r\n\\\/]+[\\/][^<>"|?*\r\n\\\/]+[\\/])[^<>"|?*\r\n]*/gi;
+
 const PATH_PART = String.raw`[^\s"'<>|:*?()\[\]{},;\\\/]+`;
+const GENERAL_FILE_PATH_RE = new RegExp(
+  String.raw`(?:\.{1,2}[\\/])?(?:${PATH_PART}[\\/])+${PATH_PART}\.[A-Za-z0-9]{1,16}(?::\d+(?::\d+)?)?`,
+  "gi"
+);
 const FOLDER_PATH_RE = new RegExp(
   String.raw`(?:[A-Za-z]:[\\/]|\\\\${PATH_PART}[\\/]${PATH_PART}[\\/]|\.{1,2}[\\/])?(?:${PATH_PART}[\\/])+(?:${PATH_PART})?`,
   "gi"
@@ -74,6 +81,7 @@ const FOLDER_PATH_RE = new RegExp(
 export type MarkdownPathHandler = (agentId: string, path: string) => void;
 export type ImagePathHandler = (agentId: string, path: string) => void;
 export type FolderPathHandler = (agentId: string, path: string) => void;
+export type TerminalPathHandler = (agentId: string, path: string) => void;
 
 type MarkdownPathMatch = {
   text: string;
@@ -158,6 +166,15 @@ function cleanFolderPathCandidate(candidate: string) {
     .replace(/[>`"')\].,;]+$/, "");
 }
 
+function cleanTerminalPathCandidate(candidate: string) {
+  return candidate
+    .trim()
+    .replace(/^[`"'<]+/, "")
+    .replace(/[>`"',;]+$/, "")
+    .replace(/:\d+(?::\d+)?$/, "")
+    .trimEnd();
+}
+
 function rangeOverlaps(a: MarkdownPathMatch, b: MarkdownPathMatch) {
   return a.startIndex < b.endIndex && b.startIndex < a.endIndex;
 }
@@ -173,6 +190,27 @@ function findImagePathMatches(text: string): MarkdownPathMatch[] {
     const raw = match[0];
     const start = match.index ?? 0;
     const cleaned = cleanImagePathCandidate(raw);
+    if (!cleaned) continue;
+    const startColumn = cellWidth(text.slice(0, start));
+    matches.push({
+      text: cleaned,
+      startIndex: start,
+      endIndex: start + raw.length,
+      startColumn,
+      endColumn: startColumn + cellWidth(raw),
+    });
+  }
+  return matches;
+}
+
+function findAbsolutePathMatches(text: string): MarkdownPathMatch[] {
+  const matches: MarkdownPathMatch[] = [];
+  ABSOLUTE_PATH_RE.lastIndex = 0;
+  for (const match of text.matchAll(ABSOLUTE_PATH_RE)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    if (startsInsideUrl(text, start)) continue;
+    const cleaned = cleanTerminalPathCandidate(raw);
     if (!cleaned) continue;
     const startColumn = cellWidth(text.slice(0, start));
     matches.push({
@@ -281,6 +319,35 @@ function findFolderPathMatches(
   return matches;
 }
 
+function findGeneralFilePathMatches(
+  text: string,
+  occupied: MarkdownPathMatch[]
+): MarkdownPathMatch[] {
+  const matches: MarkdownPathMatch[] = [];
+  GENERAL_FILE_PATH_RE.lastIndex = 0;
+
+  for (const match of text.matchAll(GENERAL_FILE_PATH_RE)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    if (startsInsideUrl(text, start)) continue;
+    const cleaned = cleanTerminalPathCandidate(raw);
+    if (!cleaned) continue;
+    const candidate: MarkdownPathMatch = {
+      text: cleaned,
+      startIndex: start,
+      endIndex: start + raw.length,
+      startColumn: cellWidth(text.slice(0, start)),
+      endColumn: cellWidth(text.slice(0, start)) + cellWidth(raw),
+    };
+    if (occupied.some((existing) => rangeOverlaps(existing, candidate))) {
+      continue;
+    }
+    matches.push(candidate);
+  }
+
+  return matches;
+}
+
 export function findMarkdownPathAt(
   text: string,
   column: number,
@@ -307,7 +374,8 @@ function registerMarkdownLinkProvider(
   id: string,
   onMarkdownPath: MarkdownPathHandler,
   onImagePath?: ImagePathHandler,
-  onFolderPath?: FolderPathHandler
+  onFolderPath?: FolderPathHandler,
+  onTerminalPath?: TerminalPathHandler
 ) {
   term.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
@@ -321,7 +389,31 @@ function registerMarkdownLinkProvider(
       const links: ILink[] = [];
       const occupied: MarkdownPathMatch[] = [];
 
+      if (onTerminalPath) {
+        for (const match of findAbsolutePathMatches(text)) {
+          occupied.push(match);
+          links.push({
+            range: {
+              start: { x: match.startColumn + 1, y: bufferLineNumber },
+              end: { x: match.endColumn, y: bufferLineNumber },
+            },
+            text: match.text,
+            decorations: {
+              pointerCursor: true,
+              underline: true,
+            },
+            activate(event, path) {
+              event.preventDefault();
+              onTerminalPath(id, path);
+            },
+          });
+        }
+      }
+
       for (const match of findMarkdownPathMatches(text)) {
+        if (occupied.some((existing) => rangeOverlaps(existing, match))) {
+          continue;
+        }
         occupied.push(match);
         links.push({
           range: {
@@ -342,6 +434,9 @@ function registerMarkdownLinkProvider(
 
       if (onImagePath) {
         for (const match of findImagePathMatches(text)) {
+          if (occupied.some((existing) => rangeOverlaps(existing, match))) {
+            continue;
+          }
           occupied.push(match);
           links.push({
             range: {
@@ -356,6 +451,27 @@ function registerMarkdownLinkProvider(
             activate(event, path) {
               event.preventDefault();
               onImagePath(id, path);
+            },
+          });
+        }
+      }
+
+      if (onTerminalPath) {
+        for (const match of findGeneralFilePathMatches(text, occupied)) {
+          occupied.push(match);
+          links.push({
+            range: {
+              start: { x: match.startColumn + 1, y: bufferLineNumber },
+              end: { x: match.endColumn, y: bufferLineNumber },
+            },
+            text: match.text,
+            decorations: {
+              pointerCursor: true,
+              underline: true,
+            },
+            activate(event, path) {
+              event.preventDefault();
+              onTerminalPath(id, path);
             },
           });
         }
@@ -390,7 +506,8 @@ export function createEntry(
   id: string,
   onMarkdownPath?: MarkdownPathHandler,
   onImagePath?: ImagePathHandler,
-  onFolderPath?: FolderPathHandler
+  onFolderPath?: FolderPathHandler,
+  onTerminalPath?: TerminalPathHandler
 ): TerminalEntry {
   const isWindows = navigator.userAgent.includes("Windows");
   const term = new Terminal({
@@ -425,7 +542,8 @@ export function createEntry(
       id,
       onMarkdownPath,
       onImagePath,
-      onFolderPath
+      onFolderPath,
+      onTerminalPath
     );
   }
 

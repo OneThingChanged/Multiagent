@@ -65,6 +65,25 @@ npm run tauri build
 
 > 배포(GitHub Releases 게시 + updater 서명 + latest.json)는 [RELEASE.md](RELEASE.md) 참고. 위 `npm run tauri build`는 서명 없는 로컬 빌드이고, 배포용은 서명 키 환경변수를 줘야 한다.
 
+## 빌드 Variant
+
+배포용으로는 두 variant를 같이 준비한다.
+
+| variant | 명령 | 차이 |
+|---|---|---|
+| standard | `npm run tauri:build:standard` | 전체 기능 포함 |
+| company | `npm run tauri:build:company` | Remote 탭/서버/터널 기능 제외 |
+| both | `npm run tauri:build:all` | standard 후 company 순서로 둘 다 빌드 |
+| signed release | `npm run release:build:all` | 두 variant 빌드 + updater manifest 필수 생성 |
+
+회사 빌드는 별도 Tauri config(`src-tauri/tauri.company.conf.json`)를 merge해서 `productName`, `identifier`, updater endpoint를 분리한다. 따라서 일반 설치본과 회사 설치본은 서로 덮어쓰지 않고, 각자 자기 업데이트 채널만 따른다.
+
+로컬 컴파일 확인만 할 때:
+
+```bash
+npm run tauri:build:company -- --debug --no-bundle
+```
+
 ## dev 트러블슈팅
 
 - **포트 1420 점유**: `Get-NetTCPConnection -LocalPort 1420 | Stop-Process` 또는 vite 띄운 node를 죽임

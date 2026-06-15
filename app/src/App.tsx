@@ -13,7 +13,6 @@ import {
   onAction,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { openPath } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 
@@ -61,6 +60,7 @@ import {
 } from "./lib/scrollback";
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
+import { IS_COMPANY_BUILD } from "./lib/appInfo";
 
 import { Sidebar } from "./components/Sidebar";
 import { TerminalArea } from "./components/TerminalArea";
@@ -85,6 +85,11 @@ type DocsRequest = {
   agentId: string | null;
   relativePath: string;
   key: number;
+};
+
+type TerminalPathResolution = {
+  kind: "image" | "html" | "markdown" | "folder" | "file";
+  path: string;
 };
 
 function clampDocsWidth(width: number) {
@@ -261,6 +266,7 @@ function App() {
   // Mirror agent metadata into the Rust remote hub so the remote web
   // client can list sessions and show live status.
   useEffect(() => {
+    if (IS_COMPANY_BUILD) return;
     const projectNames = new Map(projects.map((p) => [p.id, p.name]));
     invoke("sync_remote_agents", {
       agents: agents.map((a) => ({
@@ -277,6 +283,7 @@ function App() {
   // The web client is an independent viewer: it picks which session to
   // view locally, so desktop active/layout is intentionally not synced.
   useEffect(() => {
+    if (IS_COMPANY_BUILD) return;
     const view = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -581,15 +588,17 @@ function App() {
       );
     }).then(track);
 
-    listen<{ login: string }>("remote:access-request", (e) => {
-      if (cancelled) return;
-      playNotificationSound();
-      pushToast(
-        "",
-        "원격 접속 요청",
-        `GitHub @${e.payload.login} — 설정 > Remote access에서 승인하세요`
-      );
-    }).then(track);
+    if (!IS_COMPANY_BUILD) {
+      listen<{ login: string }>("remote:access-request", (e) => {
+        if (cancelled) return;
+        playNotificationSound();
+        pushToast(
+          "",
+          "원격 접속 요청",
+          `GitHub @${e.payload.login} — 설정 > Remote access에서 승인하세요`
+        );
+      }).then(track);
+    }
 
 
     listen<void>("app:close-requested", async () => {
@@ -1151,7 +1160,7 @@ function App() {
           const fullPath = isAbsoluteFsPath(relativePath)
             ? relativePath
             : joinFsPath(project.folder, relativePath);
-          await openPath(fullPath);
+          await invoke("open_local_path", { path: fullPath });
           return;
         }
         setDocsOpen(true);
@@ -1185,13 +1194,64 @@ function App() {
       if (!agent || !project?.folder) return;
 
       try {
-        const folderPath = await invoke<string>("resolve_folder_path", {
-          folder: project.folder,
-          path,
-        });
-        await openPath(folderPath);
-      } catch {
-        pushToast(agentId, agent.name, "폴더를 열 수 없습니다.");
+        await invoke("open_folder_path", { folder: project.folder, path });
+      } catch (error) {
+        pushToast(agentId, agent.name, `폴더를 열 수 없습니다: ${String(error)}`);
+      }
+    },
+    [pushToast]
+  );
+
+  const handleOpenTerminalPath = useCallback(
+    async (agentId: string, path: string) => {
+      const agent = agentsRef.current.find((a) => a.id === agentId);
+      const project = projectsRef.current.find(
+        (candidate) => candidate.id === agent?.projectId
+      );
+      if (!agent || !project?.folder) return;
+
+      try {
+        const resolved = await invoke<TerminalPathResolution>(
+          "resolve_terminal_path",
+          {
+            folder: project.folder,
+            path,
+          }
+        );
+
+        if (resolved.kind === "image") {
+          setImageViewer({ path: resolved.path, folder: null });
+          return;
+        }
+
+        if (resolved.kind === "html") {
+          await invoke("open_local_path", { path: resolved.path });
+          return;
+        }
+
+        if (resolved.kind === "markdown") {
+          const relativePath = await invoke<string>("resolve_markdown_path", {
+            folder: project.folder,
+            path: resolved.path,
+          });
+          setDocsOpen(true);
+          setDocsRequest({
+            projectId: project.id,
+            agentId,
+            relativePath,
+            key: Date.now(),
+          });
+          return;
+        }
+
+        if (resolved.kind === "folder") {
+          await invoke("open_local_path", { path: resolved.path });
+          return;
+        }
+
+        await invoke("reveal_local_path", { path: resolved.path });
+      } catch (error) {
+        pushToast(agentId, agent.name, `경로를 열 수 없습니다: ${String(error)}`);
       }
     },
     [pushToast]
@@ -1356,6 +1416,7 @@ function App() {
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
         onOpenFolderPath={handleOpenFolderPath}
+        onOpenTerminalPath={handleOpenTerminalPath}
       />
       {docsOpen && (
         <div className="docs-overlay">

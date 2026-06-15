@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -282,11 +281,17 @@ export function DocsPanel({
   const selectedFullPath =
     folder && selectedPath ? joinFolderPath(folder, selectedPath) : null;
 
+  const openLocalPath = (path: string) => {
+    invoke("open_local_path", { path }).catch((err) => setError(String(err)));
+  };
+
+  const revealLocalPath = (path: string) => {
+    invoke("reveal_local_path", { path }).catch((err) => setError(String(err)));
+  };
+
   const openDocsFile = (file: MarkdownFile) => {
     if (isHtmlPath(file.relative_path)) {
-      openPath(joinFolderPath(folder, file.relative_path)).catch((err) =>
-        setError(String(err))
-      );
+      openLocalPath(joinFolderPath(folder, file.relative_path));
       return;
     }
     setSelectedPath(file.relative_path);
@@ -387,14 +392,14 @@ export function DocsPanel({
         </button>
         <button
           className="docs-tool-btn"
-          onClick={() => selectedFullPath && openPath(selectedFullPath)}
+          onClick={() => selectedFullPath && openLocalPath(selectedFullPath)}
           disabled={!selectedFullPath}
         >
           Open
         </button>
         <button
           className="docs-tool-btn"
-          onClick={() => selectedFullPath && revealItemInDir(selectedFullPath)}
+          onClick={() => selectedFullPath && revealLocalPath(selectedFullPath)}
           disabled={!selectedFullPath}
         >
           Reveal

@@ -41,6 +41,7 @@ export type RenderCtx = {
   onOpenMarkdownPath: (agentId: string, path: string) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
   onOpenFolderPath: (agentId: string, path: string) => void;
+  onOpenTerminalPath: (agentId: string, path: string) => void;
 };
 
 export function PaneSlot({
@@ -79,7 +80,8 @@ export function PaneSlot({
         agentId,
         ctx.onOpenMarkdownPath,
         ctx.onOpenImagePath,
-        ctx.onOpenFolderPath
+        ctx.onOpenFolderPath,
+        ctx.onOpenTerminalPath
       );
       termsRef.current.set(agentId, entry);
       freshlyCreated = true;
@@ -267,6 +269,7 @@ export function PaneSlot({
     ctx.onOpenMarkdownPath,
     ctx.onOpenImagePath,
     ctx.onOpenFolderPath,
+    ctx.onOpenTerminalPath,
     ctx.sessionPins,
   ]);
 

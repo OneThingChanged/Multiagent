@@ -1,4 +1,9 @@
-export const APP_VERSION = "0.4.12";
+export const APP_VERSION = "0.4.13";
+export const BUILD_VARIANT =
+  import.meta.env.VITE_MULTIAGENT_VARIANT === "company"
+    ? "company"
+    : "standard";
+export const IS_COMPANY_BUILD = BUILD_VARIANT === "company";
 export const GITHUB_OWNER = "OneThingChanged";
 export const GITHUB_REPO = "Multiagent";
 export const REPOSITORY_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`;

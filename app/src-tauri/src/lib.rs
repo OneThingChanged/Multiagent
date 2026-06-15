@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
+#[cfg(not(multiagent_company))]
 mod remote;
 mod usage;
 
@@ -31,6 +32,7 @@ struct AppState {
     ptys: Mutex<HashMap<String, PtyHandle>>,
     hook_info: HookInfo,
     close_confirmed: Mutex<bool>,
+    #[cfg(not(multiagent_company))]
     remote: Arc<remote::RemoteHub>,
     usage: Arc<usage::UsageHub>,
 }
@@ -62,6 +64,12 @@ struct HookEvent {
 struct MarkdownFile {
     name: String,
     relative_path: String,
+}
+
+#[derive(Clone, Serialize)]
+struct TerminalPathResolution {
+    kind: String,
+    path: String,
 }
 
 const HOOK_MARKER: &str = "multiagent";
@@ -567,6 +575,77 @@ fn add_relative_folder_probes(probes: &mut Vec<PathBuf>, root: &Path, relative: 
     }
 }
 
+fn path_without_first_component(path: &Path, first: &str) -> Option<PathBuf> {
+    let mut parts = Vec::new();
+    let mut saw_first = false;
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(value) => {
+                if !saw_first {
+                    if value
+                        .to_str()
+                        .map(|text| text.eq_ignore_ascii_case(first))
+                        .unwrap_or(false)
+                    {
+                        saw_first = true;
+                    } else {
+                        return None;
+                    }
+                } else {
+                    parts.push(value.to_os_string());
+                }
+            }
+            _ => return None,
+        }
+    }
+    if !saw_first || parts.is_empty() {
+        return None;
+    }
+    Some(parts.into_iter().collect())
+}
+
+fn add_unreal_folder_probes(probes: &mut Vec<PathBuf>, root: &Path, relative: &Path) {
+    if let Some(game_path) = path_without_first_component(relative, "Game") {
+        push_folder_probe(
+            probes,
+            root.join("UnrealTF").join("Content").join(&game_path),
+        );
+        push_folder_probe(probes, root.join("Content").join(&game_path));
+    }
+    if let Some(content_path) = path_without_first_component(relative, "Content") {
+        push_folder_probe(
+            probes,
+            root.join("UnrealTF").join("Content").join(&content_path),
+        );
+        push_folder_probe(probes, root.join("Content").join(&content_path));
+    }
+}
+
+fn existing_folder_target(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        if canonical.is_dir() {
+            return Some(canonical);
+        }
+        if canonical.is_file() {
+            return canonical.parent().map(Path::to_path_buf);
+        }
+    }
+
+    if path.extension().is_none() {
+        for ext in ["umap", "uasset"] {
+            let with_ext = path.with_extension(ext);
+            if let Ok(canonical) = with_ext.canonicalize() {
+                if canonical.is_file() {
+                    return canonical.parent().map(Path::to_path_buf);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn resolve_folder_file(folder: &str, path: &str) -> Result<PathBuf, String> {
     let raw = path
         .trim()
@@ -577,17 +656,145 @@ fn resolve_folder_file(folder: &str, path: &str) -> Result<PathBuf, String> {
 
     let candidate = PathBuf::from(raw);
     if candidate.is_absolute() {
-        let canonical = candidate
-            .canonicalize()
-            .map_err(|e| format!("folder not found: {}", e))?;
-        if !canonical.is_dir() {
-            return Err("path is not a folder".to_string());
+        if let Some(target) = existing_folder_target(&candidate) {
+            return Ok(target);
         }
-        return Ok(canonical);
+        return Err("folder not found".to_string());
     }
 
     if !is_safe_relative_file_path(&candidate) {
         return Err("invalid folder path".to_string());
+    }
+
+    let root = resolve_markdown_root(folder)?;
+    let mut probes = Vec::new();
+    add_relative_folder_probes(&mut probes, &root, &candidate);
+    add_unreal_folder_probes(&mut probes, &root, &candidate);
+
+    if let Some(parent) = root.parent() {
+        push_folder_probe(&mut probes, parent.join(&candidate));
+
+        let root_name = root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut sibling_dirs = fs::read_dir(parent)
+            .map_err(|e| e.to_string())?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                if entry.file_type().ok()?.is_dir() {
+                    Some(entry.path())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        sibling_dirs.sort_by(|left, right| {
+            sibling_image_dir_rank(left, &root_name)
+                .cmp(&sibling_image_dir_rank(right, &root_name))
+                .then_with(|| left.cmp(right))
+        });
+
+        for dir in sibling_dirs {
+            if dir == root {
+                continue;
+            }
+            add_relative_folder_probes(&mut probes, &dir, &candidate);
+            add_unreal_folder_probes(&mut probes, &dir, &candidate);
+        }
+    }
+
+    push_folder_probe(&mut probes, candidate);
+    for probe in probes {
+        if let Some(target) = existing_folder_target(&probe) {
+            return Ok(target);
+        }
+    }
+
+    Err("folder not found".to_string())
+}
+
+fn resolve_existing_local_path(path: &str) -> Result<PathBuf, String> {
+    let raw = path
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '<' | '>'));
+    if raw.is_empty() {
+        return Err("path is empty".to_string());
+    }
+
+    let candidate = PathBuf::from(raw);
+    if !candidate.is_absolute() {
+        return Err("path must be absolute".to_string());
+    }
+
+    candidate
+        .canonicalize()
+        .map_err(|e| format!("path not found: {}", e))
+}
+
+fn clean_terminal_path_candidate(candidate: &str) -> &str {
+    candidate
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '<' | '>'))
+        .trim_end_matches(|c| matches!(c, ',' | ';'))
+        .trim_end()
+}
+
+fn canonicalize_absolute_prefix(raw: &str) -> Option<PathBuf> {
+    let cleaned = clean_terminal_path_candidate(raw);
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let mut boundaries = cleaned
+        .char_indices()
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    boundaries.push(cleaned.len());
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    for end in boundaries.into_iter().rev() {
+        if end == 0 {
+            continue;
+        }
+        let prefix = clean_terminal_path_candidate(&cleaned[..end]);
+        if prefix.is_empty() {
+            continue;
+        }
+        let candidate = PathBuf::from(prefix);
+        if !candidate.is_absolute() {
+            continue;
+        }
+        if let Ok(canonical) = candidate.canonicalize() {
+            return Some(canonical);
+        }
+    }
+
+    None
+}
+
+fn existing_path_target(path: &Path) -> Option<PathBuf> {
+    path.canonicalize()
+        .ok()
+        .filter(|canonical| canonical.is_file() || canonical.is_dir())
+}
+
+fn resolve_terminal_path_file(folder: &str, path: &str) -> Result<PathBuf, String> {
+    let raw = clean_terminal_path_candidate(path);
+    if raw.is_empty() {
+        return Err("path is empty".to_string());
+    }
+
+    let candidate = PathBuf::from(raw);
+    if candidate.is_absolute() {
+        return canonicalize_absolute_prefix(raw)
+            .ok_or_else(|| "file or folder not found".to_string());
+    }
+
+    if !is_safe_relative_file_path(&candidate) {
+        return Err("invalid path".to_string());
     }
 
     let root = resolve_markdown_root(folder)?;
@@ -629,14 +836,112 @@ fn resolve_folder_file(folder: &str, path: &str) -> Result<PathBuf, String> {
 
     push_folder_probe(&mut probes, candidate);
     for probe in probes {
-        if let Ok(canonical) = probe.canonicalize() {
-            if canonical.is_dir() {
-                return Ok(canonical);
-            }
+        if let Some(target) = existing_path_target(&probe) {
+            return Ok(target);
         }
     }
 
-    Err("folder not found".to_string())
+    Err("file or folder not found".to_string())
+}
+
+fn is_html_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "html" | "htm"))
+        .unwrap_or(false)
+}
+
+fn terminal_path_kind(path: &Path) -> &'static str {
+    if path.is_dir() {
+        "folder"
+    } else if is_image_file(path) {
+        "image"
+    } else if is_html_file(path) {
+        "html"
+    } else if is_markdown_file(path) {
+        "markdown"
+    } else {
+        "file"
+    }
+}
+
+#[cfg(windows)]
+fn windows_shell_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(without_prefix) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", without_prefix);
+    }
+    if let Some(without_prefix) = value.strip_prefix(r"\\?\") {
+        return without_prefix.to_string();
+    }
+    value.into_owned()
+}
+
+fn open_path_with_system(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(windows_shell_path(path))
+            .spawn()
+            .map_err(|e| format!("open path failed: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("open path failed: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("open path failed: {}", e))?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("open path is not supported on this platform".to_string())
+}
+
+fn reveal_path_with_system(path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        return open_path_with_system(path);
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{}", windows_shell_path(path)))
+            .spawn()
+            .map_err(|e| format!("reveal path failed: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("reveal path failed: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(parent) = path.parent() {
+            return open_path_with_system(parent);
+        }
+    }
+
+    #[allow(unreachable_code)]
+    Err("reveal path is not supported on this platform".to_string())
 }
 
 fn should_skip_markdown_dir(path: &Path) -> bool {
@@ -822,6 +1127,33 @@ fn resolve_folder_path(folder: String, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn open_folder_path(folder: String, path: String) -> Result<(), String> {
+    let target = resolve_folder_file(&folder, &path)?;
+    open_path_with_system(&target)
+}
+
+#[tauri::command]
+fn open_local_path(path: String) -> Result<(), String> {
+    let target = resolve_existing_local_path(&path)?;
+    open_path_with_system(&target)
+}
+
+#[tauri::command]
+fn reveal_local_path(path: String) -> Result<(), String> {
+    let target = resolve_existing_local_path(&path)?;
+    reveal_path_with_system(&target)
+}
+
+#[tauri::command]
+fn resolve_terminal_path(folder: String, path: String) -> Result<TerminalPathResolution, String> {
+    let target = resolve_terminal_path_file(&folder, &path)?;
+    Ok(TerminalPathResolution {
+        kind: terminal_path_kind(&target).to_string(),
+        path: target.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
 fn spawn_pty(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -893,6 +1225,7 @@ fn spawn_pty(
 
     let id_for_thread = id.clone();
     let app_for_thread = app.clone();
+    #[cfg(not(multiagent_company))]
     let hub_for_thread = state.remote.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
@@ -900,6 +1233,7 @@ fn spawn_pty(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    #[cfg(not(multiagent_company))]
                     hub_for_thread.push(&id_for_thread, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = app_for_thread.emit(
@@ -921,6 +1255,7 @@ fn spawn_pty(
         );
     });
 
+    #[cfg(not(multiagent_company))]
     state.remote.set_size(&id, cols, rows);
     state.ptys.lock().unwrap().insert(
         id,
@@ -960,6 +1295,7 @@ fn resize_pty(state: State<'_, AppState>, id: String, cols: u16, rows: u16) -> R
             })
             .map_err(|e| e.to_string())?;
     }
+    #[cfg(not(multiagent_company))]
     state.remote.set_size(&id, cols, rows);
     Ok(())
 }
@@ -970,76 +1306,82 @@ fn kill_pty(state: State<'_, AppState>, id: String) -> Result<(), String> {
     if let Some(mut pty) = ptys.remove(&id) {
         let _ = pty.child.kill();
     }
+    #[cfg(not(multiagent_company))]
     state.remote.drop_agent(&id);
     Ok(())
 }
 
-#[tauri::command]
-async fn start_remote_server(app: AppHandle) -> Result<remote::RemoteStatus, String> {
-    remote::start(app).await
-}
+#[cfg(not(multiagent_company))]
+mod remote_commands {
+    use super::*;
 
-#[tauri::command]
-fn stop_remote_server(app: AppHandle) -> remote::RemoteStatus {
-    remote::stop(&app)
-}
+    #[tauri::command]
+    pub async fn start_remote_server(app: AppHandle) -> Result<remote::RemoteStatus, String> {
+        remote::start(app).await
+    }
 
-#[tauri::command]
-fn remote_server_status(state: State<'_, AppState>) -> remote::RemoteStatus {
-    remote::status(&state.remote)
-}
+    #[tauri::command]
+    pub fn stop_remote_server(app: AppHandle) -> remote::RemoteStatus {
+        remote::stop(&app)
+    }
 
-#[tauri::command]
-fn sync_remote_agents(state: State<'_, AppState>, agents: Vec<remote::RemoteAgentInfo>) {
-    *state.remote.agents.lock().unwrap() = agents;
-}
+    #[tauri::command]
+    pub fn remote_server_status(state: State<'_, AppState>) -> remote::RemoteStatus {
+        remote::status(&state.remote)
+    }
 
-#[tauri::command]
-fn sync_remote_view(state: State<'_, AppState>, view: String) {
-    *state.remote.view.lock().unwrap() = view;
-}
+    #[tauri::command]
+    pub fn sync_remote_agents(state: State<'_, AppState>, agents: Vec<remote::RemoteAgentInfo>) {
+        *state.remote.agents.lock().unwrap() = agents;
+    }
 
-#[tauri::command]
-async fn start_tunnel(app: AppHandle) -> Result<remote::TunnelStatus, String> {
-    remote::start_tunnel(app).await
-}
+    #[tauri::command]
+    pub fn sync_remote_view(state: State<'_, AppState>, view: String) {
+        *state.remote.view.lock().unwrap() = view;
+    }
 
-#[tauri::command]
-fn stop_tunnel(app: AppHandle) -> remote::TunnelStatus {
-    remote::stop_tunnel(&app)
-}
+    #[tauri::command]
+    pub async fn start_tunnel(app: AppHandle) -> Result<remote::TunnelStatus, String> {
+        remote::start_tunnel(app).await
+    }
 
-#[tauri::command]
-fn tunnel_status(state: State<'_, AppState>) -> remote::TunnelStatus {
-    remote::tunnel_status_of(&state.remote)
-}
+    #[tauri::command]
+    pub fn stop_tunnel(app: AppHandle) -> remote::TunnelStatus {
+        remote::stop_tunnel(&app)
+    }
 
-#[tauri::command]
-fn remote_access_list(state: State<'_, AppState>) -> remote::AccessStore {
-    remote::access_list(&state.remote)
-}
+    #[tauri::command]
+    pub fn tunnel_status(state: State<'_, AppState>) -> remote::TunnelStatus {
+        remote::tunnel_status_of(&state.remote)
+    }
 
-#[tauri::command]
-fn remote_access_approve(state: State<'_, AppState>, login: String) -> remote::AccessStore {
-    remote::access_approve(&state.remote, &login)
-}
+    #[tauri::command]
+    pub fn remote_access_list(state: State<'_, AppState>) -> remote::AccessStore {
+        remote::access_list(&state.remote)
+    }
 
-#[tauri::command]
-fn remote_access_revoke(state: State<'_, AppState>, login: String) -> remote::AccessStore {
-    remote::access_revoke(&state.remote, &login)
-}
+    #[tauri::command]
+    pub fn remote_access_approve(state: State<'_, AppState>, login: String) -> remote::AccessStore {
+        remote::access_approve(&state.remote, &login)
+    }
 
-#[tauri::command]
-fn remote_config_get(state: State<'_, AppState>) -> remote::RemoteConfig {
-    remote::config_get(&state.remote)
-}
+    #[tauri::command]
+    pub fn remote_access_revoke(state: State<'_, AppState>, login: String) -> remote::AccessStore {
+        remote::access_revoke(&state.remote, &login)
+    }
 
-#[tauri::command]
-fn remote_config_set(
-    state: State<'_, AppState>,
-    config: remote::RemoteConfig,
-) -> remote::RemoteConfig {
-    remote::config_set(&state.remote, config)
+    #[tauri::command]
+    pub fn remote_config_get(state: State<'_, AppState>) -> remote::RemoteConfig {
+        remote::config_get(&state.remote)
+    }
+
+    #[tauri::command]
+    pub fn remote_config_set(
+        state: State<'_, AppState>,
+        config: remote::RemoteConfig,
+    ) -> remote::RemoteConfig {
+        remote::config_set(&state.remote, config)
+    }
 }
 
 #[tauri::command]
@@ -1112,6 +1454,7 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
+    #[cfg(not(multiagent_company))]
     state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
     if let Some(window) = app.get_webview_window("main") {
@@ -1281,11 +1624,80 @@ mod tests {
         assert_eq!(resolved, target_dir.canonicalize().unwrap());
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn folder_resolver_opens_parent_for_unreal_virtual_asset_path() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("multiagent-unreal-test-{}", unique));
+        let project = root.join("ProjectA");
+        let debug_dir = root
+            .join("ProjectA_Toon")
+            .join("UnrealTF")
+            .join("Content")
+            .join("ProjectA_Toon")
+            .join("Debug");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&debug_dir).unwrap();
+        fs::write(debug_dir.join("Lvl_ToonLit_Capture.umap"), [0_u8]).unwrap();
+
+        let resolved = resolve_folder_file(
+            project.to_str().unwrap(),
+            "Game/ProjectA_Toon/Debug/Lvl_ToonLit_Capture",
+        )
+        .unwrap();
+
+        assert_eq!(resolved, debug_dir.canonicalize().unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_resolver_opens_parent_for_file_path() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("multiagent-file-folder-test-{}", unique));
+        let project = root.join("ProjectA");
+        let target_dir = project.join("Docs").join("Guide");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("index.html"), "<html></html>").unwrap();
+
+        let resolved =
+            resolve_folder_file(project.to_str().unwrap(), "Docs/Guide/index.html").unwrap();
+
+        assert_eq!(resolved, target_dir.canonicalize().unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn terminal_path_resolver_uses_longest_existing_absolute_prefix() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("multiagent-terminal-test-{}", unique));
+        let project = root.join("ProjectA");
+        let target_dir = root.join("Downloads");
+        let target = target_dir.join("ChatGPT Image 2026 05 17.png");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(&target, [0_u8, 1, 2, 3]).unwrap();
+
+        let raw = format!("{} trailing description", target.to_string_lossy());
+        let resolved = resolve_terminal_path_file(project.to_str().unwrap(), &raw).unwrap();
+
+        assert_eq!(resolved, target.canonicalize().unwrap());
+        assert_eq!(terminal_path_kind(&resolved), "image");
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -1309,9 +1721,11 @@ pub fn run() {
                     helper_path: helper_path.to_string_lossy().to_string(),
                 },
                 close_confirmed: Mutex::new(false),
+                #[cfg(not(multiagent_company))]
                 remote: Arc::new(remote::RemoteHub::new()),
                 usage: usage_hub,
             });
+            #[cfg(not(multiagent_company))]
             remote::load_access(app.handle());
             usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
             {
@@ -1346,8 +1760,10 @@ pub fn run() {
                 });
             }
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
+        });
+
+    #[cfg(not(multiagent_company))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
             spawn_pty,
             write_pty,
             resize_pty,
@@ -1357,24 +1773,28 @@ pub fn run() {
             read_markdown_file,
             resolve_markdown_path,
             resolve_folder_path,
+            open_folder_path,
+            open_local_path,
+            reveal_local_path,
+            resolve_terminal_path,
             download_installer,
             run_installer_and_quit,
             play_system_sound,
             read_audio_file,
             read_image_data_url,
-            start_remote_server,
-            stop_remote_server,
-            remote_server_status,
-            sync_remote_agents,
-            sync_remote_view,
-            start_tunnel,
-            stop_tunnel,
-            tunnel_status,
-            remote_access_list,
-            remote_access_approve,
-            remote_access_revoke,
-            remote_config_get,
-            remote_config_set,
+            remote_commands::start_remote_server,
+            remote_commands::stop_remote_server,
+            remote_commands::remote_server_status,
+            remote_commands::sync_remote_agents,
+            remote_commands::sync_remote_view,
+            remote_commands::start_tunnel,
+            remote_commands::stop_tunnel,
+            remote_commands::tunnel_status,
+            remote_commands::remote_access_list,
+            remote_commands::remote_access_approve,
+            remote_commands::remote_access_revoke,
+            remote_commands::remote_config_get,
+            remote_commands::remote_config_set,
             sync_usage_catalog,
             start_usage_server,
             stop_usage_server,
@@ -1384,7 +1804,40 @@ pub fn run() {
             usage_ingest_now,
             resolve_cli_session,
             show_main_window
-        ])
+    ]);
+
+    #[cfg(multiagent_company)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+            spawn_pty,
+            write_pty,
+            resize_pty,
+            kill_pty,
+            confirm_close,
+            list_markdown_files,
+            read_markdown_file,
+            resolve_markdown_path,
+            resolve_folder_path,
+            open_folder_path,
+            open_local_path,
+            reveal_local_path,
+            resolve_terminal_path,
+            download_installer,
+            run_installer_and_quit,
+            play_system_sound,
+            read_audio_file,
+            read_image_data_url,
+            sync_usage_catalog,
+            start_usage_server,
+            stop_usage_server,
+            usage_server_status,
+            usage_config_get,
+            usage_config_set,
+            usage_ingest_now,
+            resolve_cli_session,
+            show_main_window
+    ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
