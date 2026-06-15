@@ -554,6 +554,91 @@ fn resolve_image_file(path: &str, folder: Option<&str>) -> Result<PathBuf, Strin
     Err("image not found".to_string())
 }
 
+fn push_folder_probe(probes: &mut Vec<PathBuf>, path: PathBuf) {
+    if !probes.iter().any(|existing| existing == &path) {
+        probes.push(path);
+    }
+}
+
+fn add_relative_folder_probes(probes: &mut Vec<PathBuf>, root: &Path, relative: &Path) {
+    push_folder_probe(probes, root.join(relative));
+    if !relative_path_starts_with(relative, "Docs") {
+        push_folder_probe(probes, root.join("Docs").join(relative));
+    }
+}
+
+fn resolve_folder_file(folder: &str, path: &str) -> Result<PathBuf, String> {
+    let raw = path
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']'));
+    if raw.is_empty() {
+        return Err("folder path is empty".to_string());
+    }
+
+    let candidate = PathBuf::from(raw);
+    if candidate.is_absolute() {
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|e| format!("folder not found: {}", e))?;
+        if !canonical.is_dir() {
+            return Err("path is not a folder".to_string());
+        }
+        return Ok(canonical);
+    }
+
+    if !is_safe_relative_file_path(&candidate) {
+        return Err("invalid folder path".to_string());
+    }
+
+    let root = resolve_markdown_root(folder)?;
+    let mut probes = Vec::new();
+    add_relative_folder_probes(&mut probes, &root, &candidate);
+
+    if let Some(parent) = root.parent() {
+        push_folder_probe(&mut probes, parent.join(&candidate));
+
+        let root_name = root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut sibling_dirs = fs::read_dir(parent)
+            .map_err(|e| e.to_string())?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                if entry.file_type().ok()?.is_dir() {
+                    Some(entry.path())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        sibling_dirs.sort_by(|left, right| {
+            sibling_image_dir_rank(left, &root_name)
+                .cmp(&sibling_image_dir_rank(right, &root_name))
+                .then_with(|| left.cmp(right))
+        });
+
+        for dir in sibling_dirs {
+            if dir == root {
+                continue;
+            }
+            add_relative_folder_probes(&mut probes, &dir, &candidate);
+        }
+    }
+
+    push_folder_probe(&mut probes, candidate);
+    for probe in probes {
+        if let Ok(canonical) = probe.canonicalize() {
+            if canonical.is_dir() {
+                return Ok(canonical);
+            }
+        }
+    }
+
+    Err("folder not found".to_string())
+}
+
 fn should_skip_markdown_dir(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -729,6 +814,11 @@ fn resolve_markdown_path(folder: String, path: String) -> Result<String, String>
     }
 
     Err(last_error)
+}
+
+#[tauri::command]
+fn resolve_folder_path(folder: String, path: String) -> Result<String, String> {
+    resolve_folder_file(&folder, &path).map(|path| path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -1166,6 +1256,31 @@ mod tests {
         assert_eq!(resolved, image.canonicalize().unwrap());
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn folder_resolver_finds_docs_folder_in_sibling_project_folder() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("multiagent-folder-test-{}", unique));
+        let project = root.join("ProjectA");
+        let target_dir = root
+            .join("ProjectA_Toon")
+            .join("Docs")
+            .join("GameDesign")
+            .join("ToonRef")
+            .join("Phase4");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        let resolved =
+            resolve_folder_file(project.to_str().unwrap(), "Docs/GameDesign/ToonRef/Phase4")
+                .unwrap();
+
+        assert_eq!(resolved, target_dir.canonicalize().unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1241,6 +1356,7 @@ pub fn run() {
             list_markdown_files,
             read_markdown_file,
             resolve_markdown_path,
+            resolve_folder_path,
             download_installer,
             run_installer_and_quit,
             play_system_sound,

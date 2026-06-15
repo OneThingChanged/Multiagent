@@ -40,6 +40,7 @@ export type RenderCtx = {
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   onOpenMarkdownPath: (agentId: string, path: string) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
+  onOpenFolderPath: (agentId: string, path: string) => void;
 };
 
 export function PaneSlot({
@@ -74,7 +75,12 @@ export function PaneSlot({
     let entry = termsRef.current.get(agentId);
     let freshlyCreated = false;
     if (!entry) {
-      entry = createEntry(agentId, ctx.onOpenMarkdownPath, ctx.onOpenImagePath);
+      entry = createEntry(
+        agentId,
+        ctx.onOpenMarkdownPath,
+        ctx.onOpenImagePath,
+        ctx.onOpenFolderPath
+      );
       termsRef.current.set(agentId, entry);
       freshlyCreated = true;
     }
@@ -260,6 +266,7 @@ export function PaneSlot({
     setAgentSessionId,
     ctx.onOpenMarkdownPath,
     ctx.onOpenImagePath,
+    ctx.onOpenFolderPath,
     ctx.sessionPins,
   ]);
 

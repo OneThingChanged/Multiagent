@@ -1176,6 +1176,27 @@ function App() {
     setImageViewer({ path, folder: project?.folder ?? null });
   }, []);
 
+  const handleOpenFolderPath = useCallback(
+    async (agentId: string, path: string) => {
+      const agent = agentsRef.current.find((a) => a.id === agentId);
+      const project = projectsRef.current.find(
+        (candidate) => candidate.id === agent?.projectId
+      );
+      if (!agent || !project?.folder) return;
+
+      try {
+        const folderPath = await invoke<string>("resolve_folder_path", {
+          folder: project.folder,
+          path,
+        });
+        await openPath(folderPath);
+      } catch {
+        pushToast(agentId, agent.name, "폴더를 열 수 없습니다.");
+      }
+    },
+    [pushToast]
+  );
+
   const setActivePathForPane = useCallback(
     (path: Path | null) => {
       if (!path) {
@@ -1334,6 +1355,7 @@ function App() {
         }
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
+        onOpenFolderPath={handleOpenFolderPath}
       />
       {docsOpen && (
         <div className="docs-overlay">

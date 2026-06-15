@@ -65,11 +65,20 @@ const MARKDOWN_PATH_RE =
 const IMAGE_PATH_RE =
   /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()\[\]{},;]+[\\/])*[^\s"'<>|:*?()\[\]{},;]+\.(?:png|jpe?g|gif|webp|bmp|svg|ico)/gi;
 
+const PATH_PART = String.raw`[^\s"'<>|:*?()\[\]{},;\\\/]+`;
+const FOLDER_PATH_RE = new RegExp(
+  String.raw`(?:[A-Za-z]:[\\/]|\\\\${PATH_PART}[\\/]${PATH_PART}[\\/]|\.{1,2}[\\/])?(?:${PATH_PART}[\\/])+(?:${PATH_PART})?`,
+  "gi"
+);
+
 export type MarkdownPathHandler = (agentId: string, path: string) => void;
 export type ImagePathHandler = (agentId: string, path: string) => void;
+export type FolderPathHandler = (agentId: string, path: string) => void;
 
 type MarkdownPathMatch = {
   text: string;
+  startIndex: number;
+  endIndex: number;
   startColumn: number;
   endColumn: number;
 };
@@ -142,6 +151,21 @@ function cleanImagePathCandidate(candidate: string) {
     .replace(/[>`"')\].,;]+$/, "");
 }
 
+function cleanFolderPathCandidate(candidate: string) {
+  return candidate
+    .trim()
+    .replace(/^[`"'(<\[]+/, "")
+    .replace(/[>`"')\].,;]+$/, "");
+}
+
+function rangeOverlaps(a: MarkdownPathMatch, b: MarkdownPathMatch) {
+  return a.startIndex < b.endIndex && b.startIndex < a.endIndex;
+}
+
+function startsInsideUrl(text: string, start: number) {
+  return text.slice(Math.max(0, start - 3), start) === "://";
+}
+
 function findImagePathMatches(text: string): MarkdownPathMatch[] {
   const matches: MarkdownPathMatch[] = [];
   IMAGE_PATH_RE.lastIndex = 0;
@@ -153,6 +177,8 @@ function findImagePathMatches(text: string): MarkdownPathMatch[] {
     const startColumn = cellWidth(text.slice(0, start));
     matches.push({
       text: cleaned,
+      startIndex: start,
+      endIndex: start + raw.length,
       startColumn,
       endColumn: startColumn + cellWidth(raw),
     });
@@ -216,9 +242,40 @@ function findMarkdownPathMatches(text: string): MarkdownPathMatch[] {
     const startColumn = cellWidth(text.slice(0, start));
     matches.push({
       text: cleaned,
+      startIndex: start,
+      endIndex: start + raw.length,
       startColumn,
       endColumn: startColumn + cellWidth(raw),
     });
+  }
+
+  return matches;
+}
+
+function findFolderPathMatches(
+  text: string,
+  occupied: MarkdownPathMatch[]
+): MarkdownPathMatch[] {
+  const matches: MarkdownPathMatch[] = [];
+  FOLDER_PATH_RE.lastIndex = 0;
+
+  for (const match of text.matchAll(FOLDER_PATH_RE)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    if (startsInsideUrl(text, start)) continue;
+    const cleaned = cleanFolderPathCandidate(raw);
+    if (!cleaned) continue;
+    const candidate: MarkdownPathMatch = {
+      text: cleaned,
+      startIndex: start,
+      endIndex: start + raw.length,
+      startColumn: cellWidth(text.slice(0, start)),
+      endColumn: cellWidth(text.slice(0, start)) + cellWidth(raw),
+    };
+    if (occupied.some((existing) => rangeOverlaps(existing, candidate))) {
+      continue;
+    }
+    matches.push(candidate);
   }
 
   return matches;
@@ -249,7 +306,8 @@ function registerMarkdownLinkProvider(
   term: Terminal,
   id: string,
   onMarkdownPath: MarkdownPathHandler,
-  onImagePath?: ImagePathHandler
+  onImagePath?: ImagePathHandler,
+  onFolderPath?: FolderPathHandler
 ) {
   term.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
@@ -261,8 +319,10 @@ function registerMarkdownLinkProvider(
 
       const text = line.translateToString(true);
       const links: ILink[] = [];
+      const occupied: MarkdownPathMatch[] = [];
 
       for (const match of findMarkdownPathMatches(text)) {
+        occupied.push(match);
         links.push({
           range: {
             start: { x: match.startColumn + 1, y: bufferLineNumber },
@@ -282,6 +342,7 @@ function registerMarkdownLinkProvider(
 
       if (onImagePath) {
         for (const match of findImagePathMatches(text)) {
+          occupied.push(match);
           links.push({
             range: {
               start: { x: match.startColumn + 1, y: bufferLineNumber },
@@ -300,6 +361,26 @@ function registerMarkdownLinkProvider(
         }
       }
 
+      if (onFolderPath) {
+        for (const match of findFolderPathMatches(text, occupied)) {
+          links.push({
+            range: {
+              start: { x: match.startColumn + 1, y: bufferLineNumber },
+              end: { x: match.endColumn, y: bufferLineNumber },
+            },
+            text: match.text,
+            decorations: {
+              pointerCursor: true,
+              underline: true,
+            },
+            activate(event, path) {
+              event.preventDefault();
+              onFolderPath(id, path);
+            },
+          });
+        }
+      }
+
       callback(links.length > 0 ? links : undefined);
     },
   });
@@ -308,7 +389,8 @@ function registerMarkdownLinkProvider(
 export function createEntry(
   id: string,
   onMarkdownPath?: MarkdownPathHandler,
-  onImagePath?: ImagePathHandler
+  onImagePath?: ImagePathHandler,
+  onFolderPath?: FolderPathHandler
 ): TerminalEntry {
   const isWindows = navigator.userAgent.includes("Windows");
   const term = new Terminal({
@@ -338,7 +420,13 @@ export function createEntry(
     })
   );
   if (onMarkdownPath) {
-    registerMarkdownLinkProvider(term, id, onMarkdownPath, onImagePath);
+    registerMarkdownLinkProvider(
+      term,
+      id,
+      onMarkdownPath,
+      onImagePath,
+      onFolderPath
+    );
   }
 
   const el = document.createElement("div");

@@ -34,6 +34,7 @@ export function TerminalArea({
   onTabContextMenu,
   onOpenMarkdownPath,
   onOpenImagePath,
+  onOpenFolderPath,
 }: {
   agents: Agent[];
   layout: LayoutNode | null;
@@ -56,6 +57,7 @@ export function TerminalArea({
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   onOpenMarkdownPath: (agentId: string, path: string) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
+  onOpenFolderPath: (agentId: string, path: string) => void;
 }) {
   const ctx: RenderCtx = {
     agents,
@@ -77,6 +79,7 @@ export function TerminalArea({
     onTabContextMenu,
     onOpenMarkdownPath,
     onOpenImagePath,
+    onOpenFolderPath,
   };
   return (
     <main className="terminal-area">
