@@ -35,39 +35,36 @@
 - 고정값은 다음 spawn부터 적용된다. 이미 실행 중인 Codex/Claude 프로세스는 자동 재시작하지 않음
 - 고정된 세션 ID가 도구 쪽에서 더 이상 resume 불가하면 사용자가 고정을 해제하거나 새 세션을 시작해야 함
 
-### 수동 업데이트 확인
-- 설정창의 업데이트 확인은 GitHub Release를 조회하고 브라우저를 여는 수동 방식
-- 설치 파일 다운로드와 설치는 사용자가 직접 진행해야 함
-- Tauri updater의 서명 기반 자동 다운로드/설치는 아직 없음
+### 자동 업데이트 / 릴리즈 운영
+- 자동 업데이트는 GitHub의 **Latest 릴리즈**에 첨부된 `latest.json`(+`.sig`)에 의존. 릴리즈를 draft로 두거나 latest 마킹·서명·매니페스트를 빠뜨리면 업데이트가 안 보임 ([RELEASE.md](RELEASE.md) 체크리스트)
+- `/releases/latest/download/` 경로는 GitHub CDN 캐시로 publish 직후 몇 분간 옛 버전을 줄 수 있음
+- 서명 private key를 잃으면 기존 사용자는 자동 업데이트 불가 (새 키 + 수동 재설치 필요)
+
+### 원격 접속 제약
+- 내부 localhost 구간은 평문 HTTP (외부는 Cloudflare가 TLS). LAN 직접 접속(레거시 토큰)은 같은 망에서 평문
+- quick tunnel URL은 켤 때마다 바뀜. 고정 도메인은 Cloudflare 계정 + 도메인으로 named tunnel 필요
+- 같은 세션을 데스크탑·웹에서 동시에 보면 PTY가 하나라 출력이 공유됨 (의도된 동작; 화면 크기는 데스크탑이 주인)
+
+### codex 플러그인 hook 호환
+- codex companion 플러그인의 `hooks.json`이 codex 버전의 hook 스키마와 안 맞으면(예: 최상위 `description` 필드) hook 로딩 실패 → working 표시/세션 캡처가 안 될 수 있음 ([RESUME.md](RESUME.md))
 
 ### dev 모드에서 부모 죽으면 자식 stale 가능
 - app.exe 강제종료 시 PowerShell 자식이 즉시 안 죽고 orphan이 될 수 있음
 - 정상 종료 (창 X) 경로에선 portable-pty가 master drop → slave EIO → child 종료 cascade
 
-## 잠재 개선 (phase 2)
+## 구현 완료 (과거 phase 2 후보)
 
-### 필수에 가까운 것
+세션 재시작·비활성화·재등록, 전역 단축키(Ctrl+T/W/1-9/F), 스크롤백 영속화, 터미널 검색(Ctrl+F), 알림음 옵션, 자동 업데이터, 프로젝트 드래그 재정렬·삭제·속성, 세션 속성, 사이드바 검색, 이미지/HTML 뷰어, 원격 접속, 사용량 대시보드는 모두 구현됨.
 
-- **탭 reorder**: 같은 leaf 안에서 탭을 드래그로 순서 바꾸기 (지금은 같은 leaf center 드롭이 no-op)
-- **세션 재시작**: exited 상태 에이전트를 클릭하면 재spawn (지금은 영원히 exited)
-- **세션 설정 편집 확장**: 별명 변경은 가능하지만 프로젝트/AI 도구/dangerous 변경 UI는 아직 없음
+## 잠재 개선 (남은 것)
 
-### 있으면 좋은 것
-
-- **Cross-group 드래그**: 다른 그룹의 에이전트를 현재 그룹의 패널로 끌어다 놓기 (지금도 동작은 하지만 시각 피드백 부족)
-- **그룹 이름 / 색깔**: 사이드바에서 그룹 식별 강화
-- **단축키**: Ctrl+T 새 탭, Ctrl+W 탭 닫기, Ctrl+1~9 탭 전환, Ctrl+\ 분할 등
-- **모델/플래그 커스터마이즈**: AI 도구별로 추가 CLI 인자 (예: `claude -m sonnet`)를 모달에서 지정
-- **세션 복제**: 같은 프로젝트에 동일 설정으로 새 세션 만들기
-- **터미널 폰트/사이즈 설정 UI**: Ctrl+휠로 크기 조절은 가능하지만 설정 팝업에서는 아직 직접 지정 불가
-- **알림 옵션**: Windows 토스트 / 인앱 토스트 / 사운드 켜고 끄기
-- **세션 export/import**: 그룹/레이아웃을 JSON으로 내보내기
-- **Cargo 바이너리명 → MultiAgent.exe**: 단독 EXE 파일명 정리
-
-### 더 큰 작업
-
-- **세션 영속화**: PowerShell 백그라운드로 detach + 다음 실행 시 재attach (Windows에선 어려움. WSL 기반이면 tmux 비슷한 접근 가능)
-- **스크롤백 영속화**: `@xterm/addon-serialize`로 종료 직전 스크롤백 저장, 다음 실행 때 inject. Claude 자체 컨텍스트는 따로 못 살리지만 시각적으로 이전 출력은 보임
-- **터미널 검색**: `@xterm/addon-search`로 Ctrl+F
-- **로그 export**: 에이전트별 출력 로그 파일로 저장
-- **다국어**: 지금 UI는 한글 일부 + 영문 일부 혼합 → 통일
+- **탭 reorder**: 같은 leaf 안에서 탭 순서 드래그 변경 (현재 같은 leaf center 드롭은 no-op)
+- **세션 설정 편집 확장**: 별명은 바꿀 수 있지만 프로젝트/AI 도구/dangerous 변경 UI는 없음
+- **모델/플래그 커스터마이즈**: 도구별 추가 CLI 인자(예: `claude -m sonnet`)를 모달에서 지정
+- **세션 복제**: 같은 프로젝트에 동일 설정으로 새 세션
+- **그룹 이름/색**: 사이드바 그룹 식별 강화
+- **세션 export/import**: 그룹/레이아웃을 JSON으로
+- **로그 export**: 에이전트별 출력 로그 파일
+- **세션 프로세스 영속화**: 앱을 닫아도 PowerShell+CLI를 백그라운드 유지 (Windows에선 어려움; 현재는 resume으로 대화만 복원)
+- **모바일 전용 원격 UI**: 현재 원격 웹은 데스크탑 브라우저 기준. 좁은 화면용 레이아웃 별도 필요
+- **다국어**: UI 한/영 혼용 → 통일

@@ -9,7 +9,6 @@ import {
 import { toolForId } from "../types";
 import type { Agent, DragState, Group, Project } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
-import { folderTail } from "../lib/path";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 
@@ -103,6 +102,7 @@ export function Sidebar({
     before: boolean;
   } | null>(null);
   const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const pendingSessionClickRef = useRef<PendingSessionClick | null>(null);
 
   useEffect(() => {
@@ -180,6 +180,29 @@ export function Sidebar({
     return result;
   }, [agents, groups, projects]);
 
+  const searchTerm = searchQuery.trim().toLowerCase();
+
+  // Filter sections by search: project-name match shows all its sessions;
+  // otherwise only sessions whose name matches. Returns null to hide the
+  // whole project.
+  const filterSections = (
+    projectId: string,
+    projectName: string
+  ): Section[] | null => {
+    const sections = sectionsByProject.get(projectId) ?? [];
+    if (!searchTerm) return sections;
+    if (projectName.toLowerCase().includes(searchTerm)) return sections;
+    const filtered = sections
+      .map((s) => ({
+        ...s,
+        members: s.members.filter((m) =>
+          m.name.toLowerCase().includes(searchTerm)
+        ),
+      }))
+      .filter((s) => s.members.length > 0);
+    return filtered.length > 0 ? filtered : null;
+  };
+
   const toggleProjectExpanded = (projectId: string) => {
     setExpandedProjectIds((current) => {
       const next = new Set(current);
@@ -242,7 +265,8 @@ export function Sidebar({
     a: Agent,
     groupId: string,
     multi: boolean,
-    sessionLocked: boolean
+    sessionLocked: boolean,
+    compact: boolean
   ) => {
     const inGroup = inGroupAgentIds.has(a.id);
     const isDragging = dragState?.fromAgentId === a.id;
@@ -253,6 +277,7 @@ export function Sidebar({
         className={[
           "agent-item",
           "agent-item-nested",
+          compact ? "agent-item-compact" : "",
           activeAgentId === a.id ? "active" : "",
           inGroup ? "in-group" : "",
           isDragging ? "agent-dragging" : "",
@@ -305,7 +330,18 @@ export function Sidebar({
           >
             {toolForId(a.aiToolId).icon}
           </span>
-          <span className="agent-name" title={`${a.name} - 더블클릭으로 별명 변경`}>
+          <span
+            className="agent-name"
+            title={
+              compact
+                ? `${a.name} · ${
+                    a.lastSessionId
+                      ? `session ${a.lastSessionId.slice(0, 8)}`
+                      : "new session"
+                  } - 더블클릭으로 별명 변경`
+                : `${a.name} - 더블클릭으로 별명 변경`
+            }
+          >
             {a.name}
           </span>
           {sessionLocked && (
@@ -335,9 +371,13 @@ export function Sidebar({
             x
           </button>
         </div>
-        <div className="agent-folder" title={a.lastSessionId ?? ""}>
-          {a.lastSessionId ? `session ${a.lastSessionId.slice(0, 8)}` : "new session"}
-        </div>
+        {!compact && (
+          <div className="agent-folder" title={a.lastSessionId ?? ""}>
+            {a.lastSessionId
+              ? `session ${a.lastSessionId.slice(0, 8)}`
+              : "new session"}
+          </div>
+        )}
       </li>
     );
   };
@@ -399,9 +439,28 @@ export function Sidebar({
             +
           </button>
         </div>
+        <div className="sidebar-search">
+          <input
+            className="sidebar-search-input"
+            value={searchQuery}
+            placeholder="프로젝트 · 세션 검색"
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              className="sidebar-search-clear"
+              onClick={() => setSearchQuery("")}
+              title="Clear"
+            >
+              ×
+            </button>
+          )}
+        </div>
         {projects.map((project) => {
-          const expanded = expandedProjectIds.has(project.id);
-          const sections = sectionsByProject.get(project.id) ?? [];
+          const sections = filterSections(project.id, project.name);
+          if (sections === null) return null;
+          const expanded =
+            searchTerm.length > 0 || expandedProjectIds.has(project.id);
           const sessionCount = projectSessionCounts.get(project.id) ?? 0;
 
           const isDropTarget = projectDropTarget?.id === project.id;
@@ -495,12 +554,9 @@ export function Sidebar({
                 <button
                   className="project-item project-tree-project"
                   onClick={() => selectProject(project.id)}
-                  title={project.folder}
+                  title={`${project.name}\n${project.folder}`}
                 >
                   <span className="project-name">{project.name}</span>
-                  <span className="project-meta">
-                    {folderTail(project.folder)} · {sessionCount}
-                  </span>
                 </button>
               </div>
               {expanded && (
@@ -513,7 +569,8 @@ export function Sidebar({
                           agent,
                           section.groupId,
                           section.multi,
-                          section.sessionLocked
+                          section.sessionLocked,
+                          true
                         )
                       )}
                     </Fragment>

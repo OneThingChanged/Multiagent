@@ -32,8 +32,9 @@ window.on_window_event(move |event| {
 
 1. 앱이 각 에이전트 폴더의 `.claude/settings.local.json`과 `.codex/config.toml`에 `SessionStart` hook을 머지
 2. 도구가 켜질 때 hook 실행 → `notify.ps1 session-start`
-3. `notify.ps1`이 stdin JSON에서 `session_id` 추출
-4. HTTP `/event`에 `{ id, event: "session-start", session_id, token }` POST
+3. `notify.ps1`이 stdin JSON에서 `session_id`(+ `transcript_path`, `cwd`) 추출
+4. HTTP `/event`에 `{ id, event: "session-start", session_id, token, ... }` POST
+   - 포트·토큰은 **세션별 환경변수 `MULTIAGENT_PORT`/`MULTIAGENT_TOKEN` 우선**, 없을 때만 `hook-info.json` fallback. 세션은 자기를 spawn한(살아있는) 앱에 1:1로 묶이므로 앱 재시작·다중 인스턴스에서도 정확
 5. Rust 서버가 토큰 검증 후 `agent:hook-event` 발생
 6. 프론트가 `agent.lastSessionId`에 저장하고 `multiagent.agents.v1`에 영구화
 
@@ -68,11 +69,22 @@ Claude 결과 예: `claude --resume <session_id> --dangerously-skip-permissions`
 
 고정 그룹은 `sessionLocked` 상태가 되어 외부 에이전트를 탭/분할/드래그로 추가할 수 없다. 이미 실행 중인 터미널 프로세스는 자동 재시작하지 않으므로 고정값은 다음 spawn부터 적용된다.
 
+## 현재 세션으로 재등록 (복구)
+
+hook이 안 돌거나(예: 깨진 codex 플러그인 `hooks.json`이 파싱 실패해 SessionStart가 안 fire) `lastSessionId`가 옛 값으로 굳으면 resume이 엉뚱한 세션을 잡는다. 사이드바 세션 우클릭 → **현재 세션으로 재등록**:
+
+- `relink_cli_session`(Rust) → `usage.rs`의 `find_latest_for_folder(tool, folder)`가 그 도구·폴더의 **디스크 최신 transcript**에서 session_id를 추출
+  - claude: `~/.claude/projects/<encoded-folder>/<id>.jsonl` 중 최신
+  - codex: `~/.codex/sessions/**/rollout-...<id>.jsonl` 중 cwd 일치 최신
+- 찾은 id를 `lastSessionId`로 갱신 → **다음 spawn부터** 그 세션으로 resume
+- transcript 탐색 로직은 사용량 대시보드와 공유 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+
 ## 한계 / 미지원
 
-- **Shell only 모드**: `/quit` 명령이 PowerShell에 없어 에러 메시지가 잠깐 보일 수 있음 (해롭진 않음). 어차피 resume 대상 아님
-- **세션 ID 무효화**: Codex/Claude가 세션 ID를 더 이상 resume할 수 없거나 session jsonl이 삭제되면 resume 실패. 사용자는 새 세션 시작 필요
-- **첫 spawn**: 에이전트 최초 생성 직후엔 아직 SessionStart hook이 fire 안 됐을 수 있음. 한 번 spawn 되고 나면 다음 실행부터 정상 동작
+- **Shell only 모드**: `/quit`이 PowerShell에 없어 에러가 잠깐 보일 수 있음 (해롭진 않음, resume 대상 아님)
+- **세션 ID 무효화**: 도구가 그 세션을 더 이상 resume 못 하거나 jsonl이 삭제되면 실패 → 새 세션 시작 (재등록으로 디스크 최신 세션을 다시 잡아볼 수 있음)
+- **첫 spawn**: 최초 생성 직후엔 SessionStart hook 전이라 resume 대상 없음. 한 번 떠야 다음부터 정상
+- **codex 플러그인 hooks.json 호환**: codex companion 플러그인의 `hooks.json` 최상위에 `description` 같은 미지원 필드가 있으면 codex가 hook 로딩에 실패해 SessionStart가 안 옴 → 해당 필드 제거 또는 플러그인 정리 필요
 
 ## persistence
 

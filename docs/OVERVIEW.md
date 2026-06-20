@@ -1,46 +1,79 @@
 # MultiAgent — Overview
 
-여러 AI 에이전트(Claude Code, Codex 등) 터미널 세션을 프로젝트 단위로 한 창에서 그룹·탭·분할로 관리하는 데스크톱 앱.
+여러 AI 에이전트(Claude Code, Codex) 터미널 세션을 프로젝트 단위로 한 창에서 그룹·탭·분할로 관리하고, 외부 브라우저에서 원격 조작하며, 토큰 사용량을 집계하는 데스크톱 앱.
 
 ## 목적
 
-- 여러 프로젝트에서 동시에 Claude/Codex를 돌릴 때, 별도의 OS 터미널 창 여러 개를 띄우지 않고 한 윈도우 안에서 빠르게 전환·정리
-- 어떤 에이전트가 "작업 중"인지, "끝났는지"를 시각적으로 + 알림으로 표시
-- 라이더 IDE 같은 다중 분할 + 다중 탭 레이아웃 UX
+- 여러 프로젝트에서 동시에 Claude/Codex를 돌릴 때, OS 터미널 창을 여러 개 띄우지 않고 한 윈도우에서 전환·정리
+- 어떤 에이전트가 "작업 중"인지 "끝났는지"를 상태점 + 알림(소리 포함)으로 표시
+- IDE 같은 다중 분할 + 다중 탭 레이아웃
+- 집 밖/다른 PC에서도 브라우저로 접속해 세션을 보고 명령
+- 도구·세션·프로젝트별 토큰 소비를 대시보드로 파악
 
 ## 기술 스택
 
-- **셸**: Tauri 2 (Rust 백엔드 + Edge WebView2 프론트)
-- **프론트**: React 19 + TypeScript + Vite
-- **터미널 에뮬레이터**: `@xterm/xterm` v6 + `addon-fit` + `addon-web-links`
-- **PTY**: Rust `portable-pty` 0.8 (Windows에서는 ConPTY)
-- **이벤트 IPC**: Tauri 이벤트(`pty:data`, `pty:exit`, `agent:hook-event`)
-- **알림**: `tauri-plugin-notification`, 인앱 토스트 fallback
-- **폴더 선택**: `tauri-plugin-dialog`
-- **Claude/Codex Hook 수신**: Rust 내장 `tiny_http` HTTP 서버 (127.0.0.1:RANDOM_PORT)
+- **셸**: Tauri 2 (Rust 백엔드 + WebView2 프론트), standard / company 두 빌드 variant
+- **프론트**: React 19 + TypeScript + Vite (dev 포트 4420)
+- **터미널**: `@xterm/xterm` v6 + addon-fit / -search / -serialize / -web-links
+- **PTY**: Rust `portable-pty` (Windows ConPTY)
+- **로컬 HTTP(hook 수신)**: `tiny_http` (127.0.0.1:랜덤)
+- **원격 서버**: `axum` + `tokio` (WebSocket), Cloudflare Tunnel(`cloudflared`)
+- **사용량 DB**: `rusqlite`(SQLite)
+- **인증**: GitHub Device Flow / OAuth 웹 flow
+- **업데이트**: `tauri-plugin-updater` (서명된 GitHub 릴리즈 자동 설치)
+- **기타 플러그인**: notification / dialog / opener / process
 
-## 주요 기능 한눈에
+## 기능 카탈로그
 
+### 세션·레이아웃
 | 기능 | 설명 |
 |---|---|
-| 프로젝트/세션 모델 | 프로젝트를 먼저 등록하고, 접이식 프로젝트 트리 안에서 별명 있는 세션을 생성 |
-| 세션 생성 모달 | 세션 별명·AI 도구·Dangerous 모드 |
-| 세션 별명 변경 | 사이드바 우클릭 메뉴에서 기존 세션 이름 수정 |
-| PowerShell 7 우선 | Store판 `pwsh.exe` → MSI판 → 5.1 → cmd.exe 순 |
-| Init 명령 자동 실행 | spawn 후 600ms 뒤 `claude --dangerously-skip-permissions` 등을 자동 입력 |
-| 멀티-탭 패널 | 한 패널이 여러 에이전트를 탭으로 묶음 |
-| 분할 레이아웃 | 임의 깊이 h/v 분할. 핸들 드래그로 크기 조절 |
-| 그룹 개념 | 분할로 묶인 에이전트들이 한 그룹. 사이드바에서 누구를 클릭하든 그 그룹 전체가 보임 |
-| 그룹 세션 고정 | 사이드바 우클릭 메뉴에서 현재 저장된 세션 ID를 그룹에 고정. 고정 그룹은 해당 세션으로만 resume하고 외부 에이전트 추가를 막음 |
-| 사이드바 그룹 정렬 | 같은 그룹 멤버가 사이드바에서 연속해서 표시 + 구분선 + 왼쪽 막대 |
-| 드래그 앤 드롭 | 탭/사이드바 세션을 패널 위로 끌어서 center=탭 합치기 / 4-edge=분할 재배치. 다른 프로젝트 세션도 같은 작업 화면에 배치 가능 |
-| Working/Done 감지 | Claude Code hook(UserPromptSubmit/Stop) → 로컬 HTTP → 노란 펄스/완료 토스트+OS 알림 |
-| 영구화 | localStorage에 projects·agents·groups·view(activeProjectId/activeGroupId/activePath) 저장 |
-| Codex 세션 Resume | 창 닫을 때 자동으로 `/quit` → `codex resume <token>` 토큰 캡처 → 다음 실행 시 자동 재개 (자세한 건 [RESUME.md](RESUME.md)) |
-| Ctrl+V 텍스트 paste | 클립보드 텍스트면 xterm 직접 paste, 이미지면 raw Ctrl+V 키스트로크로 PTY 전달 (Codex 이미지 paste 호환) |
-| 휠 스크롤 보장 | TUI 앱이 mouse tracking을 켜도 항상 xterm scrollback으로 (capture 단계 가로채기) |
-| Ctrl+휠 터미널 줌 | Ctrl을 누른 상태로 마우스 휠을 돌리면 모든 터미널 폰트 크기를 조절하고 저장 |
-| Docs 패널 | 활성 프로젝트 폴더의 Markdown 파일을 오른쪽 패널에서 렌더링. List/Tree/Hide 탐색 모드, GFM 표, 코드 하이라이트 지원 |
-| 터미널 Markdown 링크 | 터미널 출력의 `.md/.markdown` 상대경로·절대경로를 클릭하면 Docs 패널에서 해당 문서 열기 |
-| 전역 설정/테마 | 사이드바 상단 `설정` 버튼에서 Soft/GitHub/Warm/Light 테마 선택. 앱 UI, 터미널, Docs 뷰어에 적용 |
-| 수동 업데이트 확인 | 설정창에서 현재 버전과 GitHub 최신 릴리즈를 비교하고 릴리즈 페이지를 열 수 있음 |
+| 프로젝트/세션 모델 | 프로젝트 등록 → 접이식 트리 안에 별명 세션 생성 |
+| 멀티 탭 / 분할 | 한 패널에 여러 탭, 임의 깊이 h/v 분할, 핸들로 크기 조절 |
+| 그룹 | 분할로 묶인 세션들이 한 그룹 — 누굴 클릭하든 그룹 전체 표시 |
+| 드래그 앤 드롭 | 탭/사이드바 세션을 5존 드롭(center=탭, 4-edge=분할)으로 재배치 |
+| 그룹 세션 고정 | 그룹을 특정 세션 ID로 고정(PIN), 외부 세션 추가 차단 |
+| 1줄 사이드바 | 프로젝트·세션을 한 줄로 압축 표시 |
+| 프로젝트 재정렬 | 사이드바에서 프로젝트 드래그로 순서 변경 |
+| 검색 | 사이드바 상단에서 프로젝트명·세션명 필터 |
+
+### 세션 관리 (우클릭 메뉴)
+전환 / 탭 추가 / 좌우·상하 분할 / 별명 변경 / **세션 재시작** / **세션 비활성화**(화면에 안 보일 때만, PTY만 종료해 리소스 해제) / **현재 세션으로 재등록**(디스크 최신 세션 찾아 resume 대상 갱신) / 그룹 세션 고정·해제 / **속성**(세션 ID·생성 시각·도구·폴더 등). 프로젝트 우클릭: 이름 변경 / 삭제 / 속성.
+
+### 상태·알림
+| 기능 | 설명 |
+|---|---|
+| Working/Done 감지 | Claude/Codex hook(UserPromptSubmit/Stop) → 로컬 HTTP → 상태점(노란 펄스/초록) |
+| 알림 | 완료 시 인앱 토스트 + OS 알림 + **알림음**(시스템음/커스텀 파일/끄기, 설정에서 선택) |
+| 세션 Resume | SessionStart hook으로 session_id 캡처 → 다음 실행 시 `codex resume`/`claude --resume` ([RESUME.md](RESUME.md)) |
+| 스크롤백 복원 | 종료 직전 스크롤백 저장 → 재시작 시 복원 |
+
+### 뷰어·터미널
+| 기능 | 설명 |
+|---|---|
+| Docs 패널 | 프로젝트 폴더의 `.md`/`.html` 파일 렌더 (List/Tree/Hide, GFM·코드 하이라이트, HTML은 sandbox iframe) |
+| 이미지 뷰어 | 터미널 출력의 이미지 경로(png/jpg/…) 클릭 → 인앱 뷰어 |
+| 문서 링크 | 터미널의 `.md`/`.html` 경로 클릭 → Docs 패널 (프로젝트 폴더 밖도 열림) |
+| Ctrl+Enter | 줄바꿈 입력 (IME 합성 안전 처리) |
+| Ctrl+F | 터미널 검색 |
+| Ctrl+C/V | 텍스트 복사/붙여넣기, 이미지 클립보드는 raw 키스트로크 |
+| Ctrl+휠 | 터미널 폰트 줌 (저장됨) |
+| 휠 스크롤 보장 | TUI mouse tracking 무시하고 항상 scrollback |
+
+### 단축키
+`Ctrl+T` 새 세션 · `Ctrl+W` 활성 탭 닫기 · `Ctrl+1~9` 탭 전환 · `Ctrl+F` 검색 · `Esc` 검색/Docs 닫기.
+
+### 원격 접속 ([REMOTE.md](REMOTE.md))
+내장 axum 웹 서버 + Cloudflare Tunnel(quick/named, 고정 도메인 가능) + GitHub 로그인 + **계정 승인제**. 외부 브라우저에서 세션 목록·터미널·입력. 독립 뷰어(데스크탑과 다른 세션을 따로 봄).
+
+### 사용량 대시보드 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+transcript JSONL을 파싱해 토큰 사용량을 SQLite에 적재, 별도 로컬 웹 대시보드(차트·요약·세션별)로 시각화.
+
+### 기타
+| 기능 | 설명 |
+|---|---|
+| 자동 업데이트 | 설정 → About → Check, 서명 검증 후 다운로드·설치·재시작 ([RELEASE.md](RELEASE.md)) |
+| 멀티 윈도우 | 새 창 열기 |
+| 항상 위 | always-on-top 토글 |
+| 테마 | Soft / GitHub / Warm / Light (앱·터미널·Docs 공통) |
+| 영구화 | localStorage(projects/agents/groups/view/theme/…) + 로컬 JSON/SQLite(원격·사용량) |

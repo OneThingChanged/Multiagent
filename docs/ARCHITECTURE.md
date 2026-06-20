@@ -5,12 +5,17 @@
 ```
 app.exe (Tauri Rust 메인 프로세스)
 ├─ WebView2 (UI 렌더링, React + xterm.js)
-├─ HTTP 서버 thread (127.0.0.1:RANDOM_PORT, Claude hook 수신)
+├─ tiny_http hook 서버 thread (127.0.0.1:RANDOM_PORT, Claude/Codex hook 수신)
+├─ axum 원격 서버 (0.0.0.0:port, 켰을 때만 — REMOTE.md)
+│   └─ cloudflared 자식 프로세스 (터널 켰을 때만)
+├─ axum 사용량 대시보드 서버 (127.0.0.1:3141, 켰을 때만 — USAGE_DASHBOARD.md)
 ├─ PTY thread × N (각 에이전트마다 reader 스레드)
 │  └─ PowerShell child process
 │      └─ claude / codex CLI (사용자가 선택한 AI 도구)
 └─ 600ms 후 init 명령 입력용 1회성 스레드 × N
 ```
+
+빌드 variant: **standard**(`com.jintae.multiagent`, `latest.json`) / **company**(`com.jintae.multiagent.company`, `latest-company.json`). 같은 버전·코드, identifier와 updater endpoint만 다름 ([RELEASE.md](RELEASE.md)).
 
 ## 파일 레이아웃
 
@@ -25,27 +30,33 @@ K:\AI\MultiAgent\
    │  │  ├─ layout.ts       ← 트리 연산 (getAt/setAt/pruneAgent/…)
    │  │  ├─ persistence.ts  ← localStorage load + bootstrap
    │  │  ├─ appTheme.ts     ← 전역 테마 정의 + localStorage 저장
-   │  │  ├─ appInfo.ts      ← 앱 버전, GitHub repo URL, 수동 업데이트 version helper
-   │  │  └─ terminal.ts     ← createEntry / xterm 테마 / Markdown 링크 / zoom / notifyDone / computeDropZone
+   │  │  ├─ appInfo.ts      ← 앱 버전·variant, GitHub repo URL
+   │  │  ├─ notificationSound.ts ← 알림음 설정/재생
+   │  │  ├─ scrollback.ts   ← xterm 스크롤백 저장/복원 (localStorage)
+   │  │  └─ terminal.ts     ← createEntry / 테마 / md·html·이미지 링크 / search·serialize / zoom / Ctrl+Enter / notifyDone
    │  ├─ components/
-   │  │  ├─ Sidebar.tsx
-   │  │  ├─ TerminalArea.tsx  ← + NodeRenderer
-   │  │  ├─ PaneSlot.tsx      ← + RenderCtx 타입
-   │  │  ├─ Splitter.tsx
-   │  │  ├─ DocsPanel.tsx     ← Markdown 목록/트리/뷰어
-   │  │  ├─ SettingsModal.tsx ← 전역 설정/테마 팝업
-   │  │  ├─ NewProjectModal.tsx
-   │  │  ├─ NewAgentModal.tsx   ← 새 세션 생성 모달
-   │  │  ├─ RenameSessionModal.tsx
+   │  │  ├─ Sidebar.tsx        ← 프로젝트 트리·검색·1줄·드래그 재정렬
+   │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
+   │  │  ├─ DocsPanel.tsx      ← Markdown/HTML 목록·트리·뷰어
+   │  │  ├─ ImageViewer.tsx    ← 터미널 이미지 경로 뷰어
+   │  │  ├─ SettingsModal.tsx  ← General/Usage/Remote/About 탭
+   │  │  ├─ SearchBar.tsx      ← 터미널 Ctrl+F 검색바
+   │  │  ├─ NewProjectModal / NewAgentModal / RenameSessionModal / RenameProjectModal
+   │  │  ├─ SessionPropertiesModal.tsx / ProjectPropertiesModal.tsx
    │  │  ├─ Toast.tsx
-   │  │  └─ Menus.tsx         ← ContextMenu + TabContextMenu
+   │  │  └─ Menus.tsx         ← ContextMenu / ProjectContextMenu / TabContextMenu
    │  ├─ App.css
    │  └─ main.tsx
    ├─ src-tauri/        ← Rust 백엔드
-   │  ├─ src/lib.rs     ← PTY + HTTP 서버 + hook 설치
+   │  ├─ src/lib.rs     ← PTY + hook 서버 + 커맨드 + setup
+   │  ├─ src/remote.rs  ← 원격 axum 서버·터널·인증·승인 (REMOTE.md)
+   │  ├─ src/remote_page.html / remote_login.html ← 원격 웹 클라이언트
+   │  ├─ src/usage.rs   ← 토큰 집계·SQLite·대시보드 서버 (USAGE_DASHBOARD.md)
+   │  ├─ src/usage_dashboard.html ← 대시보드 UI
    │  ├─ Cargo.toml
-   │  ├─ tauri.conf.json
+   │  ├─ tauri.conf.json / tauri.company.conf.json ← variant별 설정
    │  └─ capabilities/default.json
+   ├─ scripts/         ← build-all-variants / build-variant / write-latest-json
    └─ package.json
 ```
 
@@ -60,9 +71,16 @@ K:\AI\MultiAgent\
 | `resize_pty` | id, cols, rows | master.resize() (ConPTY → 자식에 SIGWINCH 상응) |
 | `kill_pty` | id | child.kill() + state에서 제거 |
 | `confirm_close` | (none) | 창 닫기 확인 플래그 true 세팅 + window.close() — 프론트의 graceful shutdown 완료 후 호출 |
-| `list_markdown_files` | folder | 프로젝트 폴더 아래 Markdown 파일을 재귀 스캔해 `{ name, relative_path }[]` 반환. 최대 500개 |
-| `read_markdown_file` | folder, relative_path | Markdown 파일을 읽어 문자열 반환. 폴더 밖 경로와 2MB 초과 파일은 거부 |
-| `resolve_markdown_path` | folder, path | 터미널에서 클릭된 Markdown 경로를 검증하고 Docs 패널용 상대 경로로 정규화 |
+| `list_markdown_files` | folder | 폴더 아래 `.md/.html` 재귀 스캔 `{name, relative_path}[]` (최대 500) |
+| `read_markdown_file` | folder, relative_path | md/html 읽기. 절대경로면 폴더 밖도 허용, 2MB 초과 거부 |
+| `resolve_markdown_path` | folder, path | 터미널 클릭 경로 검증·정규화 (폴더 밖 절대경로 지원) |
+| `read_image_data_url` | path, folder? | 이미지 파일을 data URL로 (이미지 뷰어용, 25MB 한도) |
+| `play_system_sound` / `read_audio_file` | — / path | 알림음 (시스템 비프 / 커스텀 파일 바이트) |
+
+추가 커맨드 그룹 (상세는 각 문서):
+- **원격** ([REMOTE.md](REMOTE.md)): `start/stop_remote_server`, `remote_server_status`, `start/stop_tunnel`, `tunnel_status`, `remote_config_get/set`, `remote_access_list/approve/revoke`, `sync_remote_agents`, `sync_remote_view`
+- **사용량** ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)): `sync_usage_catalog`, `start/stop_usage_server`, `usage_server_status`, `usage_config_get/set`, `usage_ingest_now`, `resolve_cli_session`, `relink_cli_session`
+- **창**: `show_main_window`, 새 창/always-on-top 관련
 
 ### 상태 (`AppState`)
 
@@ -71,6 +89,8 @@ struct AppState {
     ptys: Mutex<HashMap<String, PtyHandle>>,
     hook_info: HookInfo,  // { port, token, helper_path }
     close_confirmed: Mutex<bool>,  // graceful close 진행 중 표시
+    remote: Arc<remote::RemoteHub>,  // 원격 서버/터널/세션/승인
+    usage: Arc<usage::UsageHub>,     // 토큰 집계/대시보드 서버
 }
 
 struct PtyHandle {
@@ -173,13 +193,11 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 전역 테마가 바뀌면 모든 살아있는 xterm 인스턴스의 `term.options.theme`을 갱신
 - `registerLinkProvider`가 `.md/.markdown` 경로를 링크로 노출. xterm의 1-based buffer 좌표에 맞춰 range를 만들고, 클릭 시 `resolve_markdown_path` 후 Docs 패널을 엶
 
-## 수동 업데이트 확인
+## 자동 업데이트
 
-- `SettingsModal.tsx`의 Update 섹션에서 현재 `APP_VERSION`과 GitHub 최신 릴리즈를 표시
-- `appInfo.ts`가 `APP_VERSION`, repo URL, releases URL, latest release API URL, semver 비교 helper를 제공
-- `Check` 버튼은 `https://api.github.com/repos/OneThingChanged/Multiagent/releases/latest`를 조회
-- 새 버전이 있으면 사용자가 `Releases` 버튼으로 브라우저에서 GitHub Release 페이지를 열어 설치 파일을 직접 내려받는 수동 업데이트 방식
-- Tauri updater 플러그인 기반 자동 업데이트는 아직 적용하지 않음
+- `tauri-plugin-updater` + `tauri-plugin-process` 기반. 설정 → About → **Check**
+- variant별 updater endpoint(`latest.json` / `latest-company.json`)를 조회 → 새 버전이면 **서명 검증** 후 다운로드·설치·재시작
+- pubkey는 `tauri.conf.json`에 박혀 있고, 빌드 시 private key로 `.sig` 생성. 빌드·서명·게시 전 과정은 [RELEASE.md](RELEASE.md)
 
 ## Docs / Markdown 뷰어
 
@@ -248,4 +266,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장
 - `multiagent.docsWidth.v1` — Docs 패널 폭
 - `multiagent.terminalFontSize.v1` — xterm 폰트 크기
+- `multiagent.notificationSound.v1` — 알림음 설정 (mode + customPath)
+- `multiagent.scrollback.<agentId>.v1` — 세션별 스크롤백 스냅샷 (재시작 복원용)
 - (마이그레이션) `multiagent.layout.v1` — 옛 단일 트리. 첫 로드 시 단일 그룹으로 변환 후 삭제
+
+> 원격·사용량 설정은 localStorage가 아니라 `%LOCALAPPDATA%\com.jintae.multiagent\`의 JSON/SQLite에 저장: `remote-config.json`, `remote-access.json`, `usage-config.json`, `usage.db`, `cloudflared.exe`.

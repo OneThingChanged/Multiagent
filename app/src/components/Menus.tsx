@@ -11,7 +11,7 @@ export function ProjectContextMenu({
 }: {
   state: ProjectContextMenuState;
   onClose: () => void;
-  onAction: (action: "rename" | "delete") => void;
+  onAction: (action: "rename" | "delete" | "properties") => void;
 }) {
   return (
     <>
@@ -30,6 +30,9 @@ export function ProjectContextMenu({
       >
         <button className="ctx-item" onClick={() => onAction("rename")}>
           프로젝트 이름 변경
+        </button>
+        <button className="ctx-item" onClick={() => onAction("properties")}>
+          속성
         </button>
         <div className="ctx-separator" />
         <button
@@ -82,6 +85,7 @@ export function ContextMenu({
   isSessionLocked,
   canPinSession,
   canRestart,
+  canDeactivate,
   onClose,
   onAction,
 }: {
@@ -91,6 +95,7 @@ export function ContextMenu({
   isSessionLocked: boolean;
   canPinSession: boolean;
   canRestart: boolean;
+  canDeactivate: boolean;
   onClose: () => void;
   onAction: (
     action:
@@ -102,7 +107,9 @@ export function ContextMenu({
       | "pin-session"
       | "clear-session-pin"
       | "restart"
+      | "deactivate"
       | "relink"
+      | "properties"
   ) => void;
 }) {
   return (
@@ -154,6 +161,13 @@ export function ContextMenu({
         >
           세션 재시작
         </button>
+        <button
+          className="ctx-item"
+          onClick={() => onAction("deactivate")}
+          disabled={!canDeactivate}
+        >
+          세션 비활성화
+        </button>
         <button className="ctx-item" onClick={() => onAction("relink")}>
           현재 세션으로 재등록
         </button>
@@ -171,6 +185,10 @@ export function ContextMenu({
           disabled={!isSessionLocked}
         >
           그룹 세션 고정 해제
+        </button>
+        <div className="ctx-separator" />
+        <button className="ctx-item" onClick={() => onAction("properties")}>
+          속성
         </button>
       </div>
     </>

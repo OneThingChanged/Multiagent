@@ -53,11 +53,11 @@ npm run tauri build
 
 산출물 경로:
 
-| 종류 | 크기 | 경로 |
-|---|---|---|
-| 단독 실행 EXE | ~9-10MB | `src-tauri/target/release/app.exe` |
-| NSIS 인스톨러 | ~2MB | `src-tauri/target/release/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe` |
-| MSI 인스톨러 | ~3MB | `src-tauri/target/release/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi` |
+| 종류 | 경로 |
+|---|---|
+| 단독 실행 EXE | `src-tauri/target/release/app.exe` |
+| NSIS 인스톨러 | `src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
+| MSI 인스톨러 | `src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
 
 > Cargo 패키지 이름이 `app`이라 단독 EXE는 `app.exe`로 빌드됨. `MultiAgent.exe`로 바꾸려면 `Cargo.toml`의 `[package].name`을 변경 (`[lib].name`은 유지).
 
@@ -86,7 +86,7 @@ npm run tauri:build:company -- --debug --no-bundle
 
 ## dev 트러블슈팅
 
-- **포트 1420 점유**: `Get-NetTCPConnection -LocalPort 1420 | Stop-Process` 또는 vite 띄운 node를 죽임
+- **포트 4420 점유**: vite dev 포트. `netstat -ano | findstr :4420`로 PID 찾아 vite node 종료 (release app.exe는 건드리지 말 것)
 - **`target\debug\app.exe` 락**: 이전 app.exe가 살아있어 덮어쓰기 실패. `taskkill /F /IM app.exe`
 - **rebuild 너무 오래**: cargo가 changed crate 만 컴파일. 첫 dev 빌드만 2-3분. 이후 Rust 소스만 바꿔도 ~20s 내
 - **Hook이 안 fire**: `%LOCALAPPDATA%\com.jintae.multiagent\hook.log`에서 진단 (notify.ps1이 매 호출마다 timestamp + event + agent + 결과 기록)

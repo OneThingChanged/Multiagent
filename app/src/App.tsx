@@ -32,6 +32,7 @@ import type {
   DropTargetState,
   DropZone,
   Group,
+  LayoutNode,
   NewAgentPayload,
   NewProjectPayload,
   Path,
@@ -75,6 +76,8 @@ import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
 import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
+import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
+import { ProjectPropertiesModal } from "./components/ProjectPropertiesModal";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
@@ -206,6 +209,12 @@ function App() {
     path: string;
     folder: string | null;
   } | null>(null);
+  const [propertiesAgentId, setPropertiesAgentId] = useState<string | null>(
+    null
+  );
+  const [propertiesProjectId, setPropertiesProjectId] = useState<
+    string | null
+  >(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] =
@@ -793,6 +802,22 @@ function App() {
     );
   }, []);
 
+  // Stop a running session's PTY process to free CPU/memory, but keep it
+  // in the list (and its lastSessionId). Selecting it again respawns/resumes.
+  const deactivateAgent = useCallback((id: string) => {
+    invoke("kill_pty", { id }).catch(() => {});
+    const entry = termsRef.current.get(id);
+    if (entry) {
+      try {
+        entry.term.dispose();
+      } catch {}
+      termsRef.current.delete(id);
+    }
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+    );
+  }, []);
+
   const selectAgent = useCallback(
     (agentId: string) => {
       const agent = activateAgentProject(agentId);
@@ -1192,7 +1217,9 @@ function App() {
         | "pin-session"
         | "clear-session-pin"
         | "restart"
+        | "deactivate"
         | "relink"
+        | "properties"
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
@@ -1207,8 +1234,12 @@ function App() {
       else if (action === "restart") {
         selectAgent(id);
         restartAgent(id);
+      } else if (action === "deactivate") {
+        deactivateAgent(id);
       } else if (action === "relink") {
         relinkSession(id);
+      } else if (action === "properties") {
+        setPropertiesAgentId(id);
       }
     },
     [
@@ -1219,6 +1250,7 @@ function App() {
       pinContextGroupSessions,
       clearContextGroupSessionPins,
       restartAgent,
+      deactivateAgent,
       relinkSession,
     ]
   );
@@ -1423,6 +1455,24 @@ function App() {
     [activeGroupLayout]
   );
 
+  // Sessions actually shown on screen right now: each leaf's active tab in
+  // the active group. Used to block deactivating a visible session (its
+  // pane would immediately respawn it).
+  const visibleAgentIds = useMemo(() => {
+    const set = new Set<string>();
+    const walk = (node: LayoutNode | null) => {
+      if (!node) return;
+      if (node.type === "leaf") {
+        const id = activeAgentInLeaf(node);
+        if (id) set.add(id);
+      } else {
+        node.children.forEach(walk);
+      }
+    };
+    walk(activeGroupLayout);
+    return set;
+  }, [activeGroupLayout]);
+
   const activeAgentId = useMemo(() => {
     if (!activeGroupLayout || !activePath) return null;
     const leaf = getAt(activeGroupLayout, activePath);
@@ -1624,6 +1674,32 @@ function App() {
           onClose={() => setImageViewer(null)}
         />
       )}
+      {propertiesAgentId &&
+        (() => {
+          const target = agents.find((a) => a.id === propertiesAgentId);
+          if (!target) return null;
+          return (
+            <SessionPropertiesModal
+              agent={target}
+              project={
+                projects.find((p) => p.id === target.projectId) ?? null
+              }
+              onClose={() => setPropertiesAgentId(null)}
+            />
+          );
+        })()}
+      {propertiesProjectId &&
+        (() => {
+          const target = projects.find((p) => p.id === propertiesProjectId);
+          if (!target) return null;
+          return (
+            <ProjectPropertiesModal
+              project={target}
+              agents={agents}
+              onClose={() => setPropertiesProjectId(null)}
+            />
+          );
+        })()}
       {searchOpen && (
         <SearchBar
           onFindNext={(q) => {
@@ -1660,6 +1736,15 @@ function App() {
             agents.find((a) => a.id === contextMenu.agentId)?.status ===
             "exited"
           }
+          canDeactivate={(() => {
+            const s = agents.find(
+              (a) => a.id === contextMenu.agentId
+            )?.status;
+            const running =
+              s === "running" || s === "working" || s === "starting";
+            // Only when not currently displayed, to avoid an immediate respawn.
+            return running && !visibleAgentIds.has(contextMenu.agentId);
+          })()}
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}
         />
@@ -1673,6 +1758,8 @@ function App() {
               setRenameProjectId(projectContextMenu.projectId);
             } else if (action === "delete") {
               removeProject(projectContextMenu.projectId);
+            } else if (action === "properties") {
+              setPropertiesProjectId(projectContextMenu.projectId);
             }
             setProjectContextMenu(null);
           }}

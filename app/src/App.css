@@ -637,6 +637,87 @@ body,
   padding-right: 10px;
 }
 
+.sidebar-search {
+  position: relative;
+  padding: 4px 10px 8px;
+}
+.sidebar-search-input {
+  width: 100%;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  color: var(--app-text);
+  font-size: 12px;
+  padding: 6px 24px 6px 9px;
+  outline: none;
+}
+.sidebar-search-input:focus {
+  border-color: var(--app-accent);
+}
+.sidebar-search-clear {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-top: -2px;
+  background: transparent;
+  border: none;
+  color: var(--app-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar-search-clear:hover {
+  color: var(--app-text);
+}
+
+.project-count {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--app-soft-text);
+}
+
+/* Single-session projects render as one line (no session-id row). */
+.agent-item-compact {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  gap: 0;
+}
+
+.session-props-modal {
+  width: 420px;
+}
+.session-props-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px;
+}
+.session-props-row {
+  display: flex;
+  gap: 12px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--app-border);
+  font-size: 13px;
+}
+.session-props-label {
+  flex: 0 0 96px;
+  color: var(--app-muted);
+}
+.session-props-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-props-mono {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
 .project-empty-hint {
   padding: 10px 12px 12px 28px;
   text-align: left;
