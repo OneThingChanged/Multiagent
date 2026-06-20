@@ -9,6 +9,7 @@
     "dialog:default",
     "dialog:allow-open",
     "notification:default",
+    "core:window:allow-set-always-on-top",
     "updater:default",
     "process:default"
   ]

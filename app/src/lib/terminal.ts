@@ -175,6 +175,102 @@ function cleanTerminalPathCandidate(candidate: string) {
     .trimEnd();
 }
 
+function isImeCompositionKey(event: KeyboardEvent) {
+  return event.isComposing || event.keyCode === 229 || event.key === "Process";
+}
+
+const terminalsWithImePreview = new WeakSet<Terminal>();
+
+export function installImeCompositionPreview(entry: TerminalEntry) {
+  const { term, el } = entry;
+  if (terminalsWithImePreview.has(term)) return;
+
+  const textarea = term.textarea;
+  if (!textarea) return;
+
+  terminalsWithImePreview.add(term);
+
+  const preview = document.createElement("div");
+  preview.className = "term-ime-preview";
+  preview.setAttribute("aria-hidden", "true");
+  el.appendChild(preview);
+
+  let isComposing = false;
+  let composingText = "";
+
+  const hidePreview = () => {
+    composingText = "";
+    preview.textContent = "";
+    preview.classList.remove("term-ime-preview-active");
+  };
+
+  const positionPreview = () => {
+    if (!isComposing || !composingText) return;
+
+    const screen = el.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen || term.cols < 1 || term.rows < 1) return;
+
+    const hostRect = el.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const screenWidth = screenRect.width || screen.clientWidth;
+    const screenHeight = screenRect.height || screen.clientHeight;
+    if (screenWidth <= 0 || screenHeight <= 0) return;
+
+    const cellWidth = screenWidth / term.cols;
+    const cellHeight = screenHeight / term.rows;
+    const cursorX = Math.min(term.buffer.active.cursorX, term.cols - 1);
+    const cursorY = Math.min(term.buffer.active.cursorY, term.rows - 1);
+    const left = screenRect.left - hostRect.left + cursorX * cellWidth;
+    const top = screenRect.top - hostRect.top + cursorY * cellHeight;
+
+    preview.style.left = `${left}px`;
+    preview.style.top = `${top}px`;
+    preview.style.height = `${cellHeight}px`;
+    preview.style.lineHeight = `${cellHeight}px`;
+    preview.style.maxWidth = `${Math.max(16, hostRect.width - left - 4)}px`;
+    preview.style.fontFamily =
+      term.options.fontFamily ??
+      '"Cascadia Mono", Consolas, "Courier New", monospace';
+    preview.style.fontSize = `${term.options.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE}px`;
+  };
+
+  const showPreview = (text: string) => {
+    composingText = text;
+    if (!text) {
+      hidePreview();
+      return;
+    }
+    preview.textContent = text;
+    preview.classList.add("term-ime-preview-active");
+    positionPreview();
+  };
+
+  const onCompositionStart = (event: CompositionEvent) => {
+    isComposing = true;
+    showPreview(event.data ?? "");
+  };
+  const onCompositionUpdate = (event: CompositionEvent) => {
+    isComposing = true;
+    showPreview(event.data ?? "");
+  };
+  const onCompositionEnd = () => {
+    isComposing = false;
+    hidePreview();
+  };
+  const onBlur = () => {
+    isComposing = false;
+    hidePreview();
+  };
+
+  textarea.addEventListener("compositionstart", onCompositionStart);
+  textarea.addEventListener("compositionupdate", onCompositionUpdate);
+  textarea.addEventListener("compositionend", onCompositionEnd);
+  textarea.addEventListener("blur", onBlur);
+
+  term.onRender(positionPreview);
+  term.onResize(positionPreview);
+}
+
 function rangeOverlaps(a: MarkdownPathMatch, b: MarkdownPathMatch) {
   return a.startIndex < b.endIndex && b.startIndex < a.endIndex;
 }
@@ -555,6 +651,13 @@ export function createEntry(
   });
 
   term.attachCustomKeyEventHandler((event) => {
+    if (event.type === "keydown" && isImeCompositionKey(event)) {
+      // During Korean/Japanese/Chinese IME composition, WebView2 can emit
+      // transient keydown data before the IME commits the final text. Let the
+      // browser IME complete and only forward the committed text via onData.
+      return false;
+    }
+
     const isPlainCtrlKey =
       event.type === "keydown" &&
       event.ctrlKey &&
@@ -575,10 +678,10 @@ export function createEntry(
     }
 
     if (isPlainCtrlKey && event.key === "Enter") {
-      if (event.isComposing || event.keyCode === 229) {
+      if (isImeCompositionKey(event)) {
         // Let IME finish committing the in-progress character first.
         // The newline will be sent on the next Ctrl+Enter press.
-        return true;
+        return false;
       }
       event.preventDefault();
       invoke("write_pty", { id, data: "\x1b\r" }).catch(() => {});

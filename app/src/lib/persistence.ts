@@ -19,7 +19,6 @@ import type {
 import {
   collectAgentIds,
   firstLeafPath,
-  findLeafPath,
   getAt,
   makeLeaf,
   validateLayout,
@@ -262,43 +261,17 @@ export function loadBootstrap(): Bootstrap {
     agentProjectIds
   );
   const view = loadStoredView(groups);
-  const activeGroup = groups.find((group) => group.id === view.activeGroupId);
   const savedProjectId =
     view.activeProjectId &&
     projects.some((project) => project.id === view.activeProjectId)
       ? view.activeProjectId
       : null;
-  const activeProjectId =
-    savedProjectId ?? activeGroup?.projectId ?? projects[0]?.id ?? null;
-  const fallbackFocus =
-    !activeGroup && activeProjectId
-      ? firstProjectSessionFocus(activeProjectId, agents, groups)
-      : null;
   return {
     projects,
     agents,
     groups,
-    activeProjectId,
-    activeGroupId: activeGroup?.id ?? fallbackFocus?.groupId ?? null,
-    activePath: activeGroup ? view.activePath : fallbackFocus?.path ?? null,
+    activeProjectId: savedProjectId ?? projects[0]?.id ?? null,
+    activeGroupId: null,
+    activePath: null,
   };
-}
-
-function firstProjectSessionFocus(
-  projectId: string,
-  agents: Agent[],
-  groups: Group[]
-): { groupId: string; path: Path } | null {
-  const projectAgentIds = agents
-    .filter((agent) => agent.projectId === projectId)
-    .map((agent) => agent.id);
-
-  for (const group of groups) {
-    for (const agentId of projectAgentIds) {
-      const path = findLeafPath(group.layout, agentId);
-      if (path) return { groupId: group.id, path };
-    }
-  }
-
-  return null;
 }

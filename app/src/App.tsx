@@ -8,6 +8,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   onAction,
@@ -76,6 +77,7 @@ import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
+const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
 const DEFAULT_DOCS_WIDTH = 640;
 const MIN_DOCS_WIDTH = 360;
 const MIN_WORKSPACE_WIDTH = 260;
@@ -92,6 +94,30 @@ type TerminalPathResolution = {
   path: string;
 };
 
+type RuntimeFlags = {
+  secondary_window: boolean;
+};
+
+function readLocalStorageValue(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorageIfChanged(
+  lastValueRef: { current: string | null },
+  key: string,
+  value: string
+) {
+  if (lastValueRef.current === value) return;
+  lastValueRef.current = value;
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
 function clampDocsWidth(width: number) {
   const viewportMax =
     typeof window === "undefined"
@@ -107,6 +133,14 @@ function loadDocsWidth() {
     return raw ? clampDocsWidth(Number(raw)) : DEFAULT_DOCS_WIDTH;
   } catch {
     return DEFAULT_DOCS_WIDTH;
+  }
+}
+
+function loadAlwaysOnTop() {
+  try {
+    return localStorage.getItem(LS_ALWAYS_ON_TOP) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -148,10 +182,7 @@ function App() {
   const boot = bootstrapRef.current;
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
-  const [agents, setAgents] = useState<Agent[]>(() => {
-    pruneScrollback(new Set(boot.agents.map((a) => a.id)));
-    return boot.agents;
-  });
+  const [agents, setAgents] = useState<Agent[]>(boot.agents);
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
@@ -168,6 +199,7 @@ function App() {
   const [docsOpen, setDocsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
   const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
   const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
   const [imageViewer, setImageViewer] = useState<{
@@ -182,6 +214,8 @@ function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [runtimeFlags, setRuntimeFlags] = useState<RuntimeFlags | null>(null);
+  const isSecondaryWindow = !!runtimeFlags?.secondary_window;
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
@@ -190,7 +224,28 @@ function App() {
   const activeProjectIdRef = useRef<string | null>(null);
   const activeGroupIdRef = useRef<string | null>(null);
   const activePathRef = useRef<Path | null>(null);
-  const validatedSessionKeysRef = useRef<Set<string>>(new Set());
+  const alwaysOnTopRef = useRef(alwaysOnTop);
+  const storedProjectsJsonRef = useRef(readLocalStorageValue(LS_PROJECTS));
+  const storedAgentsJsonRef = useRef(readLocalStorageValue(LS_AGENTS));
+  const storedGroupsJsonRef = useRef(readLocalStorageValue(LS_GROUPS));
+  const storedViewJsonRef = useRef(readLocalStorageValue(LS_VIEW));
+  const remoteAgentsJsonRef = useRef<string | null>(null);
+  const remoteViewJsonRef = useRef<string | null>(null);
+  const usageCatalogJsonRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<RuntimeFlags>("runtime_flags")
+      .then((flags) => {
+        if (!cancelled) setRuntimeFlags(flags);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeFlags({ secondary_window: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -201,63 +256,9 @@ function App() {
   }, [agents]);
 
   useEffect(() => {
-    let cancelled = false;
-    const targets = agents.filter(
-      (agent) =>
-        !!agent.lastSessionId &&
-        !!agent.folder &&
-        (agent.aiToolId === "codex" || agent.aiToolId === "claude")
-    );
-
-    for (const agent of targets) {
-      const expectedSessionId = agent.lastSessionId;
-      if (!expectedSessionId) continue;
-      const key = `${agent.id}:${expectedSessionId}`;
-      if (validatedSessionKeysRef.current.has(key)) continue;
-      validatedSessionKeysRef.current.add(key);
-
-      invoke<string | null>("resolve_cli_session", {
-        aiToolId: agent.aiToolId,
-        folder: agent.folder,
-        agentName: agent.name,
-        preferredSessionId: expectedSessionId,
-      })
-        .then((resolved) => {
-          if (cancelled) return;
-          if (!resolved) clearScrollback(agent.id);
-          setAgents((prev) =>
-            prev.map((current) => {
-              if (
-                current.id !== agent.id ||
-                current.lastSessionId !== expectedSessionId
-              ) {
-                return current;
-              }
-              return {
-                ...current,
-                lastSessionId: resolved || undefined,
-              };
-            })
-          );
-        })
-        .catch(() => {
-          if (cancelled) return;
-          clearScrollback(agent.id);
-          setAgents((prev) =>
-            prev.map((current) =>
-              current.id === agent.id &&
-              current.lastSessionId === expectedSessionId
-                ? { ...current, lastSessionId: undefined }
-                : current
-            )
-          );
-        });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agents]);
+    if (!runtimeFlags || isSecondaryWindow) return;
+    pruneScrollback(new Set(agentsRef.current.map((agent) => agent.id)));
+  }, [isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
     groupsRef.current = groups;
@@ -266,9 +267,9 @@ function App() {
   // Mirror agent metadata into the Rust remote hub so the remote web
   // client can list sessions and show live status.
   useEffect(() => {
-    if (IS_COMPANY_BUILD) return;
+    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
     const projectNames = new Map(projects.map((p) => [p.id, p.name]));
-    invoke("sync_remote_agents", {
+    const payload = {
       agents: agents.map((a) => ({
         id: a.id,
         name: a.name,
@@ -276,15 +277,19 @@ function App() {
         status: a.status,
         tool: a.aiToolId,
       })),
-    }).catch(() => {});
-  }, [agents, projects]);
+    };
+    const json = JSON.stringify(payload);
+    if (remoteAgentsJsonRef.current === json) return;
+    remoteAgentsJsonRef.current = json;
+    invoke("sync_remote_agents", payload).catch(() => {});
+  }, [agents, isSecondaryWindow, projects, runtimeFlags]);
 
   // Mirror projects + sessions so the remote web client can list them.
   // The web client is an independent viewer: it picks which session to
   // view locally, so desktop active/layout is intentionally not synced.
   useEffect(() => {
-    if (IS_COMPANY_BUILD) return;
-    const view = {
+    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
+    const payload = {
       projects: projects.map((p) => ({
         id: p.id,
         name: p.name,
@@ -298,11 +303,15 @@ function App() {
         aiToolId: a.aiToolId,
       })),
     };
-    invoke("sync_remote_view", { view: JSON.stringify(view) }).catch(() => {});
-  }, [projects, agents]);
+    const view = JSON.stringify(payload);
+    if (remoteViewJsonRef.current === view) return;
+    remoteViewJsonRef.current = view;
+    invoke("sync_remote_view", { view }).catch(() => {});
+  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
-    invoke("sync_usage_catalog", {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    const payload = {
       projects: projects.map((p) => ({
         id: p.id,
         name: p.name,
@@ -316,8 +325,12 @@ function App() {
         aiToolId: a.aiToolId,
         lastSessionId: a.lastSessionId ?? null,
       })),
-    }).catch(() => {});
-  }, [projects, agents]);
+    };
+    const json = JSON.stringify(payload);
+    if (usageCatalogJsonRef.current === json) return;
+    usageCatalogJsonRef.current = json;
+    invoke("sync_usage_catalog", payload).catch(() => {});
+  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -331,6 +344,10 @@ function App() {
     activePathRef.current = activePath;
   }, [activePath]);
 
+  useEffect(() => {
+    alwaysOnTopRef.current = alwaysOnTop;
+  }, [alwaysOnTop]);
+
   // ---- Persistence
 
   useEffect(() => {
@@ -341,9 +358,11 @@ function App() {
       createdAt: project.createdAt,
       lastOpenedAt: project.lastOpenedAt,
     }));
-    try {
-      localStorage.setItem(LS_PROJECTS, JSON.stringify(storedProjects));
-    } catch {}
+    writeLocalStorageIfChanged(
+      storedProjectsJsonRef,
+      LS_PROJECTS,
+      JSON.stringify(storedProjects)
+    );
   }, [projects]);
 
   useEffect(() => {
@@ -357,25 +376,29 @@ function App() {
       createdAt: a.createdAt,
       lastSessionId: a.lastSessionId,
     }));
-    try {
-      localStorage.setItem(LS_AGENTS, JSON.stringify(configs));
-    } catch {}
+    writeLocalStorageIfChanged(
+      storedAgentsJsonRef,
+      LS_AGENTS,
+      JSON.stringify(configs)
+    );
   }, [agents]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_GROUPS, JSON.stringify(groups));
-    } catch {}
+    writeLocalStorageIfChanged(
+      storedGroupsJsonRef,
+      LS_GROUPS,
+      JSON.stringify(groups)
+    );
   }, [groups]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        LS_VIEW,
-        JSON.stringify({ activeProjectId, activeGroupId, activePath })
-      );
-    } catch {}
-  }, [activeProjectId, activeGroupId, activePath]);
+    if (!runtimeFlags || isSecondaryWindow) return;
+    writeLocalStorageIfChanged(
+      storedViewJsonRef,
+      LS_VIEW,
+      JSON.stringify({ activeProjectId, activeGroupId, activePath })
+    );
+  }, [activeProjectId, activeGroupId, activePath, isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
     try {
@@ -499,10 +522,9 @@ function App() {
     }
 
     const nextProjectId = projects[0].id;
-    const firstFocus = firstProjectSessionFocus(nextProjectId, agents, groups);
     setActiveProjectId(nextProjectId);
-    setActiveGroupId(firstFocus?.groupId ?? null);
-    setActivePath(firstFocus?.path ?? null);
+    setActiveGroupId(null);
+    setActivePath(null);
   }, [activeProjectId, agents, groups, projects]);
 
   // ---- Notifications
@@ -523,14 +545,61 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    getCurrentWindow()
+      .setAlwaysOnTop(alwaysOnTopRef.current)
+      .catch((error) => {
+        if (cancelled || !alwaysOnTopRef.current) return;
+        console.warn("failed to restore always on top", error);
+        alwaysOnTopRef.current = false;
+        setAlwaysOnTop(false);
+        try {
+          localStorage.setItem(LS_ALWAYS_ON_TOP, "false");
+        } catch {}
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleAlwaysOnTop = useCallback(() => {
+    const previous = alwaysOnTopRef.current;
+    const next = !previous;
+    alwaysOnTopRef.current = next;
+    setAlwaysOnTop(next);
+    try {
+      localStorage.setItem(LS_ALWAYS_ON_TOP, String(next));
+    } catch {}
+
+    getCurrentWindow()
+      .setAlwaysOnTop(next)
+      .catch((error) => {
+        alwaysOnTopRef.current = previous;
+        setAlwaysOnTop(previous);
+        try {
+          localStorage.setItem(LS_ALWAYS_ON_TOP, String(previous));
+        } catch {}
+        pushToast("", "창 고정", `상시 최상단 설정 실패: ${String(error)}`);
+      });
+  }, [pushToast]);
+
+  const openNewAppWindow = useCallback(() => {
+    invoke("open_new_app_window").catch((error) => {
+      pushToast("", "새 창", `새 창을 열 수 없습니다: ${String(error)}`);
+    });
+  }, [pushToast]);
+
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
     isPermissionGranted()
       .then((g) => {
         if (!g) return requestPermission();
       })
       .catch(() => {});
-  }, []);
+  }, [isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
     onAction(() => {
@@ -545,7 +614,7 @@ function App() {
       cancelled = true;
       unsubscribe?.();
     };
-  }, []);
+  }, [isSecondaryWindow, runtimeFlags]);
 
   // ---- PTY + hook event listeners
 
@@ -1383,6 +1452,9 @@ function App() {
             return !open;
           })
         }
+        alwaysOnTop={alwaysOnTop}
+        onToggleAlwaysOnTop={toggleAlwaysOnTop}
+        onOpenNewWindow={openNewAppWindow}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((open) => !open)}
         onRemove={removeAgent}

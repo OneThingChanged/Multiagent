@@ -16,6 +16,7 @@ import {
   clampTerminalFontSize,
   computeDropZone,
   createEntry,
+  installImeCompositionPreview,
   saveTerminalFontSize,
 } from "../lib/terminal";
 import { loadScrollback } from "../lib/scrollback";
@@ -106,6 +107,7 @@ export function PaneSlot({
         }
       }
     }
+    installImeCompositionPreview(entry);
 
     let lastCols = 0;
     let lastRows = 0;
@@ -187,6 +189,7 @@ export function PaneSlot({
             rows,
           }).catch((err) => {
             e.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
+            setAgentStatus(agentId, "exited");
           });
         };
         void spawn();

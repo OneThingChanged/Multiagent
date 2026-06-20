@@ -166,7 +166,11 @@ impl RemoteHub {
             }
         }
         let access = self.access.lock().unwrap();
-        if access.approved.iter().any(|u| u.eq_ignore_ascii_case(login)) {
+        if access
+            .approved
+            .iter()
+            .any(|u| u.eq_ignore_ascii_case(login))
+        {
             AccessLevel::Approved
         } else if access.pending.iter().any(|u| u.eq_ignore_ascii_case(login)) {
             AccessLevel::Pending
@@ -339,10 +343,7 @@ pub async fn start(app: AppHandle) -> Result<RemoteStatus, String> {
                 format!("bind remote listener: {}", e)
             }
         })?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let token = uuid::Uuid::new_v4().to_string();
 
     let router = Router::new()
@@ -404,10 +405,7 @@ const CLOUDFLARED_URL: &str =
     "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 
 fn cloudflared_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("cloudflared.exe"))
 }
@@ -516,7 +514,11 @@ pub fn access_approve(hub: &RemoteHub, login: &str) -> AccessStore {
     {
         let mut access = hub.access.lock().unwrap();
         access.pending.retain(|u| !u.eq_ignore_ascii_case(login));
-        if !access.approved.iter().any(|u| u.eq_ignore_ascii_case(login)) {
+        if !access
+            .approved
+            .iter()
+            .any(|u| u.eq_ignore_ascii_case(login))
+        {
             access.approved.push(login.to_string());
         }
     }
@@ -554,24 +556,22 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
     let (port, config) = {
         let state = app.state::<AppState>();
         let server = state.remote.server.lock().unwrap();
-        let port = server.as_ref().map(|s| s.port).ok_or("server not running")?;
+        let port = server
+            .as_ref()
+            .map(|s| s.port)
+            .ok_or("server not running")?;
         let config = state.remote.config.lock().unwrap().clone();
         (port, config)
     };
 
     let app_for_task = app.clone();
-    let (child, url) = tokio::task::spawn_blocking(
-        move || -> Result<(std::process::Child, String), String> {
+    let (child, url) =
+        tokio::task::spawn_blocking(move || -> Result<(std::process::Child, String), String> {
             let bin = ensure_cloudflared(&app_for_task)?;
             let named = !config.tunnel_token.is_empty();
             let mut cmd = std::process::Command::new(&bin);
             if named {
-                cmd.args([
-                    "tunnel",
-                    "run",
-                    "--token",
-                    &config.tunnel_token,
-                ]);
+                cmd.args(["tunnel", "run", "--token", &config.tunnel_token]);
             } else {
                 cmd.args([
                     "tunnel",
@@ -598,14 +598,20 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
             let tx_err = line_tx.clone();
             std::thread::spawn(move || {
                 use std::io::BufRead;
-                for line in std::io::BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in std::io::BufReader::new(stderr)
+                    .lines()
+                    .map_while(Result::ok)
+                {
                     let _ = tx_err.send(line);
                 }
             });
             if let Some(stdout) = stdout {
                 std::thread::spawn(move || {
                     use std::io::BufRead;
-                    for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                    for line in std::io::BufReader::new(stdout)
+                        .lines()
+                        .map_while(Result::ok)
+                    {
                         let _ = line_tx.send(line);
                     }
                 });
@@ -627,9 +633,7 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         let _ = child.kill();
-                        return Err(
-                            "cloudflared exited before the tunnel was ready".to_string()
-                        );
+                        return Err("cloudflared exited before the tunnel was ready".to_string());
                     }
                 };
                 if named {
@@ -645,10 +649,9 @@ pub async fn start_tunnel(app: AppHandle) -> Result<TunnelStatus, String> {
                     return Ok((child, url));
                 }
             }
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())??;
+        })
+        .await
+        .map_err(|e| e.to_string())??;
 
     let state = app.state::<AppState>();
     *state.remote.tunnel_child.lock().unwrap() = Some(child);
@@ -707,11 +710,7 @@ async fn view(
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let json = state.remote.view.lock().unwrap().clone();
-    (
-        [(header::CONTENT_TYPE, "application/json")],
-        json,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "application/json")], json).into_response()
 }
 
 async fn ws_upgrade(
@@ -777,10 +776,7 @@ async fn auth_start(State(app): State<AppHandle>) -> Response {
     }
 }
 
-async fn auth_poll(
-    State(app): State<AppHandle>,
-    Json(body): Json<serde_json::Value>,
-) -> Response {
+async fn auth_poll(State(app): State<AppHandle>, Json(body): Json<serde_json::Value>) -> Response {
     let Some(device_code) = body.get("device_code").and_then(|d| d.as_str()) else {
         return (StatusCode::BAD_REQUEST, "device_code required").into_response();
     };
@@ -795,10 +791,7 @@ async fn auth_poll(
                 .send_form(&[
                     ("client_id", &client_id),
                     ("device_code", &device_code),
-                    (
-                        "grant_type",
-                        "urn:ietf:params:oauth:grant-type:device_code",
-                    ),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 ]),
         )
     })
@@ -941,7 +934,10 @@ async fn auth_callback(
     let code = q.get("code").cloned().unwrap_or_default();
     let state = q.get("state").cloned().unwrap_or_default();
     if code.is_empty() || !hub.consume_oauth_state(&state) {
-        return (StatusCode::BAD_REQUEST, "invalid oauth state — try logging in again")
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid oauth state — try logging in again",
+        )
             .into_response();
     }
 
@@ -966,7 +962,9 @@ async fn auth_callback(
 
     let token_json = match token_result {
         Ok(j) => j,
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("token exchange: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("token exchange: {}", e)).into_response()
+        }
     };
     let Some(access_token) = token_json.get("access_token").and_then(|t| t.as_str()) else {
         let err = token_json
@@ -1041,7 +1039,10 @@ async fn auth_logout(State(app): State<AppHandle>, headers: HeaderMap) -> Respon
         }
     }
     (
-        [(header::SET_COOKIE, "ma_session=; Path=/; Max-Age=0".to_string())],
+        [(
+            header::SET_COOKIE,
+            "ma_session=; Path=/; Max-Age=0".to_string(),
+        )],
         Json(serde_json::json!({ "ok": true })),
     )
         .into_response()
@@ -1063,7 +1064,10 @@ async fn handle_socket(mut socket: WebSocket, app: AppHandle, id: String) {
     // Tell the viewer the current authoritative PTY size up front.
     let initial_size = hub.sizes.lock().unwrap().get(&id).copied();
     if let Some((cols, rows)) = initial_size {
-        let msg = format!("{{\"type\":\"resize\",\"cols\":{},\"rows\":{}}}", cols, rows);
+        let msg = format!(
+            "{{\"type\":\"resize\",\"cols\":{},\"rows\":{}}}",
+            cols, rows
+        );
         if socket.send(Message::Text(msg.into())).await.is_err() {
             return;
         }

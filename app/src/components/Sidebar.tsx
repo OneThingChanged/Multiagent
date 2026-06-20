@@ -57,6 +57,9 @@ export function Sidebar({
   onNewSession,
   docsOpen,
   onToggleDocs,
+  alwaysOnTop,
+  onToggleAlwaysOnTop,
+  onOpenNewWindow,
   settingsOpen,
   onToggleSettings,
   onRemove,
@@ -81,6 +84,9 @@ export function Sidebar({
   onNewSession: () => void;
   docsOpen: boolean;
   onToggleDocs: () => void;
+  alwaysOnTop: boolean;
+  onToggleAlwaysOnTop: () => void;
+  onOpenNewWindow: () => void;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   onRemove: (id: string) => void;
@@ -346,6 +352,23 @@ export function Sidebar({
             title="Toggle docs"
           >
             MD
+          </button>
+          <button
+            className={`always-on-top-btn ${
+              alwaysOnTop ? "always-on-top-active" : ""
+            }`}
+            onClick={onToggleAlwaysOnTop}
+            title={alwaysOnTop ? "상시 최상단 해제" : "상시 최상단 활성화"}
+            aria-pressed={alwaysOnTop}
+          >
+            <span className="always-on-top-icon" aria-hidden="true" />
+          </button>
+          <button
+            className="new-window-btn"
+            onClick={onOpenNewWindow}
+            title="새 창 열기"
+          >
+            <span className="new-window-icon" aria-hidden="true" />
           </button>
           <button
             className={`settings-toggle-btn ${

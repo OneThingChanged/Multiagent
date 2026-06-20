@@ -301,6 +301,118 @@ body,
   border-color: var(--app-accent);
 }
 
+.always-on-top-btn {
+  background: var(--app-button-bg);
+  color: var(--app-muted);
+  border: 1px solid var(--app-border);
+  width: 24px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.always-on-top-btn:hover,
+.always-on-top-active {
+  background: var(--app-button-hover);
+  color: var(--app-heading);
+  border-color: var(--app-accent);
+}
+
+.always-on-top-icon {
+  position: relative;
+  display: block;
+  width: 12px;
+  height: 13px;
+  transform: rotate(-35deg);
+}
+
+.always-on-top-icon::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 6px;
+  height: 7px;
+  border-radius: 2px 2px 1px 1px;
+  background: currentColor;
+}
+
+.always-on-top-icon::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 5px;
+  width: 2px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.always-on-top-active .always-on-top-icon {
+  color: var(--app-accent);
+}
+
+.new-window-btn {
+  background: var(--app-button-bg);
+  color: var(--app-muted);
+  border: 1px solid var(--app-border);
+  width: 24px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.new-window-btn:hover {
+  background: var(--app-button-hover);
+  color: var(--app-heading);
+  border-color: var(--app-accent);
+}
+
+.new-window-icon {
+  position: relative;
+  display: block;
+  width: 13px;
+  height: 12px;
+}
+
+.new-window-icon::before,
+.new-window-icon::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 7px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: var(--app-button-bg);
+}
+
+.new-window-icon::before {
+  top: 0;
+  right: 0;
+}
+
+.new-window-icon::after {
+  left: 0;
+  bottom: 0;
+  background: var(--app-panel);
+}
+
+.new-window-btn:hover .new-window-icon::before {
+  background: var(--app-button-hover);
+}
+
+.new-window-btn:hover .new-window-icon::after {
+  background: var(--app-panel-hover);
+}
+
 .settings-toggle-btn {
   background: var(--app-button-bg);
   color: var(--app-text);
@@ -1364,8 +1476,28 @@ body.docs-resizing .docs-resizer::after {
 }
 
 .term-host {
+  position: relative;
   width: 100%;
   height: 100%;
+}
+
+.term-ime-preview {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  pointer-events: none;
+  min-width: 1ch;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+  color: var(--app-heading);
+  background: var(--app-bg);
+  border-bottom: 1px solid var(--app-accent);
+  padding: 0 1px;
+}
+
+.term-ime-preview-active {
+  display: block;
 }
 
 .empty-state {

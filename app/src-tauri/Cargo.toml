@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.4.13"
+version = "0.4.14"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -33,6 +33,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 ureq = { version = "2", features = ["json"] }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
+fs2 = "0.4"
 tokio = { version = "1", features = ["net", "sync", "macros", "time"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use fs2::FileExt;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,6 +21,19 @@ struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    _session_lock: SessionLock,
+}
+
+struct SessionLock {
+    path: PathBuf,
+    file: File,
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 struct HookInfo {
@@ -32,6 +46,7 @@ struct AppState {
     ptys: Mutex<HashMap<String, PtyHandle>>,
     hook_info: HookInfo,
     close_confirmed: Mutex<bool>,
+    secondary_window: bool,
     #[cfg(not(multiagent_company))]
     remote: Arc<remote::RemoteHub>,
     usage: Arc<usage::UsageHub>,
@@ -72,9 +87,19 @@ struct TerminalPathResolution {
     path: String,
 }
 
+#[derive(Clone, Serialize)]
+struct RuntimeFlags {
+    secondary_window: bool,
+}
+
 const HOOK_MARKER: &str = "multiagent";
 const MAX_MARKDOWN_FILES: usize = 500;
 const MAX_MARKDOWN_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+fn is_secondary_window_process() -> bool {
+    std::env::var("MULTIAGENT_SECONDARY_WINDOW").ok().as_deref() == Some("1")
+        || std::env::args().any(|arg| arg == "--multiagent-secondary-window")
+}
 
 #[cfg(windows)]
 fn default_shell() -> String {
@@ -84,17 +109,18 @@ fn default_shell() -> String {
     // 3. Windows PowerShell 5.1
     // 4. cmd.exe
     let candidates = [
-        std::env::var("LOCALAPPDATA")
-            .ok()
-            .map(|l| {
-                PathBuf::from(l)
-                    .join("Microsoft")
-                    .join("WindowsApps")
-                    .join("pwsh.exe")
-            }),
-        std::env::var("ProgramFiles")
-            .ok()
-            .map(|p| PathBuf::from(p).join("PowerShell").join("7").join("pwsh.exe")),
+        std::env::var("LOCALAPPDATA").ok().map(|l| {
+            PathBuf::from(l)
+                .join("Microsoft")
+                .join("WindowsApps")
+                .join("pwsh.exe")
+        }),
+        std::env::var("ProgramFiles").ok().map(|p| {
+            PathBuf::from(p)
+                .join("PowerShell")
+                .join("7")
+                .join("pwsh.exe")
+        }),
         Some(PathBuf::from(r"C:\Program Files\PowerShell\7\pwsh.exe")),
         std::env::var("SystemRoot").ok().map(|r| {
             PathBuf::from(r)
@@ -121,10 +147,7 @@ fn default_shell() -> String {
 }
 
 fn write_helper_script(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("notify.ps1");
     let script = r#"param([string]$Event)
@@ -177,10 +200,7 @@ try {
 }
 
 fn write_hook_info(app: &AppHandle, port: u16, token: &str) -> Result<(), String> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("hook-info.json");
     let body = serde_json::json!({ "port": port, "token": token }).to_string();
@@ -188,14 +208,51 @@ fn write_hook_info(app: &AppHandle, port: u16, token: &str) -> Result<(), String
     Ok(())
 }
 
+fn session_lock_file_name(id: &str) -> String {
+    let mut safe = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if safe.is_empty() {
+        safe = "session".to_string();
+    }
+    format!("{}.lock", safe)
+}
+
+fn acquire_session_lock(app: &AppHandle, id: &str) -> Result<SessionLock, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("session-locks");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(session_lock_file_name(id));
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+
+    file.try_lock_exclusive()
+        .map_err(|_| "이 세션은 다른 MultiAgent 창에서 이미 실행 중입니다.".to_string())?;
+    file.set_len(0).map_err(|e| e.to_string())?;
+    writeln!(file, "pid={}", std::process::id()).map_err(|e| e.to_string())?;
+    file.flush().map_err(|e| e.to_string())?;
+
+    Ok(SessionLock { path, file })
+}
+
 fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
-    let server = tiny_http::Server::from_listener(listener, None)
-        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let server = tiny_http::Server::from_listener(listener, None).map_err(|e| e.to_string())?;
 
     thread::spawn(move || {
         for mut req in server.incoming_requests() {
@@ -1165,6 +1222,14 @@ fn spawn_pty(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    {
+        let ptys = state.ptys.lock().unwrap();
+        if ptys.contains_key(&id) {
+            return Err("이 세션은 이미 현재 창에서 실행 중입니다.".to_string());
+        }
+    }
+    let session_lock = acquire_session_lock(&app, &id)?;
+
     if let Some(folder) = cwd.as_ref() {
         match ai_tool_id.as_deref() {
             Some("claude") => {
@@ -1253,6 +1318,12 @@ fn spawn_pty(
                 id: id_for_thread.clone(),
             },
         );
+        {
+            let state: State<AppState> = app_for_thread.state();
+            let _ = state.ptys.lock().unwrap().remove(&id_for_thread);
+        }
+        #[cfg(not(multiagent_company))]
+        hub_for_thread.drop_agent(&id_for_thread);
     });
 
     #[cfg(not(multiagent_company))]
@@ -1263,6 +1334,7 @@ fn spawn_pty(
             writer,
             master: pair.master,
             child,
+            _session_lock: session_lock,
         },
     );
     Ok(())
@@ -1276,7 +1348,9 @@ fn write_pty(state: State<'_, AppState>, id: String, data: String) -> Result<(),
         pty.writer.clone()
     };
     let mut guard = writer.lock().map_err(|e| e.to_string())?;
-    guard.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+    guard
+        .write_all(data.as_bytes())
+        .map_err(|e| e.to_string())?;
     guard.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1311,6 +1385,30 @@ fn kill_pty(state: State<'_, AppState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_new_app_window() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("--multiagent-secondary-window")
+        .env("MULTIAGENT_SECONDARY_WINDOW", "1");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn runtime_flags(state: State<'_, AppState>) -> RuntimeFlags {
+    RuntimeFlags {
+        secondary_window: state.secondary_window,
+    }
+}
+
 #[cfg(not(multiagent_company))]
 mod remote_commands {
     use super::*;
@@ -1332,11 +1430,17 @@ mod remote_commands {
 
     #[tauri::command]
     pub fn sync_remote_agents(state: State<'_, AppState>, agents: Vec<remote::RemoteAgentInfo>) {
+        if state.secondary_window {
+            return;
+        }
         *state.remote.agents.lock().unwrap() = agents;
     }
 
     #[tauri::command]
     pub fn sync_remote_view(state: State<'_, AppState>, view: String) {
+        if state.secondary_window {
+            return;
+        }
         *state.remote.view.lock().unwrap() = view;
     }
 
@@ -1390,6 +1494,9 @@ fn sync_usage_catalog(
     projects: Vec<usage::UsageProjectInfo>,
     agents: Vec<usage::UsageAgentInfo>,
 ) {
+    if state.secondary_window {
+        return;
+    }
     state.usage.sync_catalog(projects, agents);
 }
 
@@ -1414,10 +1521,7 @@ fn usage_config_get(state: State<'_, AppState>) -> usage::UsageConfig {
 }
 
 #[tauri::command]
-fn usage_config_set(
-    state: State<'_, AppState>,
-    config: usage::UsageConfig,
-) -> usage::UsageConfig {
+fn usage_config_set(state: State<'_, AppState>, config: usage::UsageConfig) -> usage::UsageConfig {
     usage::config_set(&state.usage, config)
 }
 
@@ -1531,10 +1635,9 @@ fn download_installer(url: String, file_name: String) -> Result<String, String> 
         .map_err(|e| format!("download request failed: {}", e))?;
 
     let mut reader = response.into_reader();
-    let mut file = fs::File::create(&target)
-        .map_err(|e| format!("create installer file: {}", e))?;
-    std::io::copy(&mut reader, &mut file)
-        .map_err(|e| format!("write installer file: {}", e))?;
+    let mut file =
+        fs::File::create(&target).map_err(|e| format!("create installer file: {}", e))?;
+    std::io::copy(&mut reader, &mut file).map_err(|e| format!("write installer file: {}", e))?;
     Ok(target.to_string_lossy().into_owned())
 }
 
@@ -1704,10 +1807,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let secondary_window = is_secondary_window_process();
             let handle = app.handle().clone();
             let token = uuid::Uuid::new_v4().to_string();
-            let helper_path = write_helper_script(&handle)
-                .map_err(|e| format!("write helper script: {}", e))?;
+            let helper_path =
+                write_helper_script(&handle).map_err(|e| format!("write helper script: {}", e))?;
             let port = start_hook_server(handle.clone(), token.clone())
                 .map_err(|e| format!("start hook server: {}", e))?;
             write_hook_info(&handle, port, &token)
@@ -1721,14 +1825,17 @@ pub fn run() {
                     helper_path: helper_path.to_string_lossy().to_string(),
                 },
                 close_confirmed: Mutex::new(false),
+                secondary_window,
                 #[cfg(not(multiagent_company))]
                 remote: Arc::new(remote::RemoteHub::new()),
                 usage: usage_hub,
             });
             #[cfg(not(multiagent_company))]
-            remote::load_access(app.handle());
-            usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
-            {
+            if !secondary_window {
+                remote::load_access(app.handle());
+            }
+            if !secondary_window {
+                usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
                 let state: State<AppState> = app.handle().state();
                 if usage::config_get(&state.usage).enabled {
                     let app_for_usage = app.handle().clone();
@@ -1747,14 +1854,11 @@ pub fn run() {
                 let app_handle_for_event = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let state: State<AppState> =
-                            app_handle_for_event.state();
-                        let confirmed =
-                            *state.close_confirmed.lock().unwrap();
+                        let state: State<AppState> = app_handle_for_event.state();
+                        let confirmed = *state.close_confirmed.lock().unwrap();
                         if !confirmed {
                             api.prevent_close();
-                            let _ = app_handle_for_event
-                                .emit("app:close-requested", ());
+                            let _ = app_handle_for_event.emit("app:close-requested", ());
                         }
                     }
                 });
@@ -1764,77 +1868,81 @@ pub fn run() {
 
     #[cfg(not(multiagent_company))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-            spawn_pty,
-            write_pty,
-            resize_pty,
-            kill_pty,
-            confirm_close,
-            list_markdown_files,
-            read_markdown_file,
-            resolve_markdown_path,
-            resolve_folder_path,
-            open_folder_path,
-            open_local_path,
-            reveal_local_path,
-            resolve_terminal_path,
-            download_installer,
-            run_installer_and_quit,
-            play_system_sound,
-            read_audio_file,
-            read_image_data_url,
-            remote_commands::start_remote_server,
-            remote_commands::stop_remote_server,
-            remote_commands::remote_server_status,
-            remote_commands::sync_remote_agents,
-            remote_commands::sync_remote_view,
-            remote_commands::start_tunnel,
-            remote_commands::stop_tunnel,
-            remote_commands::tunnel_status,
-            remote_commands::remote_access_list,
-            remote_commands::remote_access_approve,
-            remote_commands::remote_access_revoke,
-            remote_commands::remote_config_get,
-            remote_commands::remote_config_set,
-            sync_usage_catalog,
-            start_usage_server,
-            stop_usage_server,
-            usage_server_status,
-            usage_config_get,
-            usage_config_set,
-            usage_ingest_now,
-            resolve_cli_session,
-            show_main_window
+        spawn_pty,
+        write_pty,
+        resize_pty,
+        kill_pty,
+        open_new_app_window,
+        runtime_flags,
+        confirm_close,
+        list_markdown_files,
+        read_markdown_file,
+        resolve_markdown_path,
+        resolve_folder_path,
+        open_folder_path,
+        open_local_path,
+        reveal_local_path,
+        resolve_terminal_path,
+        download_installer,
+        run_installer_and_quit,
+        play_system_sound,
+        read_audio_file,
+        read_image_data_url,
+        remote_commands::start_remote_server,
+        remote_commands::stop_remote_server,
+        remote_commands::remote_server_status,
+        remote_commands::sync_remote_agents,
+        remote_commands::sync_remote_view,
+        remote_commands::start_tunnel,
+        remote_commands::stop_tunnel,
+        remote_commands::tunnel_status,
+        remote_commands::remote_access_list,
+        remote_commands::remote_access_approve,
+        remote_commands::remote_access_revoke,
+        remote_commands::remote_config_get,
+        remote_commands::remote_config_set,
+        sync_usage_catalog,
+        start_usage_server,
+        stop_usage_server,
+        usage_server_status,
+        usage_config_get,
+        usage_config_set,
+        usage_ingest_now,
+        resolve_cli_session,
+        show_main_window
     ]);
 
     #[cfg(multiagent_company)]
     let builder = builder.invoke_handler(tauri::generate_handler![
-            spawn_pty,
-            write_pty,
-            resize_pty,
-            kill_pty,
-            confirm_close,
-            list_markdown_files,
-            read_markdown_file,
-            resolve_markdown_path,
-            resolve_folder_path,
-            open_folder_path,
-            open_local_path,
-            reveal_local_path,
-            resolve_terminal_path,
-            download_installer,
-            run_installer_and_quit,
-            play_system_sound,
-            read_audio_file,
-            read_image_data_url,
-            sync_usage_catalog,
-            start_usage_server,
-            stop_usage_server,
-            usage_server_status,
-            usage_config_get,
-            usage_config_set,
-            usage_ingest_now,
-            resolve_cli_session,
-            show_main_window
+        spawn_pty,
+        write_pty,
+        resize_pty,
+        kill_pty,
+        open_new_app_window,
+        runtime_flags,
+        confirm_close,
+        list_markdown_files,
+        read_markdown_file,
+        resolve_markdown_path,
+        resolve_folder_path,
+        open_folder_path,
+        open_local_path,
+        reveal_local_path,
+        resolve_terminal_path,
+        download_installer,
+        run_installer_and_quit,
+        play_system_sound,
+        read_audio_file,
+        read_image_data_url,
+        sync_usage_catalog,
+        start_usage_server,
+        stop_usage_server,
+        usage_server_status,
+        usage_config_get,
+        usage_config_set,
+        usage_ingest_now,
+        resolve_cli_session,
+        show_main_window
     ]);
 
     builder
