@@ -102,6 +102,7 @@ export function ContextMenu({
       | "pin-session"
       | "clear-session-pin"
       | "restart"
+      | "relink"
   ) => void;
 }) {
   return (
@@ -152,6 +153,9 @@ export function ContextMenu({
           disabled={!canRestart}
         >
           세션 재시작
+        </button>
+        <button className="ctx-item" onClick={() => onAction("relink")}>
+          현재 세션으로 재등록
         </button>
         <div className="ctx-separator" />
         <button

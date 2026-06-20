@@ -328,6 +328,26 @@ impl UsageHub {
         Ok(session_id_from_transcript_file(&path, tool))
     }
 
+    /// Find the most recent session id for a tool+folder, ignoring any
+    /// stored session id. Used by "re-link current session" to recover
+    /// when the saved session id drifted or was lost.
+    pub fn find_latest_for_folder(
+        &self,
+        tool: &str,
+        folder: &str,
+        agent_name: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        if folder.trim().is_empty() {
+            return Err("folder is missing".to_string());
+        }
+        let root = source_root(tool)?;
+        let Some(path) = find_project_transcript_file(&root, folder, agent_name, false) else {
+            return Ok(None);
+        };
+        self.allowed_source_path(tool, &path)?;
+        Ok(session_id_from_transcript_file(&path, tool))
+    }
+
     fn allowed_source_path(&self, tool: &str, path: &Path) -> Result<PathBuf, String> {
         let root = source_root(tool)?
             .canonicalize()

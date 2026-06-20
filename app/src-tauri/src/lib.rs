@@ -1547,6 +1547,18 @@ fn resolve_cli_session(
 }
 
 #[tauri::command]
+fn relink_cli_session(
+    state: State<'_, AppState>,
+    ai_tool_id: String,
+    folder: String,
+    agent_name: Option<String>,
+) -> Result<Option<String>, String> {
+    state
+        .usage
+        .find_latest_for_folder(&ai_tool_id, &folder, agent_name.as_deref())
+}
+
+#[tauri::command]
 fn show_main_window(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -1909,6 +1921,7 @@ pub fn run() {
         usage_config_set,
         usage_ingest_now,
         resolve_cli_session,
+        relink_cli_session,
         show_main_window
     ]);
 
@@ -1942,6 +1955,7 @@ pub fn run() {
         usage_config_set,
         usage_ingest_now,
         resolve_cli_session,
+        relink_cli_session,
         show_main_window
     ]);
 

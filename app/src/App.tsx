@@ -1141,6 +1141,46 @@ function App() {
     [agents, groups, pushToast]
   );
 
+  const relinkSession = useCallback(
+    (agentId: string) => {
+      const agent = agentsRef.current.find((a) => a.id === agentId);
+      if (!agent) return;
+      const project = projectsRef.current.find(
+        (p) => p.id === agent.projectId
+      );
+      const folder = agent.folder || project?.folder || "";
+      if (!folder) {
+        pushToast(agentId, agent.name, "폴더 정보가 없어 재등록할 수 없습니다.");
+        return;
+      }
+      invoke<string | null>("relink_cli_session", {
+        aiToolId: agent.aiToolId,
+        folder,
+        agentName: agent.name,
+      })
+        .then((sessionId) => {
+          if (!sessionId) {
+            pushToast(agentId, agent.name, "찾을 수 있는 최근 세션이 없습니다.");
+            return;
+          }
+          setAgents((prev) =>
+            prev.map((a) =>
+              a.id === agentId ? { ...a, lastSessionId: sessionId } : a
+            )
+          );
+          pushToast(
+            agentId,
+            agent.name,
+            `세션 재등록: ${sessionId.slice(0, 8)} (다음 실행부터 적용)`
+          );
+        })
+        .catch((err) => {
+          pushToast(agentId, agent.name, `재등록 실패: ${String(err)}`);
+        });
+    },
+    [pushToast]
+  );
+
   const onContextAction = useCallback(
     (
       action:
@@ -1152,6 +1192,7 @@ function App() {
         | "pin-session"
         | "clear-session-pin"
         | "restart"
+        | "relink"
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
@@ -1166,6 +1207,8 @@ function App() {
       else if (action === "restart") {
         selectAgent(id);
         restartAgent(id);
+      } else if (action === "relink") {
+        relinkSession(id);
       }
     },
     [
@@ -1176,6 +1219,7 @@ function App() {
       pinContextGroupSessions,
       clearContextGroupSessionPins,
       restartAgent,
+      relinkSession,
     ]
   );
 
