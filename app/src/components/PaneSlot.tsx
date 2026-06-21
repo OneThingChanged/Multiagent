@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toolForId } from "../types";
+import { findSshHost } from "../lib/sshHosts";
 import type {
   Agent,
   AgentStatus,
@@ -136,42 +137,48 @@ export function PaneSlot({
         }
         const spawn = async () => {
           const tool = toolForId(cur.aiToolId);
+          // SSH sessions run on a remote machine: session resume / usage rely on
+          // local transcripts, so we skip them here (Phase 1).
+          const sshHost = cur.sshHostId ? findSshHost(cur.sshHostId) : null;
           let initCommand: string | null = null;
           if (tool.command) {
             let cmd = tool.command;
-            const pinnedSessionId = ctx.sessionPins?.[cur.id] ?? null;
-            const candidateSessionId = pinnedSessionId ?? cur.lastSessionId ?? null;
-            let sessionId: string | null = null;
-            if (
-              candidateSessionId &&
-              cur.folder &&
-              (cur.aiToolId === "codex" || cur.aiToolId === "claude")
-            ) {
-              try {
-                const resolved = await invoke<string | null>(
-                  "resolve_cli_session",
-                  {
-                    aiToolId: cur.aiToolId,
-                    folder: cur.folder,
-                    agentName: cur.name,
-                    preferredSessionId: candidateSessionId,
+            if (!sshHost) {
+              const pinnedSessionId = ctx.sessionPins?.[cur.id] ?? null;
+              const candidateSessionId =
+                pinnedSessionId ?? cur.lastSessionId ?? null;
+              let sessionId: string | null = null;
+              if (
+                candidateSessionId &&
+                cur.folder &&
+                (cur.aiToolId === "codex" || cur.aiToolId === "claude")
+              ) {
+                try {
+                  const resolved = await invoke<string | null>(
+                    "resolve_cli_session",
+                    {
+                      aiToolId: cur.aiToolId,
+                      folder: cur.folder,
+                      agentName: cur.name,
+                      preferredSessionId: candidateSessionId,
+                    }
+                  );
+                  sessionId = resolved ?? null;
+                  if (!pinnedSessionId && cur.lastSessionId !== sessionId) {
+                    setAgentSessionId(cur.id, sessionId);
                   }
-                );
-                sessionId = resolved ?? null;
-                if (!pinnedSessionId && cur.lastSessionId !== sessionId) {
-                  setAgentSessionId(cur.id, sessionId);
-                }
-              } catch {
-                if (!pinnedSessionId && cur.lastSessionId) {
-                  setAgentSessionId(cur.id, null);
+                } catch {
+                  if (!pinnedSessionId && cur.lastSessionId) {
+                    setAgentSessionId(cur.id, null);
+                  }
                 }
               }
-            }
-            if (sessionId) {
-              if (cur.aiToolId === "codex") {
-                cmd = `${cmd} resume ${sessionId}`;
-              } else if (cur.aiToolId === "claude") {
-                cmd = `${cmd} --resume ${sessionId}`;
+              if (sessionId) {
+                if (cur.aiToolId === "codex") {
+                  cmd = `${cmd} resume ${sessionId}`;
+                } else if (cur.aiToolId === "claude") {
+                  cmd = `${cmd} --resume ${sessionId}`;
+                }
               }
             }
             if (cur.dangerous && tool.dangerousFlag) {
@@ -179,12 +186,24 @@ export function PaneSlot({
             }
             initCommand = cmd;
           }
+          const ssh = sshHost
+            ? {
+                host: sshHost.host,
+                user: sshHost.user,
+                port: sshHost.port,
+                identityFile: sshHost.identityFile,
+                extraOptions: sshHost.extraOptions,
+                remoteFolder: cur.remoteFolder ?? null,
+                remoteOs: sshHost.remoteOs ?? "posix",
+              }
+            : null;
           invoke("spawn_pty", {
             id: agentId,
             shell: null,
-            cwd: cur.folder || null,
+            cwd: sshHost ? null : cur.folder || null,
             initCommand,
             aiToolId: cur.aiToolId,
+            ssh,
             cols,
             rows,
           }).catch((err) => {

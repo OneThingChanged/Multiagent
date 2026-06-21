@@ -46,13 +46,17 @@ function loadStoredProjects(rawAgents: StoredAgent[]): Project[] {
     const raw = localStorage.getItem(LS_PROJECTS);
     if (raw) {
       for (const project of JSON.parse(raw) as StoredProject[]) {
-        if (!project.id || !project.folder) continue;
+        // SSH projects may have no local folder; still require an id.
+        if (!project.id) continue;
+        if (!project.folder && !project.sshHostId) continue;
         existing.set(project.id, {
           id: project.id,
-          name: project.name || projectNameFromFolder(project.folder),
-          folder: project.folder,
+          name: project.name || projectNameFromFolder(project.folder || ""),
+          folder: project.folder || "",
           createdAt: project.createdAt || Date.now(),
           lastOpenedAt: project.lastOpenedAt,
+          sshHostId: project.sshHostId || undefined,
+          remoteFolder: project.remoteFolder || undefined,
         });
       }
     }
@@ -105,6 +109,9 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
         lastSessionId:
           c.lastSessionId ?? c.lastClaudeSessionId ?? c.lastResumeToken,
         status: "idle" as AgentStatus,
+        // Derived from the owning project (not persisted on the agent).
+        sshHostId: project.sshHostId,
+        remoteFolder: project.remoteFolder,
       },
     ];
   });

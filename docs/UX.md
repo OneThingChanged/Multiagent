@@ -45,6 +45,7 @@
 ## 새 프로젝트 / 세션 모달
 
 - **New Project**: 프로젝트 이름과 루트 폴더를 입력. 이 폴더가 세션 cwd와 Docs 스캔 root가 됨
+  - **Run on remote host (SSH)** 토글: 켜면 폴더 대신 등록된 SSH 호스트(드롭다운)와 **원격 폴더**를 입력. 이 프로젝트의 세션은 그 머신에서 SSH로 실행됨 (호스트는 설정 → SSH Hosts에서 먼저 등록)
 - **New Session**: 활성 프로젝트 안에 세션을 만든다
 - **Session alias**: 사이드바/탭/Docs subtitle에 표시될 이름
 - **AI tool**: Claude Code / Codex / Shell only
@@ -112,11 +113,12 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 
 ## 설정
 
-사이드바 상단 **설정** 버튼으로 팝업을 연다 (`Esc`/바깥 클릭/닫기). 4개 탭:
+사이드바 상단 **설정** 버튼으로 팝업을 연다 (`Esc`/바깥 클릭/닫기). 탭(General/Usage/Remote/SSH Hosts/About — company 빌드는 Remote 제외):
 
 - **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test)
 - **Usage**: 사용량 대시보드 서버 on/off·포트, URL 복사, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 - **Remote**: 원격 서버·Cloudflare 터널 Start/Stop, GitHub OAuth(client id/secret)·Owner, named tunnel(token/hostname/port), 계정 승인 관리 ([REMOTE.md](REMOTE.md))
+- **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·user·host·port·identity 파일[Browse]·extra options) + **Test connection**(키 인증 기준 연결 확인). 비밀번호는 저장하지 않고 시스템 ssh-agent/키에 위임
 - **About**: 제작자, 버전, **Check**(자동 업데이트 — 서명 검증 후 다운로드·설치·재시작), Releases
 
 설정값은 localStorage 및 로컬 JSON에 저장되어 다음 실행에도 유지된다.

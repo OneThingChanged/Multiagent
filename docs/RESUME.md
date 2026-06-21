@@ -84,6 +84,7 @@ hook이 안 돌거나(예: 깨진 codex 플러그인 `hooks.json`이 파싱 실�
 - **Shell only 모드**: `/quit`이 PowerShell에 없어 에러가 잠깐 보일 수 있음 (해롭진 않음, resume 대상 아님)
 - **세션 ID 무효화**: 도구가 그 세션을 더 이상 resume 못 하거나 jsonl이 삭제되면 실패 → 새 세션 시작 (재등록으로 디스크 최신 세션을 다시 잡아볼 수 있음)
 - **첫 spawn**: 최초 생성 직후엔 SessionStart hook 전이라 resume 대상 없음. 한 번 떠야 다음부터 정상
+- **SSH 원격 세션**: resume 대상은 로컬 디스크 transcript로 해석되므로 원격 세션엔 적용 안 됨. spawn 시 resume 분기를 건너뛰고 도구를 새 세션으로 띄움 ([KNOWN_ISSUES.md](KNOWN_ISSUES.md))
 - **codex 플러그인 hooks.json 호환**: codex companion 플러그인의 `hooks.json` 최상위에 `description` 같은 미지원 필드가 있으면 codex가 hook 로딩에 실패해 SessionStart가 안 옴 → 해당 필드 제거 또는 플러그인 정리 필요
 
 ## persistence

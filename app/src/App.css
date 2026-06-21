@@ -583,6 +583,13 @@ body,
   min-width: 0;
   border-left: 0;
   padding-left: 2px;
+  /* Keep the project name and SSH badge on one row (badge on the right). */
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.project-tree-project .project-name {
+  flex: 1;
 }
 
 .project-node-active .project-tree-project {
@@ -593,6 +600,59 @@ body,
   list-style: none;
   margin: 0;
   padding: 0 0 4px;
+}
+
+/* Machine (computer) grouping: local "This PC" + one group per SSH host. */
+.machine-node {
+  margin-bottom: 2px;
+}
+.machine-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.machine-caret-btn {
+  width: 24px;
+  flex: 0 0 24px;
+  background: transparent;
+  border: 0;
+  color: var(--app-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+}
+.machine-caret-btn:hover {
+  background: var(--app-panel-hover);
+  color: var(--app-heading);
+}
+.machine-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 2px;
+}
+.machine-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+}
+.machine-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-soft-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Indent projects nested under a machine group. */
+.machine-projects {
+  padding-left: 12px;
 }
 
 .project-name,
@@ -762,6 +822,17 @@ body,
   font-size: 9px;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.project-ssh-badge {
+  flex-shrink: 0;
+  color: var(--app-accent);
+  border: 1px solid var(--app-accent);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .agent-folder {
@@ -1944,10 +2015,132 @@ body.docs-resizing .docs-resizer::after {
 }
 
 .app-settings-modal {
-  width: 380px;
+  width: 480px;
+  max-width: calc(100vw - 48px);
   display: flex;
   flex-direction: column;
-  max-height: min(640px, calc(100vh - 80px));
+  max-height: min(760px, calc(100vh - 64px));
+}
+
+.app-ssh-intro-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.app-ssh-intro-row .app-update-message {
+  flex: 1;
+  min-width: 0;
+}
+.app-ssh-guide-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* SSH setup guide modal — sits above the Settings modal. */
+.ssh-guide-backdrop {
+  z-index: 120;
+}
+.ssh-guide-modal {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  max-height: min(800px, calc(100vh - 64px));
+}
+.ssh-guide-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+.ssh-guide-intro {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--app-soft-text);
+  margin: 0 0 12px;
+}
+.ssh-guide-step {
+  margin-bottom: 14px;
+}
+.ssh-guide-step-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--app-heading);
+  margin-bottom: 6px;
+}
+.ssh-guide-note {
+  font-size: 12px;
+  color: var(--app-soft-text);
+  margin: 8px 0 4px;
+}
+.ssh-guide-code {
+  position: relative;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.ssh-guide-code pre {
+  margin: 0;
+  padding-right: 56px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--mono-font, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.ssh-guide-key {
+  color: var(--app-accent);
+}
+.ssh-guide-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.ssh-guide-keybox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--app-soft-text);
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.ssh-guide-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--app-text);
+}
+.ssh-guide-mono {
+  font-family: var(--mono-font, monospace);
+  font-size: 11.5px;
+}
+.ssh-guide-foot {
+  font-size: 11.5px;
+  color: var(--app-muted);
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
+/* SSH Hosts tab: compact spacing so the whole form fits without scrolling. */
+.app-ssh-tab .field {
+  margin-bottom: 8px;
+}
+.app-ssh-tab .folder-row {
+  margin-bottom: 8px;
+}
+.app-ssh-tab .folder-row .field {
+  margin-bottom: 0;
+}
+.app-ssh-form-title {
+  margin-top: 6px;
 }
 
 .app-settings-tabs {
@@ -1962,10 +2155,11 @@ body.docs-resizing .docs-resizer::after {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--app-soft-text);
-  padding: 8px 14px;
+  padding: 8px 12px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .app-settings-tab:hover {
@@ -1981,6 +2175,7 @@ body.docs-resizing .docs-resizer::after {
   flex: 1;
   min-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 2px;
 }
 
@@ -2052,7 +2247,48 @@ body.docs-resizing .docs-resizer::after {
 .app-sound-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.app-ssh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.app-ssh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+}
+.app-ssh-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-ssh-row-label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-ssh-row-target {
+  font-size: 12px;
+  opacity: 0.7;
+  font-family: var(--mono-font, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-ssh-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .app-remote-url-row {
@@ -2278,6 +2514,9 @@ body.docs-resizing .docs-resizer::after {
   font-size: 13px;
   font-family: inherit;
   outline: none;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .field input:focus,
 .field select:focus {
@@ -2291,6 +2530,12 @@ body.docs-resizing .docs-resizer::after {
 .folder-row input {
   flex: 1;
   min-width: 0;
+}
+/* Nested .field items inside a row (e.g. User/Host/Port) must be allowed to
+   shrink below their intrinsic input width, otherwise the row overflows. */
+.folder-row > .field {
+  min-width: 0;
+  margin-bottom: 0;
 }
 
 .session-project-summary {

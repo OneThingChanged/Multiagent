@@ -44,6 +44,23 @@ export function toolForId(id: string): AiTool {
   return AI_TOOLS.find((t) => t.id === id) ?? AI_TOOLS[2];
 }
 
+// A reusable SSH connection target. Stored in its own localStorage registry
+// (LS_SSH_HOSTS) and referenced by projects via Project.sshHostId.
+export type SshRemoteOs = "posix" | "windows";
+
+export type SshHost = {
+  id: string;
+  label: string; // display alias in sidebar / pickers
+  host: string; // hostname or IP
+  user: string;
+  port?: number; // defaults to 22
+  identityFile?: string; // optional private key path
+  extraOptions?: string; // extra ssh options, e.g. "-o StrictHostKeyChecking=accept-new"
+  // Shell family on the remote machine. Decides how the cd + tool command is
+  // built. Defaults to "posix" (Linux/macOS) when unset.
+  remoteOs?: SshRemoteOs;
+};
+
 export type Agent = {
   id: string;
   projectId: string;
@@ -55,6 +72,9 @@ export type Agent = {
   status: AgentStatus;
   createdAt: number;
   lastSessionId?: string;
+  // Derived from the owning project at load time (not persisted on the agent).
+  sshHostId?: string;
+  remoteFolder?: string;
 };
 
 export type StoredAgent = {
@@ -77,6 +97,10 @@ export type Project = {
   folder: string;
   createdAt: number;
   lastOpenedAt?: number;
+  // When set, sessions of this project run on the referenced SSH host instead
+  // of locally. remoteFolder is the working directory on the remote machine.
+  sshHostId?: string;
+  remoteFolder?: string;
 };
 
 export type StoredProject = Project;
@@ -100,6 +124,8 @@ export type NewAgentPayload = {
 export type NewProjectPayload = {
   name: string;
   folder: string;
+  sshHostId?: string;
+  remoteFolder?: string;
 };
 
 export type Toast = {
@@ -165,6 +191,7 @@ export type DropTargetState = {
 
 export const LS_AGENTS = "multiagent.agents.v1";
 export const LS_PROJECTS = "multiagent.projects.v1";
+export const LS_SSH_HOSTS = "multiagent.sshHosts.v1";
 export const LS_GROUPS = "multiagent.groups.v1";
 export const LS_VIEW = "multiagent.view.v1";
 export const LS_LAYOUT_LEGACY = "multiagent.layout.v1";

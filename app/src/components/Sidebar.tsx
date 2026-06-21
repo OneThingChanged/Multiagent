@@ -9,8 +9,26 @@ import {
 import { toolForId } from "../types";
 import type { Agent, DragState, Group, Project } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
+import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
+const LS_COLLAPSED_MACHINES = "multiagent.collapsedMachines.v1";
+
+type MachineGroup = {
+  id: string; // "local" or "ssh:<hostId>"
+  kind: "local" | "ssh";
+  label: string;
+  hostSummary?: string;
+  projects: Project[];
+};
+
+function loadCollapsedMachines(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_COLLAPSED_MACHINES);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch {}
+  return new Set();
+}
 
 type Section = {
   groupId: string;
@@ -125,6 +143,30 @@ export function Sidebar({
     } catch {}
   }, [expandedProjectIds]);
 
+  // Machines are expanded by default; we persist the set of *collapsed* ids so
+  // a newly-appearing machine starts expanded without needing its id upfront.
+  const [collapsedMachineIds, setCollapsedMachineIds] = useState<Set<string>>(
+    () => loadCollapsedMachines()
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LS_COLLAPSED_MACHINES,
+        JSON.stringify(Array.from(collapsedMachineIds))
+      );
+    } catch {}
+  }, [collapsedMachineIds]);
+
+  const toggleMachineExpanded = (machineId: string) => {
+    setCollapsedMachineIds((current) => {
+      const next = new Set(current);
+      if (next.has(machineId)) next.delete(machineId);
+      else next.add(machineId);
+      return next;
+    });
+  };
+
   const projectSessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const agent of agents) {
@@ -221,6 +263,49 @@ export function Sidebar({
     });
     onSelectProject(projectId);
   };
+
+  // Group projects by machine: local (no sshHostId) + one group per SSH host.
+  const machineGroups = useMemo<MachineGroup[]>(() => {
+    const hosts = loadSshHosts();
+    const hostById = new Map(hosts.map((h) => [h.id, h]));
+    const local: Project[] = [];
+    const byHost = new Map<string, Project[]>();
+    for (const project of projects) {
+      if (project.sshHostId) {
+        const list = byHost.get(project.sshHostId) ?? [];
+        list.push(project);
+        byHost.set(project.sshHostId, list);
+      } else {
+        local.push(project);
+      }
+    }
+    const result: MachineGroup[] = [];
+    if (local.length > 0) {
+      result.push({ id: "local", kind: "local", label: "This PC", projects: local });
+    }
+    const hostIds = Array.from(byHost.keys()).sort((a, b) => {
+      const la = hostById.get(a)?.label ?? a;
+      const lb = hostById.get(b)?.label ?? b;
+      return la.localeCompare(lb);
+    });
+    for (const hostId of hostIds) {
+      const host = hostById.get(hostId);
+      result.push({
+        id: `ssh:${hostId}`,
+        kind: "ssh",
+        label: host?.label ?? "(unknown host)",
+        hostSummary: host ? sshHostSummary(host) : undefined,
+        projects: byHost.get(hostId)!,
+      });
+    }
+    return result;
+  }, [projects]);
+
+  // Only show machine headers once at least one remote project exists; a
+  // local-only setup stays flat as before.
+  const groupByMachine = projects.some((p) => p.sshHostId);
+  const machineExpanded = (machineId: string) =>
+    searchTerm.length > 0 || !collapsedMachineIds.has(machineId);
 
   const startSessionPointer = (
     agentId: string,
@@ -382,6 +467,138 @@ export function Sidebar({
     );
   };
 
+  const renderProject = (project: Project) => {
+    const sections = filterSections(project.id, project.name);
+    if (sections === null) return null;
+    const expanded =
+      searchTerm.length > 0 || expandedProjectIds.has(project.id);
+    const sessionCount = projectSessionCounts.get(project.id) ?? 0;
+
+    const isDropTarget = projectDropTarget?.id === project.id;
+    const dropBefore = isDropTarget && projectDropTarget?.before;
+    const dropAfter = isDropTarget && !projectDropTarget?.before;
+    const isDraggingThis = draggingProjectId === project.id;
+    return (
+      <div
+        key={project.id}
+        className={[
+          "project-node",
+          project.id === activeProjectId ? "project-node-active" : "",
+          dropBefore ? "project-node-drop-before" : "",
+          dropAfter ? "project-node-drop-after" : "",
+          isDraggingThis ? "project-node-dragging" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        draggable
+        onDragStart={(e) => {
+          if ((e.target as HTMLElement).closest(".project-session-list")) {
+            return;
+          }
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("application/x-multiagent-project", project.id);
+          setDraggingProjectId(project.id);
+        }}
+        onDragOver={(e) => {
+          if (
+            !e.dataTransfer.types.includes("application/x-multiagent-project")
+          ) {
+            return;
+          }
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const rect = e.currentTarget.getBoundingClientRect();
+          const before = e.clientY - rect.top < rect.height / 2;
+          setProjectDropTarget((cur) =>
+            cur?.id === project.id && cur.before === before
+              ? cur
+              : { id: project.id, before }
+          );
+        }}
+        onDragLeave={(e) => {
+          const next = e.relatedTarget as Node | null;
+          if (next && e.currentTarget.contains(next)) return;
+          setProjectDropTarget((cur) => (cur?.id === project.id ? null : cur));
+        }}
+        onDrop={(e) => {
+          const draggedId = e.dataTransfer.getData(
+            "application/x-multiagent-project"
+          );
+          if (!draggedId) return;
+          e.preventDefault();
+          const target = projectDropTarget;
+          setProjectDropTarget(null);
+          setDraggingProjectId(null);
+          if (target && draggedId !== project.id) {
+            onReorderProject(draggedId, project.id, target.before);
+          }
+        }}
+        onDragEnd={() => {
+          setProjectDropTarget(null);
+          setDraggingProjectId(null);
+        }}
+      >
+        <div
+          className="project-row"
+          onContextMenu={(e) => {
+            if (
+              (e.target as HTMLElement).closest("button.project-caret-btn")
+            ) {
+              return;
+            }
+            e.preventDefault();
+            onProjectContextMenu(project.id, e.clientX, e.clientY);
+          }}
+        >
+          <button
+            className="project-caret-btn"
+            onClick={() => toggleProjectExpanded(project.id)}
+            title={expanded ? "Collapse project" : "Expand project"}
+          >
+            {expanded ? "v" : ">"}
+          </button>
+          <button
+            className="project-item project-tree-project"
+            onClick={() => selectProject(project.id)}
+            title={`${project.name}\n${
+              project.sshHostId
+                ? `SSH: ${project.remoteFolder || "(remote)"}`
+                : project.folder
+            }`}
+          >
+            <span className="project-name">{project.name}</span>
+            {project.sshHostId && (
+              <span className="project-ssh-badge">SSH</span>
+            )}
+          </button>
+        </div>
+        {expanded && (
+          <ul className="project-session-list">
+            {sections.map((section, idx) => (
+              <Fragment key={`${project.id}-${section.groupId}`}>
+                {idx > 0 && <li className="group-separator" />}
+                {section.members.map((agent) =>
+                  renderItem(
+                    agent,
+                    section.groupId,
+                    section.multi,
+                    section.sessionLocked,
+                    true
+                  )
+                )}
+              </Fragment>
+            ))}
+            {sessionCount === 0 && (
+              <li className="empty-hint project-empty-hint">
+                Select project, then click + to start a session
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -456,135 +673,45 @@ export function Sidebar({
             </button>
           )}
         </div>
-        {projects.map((project) => {
-          const sections = filterSections(project.id, project.name);
-          if (sections === null) return null;
-          const expanded =
-            searchTerm.length > 0 || expandedProjectIds.has(project.id);
-          const sessionCount = projectSessionCounts.get(project.id) ?? 0;
-
-          const isDropTarget = projectDropTarget?.id === project.id;
-          const dropBefore = isDropTarget && projectDropTarget?.before;
-          const dropAfter = isDropTarget && !projectDropTarget?.before;
-          const isDraggingThis = draggingProjectId === project.id;
-          return (
-            <div
-              key={project.id}
-              className={[
-                "project-node",
-                project.id === activeProjectId ? "project-node-active" : "",
-                dropBefore ? "project-node-drop-before" : "",
-                dropAfter ? "project-node-drop-after" : "",
-                isDraggingThis ? "project-node-dragging" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              draggable
-              onDragStart={(e) => {
-                if ((e.target as HTMLElement).closest(".project-session-list")) {
-                  return;
-                }
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData(
-                  "application/x-multiagent-project",
-                  project.id
-                );
-                setDraggingProjectId(project.id);
-              }}
-              onDragOver={(e) => {
-                if (
-                  !e.dataTransfer.types.includes(
-                    "application/x-multiagent-project"
-                  )
-                ) {
-                  return;
-                }
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                const rect = e.currentTarget.getBoundingClientRect();
-                const before = e.clientY - rect.top < rect.height / 2;
-                setProjectDropTarget((cur) =>
-                  cur?.id === project.id && cur.before === before
-                    ? cur
-                    : { id: project.id, before }
-                );
-              }}
-              onDragLeave={(e) => {
-                const next = e.relatedTarget as Node | null;
-                if (next && e.currentTarget.contains(next)) return;
-                setProjectDropTarget((cur) =>
-                  cur?.id === project.id ? null : cur
-                );
-              }}
-              onDrop={(e) => {
-                const draggedId = e.dataTransfer.getData(
-                  "application/x-multiagent-project"
-                );
-                if (!draggedId) return;
-                e.preventDefault();
-                const target = projectDropTarget;
-                setProjectDropTarget(null);
-                setDraggingProjectId(null);
-                if (target && draggedId !== project.id) {
-                  onReorderProject(draggedId, project.id, target.before);
-                }
-              }}
-              onDragEnd={() => {
-                setProjectDropTarget(null);
-                setDraggingProjectId(null);
-              }}
-            >
-              <div
-                className="project-row"
-                onContextMenu={(e) => {
-                  if ((e.target as HTMLElement).closest("button.project-caret-btn")) {
-                    return;
-                  }
-                  e.preventDefault();
-                  onProjectContextMenu(project.id, e.clientX, e.clientY);
-                }}
-              >
-                <button
-                  className="project-caret-btn"
-                  onClick={() => toggleProjectExpanded(project.id)}
-                  title={expanded ? "Collapse project" : "Expand project"}
-                >
-                  {expanded ? "v" : ">"}
-                </button>
-                <button
-                  className="project-item project-tree-project"
-                  onClick={() => selectProject(project.id)}
-                  title={`${project.name}\n${project.folder}`}
-                >
-                  <span className="project-name">{project.name}</span>
-                </button>
-              </div>
-              {expanded && (
-                <ul className="project-session-list">
-                  {sections.map((section, idx) => (
-                    <Fragment key={`${project.id}-${section.groupId}`}>
-                      {idx > 0 && <li className="group-separator" />}
-                      {section.members.map((agent) =>
-                        renderItem(
-                          agent,
-                          section.groupId,
-                          section.multi,
-                          section.sessionLocked,
-                          true
-                        )
+        {groupByMachine
+          ? machineGroups.map((group) => {
+              const visible = group.projects.filter(
+                (p) => filterSections(p.id, p.name) !== null
+              );
+              if (visible.length === 0) return null;
+              const mExpanded = machineExpanded(group.id);
+              return (
+                <div key={group.id} className="machine-node">
+                  <div className="machine-row">
+                    <button
+                      className="machine-caret-btn"
+                      onClick={() => toggleMachineExpanded(group.id)}
+                      title={mExpanded ? "Collapse" : "Expand"}
+                    >
+                      {mExpanded ? "v" : ">"}
+                    </button>
+                    <div
+                      className="machine-item"
+                      title={group.hostSummary ?? group.label}
+                    >
+                      <span className="machine-icon" aria-hidden="true">
+                        {group.kind === "local" ? "🖥️" : "☁️"}
+                      </span>
+                      <span className="machine-name">{group.label}</span>
+                      {group.kind === "ssh" && (
+                        <span className="project-ssh-badge">SSH</span>
                       )}
-                    </Fragment>
-                  ))}
-                  {sessionCount === 0 && (
-                    <li className="empty-hint project-empty-hint">
-                      Select project, then click + to start a session
-                    </li>
+                    </div>
+                  </div>
+                  {mExpanded && (
+                    <div className="machine-projects">
+                      {visible.map((project) => renderProject(project))}
+                    </div>
                   )}
-                </ul>
-              )}
-            </div>
-          );
-        })}
+                </div>
+              );
+            })
+          : projects.map((project) => renderProject(project))}
         {projects.length === 0 && (
           <div className="empty-hint">Click + to add a project</div>
         )}

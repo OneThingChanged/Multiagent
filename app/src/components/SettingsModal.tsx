@@ -19,6 +19,9 @@ import {
   type NotificationSoundConfig,
   type NotificationSoundMode,
 } from "../lib/notificationSound";
+import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
+import { SshSetupGuide } from "./SshSetupGuide";
+import type { SshHost } from "../types";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
   { id: "system", label: "System" },
@@ -90,17 +93,31 @@ type UsageIngestSummary = {
   errors: string[];
 };
 
-type SettingsTab = "general" | "usage" | "remote" | "about";
+type SettingsTab = "general" | "usage" | "remote" | "ssh" | "about";
 
 const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "usage", label: "Usage" },
   { id: "remote", label: "Remote" },
+  { id: "ssh", label: "SSH Hosts" },
   { id: "about", label: "About" },
 ];
 const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(
   (tab) => !IS_COMPANY_BUILD || tab.id !== "remote"
 );
+
+function emptySshDraft(): SshHost {
+  return {
+    id: "",
+    label: "",
+    host: "",
+    user: "",
+    port: undefined,
+    identityFile: "",
+    extraOptions: "",
+    remoteOs: "posix",
+  };
+}
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -169,6 +186,90 @@ export function SettingsModal({
     null
   );
   const [usageError, setUsageError] = useState<string | null>(null);
+
+  const [sshHosts, setSshHosts] = useState<SshHost[]>(() => loadSshHosts());
+  const [sshDraft, setSshDraft] = useState<SshHost>(() => emptySshDraft());
+  const [sshTest, setSshTest] = useState<
+    { status: "idle" | "testing" } | { status: "ok" | "error"; message: string }
+  >({ status: "idle" });
+  const [sshGuideOpen, setSshGuideOpen] = useState(false);
+
+  const persistSshHosts = (next: SshHost[]) => {
+    setSshHosts(next);
+    saveSshHosts(next);
+  };
+
+  const handleSshDraftChange = (patch: Partial<SshHost>) => {
+    setSshDraft((prev) => ({ ...prev, ...patch }));
+    setSshTest({ status: "idle" });
+  };
+
+  const handleSshEdit = (host: SshHost) => {
+    setSshDraft({ ...host });
+    setSshTest({ status: "idle" });
+  };
+
+  const handleSshReset = () => {
+    setSshDraft(emptySshDraft());
+    setSshTest({ status: "idle" });
+  };
+
+  const handleSshSave = () => {
+    const host = sshDraft.host.trim();
+    const user = sshDraft.user.trim();
+    if (!host || !user) return;
+    const entry: SshHost = {
+      id: sshDraft.id || crypto.randomUUID(),
+      label: sshDraft.label.trim() || `${user}@${host}`,
+      host,
+      user,
+      port: sshDraft.port ? Number(sshDraft.port) : undefined,
+      identityFile: sshDraft.identityFile?.trim() || undefined,
+      extraOptions: sshDraft.extraOptions?.trim() || undefined,
+      remoteOs: sshDraft.remoteOs ?? "posix",
+    };
+    const exists = sshHosts.some((h) => h.id === entry.id);
+    persistSshHosts(
+      exists
+        ? sshHosts.map((h) => (h.id === entry.id ? entry : h))
+        : [...sshHosts, entry]
+    );
+    handleSshReset();
+  };
+
+  const handleSshDelete = (id: string) => {
+    persistSshHosts(sshHosts.filter((h) => h.id !== id));
+    if (sshDraft.id === id) handleSshReset();
+  };
+
+  const handleSshPickIdentity = async () => {
+    try {
+      const selected = await openDialog({ directory: false, multiple: false });
+      if (typeof selected === "string") handleSshDraftChange({ identityFile: selected });
+    } catch {}
+  };
+
+  const handleSshTest = async () => {
+    const host = sshDraft.host.trim();
+    const user = sshDraft.user.trim();
+    if (!host || !user) return;
+    setSshTest({ status: "testing" });
+    try {
+      const msg = await invoke<string>("ssh_test", {
+        ssh: {
+          host,
+          user,
+          port: sshDraft.port ? Number(sshDraft.port) : undefined,
+          identityFile: sshDraft.identityFile?.trim() || undefined,
+          extraOptions: sshDraft.extraOptions?.trim() || undefined,
+          remoteFolder: null,
+        },
+      });
+      setSshTest({ status: "ok", message: msg });
+    } catch (err) {
+      setSshTest({ status: "error", message: String(err) });
+    }
+  };
 
   useEffect(() => {
     if (!IS_COMPANY_BUILD) {
@@ -463,6 +564,8 @@ export function SettingsModal({
     install.status === "installing";
 
   return (
+    <>
+    {sshGuideOpen && <SshSetupGuide onClose={() => setSshGuideOpen(false)} />}
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
         className="modal app-settings-modal"
@@ -924,6 +1027,175 @@ export function SettingsModal({
         </div>
         )}
 
+        {tab === "ssh" && (
+        <div className="app-settings-section app-ssh-tab">
+          <div className="app-ssh-intro-row">
+            <div className="app-update-message">
+              새 프로젝트의 "Run on remote host"에서 선택. 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장).
+            </div>
+            <button
+              className="btn-secondary app-ssh-guide-btn"
+              onClick={() => setSshGuideOpen(true)}
+            >
+              사용 방법
+            </button>
+          </div>
+
+          <div className="app-ssh-list">
+            {sshHosts.map((h) => (
+              <div key={h.id} className="app-ssh-row">
+                <div className="app-ssh-row-main">
+                  <span className="app-ssh-row-label">{h.label}</span>
+                  <span className="app-ssh-row-target">
+                    {h.user}@{h.host}
+                    {h.port && h.port !== 22 ? `:${h.port}` : ""}
+                  </span>
+                </div>
+                <div className="app-ssh-row-actions">
+                  <button className="btn-secondary" onClick={() => handleSshEdit(h)}>
+                    Edit
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => handleSshDelete(h.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+            {sshHosts.length === 0 && (
+              <div className="app-update-message">아직 등록된 호스트가 없습니다.</div>
+            )}
+          </div>
+
+          <div className="field-label app-ssh-form-title">
+            {sshDraft.id ? "Edit host" : "Add host"}
+          </div>
+          <div className="folder-row">
+            <label className="field" style={{ flex: 3 }}>
+              <span className="field-label">Label</span>
+              <input
+                value={sshDraft.label}
+                onChange={(e) => handleSshDraftChange({ label: e.target.value })}
+                placeholder="e.g. Lab server"
+              />
+            </label>
+            <label className="field" style={{ flex: 2 }}>
+              <span className="field-label">Remote OS</span>
+              <select
+                value={sshDraft.remoteOs ?? "posix"}
+                onChange={(e) =>
+                  handleSshDraftChange({
+                    remoteOs: e.target.value as SshHost["remoteOs"],
+                  })
+                }
+              >
+                <option value="posix">Linux / macOS</option>
+                <option value="windows">Windows</option>
+              </select>
+            </label>
+          </div>
+          <div className="folder-row">
+            <label className="field" style={{ flex: 2 }}>
+              <span className="field-label">User</span>
+              <input
+                value={sshDraft.user}
+                onChange={(e) => handleSshDraftChange({ user: e.target.value })}
+                placeholder="ubuntu"
+              />
+            </label>
+            <label className="field" style={{ flex: 3 }}>
+              <span className="field-label">Host</span>
+              <input
+                value={sshDraft.host}
+                onChange={(e) => handleSshDraftChange({ host: e.target.value })}
+                placeholder="192.168.0.10"
+              />
+            </label>
+            <label className="field" style={{ flex: 1 }}>
+              <span className="field-label">Port</span>
+              <input
+                value={sshDraft.port ?? ""}
+                onChange={(e) =>
+                  handleSshDraftChange({
+                    port: e.target.value
+                      ? Number(e.target.value.replace(/[^0-9]/g, ""))
+                      : undefined,
+                  })
+                }
+                placeholder="22"
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span className="field-label">Identity file (optional)</span>
+            <div className="folder-row">
+              <input
+                value={sshDraft.identityFile ?? ""}
+                onChange={(e) =>
+                  handleSshDraftChange({ identityFile: e.target.value })
+                }
+                placeholder="C:\\Users\\me\\.ssh\\id_ed25519"
+              />
+              <button
+                type="button"
+                className="browse-btn"
+                onClick={handleSshPickIdentity}
+              >
+                Browse...
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span className="field-label">Extra ssh options (optional)</span>
+            <input
+              value={sshDraft.extraOptions ?? ""}
+              onChange={(e) =>
+                handleSshDraftChange({ extraOptions: e.target.value })
+              }
+              placeholder="-o StrictHostKeyChecking=accept-new"
+            />
+          </label>
+
+          <div className="app-sound-actions">
+            <button
+              className="btn-primary"
+              onClick={handleSshSave}
+              disabled={!sshDraft.host.trim() || !sshDraft.user.trim()}
+            >
+              {sshDraft.id ? "Save" : "Add"}
+            </button>
+            {sshDraft.id && (
+              <button className="btn-secondary" onClick={handleSshReset}>
+                Cancel
+              </button>
+            )}
+            <button
+              className="btn-secondary"
+              onClick={handleSshTest}
+              disabled={
+                sshTest.status === "testing" ||
+                !sshDraft.host.trim() ||
+                !sshDraft.user.trim()
+              }
+            >
+              {sshTest.status === "testing" ? "Testing..." : "Test connection"}
+            </button>
+          </div>
+          {(sshTest.status === "ok" || sshTest.status === "error") && (
+            <div
+              className="app-update-message"
+              style={{
+                color: sshTest.status === "ok" ? "#3fb950" : "#f85149",
+              }}
+            >
+              {sshTest.message}
+            </div>
+          )}
+        </div>
+        )}
+
         {tab === "about" && (
         <>
         <div className="app-settings-section">
@@ -1041,5 +1313,6 @@ export function SettingsModal({
         </div>
       </div>
     </div>
+    </>
   );
 }

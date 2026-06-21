@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { Agent, Project } from "../types";
 import { toolForId } from "../types";
+import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -37,18 +38,37 @@ export function SessionPropertiesModal({
   }, [onClose]);
 
   const tool = toolForId(agent.aiToolId);
+  const sshHostId = agent.sshHostId ?? project?.sshHostId;
+  const sshHost = sshHostId ? findSshHost(sshHostId) : null;
+  const remoteFolder = agent.remoteFolder ?? project?.remoteFolder;
   const rows: { label: string; value: string; mono?: boolean }[] = [
     { label: "이름", value: agent.name },
     { label: "프로젝트", value: project?.name ?? "—" },
     { label: "도구", value: tool.label },
     { label: "상태", value: STATUS_LABEL[agent.status] ?? agent.status },
     {
+      label: "원격 호스트",
+      value: sshHost ? sshHostSummary(sshHost) : "로컬",
+      mono: !!sshHost,
+    },
+    ...(sshHost
+      ? [{ label: "원격 폴더", value: remoteFolder || "—", mono: true }]
+      : []),
+    {
       label: "세션 ID",
-      value: agent.lastSessionId ?? "(아직 없음)",
+      value: sshHost ? "(원격 미지원)" : agent.lastSessionId ?? "(아직 없음)",
       mono: true,
     },
     { label: "생성 시각", value: formatDate(agent.createdAt), mono: true },
-    { label: "폴더", value: agent.folder || project?.folder || "—", mono: true },
+    ...(sshHost
+      ? []
+      : [
+          {
+            label: "폴더",
+            value: agent.folder || project?.folder || "—",
+            mono: true,
+          },
+        ]),
     {
       label: "Dangerous 모드",
       value: agent.dangerous ? "켜짐" : "꺼짐",

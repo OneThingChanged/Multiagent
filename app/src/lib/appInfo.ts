@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.16";
+export const APP_VERSION = "0.4.17";
 export const BUILD_VARIANT =
   import.meta.env.VITE_MULTIAGENT_VARIANT === "company"
     ? "company"

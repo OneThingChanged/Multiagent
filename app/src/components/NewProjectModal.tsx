@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { NewProjectPayload } from "../types";
+import { loadSshHosts } from "../lib/sshHosts";
 
 export function NewProjectModal({
   defaultName,
@@ -13,6 +14,10 @@ export function NewProjectModal({
 }) {
   const [name, setName] = useState(defaultName);
   const [folder, setFolder] = useState("");
+  const [remote, setRemote] = useState(false);
+  const [sshHosts] = useState(() => loadSshHosts());
+  const [sshHostId, setSshHostId] = useState<string>("");
+  const [remoteFolder, setRemoteFolder] = useState("");
 
   const browse = async () => {
     try {
@@ -21,14 +26,25 @@ export function NewProjectModal({
     } catch {}
   };
 
-  const canSubmit = name.trim().length > 0 && folder.trim().length > 0;
+  const canSubmit =
+    name.trim().length > 0 &&
+    (remote ? sshHostId.length > 0 : folder.trim().length > 0);
 
   const submit = () => {
     if (!canSubmit) return;
-    onCreate({
-      name: name.trim(),
-      folder: folder.trim(),
-    });
+    if (remote) {
+      onCreate({
+        name: name.trim(),
+        folder: "",
+        sshHostId,
+        remoteFolder: remoteFolder.trim(),
+      });
+    } else {
+      onCreate({
+        name: name.trim(),
+        folder: folder.trim(),
+      });
+    }
   };
 
   return (
@@ -50,23 +66,76 @@ export function NewProjectModal({
           />
         </label>
 
-        <label className="field">
-          <span className="field-label">Project folder</span>
-          <div className="folder-row">
-            <input
-              value={folder}
-              onChange={(event) => setFolder(event.target.value)}
-              placeholder="C:\\path\\to\\project"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submit();
-                if (event.key === "Escape") onCancel();
-              }}
-            />
-            <button type="button" className="browse-btn" onClick={browse}>
-              Browse...
-            </button>
-          </div>
+        <label className="field-check">
+          <input
+            type="checkbox"
+            checked={remote}
+            onChange={(event) => setRemote(event.target.checked)}
+          />
+          <span>
+            <span className="check-label">Run on remote host (SSH)</span>
+            <span className="check-hint">
+              Sessions of this project run on another machine over SSH
+            </span>
+          </span>
         </label>
+
+        {!remote && (
+          <label className="field">
+            <span className="field-label">Project folder</span>
+            <div className="folder-row">
+              <input
+                value={folder}
+                onChange={(event) => setFolder(event.target.value)}
+                placeholder="C:\\path\\to\\project"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submit();
+                  if (event.key === "Escape") onCancel();
+                }}
+              />
+              <button type="button" className="browse-btn" onClick={browse}>
+                Browse...
+              </button>
+            </div>
+          </label>
+        )}
+
+        {remote && (
+          <>
+            <label className="field">
+              <span className="field-label">SSH host</span>
+              {sshHosts.length > 0 ? (
+                <select
+                  value={sshHostId}
+                  onChange={(event) => setSshHostId(event.target.value)}
+                >
+                  <option value="">Select a host…</option>
+                  {sshHosts.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label} ({h.user}@{h.host})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="check-hint">
+                  Settings → SSH Hosts에서 먼저 호스트를 등록하세요.
+                </span>
+              )}
+            </label>
+            <label className="field">
+              <span className="field-label">Remote folder</span>
+              <input
+                value={remoteFolder}
+                onChange={(event) => setRemoteFolder(event.target.value)}
+                placeholder="/home/user/project"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submit();
+                  if (event.key === "Escape") onCancel();
+                }}
+              />
+            </label>
+          </>
+        )}
 
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onCancel}>

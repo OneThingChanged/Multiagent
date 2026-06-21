@@ -366,6 +366,8 @@ function App() {
       folder: project.folder,
       createdAt: project.createdAt,
       lastOpenedAt: project.lastOpenedAt,
+      sshHostId: project.sshHostId,
+      remoteFolder: project.remoteFolder,
     }));
     writeLocalStorageIfChanged(
       storedProjectsJsonRef,
@@ -927,12 +929,15 @@ function App() {
 
   const createProject = useCallback((payload: NewProjectPayload) => {
     const id = crypto.randomUUID();
+    const sshHostId = payload.sshHostId?.trim() || undefined;
     const project: Project = {
       id,
       name: payload.name.trim() || "Project",
       folder: payload.folder.trim(),
       createdAt: Date.now(),
       lastOpenedAt: Date.now(),
+      sshHostId,
+      remoteFolder: sshHostId ? payload.remoteFolder?.trim() || undefined : undefined,
     };
     setProjects((prev) => [project, ...prev]);
     setActiveProjectId(id);
@@ -1020,6 +1025,8 @@ function App() {
           dangerous: payload.dangerous && !!tool.dangerousFlag,
           status: "starting",
           createdAt: Date.now(),
+          sshHostId: project.sshHostId,
+          remoteFolder: project.remoteFolder,
         },
       ]);
       applyGroupOp((s) => groupOps.addNewAgent(s, id, project.id));

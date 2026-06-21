@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use fs2::FileExt;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
@@ -56,6 +56,57 @@ struct AppState {
 struct PtyData {
     id: String,
     data: String,
+}
+
+/// SSH connection parameters for spawning a remote session. Field names match
+/// the camelCase keys sent from the frontend.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SshSpawn {
+    host: String,
+    user: String,
+    port: Option<u16>,
+    identity_file: Option<String>,
+    extra_options: Option<String>,
+    remote_folder: Option<String>,
+    /// "windows" or "posix" (default). Decides remote command syntax.
+    remote_os: Option<String>,
+}
+
+/// Build the single remote command string passed to `ssh`. Combines an optional
+/// `cd` into the remote working directory with the tool/shell to run, so the
+/// session lands in the right place without relying on a typed init command.
+/// Returns an empty string when no command is needed (drop into the remote's
+/// default interactive shell).
+fn build_ssh_remote_command(
+    remote_folder: Option<&str>,
+    init_command: Option<&str>,
+    remote_os: Option<&str>,
+) -> String {
+    let folder = remote_folder.map(str::trim).filter(|f| !f.is_empty());
+    let tool = init_command.map(str::trim).filter(|c| !c.is_empty());
+
+    if remote_os == Some("windows") {
+        // cmd.exe syntax. `cd /d` also switches drive. `cmd /k` keeps the shell
+        // interactive after the cd when there's no tool to run.
+        return match (folder, tool) {
+            (Some(f), Some(t)) => format!("cd /d \"{}\" && {}", f, t),
+            (None, Some(t)) => t.to_string(),
+            (Some(f), None) => format!("cmd /k \"cd /d {}\"", f),
+            (None, None) => String::new(),
+        };
+    }
+
+    // POSIX (Linux/macOS) shells.
+    let exec_part = match tool {
+        Some(t) => format!("exec {}", t),
+        None => "exec \"$SHELL\" -l".to_string(),
+    };
+    match folder {
+        // Single-quote the folder for POSIX shells; escape embedded quotes.
+        Some(f) => format!("cd '{}' && {}", f.replace('\'', "'\\''"), exec_part),
+        None => exec_part,
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -1219,6 +1270,7 @@ fn spawn_pty(
     cwd: Option<String>,
     init_command: Option<String>,
     ai_tool_id: Option<String>,
+    ssh: Option<SshSpawn>,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -1230,15 +1282,20 @@ fn spawn_pty(
     }
     let session_lock = acquire_session_lock(&app, &id)?;
 
-    if let Some(folder) = cwd.as_ref() {
-        match ai_tool_id.as_deref() {
-            Some("claude") => {
-                let _ = setup_claude_hooks(folder, &state.hook_info.helper_path);
+    // Hooks (working/done, session capture, usage) rely on a local hook server
+    // and local config files, so they only apply to local sessions. SSH
+    // sessions skip them (Phase 1 limitation — see docs/RESUME.md).
+    if ssh.is_none() {
+        if let Some(folder) = cwd.as_ref() {
+            match ai_tool_id.as_deref() {
+                Some("claude") => {
+                    let _ = setup_claude_hooks(folder, &state.hook_info.helper_path);
+                }
+                Some("codex") => {
+                    let _ = setup_codex_hooks(folder, &state.hook_info.helper_path);
+                }
+                _ => {}
             }
-            Some("codex") => {
-                let _ = setup_codex_hooks(folder, &state.hook_info.helper_path);
-            }
-            _ => {}
         }
     }
 
@@ -1252,18 +1309,52 @@ fn spawn_pty(
         })
         .map_err(|e| e.to_string())?;
 
-    let shell_cmd = shell.unwrap_or_else(default_shell);
-
-    let mut cmd = CommandBuilder::new(&shell_cmd);
-    if cfg!(windows) {
-        let lower = shell_cmd.to_ascii_lowercase();
-        if lower.ends_with("pwsh.exe") || lower.ends_with("powershell.exe") {
-            cmd.arg("-NoLogo");
+    let mut cmd = if let Some(ref s) = ssh {
+        // Remote session: drive the local OpenSSH client. The cwd + tool are
+        // baked into a single remote command to avoid a typed-init timing race
+        // against the SSH handshake.
+        let mut c = CommandBuilder::new("ssh");
+        c.arg("-tt"); // force remote pty allocation
+        if let Some(port) = s.port {
+            if port != 0 {
+                c.arg("-p");
+                c.arg(port.to_string());
+            }
         }
-    }
-    if let Some(c) = cwd.as_ref() {
-        cmd.cwd(c);
-    }
+        if let Some(idf) = s.identity_file.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            c.arg("-i");
+            c.arg(idf);
+        }
+        if let Some(extra) = s.extra_options.as_ref() {
+            for tok in extra.split_whitespace() {
+                c.arg(tok);
+            }
+        }
+        c.arg(format!("{}@{}", s.user, s.host));
+        let remote_cmd = build_ssh_remote_command(
+            s.remote_folder.as_deref(),
+            init_command.as_deref(),
+            s.remote_os.as_deref(),
+        );
+        // Empty => drop into the remote's default interactive shell.
+        if !remote_cmd.is_empty() {
+            c.arg(remote_cmd);
+        }
+        c
+    } else {
+        let shell_cmd = shell.unwrap_or_else(default_shell);
+        let mut c = CommandBuilder::new(&shell_cmd);
+        if cfg!(windows) {
+            let lower = shell_cmd.to_ascii_lowercase();
+            if lower.ends_with("pwsh.exe") || lower.ends_with("powershell.exe") {
+                c.arg("-NoLogo");
+            }
+        }
+        if let Some(cw) = cwd.as_ref() {
+            c.cwd(cw);
+        }
+        c
+    };
 
     cmd.env("MULTIAGENT_PORT", state.hook_info.port.to_string());
     cmd.env("MULTIAGENT_TOKEN", &state.hook_info.token);
@@ -1276,16 +1367,20 @@ fn spawn_pty(
     let writer: Box<dyn Write + Send> = pair.master.take_writer().map_err(|e| e.to_string())?;
     let writer = Arc::new(Mutex::new(writer));
 
-    if let Some(init) = init_command.filter(|s| !s.trim().is_empty()) {
-        let w = writer.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(600));
-            let line = format!("{}\r", init);
-            if let Ok(mut guard) = w.lock() {
-                let _ = guard.write_all(line.as_bytes());
-                let _ = guard.flush();
-            }
-        });
+    // Local sessions type the init command after a short delay. SSH sessions
+    // already bake it into the remote command above.
+    if ssh.is_none() {
+        if let Some(init) = init_command.filter(|s| !s.trim().is_empty()) {
+            let w = writer.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(600));
+                let line = format!("{}\r", init);
+                if let Ok(mut guard) = w.lock() {
+                    let _ = guard.write_all(line.as_bytes());
+                    let _ = guard.flush();
+                }
+            });
+        }
     }
 
     let id_for_thread = id.clone();
@@ -1383,6 +1478,115 @@ fn kill_pty(state: State<'_, AppState>, id: String) -> Result<(), String> {
     #[cfg(not(multiagent_company))]
     state.remote.drop_agent(&id);
     Ok(())
+}
+
+/// Quick connectivity test for an SSH host. Uses BatchMode so it never blocks
+/// on a password prompt (key-based auth only) and a short connect timeout.
+#[tauri::command]
+fn ssh_test(ssh: SshSpawn) -> Result<String, String> {
+    let mut c = std::process::Command::new("ssh");
+    c.arg("-o").arg("BatchMode=yes");
+    c.arg("-o").arg("ConnectTimeout=8");
+    if let Some(port) = ssh.port {
+        if port != 0 {
+            c.arg("-p").arg(port.to_string());
+        }
+    }
+    if let Some(idf) = ssh
+        .identity_file
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        c.arg("-i").arg(idf);
+    }
+    if let Some(extra) = ssh.extra_options.as_ref() {
+        for tok in extra.split_whitespace() {
+            c.arg(tok);
+        }
+    }
+    c.arg(format!("{}@{}", ssh.user, ssh.host));
+    c.arg("echo multiagent-ok");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = c
+        .output()
+        .map_err(|e| format!("ssh 실행 실패 (OpenSSH 클라이언트가 설치되어 있나요?): {e}"))?;
+    if out.status.success() && String::from_utf8_lossy(&out.stdout).contains("multiagent-ok") {
+        Ok("연결 성공".to_string())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let msg = err.trim();
+        Err(if msg.is_empty() {
+            "연결 실패".to_string()
+        } else {
+            format!("연결 실패: {msg}")
+        })
+    }
+}
+
+fn ssh_dir() -> Option<PathBuf> {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())?;
+    Some(PathBuf::from(home).join(".ssh"))
+}
+
+/// Read the client's SSH public key (for pasting into a remote's authorized
+/// keys). Tries ed25519, then rsa/ecdsa. Returns null when none exists yet.
+#[tauri::command]
+fn get_ssh_public_key() -> Option<String> {
+    let dir = ssh_dir()?;
+    for name in ["id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub"] {
+        if let Ok(s) = fs::read_to_string(dir.join(name)) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Generate an ed25519 key pair (no passphrase) if none exists, then return the
+/// public key. Used by the SSH setup guide's one-click helper.
+#[tauri::command]
+fn generate_ssh_key() -> Result<String, String> {
+    if let Some(key) = get_ssh_public_key() {
+        return Ok(key);
+    }
+    let dir = ssh_dir().ok_or("홈 디렉터리를 찾을 수 없습니다")?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let key_path = dir.join("id_ed25519");
+    let mut c = std::process::Command::new("ssh-keygen");
+    c.arg("-t")
+        .arg("ed25519")
+        .arg("-N")
+        .arg("")
+        .arg("-f")
+        .arg(&key_path)
+        .arg("-C")
+        .arg("multiagent-client");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = c
+        .output()
+        .map_err(|e| format!("ssh-keygen 실행 실패 (OpenSSH 클라이언트 필요): {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "키 생성 실패: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    get_ssh_public_key().ok_or_else(|| "키 생성 후 읽기에 실패했습니다".to_string())
 }
 
 #[tauri::command]
@@ -1884,6 +2088,9 @@ pub fn run() {
         write_pty,
         resize_pty,
         kill_pty,
+        ssh_test,
+        get_ssh_public_key,
+        generate_ssh_key,
         open_new_app_window,
         runtime_flags,
         confirm_close,
@@ -1931,6 +2138,9 @@ pub fn run() {
         write_pty,
         resize_pty,
         kill_pty,
+        ssh_test,
+        get_ssh_public_key,
+        generate_ssh_key,
         open_new_app_window,
         runtime_flags,
         confirm_close,

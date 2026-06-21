@@ -10,8 +10,10 @@ app.exe (Tauri Rust 메인 프로세스)
 │   └─ cloudflared 자식 프로세스 (터널 켰을 때만)
 ├─ axum 사용량 대시보드 서버 (127.0.0.1:3141, 켰을 때만 — USAGE_DASHBOARD.md)
 ├─ PTY thread × N (각 에이전트마다 reader 스레드)
-│  └─ PowerShell child process
-│      └─ claude / codex CLI (사용자가 선택한 AI 도구)
+│  └─ PowerShell child process  (로컬 세션)
+│  │   └─ claude / codex CLI (사용자가 선택한 AI 도구)
+│  └─ ssh.exe child process    (SSH 원격 세션 — Windows 내장 OpenSSH)
+│      └─ 원격 셸 → 원격 claude / codex
 └─ 600ms 후 init 명령 입력용 1회성 스레드 × N
 ```
 
@@ -66,7 +68,8 @@ K:\AI\MultiAgent\
 
 | 커맨드 | 인자 | 동작 |
 |---|---|---|
-| `spawn_pty` | id, shell?, cwd?, init_command?, cols, rows | PTY 열고 PowerShell 실행, hook용 settings.local.json 생성/머지, env var 주입, init 명령 600ms 뒤 입력, reader thread 시작 |
+| `spawn_pty` | id, shell?, cwd?, init_command?, ai_tool_id?, ssh?, cols, rows | PTY 열고 PowerShell 실행, hook용 settings.local.json 생성/머지, env var 주입, init 명령 600ms 뒤 입력, reader thread 시작. `ssh`가 있으면 PowerShell 대신 `ssh -tt user@host "cd '<folder>' && exec <tool>"`로 원격 PTY를 띄우고 hook 머지·typed-init을 건너뜀(원격 명령에 baking) |
+| `ssh_test` | ssh | `ssh -o BatchMode=yes -o ConnectTimeout=8 ... "echo"`로 연결 가능 여부 빠르게 확인 (설정 Test 버튼) |
 | `write_pty` | id, data | 활성 PTY writer에 바이트 쓰기 |
 | `resize_pty` | id, cols, rows | master.resize() (ConPTY → 자식에 SIGWINCH 상응) |
 | `kill_pty` | id | child.kill() + state에서 제거 |
@@ -140,7 +143,7 @@ PowerShell 계열로 시작될 때는 `-NoLogo` 인자 추가.
 ### 상태
 
 ```ts
-projects: Project[]                // 프로젝트 메타 (id, name, folder, createdAt, lastOpenedAt?)
+projects: Project[]                // 프로젝트 메타 (id, name, folder, createdAt, lastOpenedAt?, sshHostId?, remoteFolder?)
 agents: Agent[]                    // 세션 메타 (id, projectId, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
 groups: Group[]                    // 각 그룹 = layout 트리 + 선택적 기준 projectId + 세션 고정값
 activeProjectId: string | null     // 현재 사이드바/Docs 기준 프로젝트
@@ -258,7 +261,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 ## localStorage 키
 
-- `multiagent.projects.v1` — `StoredProject[]` (프로젝트 이름, 폴더, 최근 사용 시각)
+- `multiagent.projects.v1` — `StoredProject[]` (프로젝트 이름, 폴더, 최근 사용 시각, 선택적 `sshHostId`/`remoteFolder`)
+- `multiagent.sshHosts.v1` — `SshHost[]` (SSH 호스트 레지스트리: label/host/user/port?/identityFile?/extraOptions?/remoteOs?)
 - `multiagent.agents.v1` — `StoredAgent[]` (세션 메타 + projectId)
 - `multiagent.groups.v1` — `Group[]` (트리 + 선택적 projectId + `sessionPins`/`sessionLocked`)
 - `multiagent.view.v1` — `{ activeProjectId, activeGroupId, activePath }`

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { Agent, Project } from "../types";
+import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -32,9 +33,23 @@ export function ProjectPropertiesModal({
     (a) => a.status === "working" || a.status === "running"
   ).length;
 
+  const sshHost = project.sshHostId ? findSshHost(project.sshHostId) : null;
   const rows: { label: string; value: string; mono?: boolean }[] = [
     { label: "이름", value: project.name },
-    { label: "폴더", value: project.folder || "—", mono: true },
+    ...(sshHost
+      ? [
+          {
+            label: "원격 호스트",
+            value: sshHostSummary(sshHost),
+            mono: true,
+          },
+          {
+            label: "원격 폴더",
+            value: project.remoteFolder || "—",
+            mono: true,
+          },
+        ]
+      : [{ label: "폴더", value: project.folder || "—", mono: true }]),
     { label: "세션 수", value: String(projectAgents.length) },
     { label: "활성 세션", value: String(activeCount) },
     { label: "생성 시각", value: formatDate(project.createdAt), mono: true },
