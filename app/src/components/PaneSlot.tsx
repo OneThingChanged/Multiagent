@@ -137,13 +137,26 @@ export function PaneSlot({
         }
         const spawn = async () => {
           const tool = toolForId(cur.aiToolId);
-          // SSH sessions run on a remote machine: session resume / usage rely on
-          // local transcripts, so we skip them here (Phase 1).
           const sshHost = cur.sshHostId ? findSshHost(cur.sshHostId) : null;
           let initCommand: string | null = null;
           if (tool.command) {
             let cmd = tool.command;
-            if (!sshHost) {
+            if (sshHost) {
+              // Windows remote (Phase 2): remote hooks capture session_id into
+              // lastSessionId, so resume directly (no local-disk resolve, which
+              // can't see the remote transcript). POSIX remote stays unsupported.
+              if (sshHost.remoteOs === "windows") {
+                const sessionId =
+                  ctx.sessionPins?.[cur.id] ?? cur.lastSessionId ?? null;
+                if (sessionId) {
+                  if (cur.aiToolId === "claude") {
+                    cmd = `${cmd} --resume ${sessionId}`;
+                  } else if (cur.aiToolId === "codex") {
+                    cmd = `${cmd} resume ${sessionId}`;
+                  }
+                }
+              }
+            } else {
               const pinnedSessionId = ctx.sessionPins?.[cur.id] ?? null;
               const candidateSessionId =
                 pinnedSessionId ?? cur.lastSessionId ?? null;

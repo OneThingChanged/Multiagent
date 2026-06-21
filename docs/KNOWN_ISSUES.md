@@ -45,16 +45,16 @@
 - quick tunnel URL은 켤 때마다 바뀜. 고정 도메인은 Cloudflare 계정 + 도메인으로 named tunnel 필요
 - 같은 세션을 데스크탑·웹에서 동시에 보면 PTY가 하나라 출력이 공유됨 (의도된 동작; 화면 크기는 데스크탑이 주인)
 
-### SSH 원격 세션 (Phase 1)
-- **상태점은 running까지만**: 원격에서 도는 claude/codex는 로컬 `127.0.0.1` hook 서버에 못 닿아 working/done 펄스가 안 뜸. SSH 연결·첫 출력 시 초록(running)으로만 전환
-- **세션 resume 미지원**: `lastSessionId` 해석은 로컬 디스크 transcript(`~/.claude`/`~/.codex`)를 읽으므로 원격 세션엔 적용 안 됨. spawn 시 resume 분기를 건너뜀
-- **사용량 집계 미지원**: usage 대시보드는 로컬 transcript만 파싱 → 원격 세션 토큰은 안 잡힘
+### SSH 원격 세션
+- **Windows 원격 = working/done 상태 + 세션 resume 지원 (Phase 2)**: spawn 시 `ssh -R <port>:127.0.0.1:<hookPort>` 역터널로 원격 hook이 로컬 서버에 도달. 원격 `<folder>\.claude\multiagent-notify.ps1`를 푸시하고 `settings.local.json`/`config.toml`에 hook 머지(원격 read→로컬 Rust 머지→write, base64 전송). env(`MULTIAGENT_PORT/TOKEN/AGENT_ID`)는 원격 cmd에 주입. session-start hook이 `lastSessionId`를 채워 다음 spawn에서 `claude --resume <id>`(codex는 `resume <id>`)
+- **POSIX(Linux/macOS) 원격 = 상태/resume 미지원**: 아직 Phase 2 미적용. 원격 셸은 뜨지만 상태점은 running까지, resume 분기는 건너뜀
+- **사용량 집계 미지원(원격 전체)**: usage 대시보드는 로컬 transcript만 파싱 → 원격 세션 토큰은 안 잡힘
 - **Docs/이미지 뷰어 미지원**: 로컬 폴더 스캔 기반이라 SSH 프로젝트(로컬 folder 없음)에선 비활성
 - **클라이언트 OpenSSH 필요**: Windows 내장 `ssh.exe`(OpenSSH 클라이언트)가 PATH에 있어야 함. 없으면 spawn/Test 실패
 - **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=cmd)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `cd /d "<folder>" && <tool>`. 기본값은 POSIX
-- **Windows 원격 폴더에 공백**: shell-only + 폴더 조합(`cmd /k "cd /d <folder>"`)은 폴더 경로에 공백이 있으면 깨질 수 있음. 도구(claude/codex) 실행 시엔 따옴표 처리되어 안전
+- **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
+- **Windows 원격 폴더 특수문자**: `cd /d "<folder>"`로 공백은 OK, 그러나 `& % ^ '`는 cmd 재파싱에서 깨질 수 있음(미지원). 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
 - **인증은 키 기반**: 비밀번호를 저장/전달하지 않음. ssh-agent 또는 키 인증(`identityFile`)이 미리 동작해야 함. `Test connection`은 BatchMode라 비밀번호 필요한 호스트는 실패로 표시됨
-- 위 통합 기능은 후속 Phase(`ssh -R` reverse 터널 + 원격 helper/설정 푸시)에서 다룰 예정
 
 ### codex 플러그인 hook 호환
 - codex companion 플러그인의 `hooks.json`이 codex 버전의 hook 스키마와 안 맞으면(예: 최상위 `description` 필드) hook 로딩 실패 → working 표시/세션 캡처가 안 될 수 있음 ([RESUME.md](RESUME.md))

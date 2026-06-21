@@ -36,7 +36,7 @@
 | 1줄 사이드바 | 프로젝트·세션을 한 줄로 압축 표시 |
 | 프로젝트 재정렬 | 사이드바에서 프로젝트 드래그로 순서 변경 |
 | 검색 | 사이드바 상단에서 프로젝트명·세션명 필터 |
-| SSH 원격 세션 | 프로젝트를 등록된 SSH 호스트에 연결 → 세션이 원격 머신에서 실행 (Phase 1, 아래 별도 항목) |
+| SSH 원격 세션 | 프로젝트를 등록된 SSH 호스트에 연결 → 세션이 원격 머신에서 실행 (Windows 원격은 상태점+resume까지, 아래 별도 항목) |
 
 ### 세션 관리 (우클릭 메뉴)
 전환 / 탭 추가 / 좌우·상하 분할 / 별명 변경 / **세션 재시작** / **세션 비활성화**(화면에 안 보일 때만, PTY만 종료해 리소스 해제) / **현재 세션으로 재등록**(디스크 최신 세션 찾아 resume 대상 갱신) / 그룹 세션 고정·해제 / **속성**(세션 ID·생성 시각·도구·폴더 등). 프로젝트 우클릭: 이름 변경 / 삭제 / 속성.
@@ -67,8 +67,11 @@
 ### 원격 접속 ([REMOTE.md](REMOTE.md))
 내장 axum 웹 서버 + Cloudflare Tunnel(quick/named, 고정 도메인 가능) + GitHub 로그인 + **계정 승인제**. 외부 브라우저에서 세션 목록·터미널·입력. 독립 뷰어(데스크탑과 다른 세션을 따로 봄).
 
-### SSH 원격 세션 (Phase 1)
-같은 망의 다른 컴퓨터(주로 Linux)에 SSH로 접속해 그 머신에서 셸/claude/codex 실행. 설정 → **SSH Hosts** 탭에서 호스트(host/user/port/identity/extraOptions) 등록 후, New Project에서 **"Run on remote host"**로 호스트+원격 폴더 지정. 백엔드는 로컬 PowerShell 대신 `ssh -tt`로 PTY를 띄운다(Windows 내장 OpenSSH). 상태점은 연결·첫 출력 시 **running(초록)**까지. **working/done·세션 resume·사용량 집계는 로컬 hook 서버/디스크 transcript 의존이라 원격 미지원**(후속 Phase). 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장). 상세 한계는 [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+### SSH 원격 세션
+같은 망(또는 사내망/VPN)으로 닿는 다른 컴퓨터에 SSH로 접속해 그 머신에서 셸/claude/codex 실행. 설정 → **SSH Hosts** 탭에서 호스트(host/user/port/identity/extraOptions/Remote OS) 등록 후(**사용 방법** 버튼에 단계별 가이드 + 공개키 복사/생성), New Project에서 **"Run on remote host"**로 호스트+원격 폴더 지정. 백엔드는 로컬 PowerShell 대신 `ssh -tt`로 PTY를 띄운다(Windows 내장 OpenSSH). 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장).
+- **Windows 원격(Phase 2)**: `ssh -R` 역터널 + 원격 hook 푸시로 **working/done 상태점 + 세션 resume**까지 동작(로컬과 동일).
+- **POSIX(Linux/macOS) 원격**: 셸·도구 실행은 정상, 상태점은 running까지(상태/resume은 후속 Phase). 사용량 집계는 원격 전체 미지원.
+- 상세·제약은 [KNOWN_ISSUES.md](KNOWN_ISSUES.md), resume 흐름은 [RESUME.md](RESUME.md).
 
 ### 사용량 대시보드 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 transcript JSONL을 파싱해 토큰 사용량을 SQLite에 적재, 별도 로컬 웹 대시보드(차트·요약·세션별)로 시각화.

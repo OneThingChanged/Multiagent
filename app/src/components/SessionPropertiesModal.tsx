@@ -41,6 +41,9 @@ export function SessionPropertiesModal({
   const sshHostId = agent.sshHostId ?? project?.sshHostId;
   const sshHost = sshHostId ? findSshHost(sshHostId) : null;
   const remoteFolder = agent.remoteFolder ?? project?.remoteFolder;
+  // Resume/session-id is captured for local sessions and Windows remotes
+  // (Phase 2 reverse-tunnel hooks); POSIX remotes are not supported yet.
+  const sessionIdSupported = !sshHost || sshHost.remoteOs === "windows";
   const rows: { label: string; value: string; mono?: boolean }[] = [
     { label: "이름", value: agent.name },
     { label: "프로젝트", value: project?.name ?? "—" },
@@ -56,7 +59,9 @@ export function SessionPropertiesModal({
       : []),
     {
       label: "세션 ID",
-      value: sshHost ? "(원격 미지원)" : agent.lastSessionId ?? "(아직 없음)",
+      value: sessionIdSupported
+        ? agent.lastSessionId ?? "(아직 없음)"
+        : "(원격 미지원)",
       mono: true,
     },
     { label: "생성 시각", value: formatDate(agent.createdAt), mono: true },

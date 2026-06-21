@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -22,6 +22,8 @@ struct PtyHandle {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     _session_lock: SessionLock,
+    /// Reverse-tunnel remote port allocated for this SSH session (freed on exit).
+    remote_port: Option<u16>,
 }
 
 struct SessionLock {
@@ -47,9 +49,30 @@ struct AppState {
     hook_info: HookInfo,
     close_confirmed: Mutex<bool>,
     secondary_window: bool,
+    /// Reverse-tunnel remote ports in use (per app instance), for unique
+    /// per-session allocation so concurrent SSH sessions don't collide.
+    remote_ports: Mutex<HashSet<u16>>,
+    /// Serializes remote-hook setup (read/merge/write of remote settings) so
+    /// concurrent spawns don't clobber each other's lost-update.
+    remote_setup_lock: Mutex<()>,
     #[cfg(not(multiagent_company))]
     remote: Arc<remote::RemoteHub>,
     usage: Arc<usage::UsageHub>,
+}
+
+/// Allocate an unused reverse-tunnel remote port (49152+) and record it.
+fn alloc_remote_port(used: &Mutex<HashSet<u16>>) -> u16 {
+    let mut set = used.lock().unwrap();
+    let mut port: u16 = 49152;
+    while set.contains(&port) {
+        port = port.checked_add(1).unwrap_or(49152);
+    }
+    set.insert(port);
+    port
+}
+
+fn free_remote_port(used: &Mutex<HashSet<u16>>, port: u16) {
+    used.lock().unwrap().remove(&port);
 }
 
 #[derive(Clone, Serialize)]
@@ -82,6 +105,7 @@ fn build_ssh_remote_command(
     remote_folder: Option<&str>,
     init_command: Option<&str>,
     remote_os: Option<&str>,
+    env: &[(&'static str, String)],
 ) -> String {
     let folder = remote_folder.map(str::trim).filter(|f| !f.is_empty());
     let tool = init_command.map(str::trim).filter(|c| !c.is_empty());
@@ -89,11 +113,24 @@ fn build_ssh_remote_command(
     if remote_os == Some("windows") {
         // cmd.exe syntax. `cd /d` also switches drive. `cmd /k` keeps the shell
         // interactive after the cd when there's no tool to run.
-        return match (folder, tool) {
+        // Env injection (for remote hooks): `set K=V&& ...` with no space before
+        // `&&` so the value has no trailing space. Values are safe chars (uuid/
+        // numeric/agent-id), so no escaping needed.
+        let env_prefix: String = env
+            .iter()
+            .map(|(k, v)| format!("set {}={}&& ", k, v))
+            .collect();
+        let body = match (folder, tool) {
             (Some(f), Some(t)) => format!("cd /d \"{}\" && {}", f, t),
             (None, Some(t)) => t.to_string(),
             (Some(f), None) => format!("cmd /k \"cd /d {}\"", f),
             (None, None) => String::new(),
+        };
+        return match (env_prefix.is_empty(), body.is_empty()) {
+            (true, _) => body,
+            // env_prefix ends with "&& "; open interactive cmd after setting env.
+            (false, true) => format!("{}cmd", env_prefix),
+            (false, false) => format!("{}{}", env_prefix, body),
         };
     }
 
@@ -250,6 +287,45 @@ try {
     Ok(path)
 }
 
+/// The remote hook helper (PowerShell), pushed to Windows remotes over SSH.
+/// Same as the local notify.ps1 but env-only: the port/token/agent-id are
+/// injected into the remote shell at spawn (no hook-info.json on the remote).
+/// Posts to 127.0.0.1:$port which the reverse SSH tunnel forwards to the local
+/// hook server.
+fn remote_helper_script() -> &'static str {
+    r#"param([string]$Event)
+$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+$logPath = Join-Path $env:TEMP "multiagent-remote-hook.log"
+$sessionId = $null
+$transcriptPath = $null
+$cwd = $null
+try {
+  $stdinText = [Console]::In.ReadToEnd()
+  if ($stdinText) {
+    $payload = $stdinText | ConvertFrom-Json
+    if ($payload.session_id) { $sessionId = [string]$payload.session_id }
+    if ($payload.transcript_path) { $transcriptPath = [string]$payload.transcript_path }
+    if ($payload.cwd) { $cwd = [string]$payload.cwd }
+  }
+} catch {}
+$port = $env:MULTIAGENT_PORT
+$token = $env:MULTIAGENT_TOKEN
+"$ts | event=$Event | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId | port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
+if (-not $port -or -not $token) { "$ts |   ! no port/token (env)" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
+try {
+  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $token }
+  if ($sessionId) { $bodyMap.session_id = $sessionId }
+  if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
+  if ($cwd) { $bodyMap.cwd = $cwd }
+  $body = $bodyMap | ConvertTo-Json -Compress
+  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
+  "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
+} catch {
+  "$ts |   error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
+}
+"#
+}
+
 fn write_hook_info(app: &AppHandle, port: u16, token: &str) -> Result<(), String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -378,30 +454,34 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
     Ok(port)
 }
 
-fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
-    let claude_dir = Path::new(folder).join(".claude");
-    fs::create_dir_all(&claude_dir).map_err(|e| e.to_string())?;
-    let settings_path = claude_dir.join("settings.local.json");
+/// The PowerShell command claude/codex run for each hook event. Identical shape
+/// for local and remote; only `helper_path` differs (local app-data path vs a
+/// remote absolute path).
+fn hook_command(helper_path: &str, arg: &str) -> String {
+    format!(
+        r#"powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{}" {}"#,
+        helper_path, arg
+    )
+}
 
-    let mut settings: serde_json::Value = if settings_path.exists() {
-        fs::read_to_string(&settings_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_else(|| serde_json::json!({}))
-    } else {
+const HOOK_EVENTS: [(&str, &str); 3] = [
+    ("UserPromptSubmit", "working"),
+    ("Stop", "done"),
+    ("SessionStart", "session-start"),
+];
+
+/// Merge our hooks into an existing claude `settings.local.json` body (empty
+/// string = no file). Pure string→string so it can be reused over SSH. Existing
+/// user hooks are preserved; only our `__source` entries are replaced.
+fn merge_claude_settings(existing: &str, helper_path: &str) -> Result<String, String> {
+    let mut settings: serde_json::Value = if existing.trim().is_empty() {
         serde_json::json!({})
+    } else {
+        serde_json::from_str(existing).unwrap_or_else(|_| serde_json::json!({}))
     };
-
     if !settings.is_object() {
         settings = serde_json::json!({});
     }
-
-    let cmd_for = |arg: &str| {
-        format!(
-            r#"powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{}" {}"#,
-            helper_path, arg
-        )
-    };
 
     let our_hook = |cmd: String| {
         serde_json::json!({
@@ -420,11 +500,7 @@ fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
     }
     let hooks_obj = hooks_entry.as_object_mut().unwrap();
 
-    for (event_name, arg) in [
-        ("UserPromptSubmit", "working"),
-        ("Stop", "done"),
-        ("SessionStart", "session-start"),
-    ] {
+    for (event_name, arg) in HOOK_EVENTS {
         let entry = hooks_obj
             .entry(event_name.to_string())
             .or_insert_with(|| serde_json::json!([]));
@@ -433,29 +509,19 @@ fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
         }
         let arr = entry.as_array_mut().unwrap();
         arr.retain(|h| h.get("__source").and_then(|s| s.as_str()) != Some(HOOK_MARKER));
-        arr.push(our_hook(cmd_for(arg)));
+        arr.push(our_hook(hook_command(helper_path, arg)));
     }
 
-    fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())
 }
 
-fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
-    let codex_dir = Path::new(folder).join(".codex");
-    fs::create_dir_all(&codex_dir).map_err(|e| e.to_string())?;
-    let config_path = codex_dir.join("config.toml");
-
-    let mut doc: DocumentMut = if config_path.exists() {
-        fs::read_to_string(&config_path)
-            .map_err(|e| e.to_string())?
-            .parse::<DocumentMut>()
-            .map_err(|e| e.to_string())?
-    } else {
+/// Merge our hooks into an existing codex `config.toml` body (empty string = no
+/// file). Pure string→string so it can be reused over SSH.
+fn merge_codex_config(existing: &str, helper_path: &str) -> Result<String, String> {
+    let mut doc: DocumentMut = if existing.trim().is_empty() {
         DocumentMut::new()
+    } else {
+        existing.parse::<DocumentMut>().map_err(|e| e.to_string())?
     };
 
     if doc.get("hooks").map(|h| !h.is_table()).unwrap_or(true) {
@@ -463,18 +529,7 @@ fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
     }
     let hooks_table = doc["hooks"].as_table_mut().unwrap();
 
-    let cmd_for = |arg: &str| {
-        format!(
-            r#"powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{}" {}"#,
-            helper_path, arg
-        )
-    };
-
-    for (event_name, arg) in [
-        ("UserPromptSubmit", "working"),
-        ("Stop", "done"),
-        ("SessionStart", "session-start"),
-    ] {
+    for (event_name, arg) in HOOK_EVENTS {
         if hooks_table
             .get(event_name)
             .map(|i| !matches!(i, Item::ArrayOfTables(_)))
@@ -493,14 +548,33 @@ fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
         let mut inner_aot = ArrayOfTables::new();
         let mut inner = Table::new();
         inner.insert("type", value("command"));
-        inner.insert("command", value(cmd_for(arg)));
+        inner.insert("command", value(hook_command(helper_path, arg)));
         inner_aot.push(inner);
         entry.insert("hooks", Item::ArrayOfTables(inner_aot));
 
         aot.push(entry);
     }
 
-    fs::write(&config_path, doc.to_string()).map_err(|e| e.to_string())?;
+    Ok(doc.to_string())
+}
+
+fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
+    let claude_dir = Path::new(folder).join(".claude");
+    fs::create_dir_all(&claude_dir).map_err(|e| e.to_string())?;
+    let settings_path = claude_dir.join("settings.local.json");
+    let existing = fs::read_to_string(&settings_path).unwrap_or_default();
+    let merged = merge_claude_settings(&existing, helper_path)?;
+    fs::write(&settings_path, merged).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
+    let codex_dir = Path::new(folder).join(".codex");
+    fs::create_dir_all(&codex_dir).map_err(|e| e.to_string())?;
+    let config_path = codex_dir.join("config.toml");
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    let merged = merge_codex_config(&existing, helper_path)?;
+    fs::write(&config_path, merged).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1282,10 +1356,12 @@ fn spawn_pty(
     }
     let session_lock = acquire_session_lock(&app, &id)?;
 
-    // Hooks (working/done, session capture, usage) rely on a local hook server
-    // and local config files, so they only apply to local sessions. SSH
-    // sessions skip them (Phase 1 limitation — see docs/RESUME.md).
+    let hook_port = state.hook_info.port;
+    // Reverse-tunnel port for a remote (Windows) session, if hooks are enabled.
+    let mut remote_port: Option<u16> = None;
+
     if ssh.is_none() {
+        // Local: merge hooks into the local project folder.
         if let Some(folder) = cwd.as_ref() {
             match ai_tool_id.as_deref() {
                 Some("claude") => {
@@ -1295,6 +1371,25 @@ fn spawn_pty(
                     let _ = setup_codex_hooks(folder, &state.hook_info.helper_path);
                 }
                 _ => {}
+            }
+        }
+    } else if let Some(ref s) = ssh {
+        // Remote (Windows only, Phase 2): push the helper + merge remote hooks
+        // and allocate a reverse-tunnel port so the remote can reach the local
+        // hook server. Best-effort — any failure degrades gracefully (session
+        // still spawns, just without status/resume).
+        let is_windows = s.remote_os.as_deref() == Some("windows");
+        let tool_supported = matches!(ai_tool_id.as_deref(), Some("claude") | Some("codex"));
+        let folder = s
+            .remote_folder
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty());
+        if is_windows && tool_supported {
+            if let Some(folder) = folder {
+                remote_port = Some(alloc_remote_port(&state.remote_ports));
+                let _guard = state.remote_setup_lock.lock().unwrap();
+                let _ = setup_remote_hooks(s, folder, ai_tool_id.as_deref().unwrap_or(""));
             }
         }
     }
@@ -1315,26 +1410,32 @@ fn spawn_pty(
         // against the SSH handshake.
         let mut c = CommandBuilder::new("ssh");
         c.arg("-tt"); // force remote pty allocation
-        if let Some(port) = s.port {
-            if port != 0 {
-                c.arg("-p");
-                c.arg(port.to_string());
-            }
+        for a in ssh_conn_args(s) {
+            c.arg(a);
         }
-        if let Some(idf) = s.identity_file.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
-            c.arg("-i");
-            c.arg(idf);
-        }
-        if let Some(extra) = s.extra_options.as_ref() {
-            for tok in extra.split_whitespace() {
-                c.arg(tok);
-            }
+        // Reverse tunnel so the remote's loopback reaches the local hook server.
+        // No ExitOnForwardFailure → if the server blocks -R, the session still
+        // runs (status/resume just won't work).
+        if let Some(rp) = remote_port {
+            c.arg("-R");
+            c.arg(format!("{}:127.0.0.1:{}", rp, hook_port));
         }
         c.arg(format!("{}@{}", s.user, s.host));
+        // Inject hook env into the remote shell (SSH won't forward env).
+        let env: Vec<(&'static str, String)> = if let Some(rp) = remote_port {
+            vec![
+                ("MULTIAGENT_PORT", rp.to_string()),
+                ("MULTIAGENT_TOKEN", state.hook_info.token.clone()),
+                ("MULTIAGENT_AGENT_ID", id.clone()),
+            ]
+        } else {
+            Vec::new()
+        };
         let remote_cmd = build_ssh_remote_command(
             s.remote_folder.as_deref(),
             init_command.as_deref(),
             s.remote_os.as_deref(),
+            &env,
         );
         // Empty => drop into the remote's default interactive shell.
         if !remote_cmd.is_empty() {
@@ -1360,7 +1461,15 @@ fn spawn_pty(
     cmd.env("MULTIAGENT_TOKEN", &state.hook_info.token);
     cmd.env("MULTIAGENT_AGENT_ID", &id);
 
-    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(rp) = remote_port {
+                free_remote_port(&state.remote_ports, rp);
+            }
+            return Err(e.to_string());
+        }
+    };
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -1385,6 +1494,7 @@ fn spawn_pty(
 
     let id_for_thread = id.clone();
     let app_for_thread = app.clone();
+    let remote_port_for_thread = remote_port;
     #[cfg(not(multiagent_company))]
     let hub_for_thread = state.remote.clone();
     thread::spawn(move || {
@@ -1416,6 +1526,9 @@ fn spawn_pty(
         {
             let state: State<AppState> = app_for_thread.state();
             let _ = state.ptys.lock().unwrap().remove(&id_for_thread);
+            if let Some(rp) = remote_port_for_thread {
+                free_remote_port(&state.remote_ports, rp);
+            }
         }
         #[cfg(not(multiagent_company))]
         hub_for_thread.drop_agent(&id_for_thread);
@@ -1430,6 +1543,7 @@ fn spawn_pty(
             master: pair.master,
             child,
             _session_lock: session_lock,
+            remote_port,
         },
     );
     Ok(())
@@ -1471,12 +1585,164 @@ fn resize_pty(state: State<'_, AppState>, id: String, cols: u16, rows: u16) -> R
 
 #[tauri::command]
 fn kill_pty(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut ptys = state.ptys.lock().unwrap();
-    if let Some(mut pty) = ptys.remove(&id) {
-        let _ = pty.child.kill();
+    let freed_port = {
+        let mut ptys = state.ptys.lock().unwrap();
+        if let Some(mut pty) = ptys.remove(&id) {
+            let _ = pty.child.kill();
+            pty.remote_port
+        } else {
+            None
+        }
+    };
+    if let Some(rp) = freed_port {
+        free_remote_port(&state.remote_ports, rp);
     }
     #[cfg(not(multiagent_company))]
     state.remote.drop_agent(&id);
+    Ok(())
+}
+
+/// Connection-level ssh args (-p / -i / extra options) shared by ssh_test, the
+/// remote-hook setup calls, and the interactive pty spawn.
+fn ssh_conn_args(ssh: &SshSpawn) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
+    if let Some(port) = ssh.port {
+        if port != 0 {
+            args.push("-p".to_string());
+            args.push(port.to_string());
+        }
+    }
+    if let Some(idf) = ssh
+        .identity_file
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        args.push("-i".to_string());
+        args.push(idf.to_string());
+    }
+    if let Some(extra) = ssh.extra_options.as_ref() {
+        for tok in extra.split_whitespace() {
+            args.push(tok.to_string());
+        }
+    }
+    args
+}
+
+fn no_window(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let _ = cmd;
+}
+
+/// PowerShell single-quoted literal (doubles embedded single quotes).
+fn ps_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Encode a PowerShell script for `-EncodedCommand` (UTF-16LE base64). The
+/// resulting blob is pure base64 (no spaces/quotes), so it passes cleanly
+/// through ssh's arg-join and the remote `cmd /c` re-parse regardless of any
+/// spaces/specials inside the script or the paths it references.
+fn ps_encoded(ps: &str) -> String {
+    use base64::Engine;
+    let utf16: Vec<u8> = ps.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16)
+}
+
+/// Run a PowerShell `-EncodedCommand` on the remote over ssh (BatchMode, short
+/// timeout) and return the process output.
+fn run_remote_ps(ssh: &SshSpawn, encoded: &str) -> Result<std::process::Output, String> {
+    let mut c = std::process::Command::new("ssh");
+    c.arg("-o").arg("BatchMode=yes").arg("-o").arg("ConnectTimeout=8");
+    for a in ssh_conn_args(ssh) {
+        c.arg(a);
+    }
+    c.arg(format!("{}@{}", ssh.user, ssh.host));
+    c.arg("powershell")
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-EncodedCommand")
+        .arg(encoded);
+    no_window(&mut c);
+    c.output().map_err(|e| e.to_string())
+}
+
+/// Write a UTF-8 text file on a Windows remote (creating parent dirs), via a
+/// base64-encoded PowerShell command. Content is base64'd to avoid any quoting.
+fn ssh_write_remote_file(ssh: &SshSpawn, remote_path: &str, content: &str) -> Result<(), String> {
+    use base64::Engine;
+    let content_b64 = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
+    let ps = format!(
+        "$ErrorActionPreference='Stop';$p={};$d=[IO.Path]::GetDirectoryName($p);[void][IO.Directory]::CreateDirectory($d);[IO.File]::WriteAllText($p,[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}')))",
+        ps_single_quote(remote_path),
+        content_b64
+    );
+    let enc = ps_encoded(&ps);
+    // Guard against the remote cmd.exe ~8191-char command-line limit.
+    if enc.len() > 7000 {
+        return Err("remote file too large for ssh push".to_string());
+    }
+    let out = run_remote_ps(ssh, &enc)?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Read a remote text file; returns None if it does not exist.
+fn ssh_read_remote_file(ssh: &SshSpawn, remote_path: &str) -> Result<Option<String>, String> {
+    use base64::Engine;
+    let ps = format!(
+        "$ErrorActionPreference='Stop';$p={};if(Test-Path -LiteralPath $p){{[Convert]::ToBase64String([IO.File]::ReadAllBytes($p))}}",
+        ps_single_quote(remote_path)
+    );
+    let enc = ps_encoded(&ps);
+    let out = run_remote_ps(ssh, &enc)?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(String::from_utf8_lossy(&bytes).to_string()))
+}
+
+/// Push the remote hook helper and merge our hooks into the remote project's
+/// settings/config (Windows remote). Best-effort: callers ignore errors so the
+/// session still spawns if anything here fails (graceful degradation).
+fn setup_remote_hooks(ssh: &SshSpawn, remote_folder: &str, ai_tool_id: &str) -> Result<(), String> {
+    let folder = remote_folder.trim().trim_end_matches(['\\', '/']);
+    if folder.is_empty() {
+        return Ok(());
+    }
+    let (subdir, settings_name) = match ai_tool_id {
+        "claude" => (".claude", "settings.local.json"),
+        "codex" => (".codex", "config.toml"),
+        _ => return Ok(()),
+    };
+    let helper_path = format!("{}\\{}\\multiagent-notify.ps1", folder, subdir);
+    let settings_path = format!("{}\\{}\\{}", folder, subdir, settings_name);
+
+    ssh_write_remote_file(ssh, &helper_path, remote_helper_script())?;
+    let existing = ssh_read_remote_file(ssh, &settings_path)?.unwrap_or_default();
+    let merged = if ai_tool_id == "claude" {
+        merge_claude_settings(&existing, &helper_path)?
+    } else {
+        merge_codex_config(&existing, &helper_path)?
+    };
+    ssh_write_remote_file(ssh, &settings_path, &merged)?;
     Ok(())
 }
 
@@ -1487,32 +1753,12 @@ fn ssh_test(ssh: SshSpawn) -> Result<String, String> {
     let mut c = std::process::Command::new("ssh");
     c.arg("-o").arg("BatchMode=yes");
     c.arg("-o").arg("ConnectTimeout=8");
-    if let Some(port) = ssh.port {
-        if port != 0 {
-            c.arg("-p").arg(port.to_string());
-        }
-    }
-    if let Some(idf) = ssh
-        .identity_file
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
-        c.arg("-i").arg(idf);
-    }
-    if let Some(extra) = ssh.extra_options.as_ref() {
-        for tok in extra.split_whitespace() {
-            c.arg(tok);
-        }
+    for a in ssh_conn_args(&ssh) {
+        c.arg(a);
     }
     c.arg(format!("{}@{}", ssh.user, ssh.host));
     c.arg("echo multiagent-ok");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        c.creation_flags(CREATE_NO_WINDOW);
-    }
+    no_window(&mut c);
     let out = c
         .output()
         .map_err(|e| format!("ssh 실행 실패 (OpenSSH 클라이언트가 설치되어 있나요?): {e}"))?;
@@ -2042,6 +2288,8 @@ pub fn run() {
                 },
                 close_confirmed: Mutex::new(false),
                 secondary_window,
+                remote_ports: Mutex::new(HashSet::new()),
+                remote_setup_lock: Mutex::new(()),
                 #[cfg(not(multiagent_company))]
                 remote: Arc::new(remote::RemoteHub::new()),
                 usage: usage_hub,
