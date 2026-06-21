@@ -1,8 +1,34 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import type {
   ContextMenuState,
   ProjectContextMenuState,
   TabCtxState,
 } from "../types";
+
+// Keep a context menu fully inside the viewport: after it renders, measure it
+// and shift left/up so it doesn't get clipped at the right/bottom edges.
+function useClampedMenuPosition(x: number, y: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x;
+    let top = y;
+    if (left + rect.width > vw - margin) {
+      left = Math.max(margin, vw - rect.width - margin);
+    }
+    if (top + rect.height > vh - margin) {
+      top = Math.max(margin, vh - rect.height - margin);
+    }
+    setPos({ left, top });
+  }, [x, y]);
+  return { ref, pos };
+}
 
 export function ProjectContextMenu({
   state,
@@ -13,6 +39,7 @@ export function ProjectContextMenu({
   onClose: () => void;
   onAction: (action: "rename" | "delete" | "properties") => void;
 }) {
+  const { ref, pos } = useClampedMenuPosition(state.x, state.y);
   return (
     <>
       <div
@@ -24,8 +51,9 @@ export function ProjectContextMenu({
         }}
       />
       <div
+        ref={ref}
         className="ctx-menu"
-        style={{ left: state.x, top: state.y }}
+        style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={() => onAction("rename")}>
@@ -55,6 +83,7 @@ export function TabContextMenu({
   onClose: () => void;
   onCloseTab: () => void;
 }) {
+  const { ref, pos } = useClampedMenuPosition(state.x, state.y);
   return (
     <>
       <div
@@ -66,8 +95,9 @@ export function TabContextMenu({
         }}
       />
       <div
+        ref={ref}
         className="ctx-menu"
-        style={{ left: state.x, top: state.y }}
+        style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={onCloseTab}>
@@ -112,6 +142,7 @@ export function ContextMenu({
       | "properties"
   ) => void;
 }) {
+  const { ref, pos } = useClampedMenuPosition(state.x, state.y);
   return (
     <>
       <div
@@ -123,8 +154,9 @@ export function ContextMenu({
         }}
       />
       <div
+        ref={ref}
         className="ctx-menu"
-        style={{ left: state.x, top: state.y }}
+        style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={() => onAction("open")}>

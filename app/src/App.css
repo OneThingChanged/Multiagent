@@ -1902,6 +1902,9 @@ body.docs-resizing .docs-resizer::after {
   box-shadow: 0 8px 20px var(--app-shadow);
   display: flex;
   flex-direction: column;
+  /* Safety for very short windows: never taller than the viewport. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 .ctx-item {
