@@ -55,6 +55,9 @@ struct AppState {
     /// Serializes remote-hook setup (read/merge/write of remote settings) so
     /// concurrent spawns don't clobber each other's lost-update.
     remote_setup_lock: Mutex<()>,
+    /// SSH host passwords (host id → password) for password-auth hosts. Kept
+    /// out of localStorage; persisted to ssh-secrets.json in app_local_data_dir.
+    ssh_secrets: Mutex<HashMap<String, String>>,
     #[cfg(not(multiagent_company))]
     remote: Arc<remote::RemoteHub>,
     usage: Arc<usage::UsageHub>,
@@ -94,6 +97,10 @@ struct SshSpawn {
     remote_folder: Option<String>,
     /// "windows" or "posix" (default). Decides remote command syntax.
     remote_os: Option<String>,
+    /// "key" (default) or "password". Decides auth options + password auto-fill.
+    auth_method: Option<String>,
+    /// SSH host id, used to look up a stored password for password auth.
+    host_id: Option<String>,
 }
 
 /// Build the single remote command string passed to `ssh`. Combines an optional
@@ -1380,12 +1387,17 @@ fn spawn_pty(
         // still spawns, just without status/resume).
         let is_windows = s.remote_os.as_deref() == Some("windows");
         let tool_supported = matches!(ai_tool_id.as_deref(), Some("claude") | Some("codex"));
+        // Remote hooks need non-interactive (BatchMode) ssh calls, which can't
+        // supply a password — so they only apply to key-auth hosts. Password
+        // hosts still connect (PTY auto-types the password) but get no
+        // status/resume hooks.
+        let key_auth = s.auth_method.as_deref() != Some("password");
         let folder = s
             .remote_folder
             .as_deref()
             .map(str::trim)
             .filter(|f| !f.is_empty());
-        if is_windows && tool_supported {
+        if is_windows && tool_supported && key_auth {
             if let Some(folder) = folder {
                 remote_port = Some(alloc_remote_port(&state.remote_ports));
                 let _guard = state.remote_setup_lock.lock().unwrap();
@@ -1492,13 +1504,27 @@ fn spawn_pty(
         }
     }
 
+    // Password-auth SSH: auto-type the stored password when the remote shows a
+    // password prompt (OpenSSH can't take a password via flag). Looked up by
+    // host id from the Rust-side secrets store; never exposed to the frontend.
+    let inject_password: Option<String> = match ssh.as_ref() {
+        Some(s) if s.auth_method.as_deref() == Some("password") => s
+            .host_id
+            .as_deref()
+            .and_then(|hid| ssh_password_get(&state, hid)),
+        _ => None,
+    };
+
     let id_for_thread = id.clone();
     let app_for_thread = app.clone();
     let remote_port_for_thread = remote_port;
+    let writer_for_thread = writer.clone();
     #[cfg(not(multiagent_company))]
     let hub_for_thread = state.remote.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut pw_injected = inject_password.is_none();
+        let mut prompt_tail = String::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -1506,6 +1532,23 @@ fn spawn_pty(
                     #[cfg(not(multiagent_company))]
                     hub_for_thread.push(&id_for_thread, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if !pw_injected {
+                        prompt_tail.push_str(&data);
+                        if prompt_tail.len() > 400 {
+                            prompt_tail = prompt_tail.split_off(prompt_tail.len() - 400);
+                        }
+                        let low = prompt_tail.to_lowercase();
+                        if low.contains("password:") || low.contains("password for") {
+                            if let Some(pw) = inject_password.as_ref() {
+                                if let Ok(mut g) = writer_for_thread.lock() {
+                                    let _ = g.write_all(format!("{}\r", pw).as_bytes());
+                                    let _ = g.flush();
+                                }
+                            }
+                            pw_injected = true;
+                            prompt_tail.clear();
+                        }
+                    }
                     let _ = app_for_thread.emit(
                         "pty:data",
                         PtyData {
@@ -1612,14 +1655,30 @@ fn ssh_conn_args(ssh: &SshSpawn) -> Vec<String> {
             args.push(port.to_string());
         }
     }
-    if let Some(idf) = ssh
+    let is_password = ssh.auth_method.as_deref() == Some("password");
+    let identity = ssh
         .identity_file
         .as_ref()
         .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
-        args.push("-i".to_string());
-        args.push(idf.to_string());
+        .filter(|v| !v.is_empty());
+    if is_password {
+        // Skip key attempts entirely: avoids "Too many authentication failures"
+        // and goes straight to the password method.
+        args.push("-o".to_string());
+        args.push("PubkeyAuthentication=no".to_string());
+        args.push("-o".to_string());
+        args.push("PreferredAuthentications=password,keyboard-interactive".to_string());
+        args.push("-o".to_string());
+        args.push("NumberOfPasswordPrompts=1".to_string());
+    } else {
+        if let Some(idf) = identity {
+            args.push("-i".to_string());
+            args.push(idf.to_string());
+            // Use only this key (don't offer agent keys) → avoids the server's
+            // MaxAuthTries being hit ("Too many authentication failures").
+            args.push("-o".to_string());
+            args.push("IdentitiesOnly=yes".to_string());
+        }
     }
     if let Some(extra) = ssh.extra_options.as_ref() {
         for tok in extra.split_whitespace() {
@@ -1744,6 +1803,75 @@ fn setup_remote_hooks(ssh: &SshSpawn, remote_folder: &str, ai_tool_id: &str) -> 
     };
     ssh_write_remote_file(ssh, &settings_path, &merged)?;
     Ok(())
+}
+
+fn ssh_secrets_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("ssh-secrets.json"))
+}
+
+fn load_ssh_secrets(app: &AppHandle) -> HashMap<String, String> {
+    if let Ok(path) = ssh_secrets_path(app) {
+        if let Ok(raw) = fs::read_to_string(&path) {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+                return map;
+            }
+        }
+    }
+    HashMap::new()
+}
+
+fn save_ssh_secrets(app: &AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
+    let path = ssh_secrets_path(app)?;
+    let body = serde_json::to_string(map).map_err(|e| e.to_string())?;
+    fs::write(&path, body).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn ssh_password_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host_id: String,
+    password: String,
+) -> Result<(), String> {
+    let mut secrets = state.ssh_secrets.lock().unwrap();
+    secrets.insert(host_id, password);
+    save_ssh_secrets(&app, &secrets)
+}
+
+#[tauri::command]
+fn ssh_password_clear(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host_id: String,
+) -> Result<(), String> {
+    let mut secrets = state.ssh_secrets.lock().unwrap();
+    secrets.remove(&host_id);
+    save_ssh_secrets(&app, &secrets)
+}
+
+#[tauri::command]
+fn ssh_password_has(state: State<'_, AppState>, host_id: String) -> bool {
+    state
+        .ssh_secrets
+        .lock()
+        .unwrap()
+        .get(&host_id)
+        .map(|p| !p.is_empty())
+        .unwrap_or(false)
+}
+
+/// Look up a stored password (internal — never exposed to the frontend).
+fn ssh_password_get(state: &AppState, host_id: &str) -> Option<String> {
+    state
+        .ssh_secrets
+        .lock()
+        .unwrap()
+        .get(host_id)
+        .filter(|p| !p.is_empty())
+        .cloned()
 }
 
 /// Quick connectivity test for an SSH host. Uses BatchMode so it never blocks
@@ -2290,6 +2418,7 @@ pub fn run() {
                 secondary_window,
                 remote_ports: Mutex::new(HashSet::new()),
                 remote_setup_lock: Mutex::new(()),
+                ssh_secrets: Mutex::new(load_ssh_secrets(&handle)),
                 #[cfg(not(multiagent_company))]
                 remote: Arc::new(remote::RemoteHub::new()),
                 usage: usage_hub,
@@ -2337,6 +2466,9 @@ pub fn run() {
         resize_pty,
         kill_pty,
         ssh_test,
+        ssh_password_set,
+        ssh_password_clear,
+        ssh_password_has,
         get_ssh_public_key,
         generate_ssh_key,
         open_new_app_window,
@@ -2387,6 +2519,9 @@ pub fn run() {
         resize_pty,
         kill_pty,
         ssh_test,
+        ssh_password_set,
+        ssh_password_clear,
+        ssh_password_has,
         get_ssh_public_key,
         generate_ssh_key,
         open_new_app_window,

@@ -47,6 +47,7 @@ export function toolForId(id: string): AiTool {
 // A reusable SSH connection target. Stored in its own localStorage registry
 // (LS_SSH_HOSTS) and referenced by projects via Project.sshHostId.
 export type SshRemoteOs = "posix" | "windows";
+export type SshAuthMethod = "key" | "password";
 
 export type SshHost = {
   id: string;
@@ -59,6 +60,11 @@ export type SshHost = {
   // Shell family on the remote machine. Decides how the cd + tool command is
   // built. Defaults to "posix" (Linux/macOS) when unset.
   remoteOs?: SshRemoteOs;
+  // "key" (default): use key auth (IdentitiesOnly when an identity file is set,
+  // which avoids "Too many authentication failures"). "password": skip keys and
+  // use a stored password (auto-typed into the PTY). The password itself is NOT
+  // stored here — it lives in a Rust-side secrets file keyed by host id.
+  authMethod?: SshAuthMethod;
 };
 
 export type Agent = {

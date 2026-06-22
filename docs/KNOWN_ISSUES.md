@@ -54,7 +54,11 @@
 - **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=cmd)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `cd /d "<folder>" && <tool>`. 기본값은 POSIX
 - **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
 - **Windows 원격 폴더 특수문자**: `cd /d "<folder>"`로 공백은 OK, 그러나 `& % ^ '`는 cmd 재파싱에서 깨질 수 있음(미지원). 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
-- **인증은 키 기반**: 비밀번호를 저장/전달하지 않음. ssh-agent 또는 키 인증(`identityFile`)이 미리 동작해야 함. `Test connection`은 BatchMode라 비밀번호 필요한 호스트는 실패로 표시됨
+- **인증 방식 토글(키/비밀번호)**: SSH Hosts 등록 시 호스트별 **Auth method** 선택.
+  - **키(기본)**: identity 파일 지정 시 자동으로 `-o IdentitiesOnly=yes` → ssh-agent에 키가 많아 생기는 **"Too many authentication failures"**를 방지(그 키 하나만 시도). 키 인증이 미리 동작해야 함.
+  - **비밀번호**: `-o PubkeyAuthentication=no`로 키를 안 던지고 바로 비번. 비번을 저장해두면 연결 시 앱이 **PTY에 자동 입력**(`password:` 프롬프트 감지). 비번은 localStorage가 아니라 로컬 `ssh-secrets.json`(`<app_local_data_dir>`)에 저장 — client_secret과 동일 수준의 로컬 평문(동기화·UI 반환 안 됨). 미저장 시 터미널에서 직접 입력.
+- **비밀번호 호스트는 원격 hook(상태/resume) 미지원**: Phase 2 hook 설정은 비대화형(BatchMode) ssh라 비번 인증이 불가 → 비번 호스트는 **자동 연결·터미널만** 되고 working/done·resume은 안 됨(키 모드 Windows 원격만 Phase 2). (SSH_ASKPASS 기반 비번 hook은 실 서버 검증 후 후속)
+- **서버측 `AllowGroups` 등은 앱이 못 고침**: 서버 `sshd_config`의 그룹/정책 제한으로 막히면 서버에서 계정을 허용 그룹에 추가해야 함(클라이언트 옵션으로 우회 불가)
 
 ### codex 플러그인 hook 호환
 - codex companion 플러그인의 `hooks.json`이 codex 버전의 hook 스키마와 안 맞으면(예: 최상위 `description` 필드) hook 로딩 실패 → working 표시/세션 캡처가 안 될 수 있음 ([RESUME.md](RESUME.md))

@@ -116,6 +116,7 @@ function emptySshDraft(): SshHost {
     identityFile: "",
     extraOptions: "",
     remoteOs: "posix",
+    authMethod: "key",
   };
 }
 
@@ -193,6 +194,10 @@ export function SettingsModal({
     { status: "idle" | "testing" } | { status: "ok" | "error"; message: string }
   >({ status: "idle" });
   const [sshGuideOpen, setSshGuideOpen] = useState(false);
+  // Password for the host being edited. Never stored in the host object /
+  // localStorage — persisted via the ssh_password_* commands (Rust-side file).
+  const [sshPasswordInput, setSshPasswordInput] = useState("");
+  const [sshPasswordSaved, setSshPasswordSaved] = useState(false);
 
   const persistSshHosts = (next: SshHost[]) => {
     setSshHosts(next);
@@ -207,11 +212,17 @@ export function SettingsModal({
   const handleSshEdit = (host: SshHost) => {
     setSshDraft({ ...host });
     setSshTest({ status: "idle" });
+    setSshPasswordInput("");
+    invoke<boolean>("ssh_password_has", { hostId: host.id })
+      .then(setSshPasswordSaved)
+      .catch(() => setSshPasswordSaved(false));
   };
 
   const handleSshReset = () => {
     setSshDraft(emptySshDraft());
     setSshTest({ status: "idle" });
+    setSshPasswordInput("");
+    setSshPasswordSaved(false);
   };
 
   const handleSshSave = () => {
@@ -227,6 +238,7 @@ export function SettingsModal({
       identityFile: sshDraft.identityFile?.trim() || undefined,
       extraOptions: sshDraft.extraOptions?.trim() || undefined,
       remoteOs: sshDraft.remoteOs ?? "posix",
+      authMethod: sshDraft.authMethod ?? "key",
     };
     const exists = sshHosts.some((h) => h.id === entry.id);
     persistSshHosts(
@@ -234,10 +246,28 @@ export function SettingsModal({
         ? sshHosts.map((h) => (h.id === entry.id ? entry : h))
         : [...sshHosts, entry]
     );
+    // Store the password only if one was typed (empty = keep existing).
+    if (entry.authMethod === "password" && sshPasswordInput) {
+      invoke("ssh_password_set", {
+        hostId: entry.id,
+        password: sshPasswordInput,
+      }).catch(() => {});
+    }
     handleSshReset();
   };
 
+  const handleSshClearPassword = () => {
+    if (!sshDraft.id) {
+      setSshPasswordInput("");
+      return;
+    }
+    invoke("ssh_password_clear", { hostId: sshDraft.id }).catch(() => {});
+    setSshPasswordSaved(false);
+    setSshPasswordInput("");
+  };
+
   const handleSshDelete = (id: string) => {
+    invoke("ssh_password_clear", { hostId: id }).catch(() => {});
     persistSshHosts(sshHosts.filter((h) => h.id !== id));
     if (sshDraft.id === id) handleSshReset();
   };
@@ -1129,24 +1159,66 @@ export function SettingsModal({
             </label>
           </div>
           <label className="field">
-            <span className="field-label">Identity file (optional)</span>
-            <div className="folder-row">
-              <input
-                value={sshDraft.identityFile ?? ""}
-                onChange={(e) =>
-                  handleSshDraftChange({ identityFile: e.target.value })
-                }
-                placeholder="C:\\Users\\me\\.ssh\\id_ed25519"
-              />
-              <button
-                type="button"
-                className="browse-btn"
-                onClick={handleSshPickIdentity}
-              >
-                Browse...
-              </button>
-            </div>
+            <span className="field-label">Auth method</span>
+            <select
+              value={sshDraft.authMethod ?? "key"}
+              onChange={(e) =>
+                handleSshDraftChange({
+                  authMethod: e.target.value as SshHost["authMethod"],
+                })
+              }
+            >
+              <option value="key">Key (recommended)</option>
+              <option value="password">Password</option>
+            </select>
           </label>
+          {(sshDraft.authMethod ?? "key") === "key" ? (
+            <label className="field">
+              <span className="field-label">Identity file (optional)</span>
+              <div className="folder-row">
+                <input
+                  value={sshDraft.identityFile ?? ""}
+                  onChange={(e) =>
+                    handleSshDraftChange({ identityFile: e.target.value })
+                  }
+                  placeholder="C:\\Users\\me\\.ssh\\id_ed25519"
+                />
+                <button
+                  type="button"
+                  className="browse-btn"
+                  onClick={handleSshPickIdentity}
+                >
+                  Browse...
+                </button>
+              </div>
+            </label>
+          ) : (
+            <label className="field">
+              <span className="field-label">
+                Password{sshPasswordSaved ? " (저장됨 — 비워두면 유지)" : ""}
+              </span>
+              <div className="folder-row">
+                <input
+                  type="password"
+                  value={sshPasswordInput}
+                  onChange={(e) => setSshPasswordInput(e.target.value)}
+                  placeholder={sshPasswordSaved ? "•••••••• (저장됨)" : "비밀번호"}
+                />
+                {sshPasswordSaved && (
+                  <button
+                    type="button"
+                    className="browse-btn"
+                    onClick={handleSshClearPassword}
+                  >
+                    지움
+                  </button>
+                )}
+              </div>
+              <span className="check-hint">
+                로컬에만 저장되며 연결 시 자동 입력됩니다(localStorage·동기화에 포함 안 됨).
+              </span>
+            </label>
+          )}
           <label className="field">
             <span className="field-label">Extra ssh options (optional)</span>
             <input

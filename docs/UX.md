@@ -118,7 +118,7 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 - **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test)
 - **Usage**: 사용량 대시보드 서버 on/off·포트, URL 복사, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 - **Remote**: 원격 서버·Cloudflare 터널 Start/Stop, GitHub OAuth(client id/secret)·Owner, named tunnel(token/hostname/port), 계정 승인 관리 ([REMOTE.md](REMOTE.md))
-- **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·user·host·port·identity 파일[Browse]·extra options) + **Test connection**(키 인증 기준 연결 확인). 비밀번호는 저장하지 않고 시스템 ssh-agent/키에 위임
+- **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·remote OS·user·host·port·**auth method**·identity 파일[Browse] 또는 비밀번호·extra options) + **Test connection**. **Auth method**: 키(identity 지정 시 자동 IdentitiesOnly로 "Too many authentication failures" 방지) / 비밀번호(저장 시 연결할 때 자동 입력, 로컬 `ssh-secrets.json`에만 저장)
 - **About**: 제작자, 버전, **Check**(자동 업데이트 — 서명 검증 후 다운로드·설치·재시작), Releases
 
 설정값은 localStorage 및 로컬 JSON에 저장되어 다음 실행에도 유지된다.

@@ -208,6 +208,8 @@ export function PaneSlot({
                 extraOptions: sshHost.extraOptions,
                 remoteFolder: cur.remoteFolder ?? null,
                 remoteOs: sshHost.remoteOs ?? "posix",
+                authMethod: sshHost.authMethod ?? "key",
+                hostId: sshHost.id,
               }
             : null;
           invoke("spawn_pty", {
