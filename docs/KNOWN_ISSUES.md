@@ -53,7 +53,7 @@
 - **클라이언트 OpenSSH 필요**: Windows 내장 `ssh.exe`(OpenSSH 클라이언트)가 PATH에 있어야 함. 없으면 spawn/Test 실패
 - **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=cmd)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `cd /d "<folder>" && <tool>`. 기본값은 POSIX
 - **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
-- **Windows 원격 폴더 특수문자**: `cd /d "<folder>"`로 공백은 OK, 그러나 `& % ^ '`는 cmd 재파싱에서 깨질 수 있음(미지원). 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
+- **Windows 원격 셸 무관(cmd/PowerShell)**: 원격 명령은 `powershell -EncodedCommand <base64>`로 보내므로, 그 서버의 SSH 기본 셸이 cmd든 PowerShell(구버전 5.1 포함)이든 동작한다. 폴더 경로 공백/특수문자도 base64 + `-LiteralPath`로 안전. 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
 - **인증 방식 토글(키/비밀번호)**: SSH Hosts 등록 시 호스트별 **Auth method** 선택.
   - **키(기본)**: identity 파일 지정 시 자동으로 `-o IdentitiesOnly=yes` → ssh-agent에 키가 많아 생기는 **"Too many authentication failures"**를 방지(그 키 하나만 시도). 키 인증이 미리 동작해야 함.
   - **비밀번호**: `-o PubkeyAuthentication=no`로 키를 안 던지고 바로 비번. 비번을 저장해두면 연결 시 앱이 **PTY에 자동 입력**(`password:` 프롬프트 감지). 비번은 localStorage가 아니라 로컬 `ssh-secrets.json`(`<app_local_data_dir>`)에 저장 — client_secret과 동일 수준의 로컬 평문(동기화·UI 반환 안 됨). 미저장 시 터미널에서 직접 입력.

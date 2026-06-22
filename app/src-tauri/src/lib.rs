@@ -118,27 +118,31 @@ fn build_ssh_remote_command(
     let tool = init_command.map(str::trim).filter(|c| !c.is_empty());
 
     if remote_os == Some("windows") {
-        // cmd.exe syntax. `cd /d` also switches drive. `cmd /k` keeps the shell
-        // interactive after the cd when there's no tool to run.
-        // Env injection (for remote hooks): `set K=V&& ...` with no space before
-        // `&&` so the value has no trailing space. Values are safe chars (uuid/
-        // numeric/agent-id), so no escaping needed.
-        let env_prefix: String = env
-            .iter()
-            .map(|(k, v)| format!("set {}={}&& ", k, v))
-            .collect();
-        let body = match (folder, tool) {
-            (Some(f), Some(t)) => format!("cd /d \"{}\" && {}", f, t),
-            (None, Some(t)) => t.to_string(),
-            (Some(f), None) => format!("cmd /k \"cd /d {}\"", f),
-            (None, None) => String::new(),
-        };
-        return match (env_prefix.is_empty(), body.is_empty()) {
-            (true, _) => body,
-            // env_prefix ends with "&& "; open interactive cmd after setting env.
-            (false, true) => format!("{}cmd", env_prefix),
-            (false, false) => format!("{}{}", env_prefix, body),
-        };
+        // The remote's SSH default shell may be cmd.exe OR PowerShell (and old
+        // PowerShell 5.1 doesn't even support `&&`). To work regardless, emit a
+        // `powershell -EncodedCommand <base64>` invocation: both cmd and
+        // PowerShell can run it, and base64 removes all quoting/`&&`/`/d` issues.
+        let mut script = String::new();
+        // Env injection for remote hooks (inherited by the launched tool).
+        for (k, v) in env {
+            script.push_str(&format!("$env:{}={};", k, ps_single_quote(v)));
+        }
+        if let Some(f) = folder {
+            script.push_str(&format!("Set-Location -LiteralPath {};", ps_single_quote(f)));
+        }
+        if let Some(t) = tool {
+            script.push_str(t);
+        }
+        if script.is_empty() {
+            // Nothing to run → drop into the remote's default shell.
+            return String::new();
+        }
+        // -NoExit keeps an interactive PowerShell after the tool/cd (parity with
+        // local: returning to a prompt when the tool exits).
+        return format!(
+            "powershell -NoProfile -NoExit -EncodedCommand {}",
+            ps_encoded(&script)
+        );
     }
 
     // POSIX (Linux/macOS) shells.
