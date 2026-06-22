@@ -13,6 +13,20 @@ import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 const LS_COLLAPSED_MACHINES = "multiagent.collapsedMachines.v1";
+const LS_ACTIVE_ONLY = "multiagent.activeOnly.v1";
+
+function loadActiveOnly(): boolean {
+  try {
+    return localStorage.getItem(LS_ACTIVE_ONLY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// A session is "active" when its PTY is alive (spawned and not exited).
+function isActiveStatus(status: string): boolean {
+  return status === "running" || status === "working" || status === "starting";
+}
 
 type MachineGroup = {
   id: string; // "local" or "ssh:<hostId>"
@@ -167,6 +181,14 @@ export function Sidebar({
     });
   };
 
+  // "Active only" filter: show just running sessions and their projects.
+  const [activeOnly, setActiveOnly] = useState<boolean>(() => loadActiveOnly());
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_ACTIVE_ONLY, activeOnly ? "1" : "0");
+    } catch {}
+  }, [activeOnly]);
+
   const projectSessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const agent of agents) {
@@ -224,25 +246,34 @@ export function Sidebar({
 
   const searchTerm = searchQuery.trim().toLowerCase();
 
-  // Filter sections by search: project-name match shows all its sessions;
-  // otherwise only sessions whose name matches. Returns null to hide the
-  // whole project.
+  // Filter sections by search (project-name match shows all its sessions,
+  // otherwise only matching session names) and, when "active only" is on, by
+  // live status. Returns null to hide the whole project.
   const filterSections = (
     projectId: string,
     projectName: string
   ): Section[] | null => {
     const sections = sectionsByProject.get(projectId) ?? [];
-    if (!searchTerm) return sections;
-    if (projectName.toLowerCase().includes(searchTerm)) return sections;
-    const filtered = sections
-      .map((s) => ({
-        ...s,
-        members: s.members.filter((m) =>
-          m.name.toLowerCase().includes(searchTerm)
-        ),
-      }))
-      .filter((s) => s.members.length > 0);
-    return filtered.length > 0 ? filtered : null;
+    let result = sections;
+    if (searchTerm && !projectName.toLowerCase().includes(searchTerm)) {
+      result = sections
+        .map((s) => ({
+          ...s,
+          members: s.members.filter((m) =>
+            m.name.toLowerCase().includes(searchTerm)
+          ),
+        }))
+        .filter((s) => s.members.length > 0);
+    }
+    if (activeOnly) {
+      result = result
+        .map((s) => ({
+          ...s,
+          members: s.members.filter((m) => isActiveStatus(m.status)),
+        }))
+        .filter((s) => s.members.length > 0);
+    }
+    return result.length > 0 ? result : null;
   };
 
   const toggleProjectExpanded = (projectId: string) => {
@@ -305,7 +336,7 @@ export function Sidebar({
   // local-only setup stays flat as before.
   const groupByMachine = projects.some((p) => p.sshHostId);
   const machineExpanded = (machineId: string) =>
-    searchTerm.length > 0 || !collapsedMachineIds.has(machineId);
+    searchTerm.length > 0 || activeOnly || !collapsedMachineIds.has(machineId);
 
   const startSessionPointer = (
     agentId: string,
@@ -471,7 +502,7 @@ export function Sidebar({
     const sections = filterSections(project.id, project.name);
     if (sections === null) return null;
     const expanded =
-      searchTerm.length > 0 || expandedProjectIds.has(project.id);
+      searchTerm.length > 0 || activeOnly || expandedProjectIds.has(project.id);
     const sessionCount = projectSessionCounts.get(project.id) ?? 0;
 
     const isDropTarget = projectDropTarget?.id === project.id;
@@ -649,6 +680,16 @@ export function Sidebar({
         <div className="sidebar-section-heading">
           <div className="sidebar-section-title">Projects</div>
           <button
+            className={`section-action-btn active-only-btn ${
+              activeOnly ? "active-only-on" : ""
+            }`}
+            onClick={() => setActiveOnly((v) => !v)}
+            title={activeOnly ? "전체 세션 보기" : "활성 세션만 보기"}
+            aria-pressed={activeOnly}
+          >
+            ●
+          </button>
+          <button
             className="section-action-btn"
             onClick={onNewProject}
             title="New project"
@@ -715,6 +756,11 @@ export function Sidebar({
         {projects.length === 0 && (
           <div className="empty-hint">Click + to add a project</div>
         )}
+        {projects.length > 0 &&
+          activeOnly &&
+          !projects.some((p) => filterSections(p.id, p.name) !== null) && (
+            <div className="empty-hint">실행 중인 세션이 없습니다</div>
+          )}
       </div>
     </aside>
   );

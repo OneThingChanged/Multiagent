@@ -496,6 +496,17 @@ body,
   border-color: var(--app-accent);
 }
 
+/* "Active only" filter toggle: dim dot when off, green-accent when on. */
+.active-only-btn {
+  font-size: 9px;
+  color: var(--app-muted);
+}
+.active-only-btn.active-only-on {
+  color: #3fb950;
+  border-color: #3fb950;
+  background: var(--app-active-bg);
+}
+
 .sidebar-section-title-list {
   list-style: none;
 }
