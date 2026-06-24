@@ -191,7 +191,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 각 entry는 `el: HTMLDivElement` 1개 보유. `term.open(el)`은 처음 한 번만
 - 활성 탭이 바뀔 때 `bodyRef.replaceChildren(entry.el)`로 슬롯 교체 (이전 탭의 el은 detach)
 - 비활성 탭의 xterm은 메모리에 살아있고 PTY 데이터도 계속 받아 scrollback에 쌓임. 사용자가 다시 클릭하면 reattach
-- 휠 이벤트는 capture 단계 핸들러에서 가로채 `term.scrollLines()` 호출 → TUI mouse tracking 무시하고 항상 scrollback
+- 휠 이벤트는 capture 단계 핸들러에서 가로채 xterm buffer scroll 상태를 즉시 갱신하는 `scrollTerminalLinesImmediately()`로 처리 → TUI mouse tracking 무시하고 항상 scrollback. xterm public `scrollLines()`는 viewport scrollTop을 먼저 갱신한 뒤 비동기 scroll 이벤트에서 `ydisp`/`isUserScrolling`을 맞추므로, streaming 출력 중에는 "사용자가 위를 보고 있음" 상태가 늦게 반영되어 최하단으로 튈 수 있어 직접 buffer scroll 경로를 사용한다
 - Ctrl+휠은 모든 터미널의 `fontSize`를 함께 변경하고 `multiagent.terminalFontSize.v1`에 저장
 - 전역 테마가 바뀌면 모든 살아있는 xterm 인스턴스의 `term.options.theme`을 갱신
 - `registerLinkProvider`가 `.md/.markdown` 경로를 링크로 노출. xterm의 1-based buffer 좌표에 맞춰 range를 만들고, 클릭 시 `resolve_markdown_path` 후 Docs 패널을 엶

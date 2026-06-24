@@ -138,6 +138,7 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 - **Ctrl+V**: 텍스트는 xterm bracketed paste, 이미지 클립보드는 raw Ctrl+V 키스트로크 (Codex 이미지 paste 호환). Ctrl+Shift+V는 그대로 통과
 - **Ctrl+Enter**: 줄바꿈 입력. 한글(IME) 합성 중에는 글자가 깨지지 않도록 처리됨
 - **Ctrl+F**: 터미널 검색 바 (다음/이전/Esc 닫기)
+- **마우스 휠**: Claude/Codex/TUI의 mouse tracking과 무관하게 항상 xterm scrollback을 움직임. streaming 출력 중 위로 올려도 현재 viewport를 유지하도록 내부 buffer scroll 상태를 즉시 갱신함
 - **Ctrl+마우스 휠**: 터미널 폰트 줌 (저장됨)
 
 ### 전역 단축키

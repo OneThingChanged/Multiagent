@@ -710,6 +710,40 @@ export function createEntry(
   return { term, fit, search, serialize, el, opened: false, spawned: false };
 }
 
+type TerminalPrivateCore = {
+  _bufferService?: {
+    buffer?: {
+      ydisp: number;
+    };
+    scrollLines: (disp: number, suppressScrollEvent?: boolean) => void;
+  };
+  refresh?: (start: number, end: number) => void;
+};
+
+type TerminalWithPrivateCore = Terminal & {
+  _core?: TerminalPrivateCore;
+};
+
+export function scrollTerminalLinesImmediately(term: Terminal, lines: number) {
+  if (lines === 0) return;
+
+  const core = (term as TerminalWithPrivateCore)._core;
+  const bufferService = core?._bufferService;
+  if (!bufferService || !core.refresh) {
+    term.scrollLines(lines);
+    return;
+  }
+
+  // Public scrollLines goes through xterm's async viewport; during heavy output
+  // that can lose the "user is scrolling" state before the next write lands.
+  const previousY = bufferService.buffer?.ydisp;
+  bufferService.scrollLines(lines);
+  if (previousY === bufferService.buffer?.ydisp) {
+    return;
+  }
+  core.refresh(0, term.rows - 1);
+}
+
 export function computeDropZone(
   rect: DOMRect,
   clientX: number,

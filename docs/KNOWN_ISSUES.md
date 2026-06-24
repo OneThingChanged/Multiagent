@@ -15,6 +15,7 @@
 
 ### TUI mouse 입력 손실
 - 휠 이벤트는 capture 단계에서 강제로 xterm scrollback으로 보내짐. Codex 같은 TUI가 자체 스크롤 가능한 리스트를 가지면 그 안에서 휠로 스크롤 안 됨. 키보드 대안 필요
+- 일반 휠은 xterm public `scrollLines()` 대신 즉시 buffer scroll 경로를 사용한다. public 경로는 viewport scrollTop과 buffer `ydisp` 동기화가 비동기라 streaming 출력 중 사용자가 위로 스크롤하면 다음 출력에서 최하단으로 튈 수 있었음
 
 ### Markdown 문서 뷰어 스캔 제한
 - Markdown 스캔은 성능 보호를 위해 최대 500개 파일까지만 수집

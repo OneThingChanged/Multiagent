@@ -19,6 +19,7 @@ import {
   createEntry,
   installImeCompositionPreview,
   saveTerminalFontSize,
+  scrollTerminalLinesImmediately,
 } from "../lib/terminal";
 import { loadScrollback } from "../lib/scrollback";
 
@@ -283,7 +284,7 @@ export function PaneSlot({
       }
       const dir = e.deltaY > 0 ? 1 : -1;
       const magnitude = e.shiftKey ? 10 : 3;
-      targetEntry.term.scrollLines(dir * magnitude);
+      scrollTerminalLinesImmediately(targetEntry.term, dir * magnitude);
     };
     container.addEventListener("wheel", wheelHandler, {
       passive: false,
