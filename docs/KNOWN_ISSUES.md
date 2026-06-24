@@ -13,9 +13,9 @@
 ### Window 크기 변경 시 scrollback
 - xterm cols가 바뀌면 자동 reflow되지만, Codex/Claude가 **이전 너비 기준으로 줄바꿈을 baked in** 한 출력은 새 너비로 다시 펴지지 않음. 새 출력만 새 너비로 나옴
 
-### TUI mouse 입력 손실
-- 휠 이벤트는 capture 단계에서 강제로 xterm scrollback으로 보내짐. Codex 같은 TUI가 자체 스크롤 가능한 리스트를 가지면 그 안에서 휠로 스크롤 안 됨. 키보드 대안 필요
-- 일반 휠은 xterm public `scrollLines()` 대신 즉시 buffer scroll 경로를 사용한다. public 경로는 viewport scrollTop과 buffer `ydisp` 동기화가 비동기라 streaming 출력 중 사용자가 위로 스크롤하면 다음 출력에서 최하단으로 튈 수 있었음
+### 휠 스크롤 / TUI
+- 휠 이벤트는 capture 단계에서 처리한다. **일반(메인) 버퍼**에선 xterm scrollback으로 강제 스크롤(TUI mouse tracking 무시) — 이때 public `scrollLines()` 대신 즉시 buffer scroll 경로를 써서 streaming 출력 중 위로 스크롤해도 최하단으로 안 튀게 한다.
+- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)** 에선 강제 스크롤백을 하지 않고 휠을 xterm/앱에 그대로 넘긴다. (이전엔 alt-screen에도 강제 스크롤백을 해서, 위로 올리면 빈 줄이 보였다가 다시 최하단으로 튕기는 버그가 있었음 — 수정됨. 이제 TUI 자체 스크롤 리스트에서 휠이 동작.)
 
 ### Markdown 문서 뷰어 스캔 제한
 - Markdown 스캔은 성능 보호를 위해 최대 500개 파일까지만 수집

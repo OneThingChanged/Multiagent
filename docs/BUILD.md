@@ -22,7 +22,7 @@ cd K:\AI\MultiAgent\app
 npm run tauri dev
 ```
 
-- Vite 1420 포트 + Tauri가 Rust 빌드 후 `target/debug/app.exe` 실행
+- Vite 4420 포트 + Tauri가 Rust 빌드 후 `target/debug/app.exe` 실행
 - `src/**` 변경 → Vite HMR 즉시 반영
 - `src-tauri/**` 변경 → Tauri watcher가 자동 재컴파일 + 앱 재시작
 - 윈도우 닫으면 dev 세션 종료. 다시 띄우려면 `npm run tauri dev`
@@ -39,8 +39,8 @@ npm run tauri -- build --debug
 | 종류 | 경로 |
 |---|---|
 | 디버그 EXE | `src-tauri/target/debug/app.exe` |
-| 디버그 NSIS 인스톨러 | `src-tauri/target/debug/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe` |
-| 디버그 MSI 인스톨러 | `src-tauri/target/debug/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi` |
+| 디버그 NSIS 인스톨러 | `src-tauri/target/debug/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
+| 디버그 MSI 인스톨러 | `src-tauri/target/debug/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
 
 디버그 빌드는 dev profile이라 최적화가 약하지만, 릴리즈보다 빌드가 빠르고 로컬 확인용으로 적합.
 

@@ -6,6 +6,7 @@
 - **상단 검색창**: 프로젝트명·세션명으로 필터. 프로젝트명 매칭이면 그 프로젝트의 모든 세션, 세션명 매칭이면 해당 세션만 표시. 검색 중에는 자동 펼침
 - **프로젝트 `>`/`v` 버튼**: 세션 목록 접기/펼치기
 - **프로젝트 좌클릭**: 프로젝트 활성화 + 첫 세션 그룹 표시 (접혀 있으면 펼침)
+- 세션이 아직 없는 새 프로젝트도 목록에 표시된다. 펼치면 `Select project, then click + to start a session` 안내가 보이고, 상단 `+`로 첫 세션을 만들 수 있다
 - **프로젝트 드래그**: 사이드바에서 위/아래로 끌어 프로젝트 순서 변경
 - **세션 좌클릭**: 그 세션의 그룹으로 전환. 클릭한 세션이 그 leaf의 활성 탭이 됨
 - **세션 더블클릭**: 별명 변경 팝업
@@ -138,7 +139,7 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 - **Ctrl+V**: 텍스트는 xterm bracketed paste, 이미지 클립보드는 raw Ctrl+V 키스트로크 (Codex 이미지 paste 호환). Ctrl+Shift+V는 그대로 통과
 - **Ctrl+Enter**: 줄바꿈 입력. 한글(IME) 합성 중에는 글자가 깨지지 않도록 처리됨
 - **Ctrl+F**: 터미널 검색 바 (다음/이전/Esc 닫기)
-- **마우스 휠**: Claude/Codex/TUI의 mouse tracking과 무관하게 항상 xterm scrollback을 움직임. streaming 출력 중 위로 올려도 현재 viewport를 유지하도록 내부 buffer scroll 상태를 즉시 갱신함
+- **마우스 휠**: 일반 터미널 버퍼에서는 xterm scrollback을 직접 움직이고, streaming 출력 중 위로 올려도 현재 viewport를 유지하도록 내부 buffer scroll 상태를 즉시 갱신함. Claude/Codex 같은 alternate-screen TUI에서는 강제 scrollback을 하지 않고 앱에 휠을 넘겨 자체 목록 스크롤이 동작하게 함
 - **Ctrl+마우스 휠**: 터미널 폰트 줌 (저장됨)
 
 ### 전역 단축키

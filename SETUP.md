@@ -46,14 +46,14 @@ npm run tauri build
 - 1~3분 (incremental은 1분 내)
 - 결과물:
   - `app/src-tauri/target/release/app.exe` — 단독 실행 ~11MB
-  - `app/src-tauri/target/release/bundle/msi/MultiAgent_0.3.0_x64_en-US.msi`
-  - `app/src-tauri/target/release/bundle/nsis/MultiAgent_0.3.0_x64-setup.exe`
+  - `app/src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi`
+  - `app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe`
 
 ### 테스트 실행
 ```powershell
 npm test
 ```
-Vitest 18개 케이스. 트리 연산 회귀 검증.
+Vitest 회귀 테스트.
 
 ## 4. 트러블슈팅
 
@@ -62,7 +62,7 @@ Vitest 18개 케이스. 트리 연산 회귀 검증.
 | `cargo: command not found` | Rust 설치 후 터미널 재시작 |
 | `link.exe not found` 또는 `MSVC linker error` | VS Build Tools에서 C++ workload 안 깔림 |
 | `webview2 not found` 런타임 | Edge/WebView2 Runtime 설치: https://developer.microsoft.com/microsoft-edge/webview2/ |
-| Vite 1420 포트 점유 | `Get-NetTCPConnection -LocalPort 1420 \| Stop-Process` |
+| Vite 4420 포트 점유 | `Get-NetTCPConnection -LocalPort 4420 \| Stop-Process` |
 | `app.exe` 락 (rebuild 실패) | 이전 앱 안 죽었음: `taskkill /F /IM app.exe` |
 | Claude/Codex 에이전트가 spawn은 되는데 코드 실행 안 됨 | `claude` / `codex` 명령이 PATH에 없는 거. PowerShell에서 `claude --version` 으로 확인 |
 

@@ -254,8 +254,10 @@ export function Sidebar({
     projectName: string
   ): Section[] | null => {
     const sections = sectionsByProject.get(projectId) ?? [];
+    const projectMatchesSearch =
+      searchTerm.length > 0 && projectName.toLowerCase().includes(searchTerm);
     let result = sections;
-    if (searchTerm && !projectName.toLowerCase().includes(searchTerm)) {
+    if (searchTerm && !projectMatchesSearch) {
       result = sections
         .map((s) => ({
           ...s,
@@ -272,8 +274,11 @@ export function Sidebar({
           members: s.members.filter((m) => isActiveStatus(m.status)),
         }))
         .filter((s) => s.members.length > 0);
+      return result.length > 0 ? result : null;
     }
-    return result.length > 0 ? result : null;
+    if (result.length > 0) return result;
+    if (!searchTerm || projectMatchesSearch) return [];
+    return null;
   };
 
   const toggleProjectExpanded = (projectId: string) => {

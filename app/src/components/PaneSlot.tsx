@@ -247,9 +247,9 @@ export function PaneSlot({
     const wheelHandler = (e: WheelEvent) => {
       const targetEntry = termsRef.current.get(agentId);
       if (!targetEntry) return;
-      e.preventDefault();
-      e.stopPropagation();
       if (e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
         const current = clampTerminalFontSize(
           targetEntry.term.options.fontSize ?? 13
         );
@@ -282,6 +282,15 @@ export function PaneSlot({
         }
         return;
       }
+      // TUI apps (claude/codex) use the alternate-screen buffer, which has no
+      // scrollback. Forcing a scroll there just shows blank rows and snaps back
+      // to the bottom. Let xterm handle the wheel instead (it forwards to the
+      // app's own scrolling when mouse tracking is on).
+      if (targetEntry.term.buffer.active.type === "alternate") {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
       const dir = e.deltaY > 0 ? 1 : -1;
       const magnitude = e.shiftKey ? 10 : 3;
       scrollTerminalLinesImmediately(targetEntry.term, dir * magnitude);
