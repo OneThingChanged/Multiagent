@@ -1,6 +1,6 @@
 # OneThingChanged MultiAgent
 
-**Current version:** `0.5.4`
+**Current version:** `0.5.5`
 
 OneThingChanged MultiAgent is a Tauri desktop app for running and organizing multiple AI-agent terminal sessions in one workspace.
 

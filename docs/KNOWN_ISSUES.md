@@ -15,7 +15,7 @@
 
 ### 휠 스크롤 / TUI
 - 휠 이벤트는 capture 단계에서 처리한다. **일반(메인) 버퍼**에선 xterm scrollback으로 강제 스크롤(TUI mouse tracking 무시) — 이때 public `scrollLines()` 대신 즉시 buffer scroll 경로를 써서 streaming 출력 중 위로 스크롤해도 최하단으로 안 튀게 한다.
-- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)** 에선 강제 스크롤백을 하지 않고 휠을 xterm/앱에 그대로 넘긴다. (이전엔 alt-screen에도 강제 스크롤백을 해서, 위로 올리면 빈 줄이 보였다가 다시 최하단으로 튕기는 버그가 있었음 — 수정됨. 이제 TUI 자체 스크롤 리스트에서 휠이 동작.)
+- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)** 에선 xterm scrollback으로 휠을 보내지 않고 `PageUp/PageDown` 입력으로 바꿔 TUI 자체 스크롤을 움직인다. (alt-screen에는 실제 scrollback이 없어서 xterm 휠 경로를 타면 빈 줄이 보였다가 다음 repaint에서 최하단으로 튕길 수 있음.)
 
 ### Markdown 문서 뷰어 스캔 제한
 - Markdown 스캔은 성능 보호를 위해 최대 500개 파일까지만 수집
