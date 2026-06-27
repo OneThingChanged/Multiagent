@@ -50,7 +50,7 @@ import {
   getAt,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
-import { loadBootstrap } from "./lib/persistence";
+import { loadBootstrap, loadStoredView } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
@@ -169,15 +169,19 @@ type ReopenPending = {
 };
 
 function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
-  if (!boot.activeGroupId) return null;
-  const group = boot.groups.find((g) => g.id === boot.activeGroupId);
+  // loadBootstrap deliberately starts with no active group (sessions stay idle
+  // until opened), so read the *saved* view directly to find what was last
+  // active and offer to reopen it.
+  const view = loadStoredView(boot.groups);
+  if (!view.activeGroupId) return null;
+  const group = boot.groups.find((g) => g.id === view.activeGroupId);
   if (!group) return null;
   const count = collectAgentIds(group.layout).size;
   if (count === 0) return null;
   return {
-    groupId: boot.activeGroupId,
-    path: boot.activePath,
-    projectId: boot.activeProjectId,
+    groupId: view.activeGroupId,
+    path: view.activePath,
+    projectId: view.activeProjectId,
     count,
   };
 }
