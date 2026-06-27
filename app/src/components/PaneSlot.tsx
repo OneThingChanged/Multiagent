@@ -283,18 +283,44 @@ export function PaneSlot({
         return;
       }
       if (targetEntry.term.buffer.active.type === "alternate") {
-        // Fullscreen TUIs draw into xterm's alternate buffer, which has no real
-        // terminal scrollback. If the browser/xterm wheel path runs here, it can
-        // expose blank rows and then snap back on the next repaint. Keep the
-        // viewport stable and ask the TUI to page its own transcript/list.
+        // Fullscreen TUIs (claude/codex) draw into xterm's alternate buffer,
+        // which has no real terminal scrollback. Running xterm's own wheel path
+        // here can expose blank rows that snap back on the next repaint, so we
+        // never scroll the viewport; we drive the TUI's own scroll instead.
         e.preventDefault();
         e.stopPropagation();
-        const sequence = e.deltaY < 0 ? "\x1b[5~" : "\x1b[6~"; // PgUp/PgDn
         const repeats = e.shiftKey ? 3 : 1;
-        invoke("write_pty", {
-          id: agentId,
-          data: sequence.repeat(repeats),
-        }).catch(() => {});
+        let data: string;
+        if (targetEntry.term.modes.mouseTrackingMode !== "none") {
+          // The TUI is reporting mouse events — forward native wheel events so
+          // it scrolls its own transcript exactly like a standard terminal
+          // (Windows Terminal, iTerm, …). Some TUIs bind scroll to the wheel
+          // rather than the PageUp/PageDown keys, so this is more reliable.
+          const rect = container.getBoundingClientRect();
+          const cols = Math.max(1, targetEntry.term.cols);
+          const rows = Math.max(1, targetEntry.term.rows);
+          const col = Math.min(
+            cols,
+            Math.max(
+              1,
+              Math.ceil(((e.clientX - rect.left) / rect.width) * cols)
+            )
+          );
+          const row = Math.min(
+            rows,
+            Math.max(
+              1,
+              Math.ceil(((e.clientY - rect.top) / rect.height) * rows)
+            )
+          );
+          const button = e.deltaY < 0 ? 64 : 65; // SGR wheel up / down
+          data = `\x1b[<${button};${col};${row}M`.repeat(repeats);
+        } else {
+          // No mouse reporting — fall back to paging the transcript/list via
+          // PageUp/PageDown keys.
+          data = (e.deltaY < 0 ? "\x1b[5~" : "\x1b[6~").repeat(repeats);
+        }
+        invoke("write_pty", { id: agentId, data }).catch(() => {});
         return;
       }
       e.preventDefault();

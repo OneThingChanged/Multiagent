@@ -59,7 +59,7 @@
 | Ctrl+F | 터미널 검색 |
 | Ctrl+C/V | 텍스트 복사/붙여넣기, 이미지 클립보드는 raw 키스트로크 |
 | Ctrl+휠 | 터미널 폰트 줌 (저장됨) |
-| 휠 스크롤 보장 | TUI mouse tracking 무시하고 항상 scrollback |
+| 휠 스크롤 | 일반 버퍼는 항상 scrollback(mouse tracking 무시), 전체화면 TUI는 휠을 TUI에 전달(마우스 휠 이벤트 또는 PageUp/Down) |
 
 ### 단축키
 `Ctrl+T` 새 세션 · `Ctrl+W` 활성 탭 닫기 · `Ctrl+1~9` 탭 전환 · `Ctrl+F` 검색 · `Esc` 검색/Docs 닫기.

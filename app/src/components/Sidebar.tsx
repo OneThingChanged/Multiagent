@@ -267,7 +267,10 @@ export function Sidebar({
         }))
         .filter((s) => s.members.length > 0);
     }
-    if (activeOnly) {
+    // "Active only" hides inactive sessions, but a search should reach them too:
+    // while searching, skip the active-status filter so deactivated/exited
+    // sessions matching the query still show up.
+    if (activeOnly && !searchTerm) {
       result = result
         .map((s) => ({
           ...s,
@@ -290,13 +293,11 @@ export function Sidebar({
     });
   };
 
+  // Clicking a project row toggles expand/collapse (like the caret) and marks it
+  // active (so the + button targets it / Docs scans its folder). It does NOT open
+  // a session anymore — sessions open only when a session row is clicked.
   const selectProject = (projectId: string) => {
-    setExpandedProjectIds((current) => {
-      if (current.has(projectId)) return current;
-      const next = new Set(current);
-      next.add(projectId);
-      return next;
-    });
+    toggleProjectExpanded(projectId);
     onSelectProject(projectId);
   };
 

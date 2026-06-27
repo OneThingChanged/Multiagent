@@ -11,6 +11,10 @@ pnpm-debug.log*
 .env.*
 *.local
 
+# Per-project agent config the app auto-generates (machine-local hooks)
+/.codex/
+/.claude/settings.local.json
+
 # Tauri updater signing keys — never commit private keys
 /signing/
 *.key

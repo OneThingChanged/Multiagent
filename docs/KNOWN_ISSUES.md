@@ -14,8 +14,17 @@
 - xterm cols가 바뀌면 자동 reflow되지만, Codex/Claude가 **이전 너비 기준으로 줄바꿈을 baked in** 한 출력은 새 너비로 다시 펴지지 않음. 새 출력만 새 너비로 나옴
 
 ### 휠 스크롤 / TUI
-- 휠 이벤트는 capture 단계에서 처리한다. **일반(메인) 버퍼**에선 xterm scrollback으로 강제 스크롤(TUI mouse tracking 무시) — 이때 public `scrollLines()` 대신 즉시 buffer scroll 경로를 써서 streaming 출력 중 위로 스크롤해도 최하단으로 안 튀게 한다.
-- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)** 에선 xterm scrollback으로 휠을 보내지 않고 `PageUp/PageDown` 입력으로 바꿔 TUI 자체 스크롤을 움직인다. (alt-screen에는 실제 scrollback이 없어서 xterm 휠 경로를 타면 빈 줄이 보였다가 다음 repaint에서 최하단으로 튕길 수 있음.)
+- 휠 처리는 그 순간 터미널이 **어떤 화면 버퍼를 쓰는지**로 갈린다. 버퍼 선택은 터미널(앱)이 아니라 **실행 중인 프로그램**이 정한다(`\x1b[?1049h`로 alternate 진입, `…l`로 복귀). 셸 프롬프트·일반 출력은 normal 버퍼, vim/less/man·git pager·claude/codex 인터랙티브 화면은 alternate 버퍼.
+- **일반(메인) 버퍼**: 휠을 capture 단계에서 가로채 xterm scrollback으로 강제 스크롤(TUI mouse tracking 무시) — 이때 public `scrollLines()` 대신 즉시 buffer scroll 경로(`scrollTerminalLinesImmediately`)를 써서 streaming 출력 중 위로 스크롤해도 최하단으로 안 튀게 한다.
+- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)**: alt-screen엔 scrollback이 없어 xterm 휠 경로를 타면 빈 줄이 보였다가 다음 repaint에서 최하단으로 튕긴다. 그래서 viewport를 직접 굴리지 않고 **스크롤 신호를 TUI 본인에게 넘긴다**:
+  - TUI가 **마우스 리포팅을 켰으면**(`term.modes.mouseTrackingMode !== "none"`) 휠 위치(col/row)로 **네이티브 SGR 마우스 휠 이벤트**(`\x1b[<64/65;col;rowM`)를 PTY에 보내 표준 터미널처럼 TUI가 자기 화면을 스크롤하게 한다.
+  - 마우스 리포팅이 **꺼져 있으면** `PageUp/PageDown`(`\x1b[5~`/`\x1b[6~`)으로 폴백한다.
+  - `Shift+휠`은 3배.
+
+### 머신마다 휠 동작이 다른 이유 (일반 스크롤 vs PageUp/Down)
+- 같은 앱·같은 코드라도 그 PC에서 도는 **claude/codex CLI 버전·모드**에 따라 인터랙티브 화면이 normal 버퍼로 그려질 수도, alternate 버퍼로 그려질 수도 있다. normal이면 오른쪽 scrollback이 보이고 휠이 부드럽게 굴러가며, alternate면 위 분기를 탄다.
+- alternate라도 그 TUI가 마우스 리포팅을 켜면 휠 스크롤이 자연스럽게 되고, 끄면 PageUp/Down 페이지 단위로 보인다.
+- 즉 "어떤 컴퓨터는 일반 스크롤, 어떤 컴퓨터는 PageUp/Down"은 앱 버그가 아니라 **그 PC claude/codex의 화면 버퍼·마우스 리포팅 차이**다. 양쪽 `claude --version`을 맞추면 동작이 일치한다. git/man 등 pager가 원인이면 `git config --global core.pager 'less -X'` 또는 `export LESS='-X'`로 normal 버퍼를 유지할 수 있다.
 
 ### Markdown 문서 뷰어 스캔 제한
 - Markdown 스캔은 성능 보호를 위해 최대 500개 파일까지만 수집

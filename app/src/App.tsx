@@ -47,7 +47,6 @@ import type {
 import {
   activeAgentInLeaf,
   collectAgentIds,
-  findLeafPath,
   getAt,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
@@ -74,6 +73,7 @@ import { DocsPanel } from "./components/DocsPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
+import { ReopenSessionsModal } from "./components/ReopenSessionsModal";
 import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
@@ -159,23 +159,27 @@ function joinFsPath(folder: string, relativePath: string) {
   return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
 }
 
-function firstProjectSessionFocus(
-  projectId: string,
-  agents: Agent[],
-  groups: Group[]
-): { agentId: string; groupId: string; path: Path } | null {
-  const projectAgentIds = agents
-    .filter((agent) => agent.projectId === projectId)
-    .map((agent) => agent.id);
+// Startup reopen prompt: the previously-active group (with sessions) is restored
+// only after the user confirms, instead of auto-resuming on launch.
+type ReopenPending = {
+  groupId: string;
+  path: Path | null;
+  projectId: string | null;
+  count: number;
+};
 
-  for (const group of groups) {
-    for (const agentId of projectAgentIds) {
-      const path = findLeafPath(group.layout, agentId);
-      if (path) return { agentId, groupId: group.id, path };
-    }
-  }
-
-  return null;
+function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
+  if (!boot.activeGroupId) return null;
+  const group = boot.groups.find((g) => g.id === boot.activeGroupId);
+  if (!group) return null;
+  const count = collectAgentIds(group.layout).size;
+  if (count === 0) return null;
+  return {
+    groupId: boot.activeGroupId,
+    path: boot.activePath,
+    projectId: boot.activeProjectId,
+    count,
+  };
 }
 
 function App() {
@@ -184,16 +188,24 @@ function App() {
   if (!bootstrapRef.current) bootstrapRef.current = loadBootstrap();
   const boot = bootstrapRef.current;
 
+  const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
+    computeInitialReopen(boot)
+  );
+
   const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
   );
+  // When a reopen prompt is pending, don't restore the active group yet (that
+  // would auto-spawn its sessions) — wait for the user's answer.
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
-    boot.activeGroupId
+    pendingReopen ? null : boot.activeGroupId
   );
-  const [activePath, setActivePath] = useState<Path | null>(boot.activePath);
+  const [activePath, setActivePath] = useState<Path | null>(
+    pendingReopen ? null : boot.activePath
+  );
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -404,12 +416,22 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
+    // While the startup reopen prompt is open we deliberately hold activeGroupId
+    // at null; don't persist that, or we'd lose the group to reopen.
+    if (pendingReopen) return;
     writeLocalStorageIfChanged(
       storedViewJsonRef,
       LS_VIEW,
       JSON.stringify({ activeProjectId, activeGroupId, activePath })
     );
-  }, [activeProjectId, activeGroupId, activePath, isSecondaryWindow, runtimeFlags]);
+  }, [
+    activeProjectId,
+    activeGroupId,
+    activePath,
+    isSecondaryWindow,
+    runtimeFlags,
+    pendingReopen,
+  ]);
 
   useEffect(() => {
     try {
@@ -836,6 +858,10 @@ function App() {
     selectAgentRef.current = selectAgent;
   }, [selectAgent]);
 
+  // Selecting a project only marks it active (so the + button targets it and the
+  // Docs panel scans its folder). It no longer auto-opens the project's first
+  // session — sessions open only when a session row is clicked. The sidebar
+  // toggles expand/collapse separately.
   const selectProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
     setProjects((prev) =>
@@ -843,17 +869,28 @@ function App() {
         project.id === projectId ? { ...project, lastOpenedAt: Date.now() } : project
       )
     );
+  }, []);
 
-    const firstFocus = firstProjectSessionFocus(projectId, agents, groups);
-    if (firstFocus) {
-      applyGroupOp((s) =>
-        groupOps.selectAgent(s, firstFocus.agentId, projectId)
-      );
-      return;
+  // Startup reopen prompt answers.
+  const confirmReopen = useCallback(() => {
+    setPendingReopen((pending) => {
+      if (pending) {
+        setActiveGroupId(pending.groupId);
+        setActivePath(pending.path);
+        if (pending.projectId) setActiveProjectId(pending.projectId);
+      }
+      return null;
+    });
+  }, []);
+
+  const dismissReopen = useCallback(() => setPendingReopen(null), []);
+
+  // Secondary windows don't prompt — they just restore as before.
+  useEffect(() => {
+    if (runtimeFlags && isSecondaryWindow && pendingReopen) {
+      confirmReopen();
     }
-    setActiveGroupId(null);
-    setActivePath(null);
-  }, [agents, applyGroupOp, groups]);
+  }, [runtimeFlags, isSecondaryWindow, pendingReopen, confirmReopen]);
 
   const openAsTab = useCallback(
     (agentId: string) => {
@@ -1621,6 +1658,13 @@ function App() {
           theme={appTheme}
           onThemeChange={handleThemeChange}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {pendingReopen && !isSecondaryWindow && (
+        <ReopenSessionsModal
+          count={pendingReopen.count}
+          onYes={confirmReopen}
+          onNo={dismissReopen}
         />
       )}
       {showProjectModal && (
