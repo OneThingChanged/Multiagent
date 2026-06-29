@@ -2150,6 +2150,64 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+// Custom always-on-top notification popup. We use our own window instead of an
+// OS/web notification because Windows doesn't reliably deliver click events to
+// web notifications when the app is backgrounded — so "click to jump to the
+// session" never worked. This popup emits `notification:activate { agentId }`
+// on click, which the main window listens for to focus + navigate.
+#[tauri::command]
+fn show_session_notification(
+    app: AppHandle,
+    title: String,
+    body: String,
+    agent_id: String,
+) -> Result<(), String> {
+    use base64::Engine;
+    // Only the latest notification is shown.
+    if let Some(existing) = app.get_webview_window("notification") {
+        let _ = existing.close();
+    }
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body,
+        "agentId": agent_id,
+    })
+    .to_string();
+    let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.as_bytes());
+
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        "notification",
+        tauri::WebviewUrl::App("notification.html".into()),
+    )
+    .title("MultiAgent")
+    .inner_size(360.0, 92.0)
+    .decorations(false)
+    .resizable(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .shadow(true)
+    .initialization_script(&format!("window.__NOTIF_DATA__ = \"{}\";", data))
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // Position bottom-right of the current monitor (approx; leaves room for a
+    // typical taskbar).
+    if let Ok(Some(monitor)) = win.current_monitor() {
+        let size = monitor.size();
+        let scale = monitor.scale_factor();
+        let win_w = 360.0 * scale;
+        let win_h = 92.0 * scale;
+        let margin = 16.0 * scale;
+        let taskbar = 56.0 * scale;
+        let x = (size.width as f64 - win_w - margin).max(0.0);
+        let y = (size.height as f64 - win_h - margin - taskbar).max(0.0);
+        let _ = win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
     #[cfg(not(multiagent_company))]
@@ -2513,7 +2571,8 @@ pub fn run() {
         usage_ingest_now,
         resolve_cli_session,
         relink_cli_session,
-        show_main_window
+        show_main_window,
+        show_session_notification
     ]);
 
     #[cfg(multiagent_company)]
@@ -2553,7 +2612,8 @@ pub fn run() {
         usage_ingest_now,
         resolve_cli_session,
         relink_cli_session,
-        show_main_window
+        show_main_window,
+        show_session_notification
     ]);
 
     builder

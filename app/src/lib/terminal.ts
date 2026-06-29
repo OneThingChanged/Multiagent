@@ -121,9 +121,11 @@ export function saveTerminalFontSize(fontSize: number) {
 export async function notifyDone({
   projectName,
   sessionName,
+  onActivate,
 }: {
   projectName: string;
   sessionName: string;
+  onActivate?: () => void;
 }) {
   try {
     let granted = await isPermissionGranted();
@@ -138,7 +140,10 @@ export async function notifyDone({
     );
     notification.onclick = () => {
       notification.close();
+      // Bring the app forward AND jump to the session that fired the
+      // notification (onActivate navigates to its group).
       invoke("show_main_window").catch(() => {});
+      onActivate?.();
     };
   } catch {}
 }

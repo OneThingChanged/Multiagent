@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MultiAgent</title>
+    <style>
+      :root { color-scheme: dark; }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        height: 100%;
+        font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+      }
+      #card {
+        box-sizing: border-box;
+        width: 100vw;
+        height: 100vh;
+        background: #1c2128;
+        color: #e6edf3;
+        border: 1px solid #30363d;
+        border-left: 3px solid #2f81f7;
+        border-radius: 10px;
+        padding: 12px 30px 12px 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;
+        cursor: pointer;
+        user-select: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #card:hover { background: #222a33; }
+      #title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #79c0ff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #body {
+        font-size: 12px;
+        color: #c9d1d9;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #close {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        font-size: 12px;
+        line-height: 1;
+        color: #8b949e;
+        padding: 3px 5px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #close:hover { color: #e6edf3; background: rgba(255, 255, 255, 0.08); }
+    </style>
+  </head>
+  <body>
+    <div id="card">
+      <div id="close" title="닫기">✕</div>
+      <div id="title">MultiAgent</div>
+      <div id="body">작업이 끝났어요</div>
+    </div>
+    <script>
+      (function () {
+        var data = { title: "MultiAgent", body: "작업이 끝났어요", agentId: "" };
+        try {
+          var raw = window.__NOTIF_DATA__ || "";
+          if (raw) {
+            var std = raw.replace(/-/g, "+").replace(/_/g, "/");
+            var bin = atob(std);
+            var bytes = Uint8Array.from(bin, function (c) {
+              return c.charCodeAt(0);
+            });
+            data = JSON.parse(new TextDecoder().decode(bytes));
+          }
+        } catch (e) {}
+
+        document.getElementById("title").textContent =
+          data.title || "MultiAgent";
+        document.getElementById("body").textContent =
+          data.body || "작업이 끝났어요";
+
+        var T = window.__TAURI__;
+        var win = T.window.getCurrentWindow();
+
+        var done = false;
+        function close() {
+          if (done) return;
+          done = true;
+          win.close();
+        }
+        function activate() {
+          if (done) return;
+          done = true;
+          T.event
+            .emit("notification:activate", { agentId: data.agentId })
+            .catch(function () {})
+            .finally(function () {
+              win.close();
+            });
+        }
+
+        document.getElementById("card").addEventListener("click", function (e) {
+          if (e.target && e.target.id === "close") return;
+          activate();
+        });
+        document
+          .getElementById("close")
+          .addEventListener("click", function (e) {
+            e.stopPropagation();
+            close();
+          });
+
+        // Auto-dismiss after a few seconds.
+        setTimeout(close, 6000);
+      })();
+    </script>
+  </body>
+</html>

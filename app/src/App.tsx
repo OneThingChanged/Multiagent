@@ -9,11 +9,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  isPermissionGranted,
-  onAction,
-  requestPermission,
-} from "@tauri-apps/plugin-notification";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 
@@ -52,7 +47,7 @@ import {
 import * as groupOps from "./lib/groupOps";
 import { loadBootstrap, loadStoredView } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
-import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
+import { applyTerminalTheme, createEntry } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
 import {
@@ -637,25 +632,20 @@ function App() {
     });
   }, [pushToast]);
 
-  useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
-    isPermissionGranted()
-      .then((g) => {
-        if (!g) return requestPermission();
-      })
-      .catch(() => {});
-  }, [isSecondaryWindow, runtimeFlags]);
-
+  // Clicking our custom notification popup focuses the app and jumps to the
+  // session that finished.
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
-    onAction(() => {
+    listen<{ agentId?: string }>("notification:activate", (e) => {
       invoke("show_main_window").catch(() => {});
+      const agentId = e.payload?.agentId;
+      if (agentId) selectAgentRef.current?.(agentId);
     })
-      .then((listener) => {
-        if (cancelled) listener.unregister();
-        else unsubscribe = () => listener.unregister();
+      .then((un) => {
+        if (cancelled) un();
+        else unsubscribe = un;
       })
       .catch(() => {});
     return () => {
@@ -783,9 +773,23 @@ function App() {
             );
             const projectName = project?.name || "Unknown project";
             const title = `${projectName} / ${target.name}`;
-            notifyDone({ projectName, sessionName: target.name });
             playNotificationSound();
             pushToast(target.id, title, "작업이 끝났어요");
+            // When the app isn't focused, the in-app toast isn't visible — pop
+            // our own always-on-top notification that navigates to this session
+            // on click (OS/web notifications don't deliver clicks reliably on
+            // Windows when backgrounded).
+            getCurrentWindow()
+              .isFocused()
+              .then((focused) => {
+                if (focused) return;
+                invoke("show_session_notification", {
+                  title,
+                  body: "작업이 끝났어요",
+                  agentId: id,
+                }).catch(() => {});
+              })
+              .catch(() => {});
           }
           setAgents((cur) =>
             cur.map((a) =>
