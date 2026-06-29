@@ -52,10 +52,12 @@ import {
 import * as groupOps from "./lib/groupOps";
 import { loadBootstrap, loadStoredView } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
-import { applyTerminalTheme, notifyDone } from "./lib/terminal";
+import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
+import { buildSpawnArgs } from "./lib/spawn";
 import {
   clearScrollback,
+  loadScrollback,
   pruneScrollback,
   saveScrollback,
 } from "./lib/scrollback";
@@ -161,28 +163,37 @@ function joinFsPath(folder: string, relativePath: string) {
 
 // Startup reopen prompt: the previously-active group (with sessions) is restored
 // only after the user confirms, instead of auto-resuming on launch.
+const LS_REOPEN_AGENTS = "multiagent.reopenAgents.v1";
+
 type ReopenPending = {
-  groupId: string;
+  agentIds: string[];
+  groupId: string | null;
   path: Path | null;
   projectId: string | null;
   count: number;
 };
 
 function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
-  // loadBootstrap deliberately starts with no active group (sessions stay idle
-  // until opened), so read the *saved* view directly to find what was last
-  // active and offer to reopen it.
+  // Reopen every session that was running at the last close (recorded in
+  // LS_REOPEN_AGENTS), not just the previously-active group. loadBootstrap
+  // starts with no active group, so read the saved view for which group to show.
+  let remembered: string[] = [];
+  try {
+    const raw = localStorage.getItem(LS_REOPEN_AGENTS);
+    if (raw) remembered = JSON.parse(raw) as string[];
+  } catch {
+    remembered = [];
+  }
+  const existing = new Set(boot.agents.map((a) => a.id));
+  const agentIds = remembered.filter((id) => existing.has(id));
+  if (agentIds.length === 0) return null;
   const view = loadStoredView(boot.groups);
-  if (!view.activeGroupId) return null;
-  const group = boot.groups.find((g) => g.id === view.activeGroupId);
-  if (!group) return null;
-  const count = collectAgentIds(group.layout).size;
-  if (count === 0) return null;
   return {
+    agentIds,
     groupId: view.activeGroupId,
     path: view.activePath,
     projectId: view.activeProjectId,
-    count,
+    count: agentIds.length,
   };
 }
 
@@ -709,6 +720,21 @@ function App() {
 
     listen<void>("app:close-requested", async () => {
       if (cancelled) return;
+      // Remember which sessions were running so the next launch can offer to
+      // reopen them all (across every group), not just the active one. Snapshot
+      // before /quit, which flips them to exited.
+      try {
+        const running = agentsRef.current
+          .filter((a) => {
+            if (a.status === "exited" || a.status === "idle") return false;
+            const e = termsRef.current.get(a.id);
+            return !!e && e.spawned;
+          })
+          .map((a) => a.id);
+        localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(running));
+      } catch {
+        // ignore
+      }
       // Session IDs are already captured at SessionStart time; close path just
       // needs to send /quit so the tools shut down cleanly, then confirm.
       const targets = agentsRef.current.filter((a) => {
@@ -875,26 +901,8 @@ function App() {
     );
   }, []);
 
-  // Startup reopen prompt answers.
-  const confirmReopen = useCallback(() => {
-    setPendingReopen((pending) => {
-      if (pending) {
-        setActiveGroupId(pending.groupId);
-        setActivePath(pending.path);
-        if (pending.projectId) setActiveProjectId(pending.projectId);
-      }
-      return null;
-    });
-  }, []);
-
-  const dismissReopen = useCallback(() => setPendingReopen(null), []);
-
-  // Secondary windows don't prompt — they just restore as before.
-  useEffect(() => {
-    if (runtimeFlags && isSecondaryWindow && pendingReopen) {
-      confirmReopen();
-    }
-  }, [runtimeFlags, isSecondaryWindow, pendingReopen, confirmReopen]);
+  // Startup reopen handlers are defined after the terminal-path handlers, which
+  // they depend on (see spawnAgentInBackground / confirmReopen below).
 
   const openAsTab = useCallback(
     (agentId: string) => {
@@ -1449,6 +1457,111 @@ function App() {
     },
     [pushToast]
   );
+
+  // Spawn an agent's PTY without it being the visible pane — used to reopen
+  // every previously-running session at startup, including ones in groups that
+  // aren't currently shown. The terminal renders into its (detached) element at
+  // a default size; when the user later opens it, PaneSlot reattaches the same
+  // entry and resizes (it skips re-spawning because entry.spawned is already set).
+  const spawnAgentInBackground = useCallback(
+    async (agentId: string) => {
+      const agent = agentsRef.current.find((a) => a.id === agentId);
+      if (!agent) return;
+      let entry = termsRef.current.get(agentId);
+      if (entry?.spawned) return; // already running
+      if (!entry) {
+        entry = createEntry(
+          agentId,
+          handleOpenMarkdownPath,
+          handleOpenImagePath,
+          handleOpenFolderPath,
+          handleOpenTerminalPath
+        );
+        termsRef.current.set(agentId, entry);
+      }
+      if (!entry.opened) {
+        // Don't call term.open() on a detached element — xterm's renderer needs
+        // an attached, sized node. Writes still buffer and render when PaneSlot
+        // opens it on first view. Restore scrollback here, since PaneSlot only
+        // restores for entries it creates itself (this one already exists).
+        const saved = loadScrollback(agentId);
+        if (saved) {
+          entry.term.write(saved);
+          entry.term.write(
+            "\r\n\x1b[2m--- restored from previous session ---\x1b[0m\r\n"
+          );
+        }
+      }
+      entry.spawned = true;
+      setAgentStatus(agentId, "starting");
+      try {
+        const group = groupsRef.current.find((g) =>
+          collectAgentIds(g.layout).has(agentId)
+        );
+        const { initCommand, ssh, cwd } = await buildSpawnArgs(
+          agent,
+          group?.sessionPins ?? null,
+          setAgentSessionId
+        );
+        await invoke("spawn_pty", {
+          id: agentId,
+          shell: null,
+          cwd,
+          initCommand,
+          aiToolId: agent.aiToolId,
+          ssh,
+          cols: 120,
+          rows: 30,
+        });
+      } catch (err) {
+        entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
+        setAgentStatus(agentId, "exited");
+      }
+    },
+    [
+      handleOpenMarkdownPath,
+      handleOpenImagePath,
+      handleOpenFolderPath,
+      handleOpenTerminalPath,
+      setAgentStatus,
+      setAgentSessionId,
+    ]
+  );
+
+  // Startup reopen prompt answers.
+  const confirmReopen = useCallback(() => {
+    const pending = pendingReopen;
+    setPendingReopen(null);
+    if (!pending) return;
+    if (pending.groupId) {
+      setActiveGroupId(pending.groupId);
+      setActivePath(pending.path);
+    }
+    if (pending.projectId) setActiveProjectId(pending.projectId);
+    // Resume every session that was running at close, including ones in groups
+    // that aren't currently visible. Setting entry.spawned synchronously here
+    // means PaneSlot won't double-spawn the ones in the shown group.
+    for (const id of pending.agentIds) {
+      void spawnAgentInBackground(id);
+    }
+  }, [pendingReopen, spawnAgentInBackground]);
+
+  const dismissReopen = useCallback(() => {
+    try {
+      localStorage.removeItem(LS_REOPEN_AGENTS);
+    } catch {
+      // ignore
+    }
+    setPendingReopen(null);
+  }, []);
+
+  // Secondary windows never prompt or auto-spawn (the main window owns the
+  // PTYs); just hide the prompt there.
+  useEffect(() => {
+    if (runtimeFlags && isSecondaryWindow && pendingReopen) {
+      setPendingReopen(null);
+    }
+  }, [runtimeFlags, isSecondaryWindow, pendingReopen]);
 
   const setActivePathForPane = useCallback(
     (path: Path | null) => {
