@@ -10,6 +10,7 @@
     "dialog:allow-open",
     "notification:default",
     "core:window:allow-set-always-on-top",
+    "core:window:allow-request-user-attention",
     "updater:default",
     "process:default"
   ]

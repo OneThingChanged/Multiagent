@@ -8,7 +8,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 
@@ -775,19 +775,18 @@ function App() {
             const title = `${projectName} / ${target.name}`;
             playNotificationSound();
             pushToast(target.id, title, "작업이 끝났어요");
-            // When the app isn't focused, the in-app toast isn't visible — pop
-            // our own always-on-top notification that navigates to this session
-            // on click (OS/web notifications don't deliver clicks reliably on
-            // Windows when backgrounded).
+            // When the app isn't focused, flash the taskbar so the user notices
+            // (clicking the taskbar brings the app forward, where the in-app
+            // toast is clickable to jump to the session). The always-on-top
+            // popup window was removed — on some Windows setups it grabbed focus
+            // and froze terminal input.
             getCurrentWindow()
               .isFocused()
               .then((focused) => {
                 if (focused) return;
-                invoke("show_session_notification", {
-                  title,
-                  body: "작업이 끝났어요",
-                  agentId: id,
-                }).catch(() => {});
+                getCurrentWindow()
+                  .requestUserAttention(UserAttentionType.Critical)
+                  .catch(() => {});
               })
               .catch(() => {});
           }
