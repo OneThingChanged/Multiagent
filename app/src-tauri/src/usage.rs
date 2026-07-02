@@ -321,7 +321,12 @@ impl UsageHub {
                 .map(|value| !value.trim().is_empty())
                 .unwrap_or(false),
         );
-        let Some(path) = newer_path(session_path, project_path) else {
+        // Honor this agent's own preferred session whenever its transcript
+        // exists for the project. Falling back to the folder's newest session
+        // (via newer_path) collapsed multiple sessions in the same project onto
+        // the same id, so only use the folder-latest when the preferred session
+        // isn't found.
+        let Some(path) = session_path.or(project_path) else {
             return Ok(None);
         };
         self.allowed_source_path(tool, &path)?;
