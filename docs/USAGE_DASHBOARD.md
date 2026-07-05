@@ -1,6 +1,6 @@
-# 토큰 사용량 대시보드
+# 토큰 사용량 집계
 
-세션·프로젝트별 토큰 사용량을 집계해 별도 로컬 웹 대시보드로 시각화하는 기능. 구현 파일: `app/src-tauri/src/usage.rs`, `usage_dashboard.html`.
+세션·프로젝트별 토큰 사용량을 집계해 `usage.db`에 저장하는 기능. 현재 사용량 화면은 별도 Usage 서버가 아니라 [MONITOR.md](MONITOR.md)의 단일 Dashboard 서버(`/api/usage/*`) 안에서 제공한다. 집계 구현 파일: `app/src-tauri/src/usage.rs`.
 
 ## 데이터 소스
 
@@ -40,29 +40,26 @@ hook 흐름을 확장해서 자동 적재한다.
 
 > 원본 transcript가 삭제·로테이션돼도 적재된 통계는 usage.db에 남는다.
 
-## 대시보드 서버
+## Dashboard 연동
 
-- bind `127.0.0.1:<port>`, 기본 **3141** (충돌 시 3141~3999 fallback). 인증 없음 — localhost 전용
-- 설정 → **Usage** 탭에서 켜고 끔(`usage_config: { enabled, server_port }`), URL 복사
-- 15초마다 자동 새로고침
+Dashboard 서버는 `127.0.0.1:4421` 기본 포트를 사용하며, 설정 → **Dashboard** 탭에서 관리한다. Usage 데이터는 같은 서버의 `Usage` 화면과 `/api/usage/*` API로 표시된다.
 
 ### API
 
 | 경로 | 쿼리 | 반환 |
 |---|---|---|
-| `GET /` | — | 대시보드 HTML |
-| `GET /api/summary` | `range`, `projectId?` | 합계 카드(input/output/cache/reasoning/total/events) |
-| `GET /api/projects` | `range` | 프로젝트별 합계 + 세션 수 (사용량 0인 프로젝트도 포함) |
-| `GET /api/sessions` | `range`, `projectId?` | 세션별 합계 (tool/model 포함) |
-| `GET /api/timeseries` | `range`, `bucket=hour\|day`, `projectId?` | 시간 버킷별 추이 |
-| `GET /api/recent` | `range`, `limit`, `projectId?` | 최근 이벤트 |
-| `POST /api/reindex` | — | 즉시 재색인 `{files, events, errors}` |
+| `GET /api/usage/summary` | `range`, `projectId?` | 합계 카드(input/output/cache/reasoning/total/events) |
+| `GET /api/usage/projects` | `range` | 프로젝트별 합계 + 세션 수 (사용량 0인 프로젝트도 포함) |
+| `GET /api/usage/sessions` | `range`, `projectId?` | 세션별 합계 (tool/model 포함) |
+| `GET /api/usage/timeseries` | `range`, `bucket=hour\|day`, `projectId?` | 시간 버킷별 추이 |
+| `GET /api/usage/recent` | `range`, `limit`, `projectId?` | 최근 이벤트 |
+| `POST /api/usage/reindex` | — | 즉시 재색인 `{files, events, errors}` |
 
 `range`: `today` / `week` / `month` / `all`.
 
 ### 화면
 
-상단 범위 버튼(오늘/7일/30일/전체) + Reindex. 좌측 프로젝트 내비(전체 + 프로젝트별). 본문: 요약 카드 6종(총/입력/출력/캐시읽기/캐시쓰기/추론) · 토큰 추이 라인차트 · 프로젝트/세션 막대차트 · 세션 테이블 · 최근 이벤트 테이블.
+Dashboard의 `Usage` 화면에서 범위 버튼(오늘/7일/30일/전체), Reindex, 요약 카드, 프로젝트/세션/최근 이벤트/타임라인 테이블을 제공한다.
 
 ## 카탈로그 동기화
 
@@ -70,6 +67,8 @@ hook 흐름을 확장해서 자동 적재한다.
 
 ## 관련 Tauri 커맨드
 
-`sync_usage_catalog` / `start_usage_server` / `stop_usage_server` / `usage_server_status` / `usage_config_get` / `usage_config_set` / `usage_ingest_now` / `resolve_cli_session` / `relink_cli_session`.
+`sync_usage_catalog` / `usage_ingest_now` / `resolve_cli_session` / `relink_cli_session`.
+
+`start_usage_server` / `stop_usage_server` / `usage_server_status` / `usage_config_get` / `usage_config_set`은 이전 별도 Usage 서버용 legacy command로 남아 있지만, 현재 UI에서는 단일 Dashboard 서버를 사용한다.
 
 (`resolve_cli_session`·`relink_cli_session`은 transcript 위치 탐색 로직을 세션 resume 재등록 기능과 공유한다. [RESUME.md](RESUME.md) 참고.)

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
+mod monitor;
 #[cfg(not(multiagent_company))]
 mod remote;
 mod usage;
@@ -60,6 +61,7 @@ struct AppState {
     ssh_secrets: Mutex<HashMap<String, String>>,
     #[cfg(not(multiagent_company))]
     remote: Arc<remote::RemoteHub>,
+    monitor: Arc<monitor::MonitorHub>,
     usage: Arc<usage::UsageHub>,
 }
 
@@ -480,6 +482,13 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
                         .usage
                         .ingest_agent(id.clone(), transcript_path.clone());
                 }
+                state.monitor.note_hook(
+                    id.clone(),
+                    event.clone(),
+                    session_id.clone(),
+                    transcript_path.clone(),
+                    cwd.clone(),
+                );
                 let _ = app.emit(
                     "agent:hook-event",
                     HookEvent {
@@ -602,7 +611,7 @@ fn merge_codex_config(existing: &str, helper_path: &str) -> Result<String, Strin
     Ok(doc.to_string())
 }
 
-fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
+pub(crate) fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
     let claude_dir = Path::new(folder).join(".claude");
     fs::create_dir_all(&claude_dir).map_err(|e| e.to_string())?;
     let settings_path = claude_dir.join("settings.local.json");
@@ -612,7 +621,7 @@ fn setup_claude_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
+pub(crate) fn setup_codex_hooks(folder: &str, helper_path: &str) -> Result<(), String> {
     let codex_dir = Path::new(folder).join(".codex");
     fs::create_dir_all(&codex_dir).map_err(|e| e.to_string())?;
     let config_path = codex_dir.join("config.toml");
@@ -2129,6 +2138,48 @@ fn sync_usage_catalog(
 }
 
 #[tauri::command]
+fn sync_monitor_state(
+    state: State<'_, AppState>,
+    projects: Vec<monitor::MonitorProjectInfo>,
+    agents: Vec<monitor::MonitorAgentInfo>,
+    groups: Vec<monitor::MonitorGroupInfo>,
+    view: monitor::MonitorViewInfo,
+) {
+    if state.secondary_window {
+        return;
+    }
+    state.monitor.sync_state(projects, agents, groups, view);
+}
+
+#[tauri::command]
+async fn start_monitor_server(app: AppHandle) -> Result<monitor::MonitorStatus, String> {
+    monitor::start(app).await
+}
+
+#[tauri::command]
+fn stop_monitor_server(app: AppHandle) -> monitor::MonitorStatus {
+    monitor::stop(&app)
+}
+
+#[tauri::command]
+fn monitor_server_status(state: State<'_, AppState>) -> monitor::MonitorStatus {
+    monitor::status(&state.monitor)
+}
+
+#[tauri::command]
+fn monitor_config_get(state: State<'_, AppState>) -> monitor::MonitorConfig {
+    monitor::config_get(&state.monitor)
+}
+
+#[tauri::command]
+fn monitor_config_set(
+    state: State<'_, AppState>,
+    config: monitor::MonitorConfig,
+) -> monitor::MonitorConfig {
+    monitor::config_set(&state.monitor, config)
+}
+
+#[tauri::command]
 async fn start_usage_server(app: AppHandle) -> Result<usage::UsageStatus, String> {
     usage::start(app).await
 }
@@ -2403,12 +2454,8 @@ mod tests {
 
     #[test]
     fn posix_ssh_remote_command_sets_xterm_env_for_tuis() {
-        let command = build_ssh_remote_command(
-            Some("/home/me/project"),
-            Some("codex"),
-            Some("posix"),
-            &[],
-        );
+        let command =
+            build_ssh_remote_command(Some("/home/me/project"), Some("codex"), Some("posix"), &[]);
 
         assert_eq!(
             command,
@@ -2558,6 +2605,7 @@ pub fn run() {
                 .map_err(|e| format!("start hook server: {}", e))?;
             write_hook_info(&handle, port, &token)
                 .map_err(|e| format!("write hook info: {}", e))?;
+            let monitor_hub = Arc::new(monitor::MonitorHub::new());
             let usage_hub = Arc::new(usage::UsageHub::new());
             app.manage(AppState {
                 ptys: Mutex::new(HashMap::new()),
@@ -2573,6 +2621,7 @@ pub fn run() {
                 ssh_secrets: Mutex::new(load_ssh_secrets(&handle)),
                 #[cfg(not(multiagent_company))]
                 remote: Arc::new(remote::RemoteHub::new()),
+                monitor: monitor_hub,
                 usage: usage_hub,
             });
             #[cfg(not(multiagent_company))]
@@ -2580,17 +2629,18 @@ pub fn run() {
                 remote::load_access(app.handle());
             }
             if !secondary_window {
-                usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
+                monitor::load(app.handle()).map_err(|e| format!("load monitor: {}", e))?;
                 let state: State<AppState> = app.handle().state();
-                if usage::config_get(&state.usage).enabled {
-                    let app_for_usage = app.handle().clone();
+                if monitor::config_get(&state.monitor).enabled {
+                    let app_for_monitor = app.handle().clone();
                     thread::spawn(move || {
-                        thread::sleep(Duration::from_millis(500));
+                        thread::sleep(Duration::from_millis(300));
                         let _ = tauri::async_runtime::block_on(async move {
-                            usage::start(app_for_usage).await
+                            monitor::start(app_for_monitor).await
                         });
                     });
                 }
+                usage::load(app.handle()).map_err(|e| format!("load usage: {}", e))?;
             }
 
             // Intercept window close: emit event to frontend so it can
@@ -2652,6 +2702,12 @@ pub fn run() {
         remote_commands::remote_access_revoke,
         remote_commands::remote_config_get,
         remote_commands::remote_config_set,
+        sync_monitor_state,
+        start_monitor_server,
+        stop_monitor_server,
+        monitor_server_status,
+        monitor_config_get,
+        monitor_config_set,
         sync_usage_catalog,
         start_usage_server,
         stop_usage_server,
@@ -2693,6 +2749,12 @@ pub fn run() {
         play_system_sound,
         read_audio_file,
         read_image_data_url,
+        sync_monitor_state,
+        start_monitor_server,
+        stop_monitor_server,
+        monitor_server_status,
+        monitor_config_get,
+        monitor_config_set,
         sync_usage_catalog,
         start_usage_server,
         stop_usage_server,

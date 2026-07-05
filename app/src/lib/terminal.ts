@@ -78,6 +78,17 @@ const FOLDER_PATH_RE = new RegExp(
   "gi"
 );
 
+// WebLinksAddon 0.12 ships a URL regex whose character classes exclude only a
+// handful of ASCII punctuation, so CJK text written flush against a URL (e.g.
+// `http://127.0.0.1:4421이야`) gets swallowed into the link. Reuse the addon's
+// pattern but also treat Hangul/CJK/Kana/fullwidth blocks as URL terminators so
+// the link stops at the last real URL character.
+const CJK_URL_STOP =
+  "\\u1100-\\u11FF\\u2E80-\\uA4CF\\uAC00-\\uD7A3\\uF900-\\uFAFF\\uFE30-\\uFE4F\\uFF00-\\uFFEF\\u3000-\\u303F\\u3040-\\u30FF";
+const URL_LINK_RE = new RegExp(
+  `(https?|HTTPS?):[/]{2}[^\\s"'!*(){}|\\\\^<>\`${CJK_URL_STOP}]*[^\\s"':,.!?{}|\\\\^~\\[\\]\`()<>${CJK_URL_STOP}]`
+);
+
 export type MarkdownPathHandler = (agentId: string, path: string) => void;
 export type ImagePathHandler = (agentId: string, path: string) => void;
 export type FolderPathHandler = (agentId: string, path: string) => void;
@@ -498,6 +509,69 @@ export function findMarkdownPathAt(
   return null;
 }
 
+type CellRef = { row: number; col: number; width: number };
+
+// Reconstruct the full logical line that `rowIndex` belongs to, joining any
+// soft-wrapped continuation rows (xterm flags these with `isWrapped`). Returns
+// the joined text plus a per-character map back to absolute buffer row/column,
+// so a link range can span wrapped rows. Without this, a path that wraps at the
+// pane edge is split across two rows and matches on neither row alone — which is
+// why long paths from full-screen TUIs (e.g. Codex) weren't clickable, while the
+// built-in URL detector, which already joins wrapped rows, was.
+const MAX_WRAP_ROWS = 512;
+
+function buildLogicalLine(
+  term: Terminal,
+  rowIndex: number
+): { text: string; cellMap: CellRef[] } | null {
+  const buffer = term.buffer.active;
+  if (!buffer.getLine(rowIndex)) return null;
+
+  // Walk up to the first row of this logical line.
+  let start = rowIndex;
+  let guard = 0;
+  while (start > 0 && guard < MAX_WRAP_ROWS) {
+    const line = buffer.getLine(start);
+    if (line?.isWrapped) {
+      start -= 1;
+      guard += 1;
+    } else {
+      break;
+    }
+  }
+
+  // Walk down, concatenating rows while they remain continuations.
+  const cols = term.cols;
+  let text = "";
+  const cellMap: CellRef[] = [];
+  guard = 0;
+  for (
+    let r = start;
+    r < buffer.length && guard < MAX_WRAP_ROWS;
+    r += 1, guard += 1
+  ) {
+    const line = buffer.getLine(r);
+    if (!line) break;
+    if (r !== start && !line.isWrapped) break;
+    for (let c = 0; c < cols; c += 1) {
+      const cell = line.getCell(c);
+      if (!cell) continue;
+      const width = cell.getWidth();
+      if (width === 0) continue; // trailing placeholder cell of a wide glyph
+      const chars = cell.getChars() || " ";
+      const base = text.length;
+      for (let i = 0; i < chars.length; i += 1) {
+        cellMap[base + i] = { row: r, col: c, width };
+      }
+      text += chars;
+    }
+  }
+
+  // Trim trailing whitespace (matches translateToString(true)); cellMap keeps
+  // its extra entries but we only index within the trimmed length.
+  return { text: text.replace(/\s+$/, ""), cellMap };
+}
+
 function registerMarkdownLinkProvider(
   term: Terminal,
   id: string,
@@ -508,46 +582,27 @@ function registerMarkdownLinkProvider(
 ) {
   term.registerLinkProvider({
     provideLinks(bufferLineNumber, callback) {
-      const line = term.buffer.active.getLine(bufferLineNumber - 1);
-      if (!line) {
+      const logical = buildLogicalLine(term, bufferLineNumber - 1);
+      if (!logical) {
         callback(undefined);
         return;
       }
 
-      const text = line.translateToString(true);
+      const { text, cellMap } = logical;
       const links: ILink[] = [];
       const occupied: MarkdownPathMatch[] = [];
 
-      if (onTerminalPath) {
-        for (const match of findAbsolutePathMatches(text)) {
-          occupied.push(match);
-          links.push({
-            range: {
-              start: { x: match.startColumn + 1, y: bufferLineNumber },
-              end: { x: match.endColumn, y: bufferLineNumber },
-            },
-            text: match.text,
-            decorations: {
-              pointerCursor: true,
-              underline: true,
-            },
-            activate(event, path) {
-              event.preventDefault();
-              onTerminalPath(id, path);
-            },
-          });
-        }
-      }
-
-      for (const match of findMarkdownPathMatches(text)) {
-        if (occupied.some((existing) => rangeOverlaps(existing, match))) {
-          continue;
-        }
-        occupied.push(match);
+      const pushLink = (
+        match: MarkdownPathMatch,
+        onActivate: (path: string) => void
+      ) => {
+        const startCell = cellMap[match.startIndex];
+        const lastCell = cellMap[match.endIndex - 1];
+        if (!startCell || !lastCell) return;
         links.push({
           range: {
-            start: { x: match.startColumn + 1, y: bufferLineNumber },
-            end: { x: match.endColumn, y: bufferLineNumber },
+            start: { x: startCell.col + 1, y: startCell.row + 1 },
+            end: { x: lastCell.col + lastCell.width, y: lastCell.row + 1 },
           },
           text: match.text,
           decorations: {
@@ -556,9 +611,24 @@ function registerMarkdownLinkProvider(
           },
           activate(event, path) {
             event.preventDefault();
-            onMarkdownPath(id, path);
+            onActivate(path);
           },
         });
+      };
+
+      if (onTerminalPath) {
+        for (const match of findAbsolutePathMatches(text)) {
+          occupied.push(match);
+          pushLink(match, (path) => onTerminalPath(id, path));
+        }
+      }
+
+      for (const match of findMarkdownPathMatches(text)) {
+        if (occupied.some((existing) => rangeOverlaps(existing, match))) {
+          continue;
+        }
+        occupied.push(match);
+        pushLink(match, (path) => onMarkdownPath(id, path));
       }
 
       if (onImagePath) {
@@ -567,62 +637,20 @@ function registerMarkdownLinkProvider(
             continue;
           }
           occupied.push(match);
-          links.push({
-            range: {
-              start: { x: match.startColumn + 1, y: bufferLineNumber },
-              end: { x: match.endColumn, y: bufferLineNumber },
-            },
-            text: match.text,
-            decorations: {
-              pointerCursor: true,
-              underline: true,
-            },
-            activate(event, path) {
-              event.preventDefault();
-              onImagePath(id, path);
-            },
-          });
+          pushLink(match, (path) => onImagePath(id, path));
         }
       }
 
       if (onTerminalPath) {
         for (const match of findGeneralFilePathMatches(text, occupied)) {
           occupied.push(match);
-          links.push({
-            range: {
-              start: { x: match.startColumn + 1, y: bufferLineNumber },
-              end: { x: match.endColumn, y: bufferLineNumber },
-            },
-            text: match.text,
-            decorations: {
-              pointerCursor: true,
-              underline: true,
-            },
-            activate(event, path) {
-              event.preventDefault();
-              onTerminalPath(id, path);
-            },
-          });
+          pushLink(match, (path) => onTerminalPath(id, path));
         }
       }
 
       if (onFolderPath) {
         for (const match of findFolderPathMatches(text, occupied)) {
-          links.push({
-            range: {
-              start: { x: match.startColumn + 1, y: bufferLineNumber },
-              end: { x: match.endColumn, y: bufferLineNumber },
-            },
-            text: match.text,
-            decorations: {
-              pointerCursor: true,
-              underline: true,
-            },
-            activate(event, path) {
-              event.preventDefault();
-              onFolderPath(id, path);
-            },
-          });
+          pushLink(match, (path) => onFolderPath(id, path));
         }
       }
 
@@ -659,12 +687,15 @@ export function createEntry(
   const serialize = new SerializeAddon();
   term.loadAddon(serialize);
   term.loadAddon(
-    new WebLinksAddon((event, uri) => {
-      event.preventDefault();
-      openUrl(uri).catch((err) => {
-        console.error("open url failed", err);
-      });
-    })
+    new WebLinksAddon(
+      (event, uri) => {
+        event.preventDefault();
+        openUrl(uri).catch((err) => {
+          console.error("open url failed", err);
+        });
+      },
+      { urlRegex: URL_LINK_RE }
+    )
   );
   if (onMarkdownPath) {
     registerMarkdownLinkProvider(

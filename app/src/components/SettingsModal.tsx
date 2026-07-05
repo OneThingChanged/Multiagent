@@ -76,13 +76,13 @@ type RemoteConfig = {
   client_secret: string;
 };
 
-type UsageStatus = {
+type MonitorStatus = {
   running: boolean;
   url: string | null;
   port: number | null;
 };
 
-type UsageConfig = {
+type MonitorConfig = {
   enabled: boolean;
   serverPort: number;
 };
@@ -93,11 +93,11 @@ type UsageIngestSummary = {
   errors: string[];
 };
 
-type SettingsTab = "general" | "usage" | "remote" | "ssh" | "about";
+type SettingsTab = "general" | "dashboard" | "remote" | "ssh" | "about";
 
 const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
-  { id: "usage", label: "Usage" },
+  { id: "dashboard", label: "Dashboard" },
   { id: "remote", label: "Remote" },
   { id: "ssh", label: "SSH Hosts" },
   { id: "about", label: "About" },
@@ -172,18 +172,20 @@ export function SettingsModal({
     client_secret: "",
   });
   const [configSaved, setConfigSaved] = useState(false);
-  const [usage, setUsage] = useState<UsageStatus>({
+  const [monitor, setMonitor] = useState<MonitorStatus>({
     running: false,
     url: null,
     port: null,
   });
-  const [usageConfig, setUsageConfig] = useState<UsageConfig>({
-    enabled: false,
-    serverPort: 3141,
+  const [monitorConfig, setMonitorConfig] = useState<MonitorConfig>({
+    enabled: true,
+    serverPort: 4421,
   });
+  const [monitorBusy, setMonitorBusy] = useState(false);
+  const [monitorCopied, setMonitorCopied] = useState(false);
+  const [monitorSaved, setMonitorSaved] = useState(false);
+  const [monitorError, setMonitorError] = useState<string | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
-  const [usageCopied, setUsageCopied] = useState(false);
-  const [usageSaved, setUsageSaved] = useState(false);
   const [usageIngest, setUsageIngest] = useState<UsageIngestSummary | null>(
     null
   );
@@ -312,8 +314,8 @@ export function SettingsModal({
         .then(setRemoteConfig)
         .catch(() => {});
     }
-    invoke<UsageConfig>("usage_config_get")
-      .then(setUsageConfig)
+    invoke<MonitorConfig>("monitor_config_get")
+      .then(setMonitorConfig)
       .catch(() => {});
   }, []);
 
@@ -329,8 +331,8 @@ export function SettingsModal({
   };
 
   useEffect(() => {
-    invoke<UsageStatus>("usage_server_status")
-      .then(setUsage)
+    invoke<MonitorStatus>("monitor_server_status")
+      .then(setMonitor)
       .catch(() => {});
     if (IS_COMPANY_BUILD) return;
 
@@ -421,43 +423,61 @@ export function SettingsModal({
       .catch(() => {});
   };
 
-  const handleUsageToggle = async () => {
-    setUsageBusy(true);
-    setUsageError(null);
+  const handleMonitorToggle = async () => {
+    setMonitorBusy(true);
+    setMonitorError(null);
     try {
-      const next = usage.running
-        ? await invoke<UsageStatus>("stop_usage_server")
-        : await invoke<UsageStatus>("start_usage_server");
-      setUsage(next);
+      const next = monitor.running
+        ? await invoke<MonitorStatus>("stop_monitor_server")
+        : await invoke<MonitorStatus>("start_monitor_server");
+      setMonitor(next);
     } catch (err) {
-      setUsageError(
+      setMonitorError(
         err instanceof Error
           ? err.message
           : typeof err === "string"
             ? err
-            : "usage dashboard failed"
+            : "monitor dashboard failed"
       );
     } finally {
-      setUsageBusy(false);
+      setMonitorBusy(false);
     }
   };
 
-  const handleSaveUsageConfig = () => {
-    invoke<UsageConfig>("usage_config_set", { config: usageConfig })
+  const handleSaveMonitorConfig = () => {
+    invoke<MonitorConfig>("monitor_config_set", { config: monitorConfig })
       .then((saved) => {
-        setUsageConfig(saved);
-        setUsageSaved(true);
-        setTimeout(() => setUsageSaved(false), 1500);
+        setMonitorConfig(saved);
+        setMonitorSaved(true);
+        setTimeout(() => setMonitorSaved(false), 1500);
       })
       .catch((err) => {
-        setUsageError(
+        setMonitorError(
           err instanceof Error
             ? err.message
             : typeof err === "string"
               ? err
-              : "usage config save failed"
+              : "monitor config save failed"
         );
       });
+  };
+
+  const handleCopyMonitorUrl = () => {
+    if (!monitor.url) return;
+    navigator.clipboard
+      .writeText(monitor.url)
+      .then(() => {
+        setMonitorCopied(true);
+        setTimeout(() => setMonitorCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+
+  const handleOpenMonitor = () => {
+    if (!monitor.url) return;
+    openUrl(monitor.url).catch((error) => {
+      console.error("Failed to open monitor dashboard", error);
+    });
   };
 
   const handleUsageReindex = async () => {
@@ -477,24 +497,6 @@ export function SettingsModal({
     } finally {
       setUsageBusy(false);
     }
-  };
-
-  const handleCopyUsageUrl = () => {
-    if (!usage.url) return;
-    navigator.clipboard
-      .writeText(usage.url)
-      .then(() => {
-        setUsageCopied(true);
-        setTimeout(() => setUsageCopied(false), 1500);
-      })
-      .catch(() => {});
-  };
-
-  const handleOpenUsage = () => {
-    if (!usage.url) return;
-    openUrl(usage.url).catch((error) => {
-      console.error("Failed to open usage dashboard", error);
-    });
   };
 
   const applySound = (next: NotificationSoundConfig) => {
@@ -698,60 +700,54 @@ export function SettingsModal({
         </>
         )}
 
-        {tab === "usage" && (
+        {tab === "dashboard" && (
+        <>
         <div className="app-settings-section">
-          <div className="field-label">Usage dashboard</div>
+          <div className="field-label">Dashboard server</div>
           <div className="app-about-card">
             <div className="app-about-row">
               <span className="app-about-label">Status</span>
               <span className="app-about-value">
-                {usage.running ? `running (port ${usage.port})` : "off"}
+                {monitor.running ? `running (port ${monitor.port})` : "off"}
               </span>
             </div>
-            {usage.running && usage.url && (
+            {monitor.running && monitor.url && (
               <div className="app-remote-url-row">
-                <span className="app-remote-url" title={usage.url}>
-                  {usage.url}
+                <span className="app-remote-url" title={monitor.url}>
+                  {monitor.url}
                 </span>
                 <button
                   className="btn-secondary app-update-btn"
-                  onClick={handleCopyUsageUrl}
+                  onClick={handleCopyMonitorUrl}
                 >
-                  {usageCopied ? "Copied!" : "Copy"}
+                  {monitorCopied ? "Copied!" : "Copy"}
                 </button>
                 <button
                   className="btn-secondary app-update-btn"
-                  onClick={handleOpenUsage}
+                  onClick={handleOpenMonitor}
                 >
                   Open
                 </button>
               </div>
             )}
             <div
-              className={`app-update-message ${usageError ? "app-update-error" : ""}`}
+              className={`app-update-message ${monitorError ? "app-update-error" : ""}`}
             >
-              {usageError
-                ? `Usage error: ${usageError}`
-                : "Claude/Codex JSONL transcript usage를 SQLite에 저장하고 로컬 웹 대시보드에서 봅니다."}
+              {monitorError
+                ? `Monitor error: ${monitorError}`
+                : "하나의 로컬 웹에서 세션 모니터링, split 그룹, hook 상태, docs/phase, 사용량을 함께 봅니다."}
             </div>
             <div className="app-update-actions">
               <button
                 className={
-                  usage.running
+                  monitor.running
                     ? "btn-secondary app-update-btn"
                     : "btn-primary app-update-btn"
                 }
-                onClick={handleUsageToggle}
-                disabled={usageBusy}
+                onClick={handleMonitorToggle}
+                disabled={monitorBusy}
               >
-                {usageBusy ? "..." : usage.running ? "Stop" : "Start"}
-              </button>
-              <button
-                className="btn-secondary app-update-btn"
-                onClick={handleUsageReindex}
-                disabled={usageBusy}
-              >
-                Reindex
+                {monitorBusy ? "..." : monitor.running ? "Stop" : "Start"}
               </button>
             </div>
 
@@ -762,13 +758,13 @@ export function SettingsModal({
                 type="number"
                 min={1}
                 max={65535}
-                value={usageConfig.serverPort}
+                value={monitorConfig.serverPort}
                 onChange={(e) =>
-                  setUsageConfig((c) => ({
+                  setMonitorConfig((c) => ({
                     ...c,
                     serverPort: Math.max(
                       1,
-                      Math.min(65535, Number(e.target.value) || 3141)
+                      Math.min(65535, Number(e.target.value) || 4421)
                     ),
                   }))
                 }
@@ -777,25 +773,53 @@ export function SettingsModal({
             <label className="app-checkbox-row">
               <input
                 type="checkbox"
-                checked={usageConfig.enabled}
+                checked={monitorConfig.enabled}
                 onChange={(e) =>
-                  setUsageConfig((c) => ({
+                  setMonitorConfig((c) => ({
                     ...c,
                     enabled: e.target.checked,
                   }))
                 }
               />
-              <span>Start usage dashboard when MultiAgent starts</span>
+              <span>Start dashboard when MultiAgent starts</span>
             </label>
             <div className="app-update-message">
-              기본값은 3141입니다. 포트 변경은 다음 Start부터 적용됩니다.
+              기본값은 4421입니다. 포트 변경은 다음 Start부터 적용됩니다.
             </div>
             <div className="app-update-actions">
               <button
                 className="btn-secondary app-update-btn"
-                onClick={handleSaveUsageConfig}
+                onClick={handleSaveMonitorConfig}
               >
-                {usageSaved ? "Saved!" : "Save"}
+                {monitorSaved ? "Saved!" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Usage data</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">Website</span>
+              <span className="app-about-value">
+                {monitor.running ? "included in Dashboard" : "Dashboard off"}
+              </span>
+            </div>
+            <div
+              className={`app-update-message ${usageError ? "app-update-error" : ""}`}
+            >
+              {usageError
+                ? `Usage error: ${usageError}`
+                : "Claude/Codex JSONL transcript 사용량은 위 Dashboard 서버 안의 Usage 화면에서 함께 봅니다."}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleUsageReindex}
+                disabled={usageBusy}
+              >
+                Reindex
               </button>
             </div>
             {usageIngest && (
@@ -816,6 +840,7 @@ export function SettingsModal({
             )}
           </div>
         </div>
+        </>
         )}
 
         {tab === "remote" && (

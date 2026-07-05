@@ -389,7 +389,11 @@ impl UsageHub {
         summary
     }
 
-    fn summary(&self, range: &str, project_id: Option<&str>) -> Result<UsageSummary, String> {
+    pub(crate) fn summary(
+        &self,
+        range: &str,
+        project_id: Option<&str>,
+    ) -> Result<UsageSummary, String> {
         let conn = self.connection()?;
         let since = range_start(range);
         conn.query_row(
@@ -419,7 +423,7 @@ impl UsageHub {
         .map_err(|e| e.to_string())
     }
 
-    fn projects(&self, range: &str) -> Result<Vec<ProjectUsage>, String> {
+    pub(crate) fn projects(&self, range: &str) -> Result<Vec<ProjectUsage>, String> {
         let conn = self.connection()?;
         let since = range_start(range);
         let mut stmt = conn
@@ -495,7 +499,11 @@ impl UsageHub {
         Ok(projects)
     }
 
-    fn sessions(&self, range: &str, project_id: Option<&str>) -> Result<Vec<SessionUsage>, String> {
+    pub(crate) fn sessions(
+        &self,
+        range: &str,
+        project_id: Option<&str>,
+    ) -> Result<Vec<SessionUsage>, String> {
         let conn = self.connection()?;
         let since = range_start(range);
         let sql = "SELECT
@@ -541,7 +549,7 @@ impl UsageHub {
         collect_rows(rows)
     }
 
-    fn timeseries(
+    pub(crate) fn timeseries(
         &self,
         range: &str,
         bucket: &str,
@@ -582,7 +590,7 @@ impl UsageHub {
         collect_rows(rows)
     }
 
-    fn recent(
+    pub(crate) fn recent(
         &self,
         range: &str,
         limit: i64,
@@ -671,79 +679,79 @@ pub struct IngestSummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UsageSummary {
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-    events: i64,
+pub(crate) struct UsageSummary {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub events: i64,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectUsage {
-    project_id: Option<String>,
-    project_name: String,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-    session_count: i64,
-    last_ts: Option<i64>,
+pub(crate) struct ProjectUsage {
+    pub project_id: Option<String>,
+    pub project_name: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub session_count: i64,
+    pub last_ts: Option<i64>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionUsage {
-    project_id: Option<String>,
-    project_name: String,
-    agent_id: Option<String>,
-    agent_name: String,
-    session_id: Option<String>,
-    tool: String,
-    model: Option<String>,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-    last_ts: Option<i64>,
+pub(crate) struct SessionUsage {
+    pub project_id: Option<String>,
+    pub project_name: String,
+    pub agent_id: Option<String>,
+    pub agent_name: String,
+    pub session_id: Option<String>,
+    pub tool: String,
+    pub model: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub last_ts: Option<i64>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UsageBucket {
-    ts: i64,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
+pub(crate) struct UsageBucket {
+    pub ts: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RecentUsage {
-    ts: i64,
-    project_id: Option<String>,
-    project_name: Option<String>,
-    agent_name: Option<String>,
-    session_id: Option<String>,
-    tool: String,
-    model: Option<String>,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    reasoning_output_tokens: i64,
-    total_tokens: i64,
-    cwd: Option<String>,
+pub(crate) struct RecentUsage {
+    pub ts: i64,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub agent_name: Option<String>,
+    pub session_id: Option<String>,
+    pub tool: String,
+    pub model: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub cwd: Option<String>,
 }
 
 pub fn load(app: &AppHandle) -> Result<(), String> {

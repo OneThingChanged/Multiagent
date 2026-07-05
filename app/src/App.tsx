@@ -460,6 +460,7 @@ function App() {
   const storedViewJsonRef = useRef(readLocalStorageValue(LS_VIEW));
   const remoteAgentsJsonRef = useRef<string | null>(null);
   const remoteViewJsonRef = useRef<string | null>(null);
+  const monitorStateJsonRef = useRef<string | null>(null);
   const usageCatalogJsonRef = useRef<string | null>(null);
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
@@ -634,6 +635,45 @@ function App() {
     usageCatalogJsonRef.current = json;
     invoke("sync_usage_catalog", payload).catch(() => {});
   }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    const payload = {
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        folder: p.folder,
+      })),
+      agents: agents.map((a) => ({
+        id: a.id,
+        projectId: a.projectId,
+        name: a.name,
+        folder: a.folder,
+        aiToolId: a.aiToolId,
+        status: a.status,
+        lastSessionId: a.lastSessionId ?? null,
+      })),
+      groups,
+      view: {
+        activeProjectId,
+        activeGroupId,
+        activePath,
+      },
+    };
+    const json = JSON.stringify(payload);
+    if (monitorStateJsonRef.current === json) return;
+    monitorStateJsonRef.current = json;
+    invoke("sync_monitor_state", payload).catch(() => {});
+  }, [
+    projects,
+    agents,
+    groups,
+    activeProjectId,
+    activeGroupId,
+    activePath,
+    isSecondaryWindow,
+    runtimeFlags,
+  ]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;

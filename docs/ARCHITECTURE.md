@@ -8,7 +8,7 @@ app.exe (Tauri Rust 메인 프로세스)
 ├─ tiny_http hook 서버 thread (127.0.0.1:RANDOM_PORT, Claude/Codex hook 수신)
 ├─ axum 원격 서버 (0.0.0.0:port, 켰을 때만 — REMOTE.md)
 │   └─ cloudflared 자식 프로세스 (터널 켰을 때만)
-├─ axum 사용량 대시보드 서버 (127.0.0.1:3141, 켰을 때만 — USAGE_DASHBOARD.md)
+├─ axum Dashboard 서버 (127.0.0.1:4421 기본, 세션 모니터 + Usage — MONITOR.md)
 ├─ PTY thread × N (각 에이전트마다 reader 스레드)
 │  └─ PowerShell child process  (로컬 세션)
 │  │   └─ claude / codex CLI (사용자가 선택한 AI 도구)
@@ -82,7 +82,8 @@ K:\AI\MultiAgent\
 
 추가 커맨드 그룹 (상세는 각 문서):
 - **원격** ([REMOTE.md](REMOTE.md)): `start/stop_remote_server`, `remote_server_status`, `start/stop_tunnel`, `tunnel_status`, `remote_config_get/set`, `remote_access_list/approve/revoke`, `sync_remote_agents`, `sync_remote_view`
-- **사용량** ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)): `sync_usage_catalog`, `start/stop_usage_server`, `usage_server_status`, `usage_config_get/set`, `usage_ingest_now`, `resolve_cli_session`, `relink_cli_session`
+- **Dashboard** ([MONITOR.md](MONITOR.md)): `sync_monitor_state`, `start/stop_monitor_server`, `monitor_server_status`, `monitor_config_get/set` — 세션 모니터링과 Usage 화면을 단일 로컬 서버에서 제공
+- **사용량 집계** ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)): `sync_usage_catalog`, `usage_ingest_now`, `resolve_cli_session`, `relink_cli_session` (`start/stop_usage_server` 계열은 이전 별도 Usage 서버용 legacy command)
 - **창**: `show_main_window`, 새 창/always-on-top 관련
 
 ### 상태 (`AppState`)
