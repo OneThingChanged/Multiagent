@@ -68,7 +68,7 @@ K:\AI\MultiAgent\
 
 | 커맨드 | 인자 | 동작 |
 |---|---|---|
-| `spawn_pty` | id, shell?, cwd?, init_command?, ai_tool_id?, ssh?, cols, rows | PTY 열고 PowerShell 실행, hook용 settings.local.json 생성/머지, env var 주입, init 명령 600ms 뒤 입력, reader thread 시작. `ssh`가 있으면 PowerShell 대신 `ssh -tt user@host "<remote command>"`로 원격 PTY를 띄우고 typed-init을 건너뜀(원격 명령에 baking). **Windows 원격**: 원격 명령을 `powershell -EncodedCommand <base64>`로 보내 기본 셸이 cmd든 PowerShell이든 동작(env는 `$env:`, cd는 `Set-Location`). npm CLI의 `.ps1` 실행 정책 문제를 피하려고 Windows SSH 호스트는 기본적으로 `codex.cmd`/`claude.cmd` shim을 사용한다. Phase 2(키 모드)에선 `-R <port>:127.0.0.1:<hookPort>` 역터널 + 원격 helper(`multiagent-notify.ps1`) 푸시·hook 머지(`setup_remote_hooks`)로 working/done·session-start hook 동작. 비번 모드는 PTY 비번 자동입력(hook 없음) |
+| `spawn_pty` | id, shell?, cwd?, init_command?, ai_tool_id?, ssh?, cols, rows | PTY 열고 PowerShell 실행, hook용 settings.local.json 생성/머지, env var 주입, init 명령 600ms 뒤 입력, reader thread 시작. `ssh`가 있으면 PowerShell 대신 `ssh -tt user@host "<remote command>"`로 원격 PTY를 띄우고 typed-init을 건너뜀(원격 명령에 baking). 원격 명령은 TUI 키 처리용 `TERM=xterm-256color`/`COLORTERM=truecolor`를 먼저 주입한다. **Windows 원격**: 원격 명령을 `powershell -EncodedCommand <base64>`로 보내 기본 셸이 cmd든 PowerShell이든 동작(env는 `$env:`, cd는 `Set-Location`). npm CLI의 `.ps1` 실행 정책 문제를 피하려고 Windows SSH 호스트는 기본적으로 `codex.cmd`/`claude.cmd` shim을 사용한다. Phase 2(키 모드)에선 `-R <port>:127.0.0.1:<hookPort>` 역터널 + 원격 helper(`multiagent-notify.ps1`) 푸시·hook 머지(`setup_remote_hooks`)로 working/done·session-start hook 동작. 비번 모드는 PTY 비번 자동입력(hook 없음) |
 | `ssh_test` | ssh | `ssh -o BatchMode=yes -o ConnectTimeout=8 ... "echo"`로 연결 가능 여부 빠르게 확인 (설정 Test 버튼) |
 | `write_pty` | id, data | 활성 PTY writer에 바이트 쓰기 |
 | `resize_pty` | id, cols, rows | master.resize() (ConPTY → 자식에 SIGWINCH 상응) |

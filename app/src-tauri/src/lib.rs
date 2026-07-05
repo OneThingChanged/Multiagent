@@ -123,6 +123,9 @@ fn build_ssh_remote_command(
         // `powershell -EncodedCommand <base64>` invocation: both cmd and
         // PowerShell can run it, and base64 removes all quoting/`&&`/`/d` issues.
         let mut script = String::new();
+        // Some Windows SSH sessions do not propagate TERM. TUI frameworks use it
+        // for key decoding, so force an xterm-compatible terminal for child CLIs.
+        script.push_str("$env:TERM='xterm-256color';$env:COLORTERM='truecolor';");
         // Env injection for remote hooks (inherited by the launched tool).
         for (k, v) in env {
             script.push_str(&format!("$env:{}={};", k, ps_single_quote(v)));
@@ -149,14 +152,20 @@ fn build_ssh_remote_command(
     }
 
     // POSIX (Linux/macOS) shells.
+    let env_part = "export TERM='xterm-256color' COLORTERM='truecolor'; ";
     let exec_part = match tool {
         Some(t) => format!("exec {}", t),
         None => "exec \"$SHELL\" -l".to_string(),
     };
     match folder {
         // Single-quote the folder for POSIX shells; escape embedded quotes.
-        Some(f) => format!("cd '{}' && {}", f.replace('\'', "'\\''"), exec_part),
-        None => exec_part,
+        Some(f) => format!(
+            "{}cd '{}' && {}",
+            env_part,
+            f.replace('\'', "'\\''"),
+            exec_part
+        ),
+        None => format!("{}{}", env_part, exec_part),
     }
 }
 
@@ -2362,6 +2371,50 @@ fn run_installer_and_quit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decode_ps_encoded_from_remote_command(command: &str) -> String {
+        use base64::Engine;
+        let encoded = command.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let words: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&words).unwrap()
+    }
+
+    #[test]
+    fn windows_ssh_remote_command_sets_xterm_env_for_tuis() {
+        let command = build_ssh_remote_command(
+            Some("D:\\AI\\Sub5torage"),
+            Some("codex.cmd --dangerously-bypass-approvals-and-sandbox"),
+            Some("windows"),
+            &[],
+        );
+        let script = decode_ps_encoded_from_remote_command(&command);
+
+        assert!(script.contains("$env:TERM='xterm-256color';"));
+        assert!(script.contains("$env:COLORTERM='truecolor';"));
+        assert!(script.contains("Set-Location -LiteralPath 'D:\\AI\\Sub5torage';"));
+        assert!(script.contains("codex.cmd --dangerously-bypass-approvals-and-sandbox"));
+    }
+
+    #[test]
+    fn posix_ssh_remote_command_sets_xterm_env_for_tuis() {
+        let command = build_ssh_remote_command(
+            Some("/home/me/project"),
+            Some("codex"),
+            Some("posix"),
+            &[],
+        );
+
+        assert_eq!(
+            command,
+            "export TERM='xterm-256color' COLORTERM='truecolor'; cd '/home/me/project' && exec codex"
+        );
+    }
 
     #[test]
     fn image_resolver_finds_docs_path_in_sibling_project_folder() {

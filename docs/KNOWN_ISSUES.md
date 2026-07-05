@@ -63,6 +63,7 @@
 - **클라이언트 OpenSSH 필요**: Windows 내장 `ssh.exe`(OpenSSH 클라이언트)가 PATH에 있어야 함. 없으면 spawn/Test 실패
 - **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=PowerShell)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `powershell -NoProfile -NoExit -EncodedCommand ...` 안에서 `$env:` 주입 + `Set-Location -LiteralPath` + `<tool>` 실행. 기본값은 POSIX
 - **Windows SSH의 npm `.ps1` 실행 정책 문제**: Windows에서 npm으로 설치한 Codex/Claude는 `codex.ps1`/`claude.ps1`와 `codex.cmd`/`claude.cmd`가 같이 생긴다. 원격 PowerShell은 `.ps1` shim을 먼저 잡아 `PSSecurityException`이 날 수 있으므로, SSH Hosts의 **Use .cmd shims for npm CLIs** 옵션이 기본 켜짐이며 Windows 원격에서는 `codex.cmd`/`claude.cmd`를 실행한다. 특수하게 `.ps1`을 써야 하는 호스트만 이 옵션을 끈다.
+- **SSH TUI 방향키 보정**: Windows OpenSSH/ConPTY 경로에서는 xterm application cursor 모드(`ESC O A/B/C/D`)가 일부 원격 TUI에서 무시될 수 있다. SSH 세션은 방향키를 일반 CSI(`ESC [ A/B/C/D`)로 정규화하고, 원격 도구 실행 전 `TERM=xterm-256color`, `COLORTERM=truecolor`를 강제해 Codex/Claude hook review 같은 메뉴가 방향키를 인식하도록 한다.
 - **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
 - **Windows 원격 셸 무관(cmd/PowerShell)**: 원격 명령은 `powershell -EncodedCommand <base64>`로 보내므로, 그 서버의 SSH 기본 셸이 cmd든 PowerShell(구버전 5.1 포함)이든 동작한다. 폴더 경로 공백/특수문자도 base64 + `-LiteralPath`로 안전. 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
 - **인증 방식 토글(키/비밀번호)**: SSH Hosts 등록 시 호스트별 **Auth method** 선택.

@@ -1755,7 +1755,8 @@ function App() {
           handleOpenMarkdownPath,
           handleOpenImagePath,
           handleOpenFolderPath,
-          handleOpenTerminalPath
+          handleOpenTerminalPath,
+          { normalizeSshCursorKeys: !!agent.sshHostId }
         );
         termsRef.current.set(agentId, entry);
       }

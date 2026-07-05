@@ -84,7 +84,8 @@ export function PaneSlot({
         ctx.onOpenMarkdownPath,
         ctx.onOpenImagePath,
         ctx.onOpenFolderPath,
-        ctx.onOpenTerminalPath
+        ctx.onOpenTerminalPath,
+        { normalizeSshCursorKeys: !!activeAgent.sshHostId }
       );
       termsRef.current.set(agentId, entry);
       freshlyCreated = true;

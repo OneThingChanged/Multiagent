@@ -184,6 +184,34 @@ function isImeCompositionKey(event: KeyboardEvent) {
   return event.isComposing || event.keyCode === 229 || event.key === "Process";
 }
 
+type CreateEntryOptions = {
+  normalizeSshCursorKeys?: boolean;
+};
+
+function normalizedCursorKeyData(event: KeyboardEvent) {
+  if (
+    event.type !== "keydown" ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey
+  ) {
+    return null;
+  }
+
+  switch (event.key) {
+    case "ArrowUp":
+      return "\x1b[A";
+    case "ArrowDown":
+      return "\x1b[B";
+    case "ArrowRight":
+      return "\x1b[C";
+    case "ArrowLeft":
+      return "\x1b[D";
+    default:
+      return null;
+  }
+}
+
 const terminalsWithImePreview = new WeakSet<Terminal>();
 
 export function installImeCompositionPreview(entry: TerminalEntry) {
@@ -608,7 +636,8 @@ export function createEntry(
   onMarkdownPath?: MarkdownPathHandler,
   onImagePath?: ImagePathHandler,
   onFolderPath?: FolderPathHandler,
-  onTerminalPath?: TerminalPathHandler
+  onTerminalPath?: TerminalPathHandler,
+  options: CreateEntryOptions = {}
 ): TerminalEntry {
   const isWindows = navigator.userAgent.includes("Windows");
   const term = new Terminal({
@@ -661,6 +690,15 @@ export function createEntry(
       // transient keydown data before the IME commits the final text. Let the
       // browser IME complete and only forward the committed text via onData.
       return false;
+    }
+
+    if (options.normalizeSshCursorKeys) {
+      const cursorData = normalizedCursorKeyData(event);
+      if (cursorData) {
+        event.preventDefault();
+        invoke("write_pty", { id, data: cursorData }).catch(() => {});
+        return false;
+      }
     }
 
     const isPlainCtrlKey =
