@@ -117,6 +117,7 @@ function emptySshDraft(): SshHost {
     extraOptions: "",
     remoteOs: "posix",
     authMethod: "key",
+    preferCmdShim: true,
   };
 }
 
@@ -239,6 +240,10 @@ export function SettingsModal({
       extraOptions: sshDraft.extraOptions?.trim() || undefined,
       remoteOs: sshDraft.remoteOs ?? "posix",
       authMethod: sshDraft.authMethod ?? "key",
+      preferCmdShim:
+        (sshDraft.remoteOs ?? "posix") === "windows"
+          ? sshDraft.preferCmdShim ?? true
+          : undefined,
     };
     const exists = sshHosts.some((h) => h.id === entry.id);
     persistSshHosts(
@@ -1172,6 +1177,24 @@ export function SettingsModal({
               <option value="password">Password</option>
             </select>
           </label>
+          {(sshDraft.remoteOs ?? "posix") === "windows" && (
+            <label className="field-check field-check-neutral">
+              <input
+                type="checkbox"
+                checked={sshDraft.preferCmdShim ?? true}
+                onChange={(e) =>
+                  handleSshDraftChange({ preferCmdShim: e.target.checked })
+                }
+              />
+              <span>
+                <span className="check-label">Use .cmd shims for npm CLIs</span>
+                <span className="check-hint">
+                  PowerShell execution policy can block codex.ps1/claude.ps1.
+                  This starts codex.cmd/claude.cmd instead.
+                </span>
+              </span>
+            </label>
+          )}
           {(sshDraft.authMethod ?? "key") === "key" ? (
             <label className="field">
               <span className="field-label">Identity file (optional)</span>

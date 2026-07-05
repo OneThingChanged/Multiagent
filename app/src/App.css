@@ -2505,11 +2505,17 @@ body.docs-resizing .docs-resizer::after {
   margin-top: 2px;
   accent-color: var(--app-danger);
 }
+.field-check-neutral input {
+  accent-color: var(--app-accent);
+}
 .check-label {
   display: block;
   font-size: 13px;
   color: var(--app-danger);
   font-weight: 500;
+}
+.field-check-neutral .check-label {
+  color: var(--app-text);
 }
 .check-hint {
   display: block;

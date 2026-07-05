@@ -65,6 +65,9 @@ export type SshHost = {
   // use a stored password (auto-typed into the PTY). The password itself is NOT
   // stored here — it lives in a Rust-side secrets file keyed by host id.
   authMethod?: SshAuthMethod;
+  // Windows remote only. npm CLIs create both .ps1 and .cmd shims; PowerShell
+  // execution policy can block the .ps1 shim, so prefer .cmd by default.
+  preferCmdShim?: boolean;
 };
 
 export type Agent = {

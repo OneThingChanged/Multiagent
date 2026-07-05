@@ -68,7 +68,7 @@
 내장 axum 웹 서버 + Cloudflare Tunnel(quick/named, 고정 도메인 가능) + GitHub 로그인 + **계정 승인제**. 외부 브라우저에서 세션 목록·터미널·입력. 독립 뷰어(데스크탑과 다른 세션을 따로 봄).
 
 ### SSH 원격 세션
-같은 망(또는 사내망/VPN)으로 닿는 다른 컴퓨터에 SSH로 접속해 그 머신에서 셸/claude/codex 실행. 설정 → **SSH Hosts** 탭에서 호스트(host/user/port/identity/extraOptions/Remote OS) 등록 후(**사용 방법** 버튼에 단계별 가이드 + 공개키 복사/생성), New Project에서 **"Run on remote host"**로 호스트+원격 폴더 지정. 백엔드는 로컬 PowerShell 대신 `ssh -tt`로 PTY를 띄운다(Windows 내장 OpenSSH). 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장).
+같은 망(또는 사내망/VPN)으로 닿는 다른 컴퓨터에 SSH로 접속해 그 머신에서 셸/claude/codex 실행. 설정 → **SSH Hosts** 탭에서 호스트(host/user/port/identity/extraOptions/Remote OS) 등록 후(**사용 방법** 버튼에 단계별 가이드 + 공개키 복사/생성), New Project에서 **"Run on remote host"**로 호스트+원격 폴더 지정. 백엔드는 로컬 PowerShell 대신 `ssh -tt`로 PTY를 띄운다(Windows 내장 OpenSSH). Windows 원격은 npm `.ps1` 실행 정책 오류를 피하려고 기본적으로 `codex.cmd`/`claude.cmd` shim을 사용한다.
 - **Windows 원격(Phase 2)**: `ssh -R` 역터널 + 원격 hook 푸시로 **working/done 상태점 + 세션 resume**까지 동작(로컬과 동일).
 - **POSIX(Linux/macOS) 원격**: 셸·도구 실행은 정상, 상태점은 running까지(상태/resume은 후속 Phase). 사용량 집계는 원격 전체 미지원.
 - 상세·제약은 [KNOWN_ISSUES.md](KNOWN_ISSUES.md), resume 흐름은 [RESUME.md](RESUME.md).

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toolForId } from "../types";
-import type { Agent } from "../types";
+import type { Agent, SshHost } from "../types";
 import { findSshHost } from "./sshHosts";
 
 export type SpawnArgs = {
@@ -19,6 +19,24 @@ export type SpawnArgs = {
   cwd: string | null;
 };
 
+export function resolveRemoteToolCommand(
+  aiToolId: string,
+  command: string,
+  sshHost: Pick<SshHost, "remoteOs" | "preferCmdShim"> | null
+): string {
+  if (
+    !command ||
+    sshHost?.remoteOs !== "windows" ||
+    sshHost.preferCmdShim === false
+  ) {
+    return command;
+  }
+
+  if (aiToolId === "codex" && command === "codex") return "codex.cmd";
+  if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  return command;
+}
+
 // Builds the spawn_pty arguments for an agent: resolves the resume session id
 // (codex resume / claude --resume), appends the dangerous flag, and assembles
 // the ssh descriptor for remote hosts. Shared by the visible-pane spawn
@@ -33,7 +51,7 @@ export async function buildSpawnArgs(
   let initCommand: string | null = null;
 
   if (tool.command) {
-    let cmd = tool.command;
+    let cmd = resolveRemoteToolCommand(agent.aiToolId, tool.command, sshHost);
     if (sshHost) {
       // Windows remote (Phase 2): remote hooks capture session_id into
       // lastSessionId, so resume directly (no local-disk resolve, which can't

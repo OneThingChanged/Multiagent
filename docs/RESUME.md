@@ -62,6 +62,7 @@ if (agent.dangerous && tool.dangerousFlag) {
 
 결과 예: `codex resume 019e3eda-7a41-77e2-9165-cb5e11e13021 --dangerously-bypass-approvals-and-sandbox`
 Claude 결과 예: `claude --resume <session_id> --dangerously-skip-permissions`
+Windows SSH 호스트는 기본적으로 npm `.ps1` shim 대신 `.cmd` shim을 써서 `codex.cmd resume ...` / `claude.cmd --resume ...` 형태로 실행한다.
 
 ## 그룹 세션 고정
 

@@ -56,12 +56,13 @@
 - 같은 세션을 데스크탑·웹에서 동시에 보면 PTY가 하나라 출력이 공유됨 (의도된 동작; 화면 크기는 데스크탑이 주인)
 
 ### SSH 원격 세션
-- **Windows 원격 = working/done 상태 + 세션 resume 지원 (Phase 2)**: spawn 시 `ssh -R <port>:127.0.0.1:<hookPort>` 역터널로 원격 hook이 로컬 서버에 도달. 원격 `<folder>\.claude\multiagent-notify.ps1`를 푸시하고 `settings.local.json`/`config.toml`에 hook 머지(원격 read→로컬 Rust 머지→write, base64 전송). env(`MULTIAGENT_PORT/TOKEN/AGENT_ID`)는 원격 cmd에 주입. session-start hook이 `lastSessionId`를 채워 다음 spawn에서 `claude --resume <id>`(codex는 `resume <id>`)
+- **Windows 원격 = working/done 상태 + 세션 resume 지원 (Phase 2)**: spawn 시 `ssh -R <port>:127.0.0.1:<hookPort>` 역터널로 원격 hook이 로컬 서버에 도달. 원격 `<folder>\.claude\multiagent-notify.ps1`를 푸시하고 `settings.local.json`/`config.toml`에 hook 머지(원격 read→로컬 Rust 머지→write, base64 전송). env(`MULTIAGENT_PORT/TOKEN/AGENT_ID`)는 원격 PowerShell 명령에 주입. session-start hook이 `lastSessionId`를 채워 다음 spawn에서 `claude --resume <id>`(codex는 `resume <id>`)
 - **POSIX(Linux/macOS) 원격 = 상태/resume 미지원**: 아직 Phase 2 미적용. 원격 셸은 뜨지만 상태점은 running까지, resume 분기는 건너뜀
 - **사용량 집계 미지원(원격 전체)**: usage 대시보드는 로컬 transcript만 파싱 → 원격 세션 토큰은 안 잡힘
 - **Docs/이미지 뷰어 미지원**: 로컬 폴더 스캔 기반이라 SSH 프로젝트(로컬 folder 없음)에선 비활성
 - **클라이언트 OpenSSH 필요**: Windows 내장 `ssh.exe`(OpenSSH 클라이언트)가 PATH에 있어야 함. 없으면 spawn/Test 실패
-- **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=cmd)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `cd /d "<folder>" && <tool>`. 기본값은 POSIX
+- **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=PowerShell)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `powershell -NoProfile -NoExit -EncodedCommand ...` 안에서 `$env:` 주입 + `Set-Location -LiteralPath` + `<tool>` 실행. 기본값은 POSIX
+- **Windows SSH의 npm `.ps1` 실행 정책 문제**: Windows에서 npm으로 설치한 Codex/Claude는 `codex.ps1`/`claude.ps1`와 `codex.cmd`/`claude.cmd`가 같이 생긴다. 원격 PowerShell은 `.ps1` shim을 먼저 잡아 `PSSecurityException`이 날 수 있으므로, SSH Hosts의 **Use .cmd shims for npm CLIs** 옵션이 기본 켜짐이며 Windows 원격에서는 `codex.cmd`/`claude.cmd`를 실행한다. 특수하게 `.ps1`을 써야 하는 호스트만 이 옵션을 끈다.
 - **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
 - **Windows 원격 셸 무관(cmd/PowerShell)**: 원격 명령은 `powershell -EncodedCommand <base64>`로 보내므로, 그 서버의 SSH 기본 셸이 cmd든 PowerShell(구버전 5.1 포함)이든 동작한다. 폴더 경로 공백/특수문자도 base64 + `-LiteralPath`로 안전. 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
 - **인증 방식 토글(키/비밀번호)**: SSH Hosts 등록 시 호스트별 **Auth method** 선택.

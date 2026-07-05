@@ -183,6 +183,13 @@ sudo systemctl enable --now ssh`}
                 <b>Remote OS</b>: 대상이 Windows면 Windows, 아니면 Linux / macOS
               </li>
               <li>
+                Windows 대상은 <b>Use .cmd shims for npm CLIs</b>를 켜둡니다. PowerShell
+                실행 정책이 <span className="ssh-guide-mono">codex.ps1</span>/
+                <span className="ssh-guide-mono">claude.ps1</span>을 막아도{" "}
+                <span className="ssh-guide-mono">codex.cmd</span>/
+                <span className="ssh-guide-mono">claude.cmd</span>로 실행됩니다.
+              </li>
+              <li>
                 <b>User</b> / <b>Host</b>: 3번에서 확인한 값 / <b>Port</b>: 보통 22
               </li>
               <li>
@@ -212,8 +219,8 @@ sudo systemctl enable --now ssh`}
           </div>
 
           <p className="ssh-guide-foot">
-            참고: 원격 세션은 working/done 상태표시·세션 resume·사용량 집계는 아직
-            지원하지 않습니다(터미널·도구 실행은 정상).
+            참고: Windows 키 인증 원격 세션은 working/done 상태표시와 세션 resume을
+            지원합니다. 비밀번호 인증과 POSIX 원격은 터미널 실행 중심으로 동작합니다.
           </p>
         </div>
 
