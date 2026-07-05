@@ -171,6 +171,20 @@ export type ContextMenuState = {
   agentId: string;
 };
 
+export type SessionContextAction =
+  | "open"
+  | "open-new-window"
+  | "tab"
+  | "split-h"
+  | "split-v"
+  | "rename"
+  | "pin-session"
+  | "clear-session-pin"
+  | "restart"
+  | "deactivate"
+  | "relink"
+  | "properties";
+
 export type ProjectContextMenuState = {
   x: number;
   y: number;

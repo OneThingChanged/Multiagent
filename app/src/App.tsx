@@ -33,6 +33,7 @@ import type {
   Path,
   Project,
   ProjectContextMenuState,
+  SessionContextAction,
   StoredAgent,
   StoredProject,
   TabCtxState,
@@ -96,6 +97,7 @@ type TerminalPathResolution = {
 
 type RuntimeFlags = {
   secondary_window: boolean;
+  open_agent_id?: string | null;
 };
 
 function readLocalStorageValue(key: string) {
@@ -116,6 +118,202 @@ function writeLocalStorageIfChanged(
   try {
     localStorage.setItem(key, value);
   } catch {}
+}
+
+function parseStoredArray<T>(raw: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function storedProjectFromProject(project: Project): StoredProject {
+  return {
+    id: project.id,
+    name: project.name,
+    folder: project.folder,
+    createdAt: project.createdAt,
+    lastOpenedAt: project.lastOpenedAt,
+    sshHostId: project.sshHostId,
+    remoteFolder: project.remoteFolder,
+  };
+}
+
+function storedAgentFromAgent(agent: Agent): StoredAgent {
+  return {
+    id: agent.id,
+    projectId: agent.projectId,
+    name: agent.name,
+    folder: agent.folder,
+    aiToolId: agent.aiToolId,
+    dangerous: agent.dangerous,
+    createdAt: agent.createdAt,
+    lastSessionId: agent.lastSessionId,
+  };
+}
+
+function mergeStoredByIdForWrite<T extends { id: string }>(
+  local: T[],
+  stored: T[],
+  removedIds: Set<string>
+) {
+  const localIds = new Set(local.map((item) => item.id));
+  const merged = local.filter((item) => !removedIds.has(item.id));
+  for (const item of stored) {
+    if (!item.id || localIds.has(item.id) || removedIds.has(item.id)) {
+      continue;
+    }
+    merged.push(item);
+  }
+  return merged;
+}
+
+function sameJson(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function projectFromStored(
+  stored: StoredProject,
+  existing?: Project
+): Project | null {
+  if (!stored.id) return null;
+  if (!stored.folder && !stored.sshHostId) return null;
+  const folder = stored.folder || "";
+  return {
+    id: stored.id,
+    name: stored.name || existing?.name || "Project",
+    folder,
+    createdAt: stored.createdAt || existing?.createdAt || Date.now(),
+    lastOpenedAt: stored.lastOpenedAt ?? existing?.lastOpenedAt,
+    sshHostId: stored.sshHostId || undefined,
+    remoteFolder: stored.remoteFolder || undefined,
+  };
+}
+
+function mergeProjectsFromStorage(
+  current: Project[],
+  stored: StoredProject[],
+  removedIds: Set<string>
+) {
+  const currentById = new Map(current.map((project) => [project.id, project]));
+  const seen = new Set<string>();
+  const merged: Project[] = [];
+  for (const item of stored) {
+    if (!item.id || removedIds.has(item.id)) continue;
+    const project = projectFromStored(item, currentById.get(item.id));
+    if (!project) continue;
+    seen.add(project.id);
+    merged.push(project);
+  }
+  for (const project of current) {
+    if (!seen.has(project.id) && !removedIds.has(project.id)) {
+      merged.push(project);
+    }
+  }
+  return sameJson(
+    current.map(storedProjectFromProject),
+    merged.map(storedProjectFromProject)
+  )
+    ? current
+    : merged;
+}
+
+function agentFromStored(
+  stored: StoredAgent,
+  projects: Project[],
+  existing?: Agent
+): Agent | null {
+  if (!stored.id) return null;
+  const byId = new Map(projects.map((project) => [project.id, project]));
+  const byFolder = new Map(projects.map((project) => [project.folder, project]));
+  const project =
+    (stored.projectId && byId.get(stored.projectId)) ||
+    byFolder.get(stored.folder);
+  if (!project) return null;
+  const aiToolId = stored.aiToolId || existing?.aiToolId || "none";
+  return {
+    id: stored.id,
+    projectId: project.id,
+    name: stored.name || existing?.name || "Session",
+    folder: project.folder,
+    aiToolId,
+    aiLabel: toolForId(aiToolId).label,
+    dangerous: !!stored.dangerous,
+    createdAt: stored.createdAt || existing?.createdAt || Date.now(),
+    lastSessionId:
+      stored.lastSessionId ??
+      stored.lastClaudeSessionId ??
+      stored.lastResumeToken ??
+      existing?.lastSessionId,
+    status: existing?.status ?? "idle",
+    sshHostId: project.sshHostId,
+    remoteFolder: project.remoteFolder,
+  };
+}
+
+function mergeAgentsFromStorage(
+  current: Agent[],
+  stored: StoredAgent[],
+  projects: Project[],
+  removedIds: Set<string>
+) {
+  const currentById = new Map(current.map((agent) => [agent.id, agent]));
+  const seen = new Set<string>();
+  const merged: Agent[] = [];
+  for (const item of stored) {
+    if (!item.id || removedIds.has(item.id)) continue;
+    const agent = agentFromStored(item, projects, currentById.get(item.id));
+    if (!agent) continue;
+    seen.add(agent.id);
+    merged.push(agent);
+  }
+  for (const agent of current) {
+    if (!seen.has(agent.id) && !removedIds.has(agent.id)) {
+      merged.push(agent);
+    }
+  }
+  return sameJson(
+    current.map(storedAgentFromAgent),
+    merged.map(storedAgentFromAgent)
+  )
+    ? current
+    : merged;
+}
+
+function groupContainsRemovedAgent(group: Group, removedIds: Set<string>) {
+  if (removedIds.size === 0) return false;
+  try {
+    const ids = collectAgentIds(group.layout);
+    return Array.from(removedIds).some((id) => ids.has(id));
+  } catch {
+    return true;
+  }
+}
+
+function mergeGroupsFromStorage(
+  current: Group[],
+  stored: Group[],
+  removedAgentIds: Set<string>
+) {
+  const currentById = new Map(current.map((group) => [group.id, group]));
+  const seen = new Set<string>();
+  const merged: Group[] = [];
+  for (const group of stored) {
+    if (!group?.id || groupContainsRemovedAgent(group, removedAgentIds)) {
+      continue;
+    }
+    seen.add(group.id);
+    merged.push(group);
+  }
+  for (const group of current) {
+    if (!seen.has(group.id) && !groupContainsRemovedAgent(group, removedAgentIds)) {
+      merged.push(currentById.get(group.id) ?? group);
+    }
+  }
+  return sameJson(current, merged) ? current : merged;
 }
 
 function clampDocsWidth(width: number) {
@@ -263,6 +461,60 @@ function App() {
   const remoteAgentsJsonRef = useRef<string | null>(null);
   const remoteViewJsonRef = useRef<string | null>(null);
   const usageCatalogJsonRef = useRef<string | null>(null);
+  const removedProjectIdsRef = useRef<Set<string>>(new Set());
+  const removedAgentIdsRef = useRef<Set<string>>(new Set());
+  const openedInitialAgentRef = useRef<string | null>(null);
+
+  const syncSharedStateFromStorage = useCallback(() => {
+    const projectsRaw = readLocalStorageValue(LS_PROJECTS);
+    const agentsRaw = readLocalStorageValue(LS_AGENTS);
+    const groupsRaw = readLocalStorageValue(LS_GROUPS);
+
+    let nextProjects = projectsRef.current;
+    if (projectsRaw !== storedProjectsJsonRef.current) {
+      const storedProjects = parseStoredArray<StoredProject>(projectsRaw);
+      const merged = mergeProjectsFromStorage(
+        projectsRef.current,
+        storedProjects,
+        removedProjectIdsRef.current
+      );
+      storedProjectsJsonRef.current = projectsRaw;
+      if (merged !== projectsRef.current) {
+        nextProjects = merged;
+        projectsRef.current = merged;
+        setProjects(merged);
+      }
+    }
+
+    if (agentsRaw !== storedAgentsJsonRef.current) {
+      const storedAgents = parseStoredArray<StoredAgent>(agentsRaw);
+      const merged = mergeAgentsFromStorage(
+        agentsRef.current,
+        storedAgents,
+        nextProjects,
+        removedAgentIdsRef.current
+      );
+      storedAgentsJsonRef.current = agentsRaw;
+      if (merged !== agentsRef.current) {
+        agentsRef.current = merged;
+        setAgents(merged);
+      }
+    }
+
+    if (groupsRaw !== storedGroupsJsonRef.current) {
+      const storedGroups = parseStoredArray<Group>(groupsRaw);
+      const merged = mergeGroupsFromStorage(
+        groupsRef.current,
+        storedGroups,
+        removedAgentIdsRef.current
+      );
+      storedGroupsJsonRef.current = groupsRaw;
+      if (merged !== groupsRef.current) {
+        groupsRef.current = merged;
+        setGroups(merged);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -277,6 +529,26 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!runtimeFlags) return;
+    syncSharedStateFromStorage();
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key === LS_PROJECTS ||
+        event.key === LS_AGENTS ||
+        event.key === LS_GROUPS
+      ) {
+        syncSharedStateFromStorage();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    const interval = window.setInterval(syncSharedStateFromStorage, 1000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(interval);
+    };
+  }, [runtimeFlags, syncSharedStateFromStorage]);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -382,45 +654,46 @@ function App() {
   // ---- Persistence
 
   useEffect(() => {
-    const storedProjects: StoredProject[] = projects.map((project) => ({
-      id: project.id,
-      name: project.name,
-      folder: project.folder,
-      createdAt: project.createdAt,
-      lastOpenedAt: project.lastOpenedAt,
-      sshHostId: project.sshHostId,
-      remoteFolder: project.remoteFolder,
-    }));
+    const storedProjects = projects.map(storedProjectFromProject);
+    const mergedProjects = mergeStoredByIdForWrite(
+      storedProjects,
+      parseStoredArray<StoredProject>(readLocalStorageValue(LS_PROJECTS)),
+      removedProjectIdsRef.current
+    );
     writeLocalStorageIfChanged(
       storedProjectsJsonRef,
       LS_PROJECTS,
-      JSON.stringify(storedProjects)
+      JSON.stringify(mergedProjects)
     );
   }, [projects]);
 
   useEffect(() => {
-    const configs: StoredAgent[] = agents.map((a) => ({
-      id: a.id,
-      projectId: a.projectId,
-      name: a.name,
-      folder: a.folder,
-      aiToolId: a.aiToolId,
-      dangerous: a.dangerous,
-      createdAt: a.createdAt,
-      lastSessionId: a.lastSessionId,
-    }));
+    const configs = agents.map(storedAgentFromAgent);
+    const mergedConfigs = mergeStoredByIdForWrite(
+      configs,
+      parseStoredArray<StoredAgent>(readLocalStorageValue(LS_AGENTS)),
+      removedAgentIdsRef.current
+    );
     writeLocalStorageIfChanged(
       storedAgentsJsonRef,
       LS_AGENTS,
-      JSON.stringify(configs)
+      JSON.stringify(mergedConfigs)
     );
   }, [agents]);
 
   useEffect(() => {
+    const storedGroups = parseStoredArray<Group>(readLocalStorageValue(LS_GROUPS));
+    const mergedGroups = mergeStoredByIdForWrite(
+      groups,
+      storedGroups.filter(
+        (group) => !groupContainsRemovedAgent(group, removedAgentIdsRef.current)
+      ),
+      new Set()
+    );
     writeLocalStorageIfChanged(
       storedGroupsJsonRef,
       LS_GROUPS,
-      JSON.stringify(groups)
+      JSON.stringify(mergedGroups)
     );
   }, [groups]);
 
@@ -626,8 +899,8 @@ function App() {
       });
   }, [pushToast]);
 
-  const openNewAppWindow = useCallback(() => {
-    invoke("open_new_app_window").catch((error) => {
+  const openNewAppWindow = useCallback((agentId?: string | null) => {
+    invoke("open_new_app_window", { agentId: agentId ?? null }).catch((error) => {
       pushToast("", "새 창", `새 창을 열 수 없습니다: ${String(error)}`);
     });
   }, [pushToast]);
@@ -891,6 +1164,14 @@ function App() {
     selectAgentRef.current = selectAgent;
   }, [selectAgent]);
 
+  useEffect(() => {
+    const agentId = runtimeFlags?.open_agent_id;
+    if (!agentId || openedInitialAgentRef.current === agentId) return;
+    if (!agents.some((agent) => agent.id === agentId)) return;
+    openedInitialAgentRef.current = agentId;
+    selectAgent(agentId);
+  }, [agents, runtimeFlags, selectAgent]);
+
   // Selecting a project only marks it active (so the + button targets it and the
   // Docs panel scans its folder). It no longer auto-opens the project's first
   // session — sessions open only when a session row is clicked. The sidebar
@@ -1042,6 +1323,10 @@ function App() {
       }
 
       const memberIds = new Set(members.map((m) => m.id));
+      removedProjectIdsRef.current.add(projectId);
+      for (const id of memberIds) {
+        removedAgentIdsRef.current.add(id);
+      }
       setAgents((prev) => prev.filter((a) => !memberIds.has(a.id)));
       for (const id of memberIds) {
         applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
@@ -1102,6 +1387,7 @@ function App() {
 
   const removeAgent = useCallback(
     async (id: string) => {
+      removedAgentIdsRef.current.add(id);
       await invoke("kill_pty", { id }).catch(() => {});
       const entry = termsRef.current.get(id);
       entry?.term.dispose();
@@ -1267,23 +1553,13 @@ function App() {
 
   const onContextAction = useCallback(
     (
-      action:
-        | "open"
-        | "tab"
-        | "split-h"
-        | "split-v"
-        | "rename"
-        | "pin-session"
-        | "clear-session-pin"
-        | "restart"
-        | "deactivate"
-        | "relink"
-        | "properties"
+      action: SessionContextAction
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
       setContextMenu(null);
       if (action === "open") selectAgent(id);
+      else if (action === "open-new-window") openNewAppWindow(id);
       else if (action === "tab") openAsTab(id);
       else if (action === "split-h") splitWith(id, "h");
       else if (action === "split-v") splitWith(id, "v");
@@ -1304,6 +1580,7 @@ function App() {
     [
       contextMenu,
       selectAgent,
+      openNewAppWindow,
       openAsTab,
       splitWith,
       pinContextGroupSessions,

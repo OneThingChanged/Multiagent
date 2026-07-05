@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type {
   ContextMenuState,
   ProjectContextMenuState,
+  SessionContextAction,
   TabCtxState,
 } from "../types";
 
@@ -128,18 +129,7 @@ export function ContextMenu({
   canDeactivate: boolean;
   onClose: () => void;
   onAction: (
-    action:
-      | "open"
-      | "tab"
-      | "split-h"
-      | "split-v"
-      | "rename"
-      | "pin-session"
-      | "clear-session-pin"
-      | "restart"
-      | "deactivate"
-      | "relink"
-      | "properties"
+    action: SessionContextAction
   ) => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
@@ -161,6 +151,9 @@ export function ContextMenu({
       >
         <button className="ctx-item" onClick={() => onAction("open")}>
           전환 (현재 그룹으로 이동)
+        </button>
+        <button className="ctx-item" onClick={() => onAction("open-new-window")}>
+          새 창에서 열기
         </button>
         <button
           className="ctx-item"

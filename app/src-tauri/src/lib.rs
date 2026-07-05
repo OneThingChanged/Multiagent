@@ -128,7 +128,10 @@ fn build_ssh_remote_command(
             script.push_str(&format!("$env:{}={};", k, ps_single_quote(v)));
         }
         if let Some(f) = folder {
-            script.push_str(&format!("Set-Location -LiteralPath {};", ps_single_quote(f)));
+            script.push_str(&format!(
+                "Set-Location -LiteralPath {};",
+                ps_single_quote(f)
+            ));
         }
         if let Some(t) = tool {
             script.push_str(t);
@@ -189,6 +192,7 @@ struct TerminalPathResolution {
 #[derive(Clone, Serialize)]
 struct RuntimeFlags {
     secondary_window: bool,
+    open_agent_id: Option<String>,
 }
 
 const HOOK_MARKER: &str = "multiagent";
@@ -198,6 +202,26 @@ const MAX_MARKDOWN_FILE_BYTES: u64 = 2 * 1024 * 1024;
 fn is_secondary_window_process() -> bool {
     std::env::var("MULTIAGENT_SECONDARY_WINDOW").ok().as_deref() == Some("1")
         || std::env::args().any(|arg| arg == "--multiagent-secondary-window")
+}
+
+fn open_agent_id_arg() -> Option<String> {
+    if let Ok(value) = std::env::var("MULTIAGENT_OPEN_AGENT_ID") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if arg == "--multiagent-open-agent" {
+            return args
+                .next()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
+    }
+    None
 }
 
 #[cfg(windows)]
@@ -1721,7 +1745,10 @@ fn ps_encoded(ps: &str) -> String {
 /// timeout) and return the process output.
 fn run_remote_ps(ssh: &SshSpawn, encoded: &str) -> Result<std::process::Output, String> {
     let mut c = std::process::Command::new("ssh");
-    c.arg("-o").arg("BatchMode=yes").arg("-o").arg("ConnectTimeout=8");
+    c.arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=8");
     for a in ssh_conn_args(ssh) {
         c.arg(a);
     }
@@ -1968,12 +1995,21 @@ fn generate_ssh_key() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_new_app_window() -> Result<(), String> {
+fn open_new_app_window(agent_id: Option<String>) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = std::process::Command::new(exe);
     command
         .arg("--multiagent-secondary-window")
         .env("MULTIAGENT_SECONDARY_WINDOW", "1");
+    if let Some(agent_id) = agent_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        command
+            .arg("--multiagent-open-agent")
+            .arg(&agent_id)
+            .env("MULTIAGENT_OPEN_AGENT_ID", agent_id);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1988,6 +2024,7 @@ fn open_new_app_window() -> Result<(), String> {
 fn runtime_flags(state: State<'_, AppState>) -> RuntimeFlags {
     RuntimeFlags {
         secondary_window: state.secondary_window,
+        open_agent_id: open_agent_id_arg(),
     }
 }
 
