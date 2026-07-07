@@ -46,7 +46,7 @@ npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.
 
 ## 릴리즈 절차
 
-### 1. 버전 올리기 (4곳 전부)
+### 1. 버전 올리기 (소스 4곳 전부)
 
 | 파일 | 필드 |
 |---|---|
@@ -55,11 +55,38 @@ npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.
 | `app/src-tauri/tauri.conf.json` | `"version"` |
 | `app/src/lib/appInfo.ts` | `APP_VERSION` |
 
-4곳이 어긋나면 빌드 산출물 파일명/표시 버전이 꼬인다.
+4곳이 어긋나면 빌드 산출물 파일명/표시 버전이 꼬인다. `app/package-lock.json`, `app/src-tauri/Cargo.lock`의 루트 패키지 버전도 최종 커밋에 같이 반영돼야 한다.
 
-### 2. 서명 빌드
+### 2. 빠른 검증
 
-private key를 환경변수로 넘겨 빌드한다. (비밀번호가 없어도 `_PASSWORD=""`를 줘야 cloudflared 프롬프트 없이 진행됨)
+작은 hotfix라도 릴리즈 전 최소 검증은 이 두 개로 고정한다.
+
+```powershell
+cd "K:\AI\MultiAgent\app"
+npm test
+
+cd "K:\AI\MultiAgent\app\src-tauri"
+cargo test
+```
+
+### 3. 서명 빌드
+
+private key를 환경변수로 넘겨 빌드한다. (비밀번호가 없어도 `_PASSWORD=""`를 줘야 프롬프트 없이 진행됨)
+
+PowerShell/Codex 환경에서는 아래 블록을 그대로 쓰면 된다. private key는 현재 프로세스 환경변수에만 주입하고, 빌드 후 바로 지운다.
+
+```powershell
+cd "K:\AI\MultiAgent\app"
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+npm run release:build:all
+$code = $LASTEXITCODE
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+if ($code -ne 0) { throw "release build failed: $code" }
+```
+
+Bash/Git Bash에서는 다음처럼 실행한다.
 
 ```bash
 cd K:/AI/MultiAgent/app
@@ -72,7 +99,7 @@ npm run release:build:all
 
 성공하면 로그 끝에 `Finished N updater signatures at:` 가 보이고 `.sig` 파일이 생성된다.
 
-### 3. 산출물
+### 4. 산출물
 
 ```
 app/src-tauri/target/release/bundle/
@@ -88,7 +115,7 @@ app/src-tauri/target/release/bundle/
   latest-company.json
 ```
 
-### 4. latest manifest 작성
+### 5. latest manifest 작성
 
 `.sig` 파일의 **내용 전체**를 `signature`에 넣는다.
 
@@ -111,7 +138,7 @@ app/src-tauri/target/release/bundle/
 - `npm run release:build:all`은 두 variant를 빌드하고 `latest.json`, `latest-company.json`을 bundle 폴더에 같이 작성한다. 둘 중 하나라도 서명/manifest가 없으면 실패한다.
 - 수동 재작성만 필요하면 `npm run release:manifests`
 
-### 5. 커밋 / 태그 / 푸시
+### 6. 커밋 / 태그 / 푸시
 
 ```bash
 cd K:/AI/MultiAgent
@@ -125,7 +152,7 @@ git push origin v<ver>
 > push가 SSL 오류(`unable to get local issuer certificate`)로 막히면 한 번만:
 > `git config --global http.sslBackend schannel`
 
-### 6. GitHub 릴리즈 게시
+### 7. GitHub 릴리즈 게시
 
 핵심: **draft로 두지 말고 바로 publish + Latest 마킹.** (0.4.4·0.4.5가 draft로 만들어져 업데이터가 못 보던 사고가 있었음.)
 
@@ -151,7 +178,7 @@ gh release upload v<ver> --clobber <파일들...>
 gh release edit v<ver> --draft=false --latest
 ```
 
-### 7. 검증
+### 8. 검증
 
 ```bash
 # Latest 태그가 이번 버전인가
@@ -167,7 +194,7 @@ curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>
 
 ## 자주 빠뜨리는 함정 (체크리스트)
 
-- [ ] 버전 4곳 모두 갱신했나
+- [ ] 버전 소스 4곳과 lockfile 루트 버전이 모두 갱신됐나
 - [ ] `TAURI_SIGNING_PRIVATE_KEY`(+빈 PASSWORD) 주고 `npm run release:build:all` 했나 → 두 variant `.sig` 생성 확인
 - [ ] `latest.json` / `latest-company.json`의 signature가 각 variant의 **NSIS setup.exe.sig** 내용인가
 - [ ] 릴리즈가 **draft 아님 + Latest 마킹**인가

@@ -3,13 +3,11 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { DropZone, TerminalEntry } from "../types";
 import { loadAppTheme, type AppThemeId } from "./appTheme";
 
@@ -93,6 +91,7 @@ export type MarkdownPathHandler = (agentId: string, path: string) => void;
 export type ImagePathHandler = (agentId: string, path: string) => void;
 export type FolderPathHandler = (agentId: string, path: string) => void;
 export type TerminalPathHandler = (agentId: string, path: string) => void;
+type UrlHandler = (url: string) => void;
 
 type MarkdownPathMatch = {
   text: string;
@@ -343,6 +342,26 @@ function findImagePathMatches(text: string): MarkdownPathMatch[] {
   return matches;
 }
 
+function findUrlMatches(text: string): MarkdownPathMatch[] {
+  const matches: MarkdownPathMatch[] = [];
+  const regex = new RegExp(URL_LINK_RE.source, "g");
+
+  for (const match of text.matchAll(regex)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    const startColumn = cellWidth(text.slice(0, start));
+    matches.push({
+      text: raw,
+      startIndex: start,
+      endIndex: start + raw.length,
+      startColumn,
+      endColumn: startColumn + cellWidth(raw),
+    });
+  }
+
+  return matches;
+}
+
 function findAbsolutePathMatches(text: string): MarkdownPathMatch[] {
   const matches: MarkdownPathMatch[] = [];
   ABSOLUTE_PATH_RE.lastIndex = 0;
@@ -572,6 +591,44 @@ function buildLogicalLine(
   return { text: text.replace(/\s+$/, ""), cellMap };
 }
 
+function registerUrlLinkProvider(term: Terminal, onUrl: UrlHandler) {
+  term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const logical = buildLogicalLine(term, bufferLineNumber - 1);
+      if (!logical) {
+        callback(undefined);
+        return;
+      }
+
+      const { text, cellMap } = logical;
+      const links: ILink[] = [];
+
+      for (const match of findUrlMatches(text)) {
+        const startCell = cellMap[match.startIndex];
+        const lastCell = cellMap[match.endIndex - 1];
+        if (!startCell || !lastCell) continue;
+        links.push({
+          range: {
+            start: { x: startCell.col + 1, y: startCell.row + 1 },
+            end: { x: lastCell.col + lastCell.width, y: lastCell.row + 1 },
+          },
+          text: match.text,
+          decorations: {
+            pointerCursor: true,
+            underline: true,
+          },
+          activate(event, url) {
+            event.preventDefault();
+            onUrl(url);
+          },
+        });
+      }
+
+      callback(links.length > 0 ? links : undefined);
+    },
+  });
+}
+
 function registerMarkdownLinkProvider(
   term: Terminal,
   id: string,
@@ -590,7 +647,7 @@ function registerMarkdownLinkProvider(
 
       const { text, cellMap } = logical;
       const links: ILink[] = [];
-      const occupied: MarkdownPathMatch[] = [];
+      const occupied: MarkdownPathMatch[] = findUrlMatches(text);
 
       const pushLink = (
         match: MarkdownPathMatch,
@@ -659,6 +716,14 @@ function registerMarkdownLinkProvider(
   });
 }
 
+function openTerminalUrl(url: string) {
+  const target = url.trim();
+  if (!target) return;
+  invoke("open_external_url", { url: target }).catch((err) => {
+    console.error("open url failed", err);
+  });
+}
+
 export function createEntry(
   id: string,
   onMarkdownPath?: MarkdownPathHandler,
@@ -686,17 +751,7 @@ export function createEntry(
   term.loadAddon(search);
   const serialize = new SerializeAddon();
   term.loadAddon(serialize);
-  term.loadAddon(
-    new WebLinksAddon(
-      (event, uri) => {
-        event.preventDefault();
-        openUrl(uri).catch((err) => {
-          console.error("open url failed", err);
-        });
-      },
-      { urlRegex: URL_LINK_RE }
-    )
-  );
+  registerUrlLinkProvider(term, openTerminalUrl);
   if (onMarkdownPath) {
     registerMarkdownLinkProvider(
       term,

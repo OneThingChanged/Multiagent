@@ -11,6 +11,7 @@ use fs2::FileExt;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
 mod monitor;
@@ -1380,6 +1381,19 @@ fn reveal_local_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    let target = url.trim();
+    let lower = target.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("unsupported url scheme".to_string());
+    }
+
+    app.opener()
+        .open_url(target.to_string(), None::<&str>)
+        .map_err(|e| format!("open url failed: {}", e))
+}
+
+#[tauri::command]
 fn resolve_terminal_path(folder: String, path: String) -> Result<TerminalPathResolution, String> {
     let target = resolve_terminal_path_file(&folder, &path)?;
     Ok(TerminalPathResolution {
@@ -2683,6 +2697,7 @@ pub fn run() {
         open_folder_path,
         open_local_path,
         reveal_local_path,
+        open_external_url,
         resolve_terminal_path,
         download_installer,
         run_installer_and_quit,
@@ -2743,6 +2758,7 @@ pub fn run() {
         open_folder_path,
         open_local_path,
         reveal_local_path,
+        open_external_url,
         resolve_terminal_path,
         download_installer,
         run_installer_and_quit,
