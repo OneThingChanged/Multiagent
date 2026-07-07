@@ -17,7 +17,9 @@ import {
   clampTerminalFontSize,
   computeDropZone,
   createEntry,
+  findTerminalUrlAtMouseEvent,
   installImeCompositionPreview,
+  openTerminalUrl,
   saveTerminalFontSize,
   scrollTerminalLinesImmediately,
 } from "../lib/terminal";
@@ -174,6 +176,60 @@ export function PaneSlot({
     ro.observe(entry.el);
     scheduleApply();
 
+    let pendingUrlClick: string | null = null;
+
+    const stopTerminalMouseEvent = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    const terminalUrlAt = (event: MouseEvent) => {
+      const targetEntry = termsRef.current.get(agentId);
+      if (!targetEntry) return null;
+      return findTerminalUrlAtMouseEvent(targetEntry.term, event);
+    };
+
+    const urlMouseDownHandler = (event: MouseEvent) => {
+      if (event.button !== 0 || event.detail > 1 || event.shiftKey) {
+        pendingUrlClick = null;
+        return;
+      }
+      const url = terminalUrlAt(event);
+      if (!url) {
+        pendingUrlClick = null;
+        return;
+      }
+      pendingUrlClick = url;
+      stopTerminalMouseEvent(event);
+    };
+
+    const urlMouseUpHandler = (event: MouseEvent) => {
+      if (!pendingUrlClick) return;
+      const pending = pendingUrlClick;
+      pendingUrlClick = null;
+      stopTerminalMouseEvent(event);
+      if (terminalUrlAt(event) === pending) {
+        openTerminalUrl(pending);
+      }
+    };
+
+    const urlClickHandler = (event: MouseEvent) => {
+      if (terminalUrlAt(event)) {
+        stopTerminalMouseEvent(event);
+      }
+    };
+
+    container.addEventListener("mousedown", urlMouseDownHandler, {
+      capture: true,
+    });
+    container.addEventListener("mouseup", urlMouseUpHandler, {
+      capture: true,
+    });
+    container.addEventListener("click", urlClickHandler, {
+      capture: true,
+    });
+
     const wheelHandler = (e: WheelEvent) => {
       const targetEntry = termsRef.current.get(agentId);
       if (!targetEntry) return;
@@ -267,6 +323,15 @@ export function PaneSlot({
     return () => {
       ro.disconnect();
       window.clearTimeout(debounceTimer);
+      container.removeEventListener("mousedown", urlMouseDownHandler, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener("mouseup", urlMouseUpHandler, {
+        capture: true,
+      } as EventListenerOptions);
+      container.removeEventListener("click", urlClickHandler, {
+        capture: true,
+      } as EventListenerOptions);
       container.removeEventListener("wheel", wheelHandler, {
         capture: true,
       } as EventListenerOptions);

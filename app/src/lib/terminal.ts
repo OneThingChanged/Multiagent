@@ -530,6 +530,32 @@ export function findMarkdownPathAt(
 
 type CellRef = { row: number; col: number; width: number };
 
+function cellLinearIndex(termCols: number, row: number, col: number) {
+  return row * termCols + col;
+}
+
+function findUrlInLogicalLineAtCell(
+  logical: { text: string; cellMap: CellRef[] },
+  termCols: number,
+  row: number,
+  col: number
+) {
+  const cursor = cellLinearIndex(termCols, row, col);
+  for (const match of findUrlMatches(logical.text)) {
+    const startCell = logical.cellMap[match.startIndex];
+    const lastCell = logical.cellMap[match.endIndex - 1];
+    if (!startCell || !lastCell) continue;
+    const start = cellLinearIndex(termCols, startCell.row, startCell.col);
+    const end = cellLinearIndex(
+      termCols,
+      lastCell.row,
+      lastCell.col + Math.max(1, lastCell.width) - 1
+    );
+    if (cursor >= start && cursor <= end) return match.text;
+  }
+  return null;
+}
+
 // Reconstruct the full logical line that `rowIndex` belongs to, joining any
 // soft-wrapped continuation rows (xterm flags these with `isWrapped`). Returns
 // the joined text plus a per-character map back to absolute buffer row/column,
@@ -589,6 +615,42 @@ function buildLogicalLine(
   // Trim trailing whitespace (matches translateToString(true)); cellMap keeps
   // its extra entries but we only index within the trimmed length.
   return { text: text.replace(/\s+$/, ""), cellMap };
+}
+
+export function findTerminalUrlAtMouseEvent(term: Terminal, event: MouseEvent) {
+  const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+  if (!screen || term.cols < 1 || term.rows < 1) return null;
+
+  const rect = screen.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const style = window.getComputedStyle(screen);
+  const paddingLeft = Number.parseInt(style.paddingLeft, 10) || 0;
+  const paddingTop = Number.parseInt(style.paddingTop, 10) || 0;
+  const contentWidth =
+    rect.width -
+    paddingLeft -
+    (Number.parseInt(style.paddingRight, 10) || 0);
+  const contentHeight =
+    rect.height -
+    paddingTop -
+    (Number.parseInt(style.paddingBottom, 10) || 0);
+  if (contentWidth <= 0 || contentHeight <= 0) return null;
+
+  const x = event.clientX - rect.left - paddingLeft;
+  const y = event.clientY - rect.top - paddingTop;
+  if (x < 0 || y < 0 || x > contentWidth || y > contentHeight) return null;
+
+  const col = Math.min(term.cols - 1, Math.max(0, Math.ceil(x / (contentWidth / term.cols)) - 1));
+  const viewportRow = Math.min(
+    term.rows - 1,
+    Math.max(0, Math.ceil(y / (contentHeight / term.rows)) - 1)
+  );
+  const row = term.buffer.active.viewportY + viewportRow;
+  const logical = buildLogicalLine(term, row);
+  if (!logical) return null;
+
+  return findUrlInLogicalLineAtCell(logical, term.cols, row, col);
 }
 
 function registerUrlLinkProvider(term: Terminal, onUrl: UrlHandler) {
@@ -716,7 +778,7 @@ function registerMarkdownLinkProvider(
   });
 }
 
-function openTerminalUrl(url: string) {
+export function openTerminalUrl(url: string) {
   const target = url.trim();
   if (!target) return;
   invoke("open_external_url", { url: target }).catch((err) => {
