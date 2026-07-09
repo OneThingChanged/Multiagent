@@ -101,6 +101,13 @@ type MarkdownPathMatch = {
   endColumn: number;
 };
 
+export type TerminalMouseLink =
+  | { kind: "url"; text: string }
+  | { kind: "terminal"; text: string }
+  | { kind: "markdown"; text: string }
+  | { kind: "image"; text: string }
+  | { kind: "folder"; text: string };
+
 export function clampTerminalFontSize(fontSize: number) {
   if (!Number.isFinite(fontSize)) return DEFAULT_TERMINAL_FONT_SIZE;
   return Math.min(
@@ -534,14 +541,15 @@ function cellLinearIndex(termCols: number, row: number, col: number) {
   return row * termCols + col;
 }
 
-function findUrlInLogicalLineAtCell(
+function findMatchAtCell(
   logical: { text: string; cellMap: CellRef[] },
   termCols: number,
   row: number,
-  col: number
+  col: number,
+  matches: MarkdownPathMatch[]
 ) {
   const cursor = cellLinearIndex(termCols, row, col);
-  for (const match of findUrlMatches(logical.text)) {
+  for (const match of matches) {
     const startCell = logical.cellMap[match.startIndex];
     const lastCell = logical.cellMap[match.endIndex - 1];
     if (!startCell || !lastCell) continue;
@@ -553,6 +561,66 @@ function findUrlInLogicalLineAtCell(
     );
     if (cursor >= start && cursor <= end) return match.text;
   }
+  return null;
+}
+
+function findTerminalLinkInLogicalLineAtCell(
+  logical: { text: string; cellMap: CellRef[] },
+  termCols: number,
+  row: number,
+  col: number
+): TerminalMouseLink | null {
+  const occupied: MarkdownPathMatch[] = [];
+
+  const url = findMatchAtCell(
+    logical,
+    termCols,
+    row,
+    col,
+    findUrlMatches(logical.text)
+  );
+  if (url) return { kind: "url", text: url };
+  occupied.push(...findUrlMatches(logical.text));
+
+  const absoluteMatches = findAbsolutePathMatches(logical.text);
+  const absolute = findMatchAtCell(logical, termCols, row, col, absoluteMatches);
+  if (absolute) return { kind: "terminal", text: absolute };
+  occupied.push(...absoluteMatches);
+
+  const markdownMatches = findMarkdownPathMatches(logical.text).filter(
+    (match) => !occupied.some((existing) => rangeOverlaps(existing, match))
+  );
+  const markdown = findMatchAtCell(
+    logical,
+    termCols,
+    row,
+    col,
+    markdownMatches
+  );
+  if (markdown) return { kind: "markdown", text: markdown };
+  occupied.push(...markdownMatches);
+
+  const imageMatches = findImagePathMatches(logical.text).filter(
+    (match) => !occupied.some((existing) => rangeOverlaps(existing, match))
+  );
+  const image = findMatchAtCell(logical, termCols, row, col, imageMatches);
+  if (image) return { kind: "image", text: image };
+  occupied.push(...imageMatches);
+
+  const fileMatches = findGeneralFilePathMatches(logical.text, occupied);
+  const file = findMatchAtCell(logical, termCols, row, col, fileMatches);
+  if (file) return { kind: "terminal", text: file };
+  occupied.push(...fileMatches);
+
+  const folder = findMatchAtCell(
+    logical,
+    termCols,
+    row,
+    col,
+    findFolderPathMatches(logical.text, occupied)
+  );
+  if (folder) return { kind: "folder", text: folder };
+
   return null;
 }
 
@@ -617,7 +685,10 @@ function buildLogicalLine(
   return { text: text.replace(/\s+$/, ""), cellMap };
 }
 
-export function findTerminalUrlAtMouseEvent(term: Terminal, event: MouseEvent) {
+export function findTerminalLinkAtMouseEvent(
+  term: Terminal,
+  event: MouseEvent
+): TerminalMouseLink | null {
   const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
   if (!screen || term.cols < 1 || term.rows < 1) return null;
 
@@ -641,7 +712,10 @@ export function findTerminalUrlAtMouseEvent(term: Terminal, event: MouseEvent) {
   const y = event.clientY - rect.top - paddingTop;
   if (x < 0 || y < 0 || x > contentWidth || y > contentHeight) return null;
 
-  const col = Math.min(term.cols - 1, Math.max(0, Math.ceil(x / (contentWidth / term.cols)) - 1));
+  const col = Math.min(
+    term.cols - 1,
+    Math.max(0, Math.ceil(x / (contentWidth / term.cols)) - 1)
+  );
   const viewportRow = Math.min(
     term.rows - 1,
     Math.max(0, Math.ceil(y / (contentHeight / term.rows)) - 1)
@@ -650,7 +724,12 @@ export function findTerminalUrlAtMouseEvent(term: Terminal, event: MouseEvent) {
   const logical = buildLogicalLine(term, row);
   if (!logical) return null;
 
-  return findUrlInLogicalLineAtCell(logical, term.cols, row, col);
+  return findTerminalLinkInLogicalLineAtCell(logical, term.cols, row, col);
+}
+
+export function findTerminalUrlAtMouseEvent(term: Terminal, event: MouseEvent) {
+  const link = findTerminalLinkAtMouseEvent(term, event);
+  return link?.kind === "url" ? link.text : null;
 }
 
 function registerUrlLinkProvider(term: Terminal, onUrl: UrlHandler) {

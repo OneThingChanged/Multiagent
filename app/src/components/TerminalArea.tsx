@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type {
   Agent,
   AgentStatus,
@@ -8,9 +10,32 @@ import type {
   Path,
   TerminalEntry,
 } from "../types";
+import { formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import { PaneSlot } from "./PaneSlot";
 import type { RenderCtx } from "./PaneSlot";
 import { Splitter } from "./Splitter";
+
+function parsePanePath(value: string | undefined) {
+  if (value === undefined) return null;
+  if (value === "") return [];
+  const path = value.split(",").map((part) => Number(part));
+  return path.every((part) => Number.isInteger(part) && part >= 0)
+    ? path
+    : null;
+}
+
+function pastePathsToTerminal(
+  entry: TerminalEntry | undefined,
+  paths: string[]
+) {
+  if (!entry || paths.length === 0) return false;
+  const text = paths.map(formatDroppedPathForTerminal).filter(Boolean).join(" ");
+  if (!text) return false;
+  entry.term.focus();
+  entry.term.clearSelection();
+  entry.term.paste(text);
+  return true;
+}
 
 export function TerminalArea({
   agents,
@@ -61,6 +86,46 @@ export function TerminalArea({
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;
 }) {
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type !== "drop") return;
+        const paths = event.payload.paths;
+        if (paths.length === 0) return;
+
+        const scale = window.devicePixelRatio || 1;
+        const x = event.payload.position.x / scale;
+        const y = event.payload.position.y / scale;
+        const pane = document
+          .elementFromPoint(x, y)
+          ?.closest<HTMLElement>("[data-pane-active-agent-id]");
+        const agentId = pane?.dataset.paneActiveAgentId;
+        if (!agentId) return;
+
+        const panePath = parsePanePath(pane.dataset.panePath);
+        if (panePath) setActivePath(panePath);
+        pastePathsToTerminal(termsRef.current.get(agentId), paths);
+      })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((err) => {
+        console.error("listen file drop failed", err);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [setActivePath, termsRef]);
+
   const ctx: RenderCtx = {
     agents,
     sessionPins,
@@ -92,6 +157,11 @@ export function TerminalArea({
         <div
           className="empty-state"
           onDragOver={(event) => {
+            if (hasExternalFiles(event.dataTransfer)) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "none";
+              return;
+            }
             const agentId =
               dragState?.fromAgentId ||
               event.dataTransfer.getData("application/x-multiagent-agent") ||
@@ -101,6 +171,10 @@ export function TerminalArea({
             event.dataTransfer.dropEffect = "move";
           }}
           onDrop={(event) => {
+            if (hasExternalFiles(event.dataTransfer)) {
+              event.preventDefault();
+              return;
+            }
             const agentId =
               dragState?.fromAgentId ||
               event.dataTransfer.getData("application/x-multiagent-agent") ||

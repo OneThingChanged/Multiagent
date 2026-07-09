@@ -17,13 +17,23 @@ import {
   clampTerminalFontSize,
   computeDropZone,
   createEntry,
-  findTerminalUrlAtMouseEvent,
+  findTerminalLinkAtMouseEvent,
   installImeCompositionPreview,
   openTerminalUrl,
   saveTerminalFontSize,
   scrollTerminalLinesImmediately,
+  type TerminalMouseLink,
 } from "../lib/terminal";
 import { loadScrollback } from "../lib/scrollback";
+import {
+  extractDroppedFilePaths,
+  formatDroppedPathForTerminal,
+  hasExternalFiles,
+} from "../lib/fileDrop";
+
+function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
+  return !!a && !!b && a.kind === b.kind && a.text === b.text;
+}
 
 export type RenderCtx = {
   agents: Agent[];
@@ -176,7 +186,7 @@ export function PaneSlot({
     ro.observe(entry.el);
     scheduleApply();
 
-    let pendingUrlClick: string | null = null;
+    let pendingLinkClick: TerminalMouseLink | null = null;
 
     const stopTerminalMouseEvent = (event: MouseEvent) => {
       event.preventDefault();
@@ -184,49 +194,72 @@ export function PaneSlot({
       event.stopImmediatePropagation();
     };
 
-    const terminalUrlAt = (event: MouseEvent) => {
+    const terminalLinkAt = (event: MouseEvent) => {
       const targetEntry = termsRef.current.get(agentId);
       if (!targetEntry) return null;
-      return findTerminalUrlAtMouseEvent(targetEntry.term, event);
+      return findTerminalLinkAtMouseEvent(targetEntry.term, event);
     };
 
-    const urlMouseDownHandler = (event: MouseEvent) => {
+    const openTerminalLink = (link: TerminalMouseLink) => {
+      const targetEntry = termsRef.current.get(agentId);
+      targetEntry?.term.clearSelection();
+      switch (link.kind) {
+        case "url":
+          openTerminalUrl(link.text);
+          break;
+        case "markdown":
+          ctx.onOpenMarkdownPath(agentId, link.text);
+          break;
+        case "image":
+          ctx.onOpenImagePath(agentId, link.text);
+          break;
+        case "folder":
+          ctx.onOpenFolderPath(agentId, link.text);
+          break;
+        case "terminal":
+          ctx.onOpenTerminalPath(agentId, link.text);
+          break;
+      }
+    };
+
+    const linkMouseDownHandler = (event: MouseEvent) => {
       if (event.button !== 0 || event.detail > 1 || event.shiftKey) {
-        pendingUrlClick = null;
+        pendingLinkClick = null;
         return;
       }
-      const url = terminalUrlAt(event);
-      if (!url) {
-        pendingUrlClick = null;
+      const link = terminalLinkAt(event);
+      if (!link) {
+        pendingLinkClick = null;
         return;
       }
-      pendingUrlClick = url;
+      pendingLinkClick = link;
+      termsRef.current.get(agentId)?.term.clearSelection();
       stopTerminalMouseEvent(event);
     };
 
-    const urlMouseUpHandler = (event: MouseEvent) => {
-      if (!pendingUrlClick) return;
-      const pending = pendingUrlClick;
-      pendingUrlClick = null;
+    const linkMouseUpHandler = (event: MouseEvent) => {
+      if (!pendingLinkClick) return;
+      const pending = pendingLinkClick;
+      pendingLinkClick = null;
       stopTerminalMouseEvent(event);
-      if (terminalUrlAt(event) === pending) {
-        openTerminalUrl(pending);
+      if (sameTerminalLink(terminalLinkAt(event), pending)) {
+        openTerminalLink(pending);
       }
     };
 
-    const urlClickHandler = (event: MouseEvent) => {
-      if (terminalUrlAt(event)) {
+    const linkClickHandler = (event: MouseEvent) => {
+      if (terminalLinkAt(event)) {
         stopTerminalMouseEvent(event);
       }
     };
 
-    container.addEventListener("mousedown", urlMouseDownHandler, {
+    container.addEventListener("mousedown", linkMouseDownHandler, {
       capture: true,
     });
-    container.addEventListener("mouseup", urlMouseUpHandler, {
+    container.addEventListener("mouseup", linkMouseUpHandler, {
       capture: true,
     });
-    container.addEventListener("click", urlClickHandler, {
+    container.addEventListener("click", linkClickHandler, {
       capture: true,
     });
 
@@ -323,13 +356,13 @@ export function PaneSlot({
     return () => {
       ro.disconnect();
       window.clearTimeout(debounceTimer);
-      container.removeEventListener("mousedown", urlMouseDownHandler, {
+      container.removeEventListener("mousedown", linkMouseDownHandler, {
         capture: true,
       } as EventListenerOptions);
-      container.removeEventListener("mouseup", urlMouseUpHandler, {
+      container.removeEventListener("mouseup", linkMouseUpHandler, {
         capture: true,
       } as EventListenerOptions);
-      container.removeEventListener("click", urlClickHandler, {
+      container.removeEventListener("click", linkClickHandler, {
         capture: true,
       } as EventListenerOptions);
       container.removeEventListener("wheel", wheelHandler, {
@@ -368,6 +401,22 @@ export function PaneSlot({
     e.dataTransfer.getData("application/x-multiagent-agent") ||
     e.dataTransfer.getData("text/plain");
 
+  const pasteDroppedFiles = (dataTransfer: DataTransfer) => {
+    if (!activeAgentId) return false;
+    const entry = ctx.termsRef.current.get(activeAgentId);
+    if (!entry) return false;
+    const text = extractDroppedFilePaths(dataTransfer)
+      .map(formatDroppedPathForTerminal)
+      .filter(Boolean)
+      .join(" ");
+    if (!text) return false;
+    ctx.setActivePath(path);
+    entry.term.focus();
+    entry.term.clearSelection();
+    entry.term.paste(text);
+    return true;
+  };
+
   const canDropAgent = (agentId: string | null) => {
     if (!agentId) return false;
     return !(leaf.tabs.includes(agentId) && leaf.tabs.length === 1);
@@ -383,6 +432,15 @@ export function PaneSlot({
     ctx.onDragEnd();
   };
   const onPaneDragOver = (e: React.DragEvent) => {
+    if (hasExternalFiles(e.dataTransfer)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = activeAgentId ? "copy" : "none";
+      if (ctx.dropTarget?.leafId === leaf.id) {
+        ctx.onDropTargetChange(null);
+      }
+      return;
+    }
     const agentId = dragAgentIdFromEvent(e);
     if (!canDropAgent(agentId)) return;
     e.preventDefault();
@@ -410,6 +468,17 @@ export function PaneSlot({
     }
   };
   const onPaneDrop = (e: React.DragEvent) => {
+    if (hasExternalFiles(e.dataTransfer)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (activeAgentId) {
+        pasteDroppedFiles(e.dataTransfer);
+      }
+      if (ctx.dropTarget?.leafId === leaf.id) {
+        ctx.onDropTargetChange(null);
+      }
+      return;
+    }
     const agentId = dragAgentIdFromEvent(e);
     if (!canDropAgent(agentId)) return;
     e.preventDefault();
@@ -422,6 +491,9 @@ export function PaneSlot({
   return (
     <div
       className={`pane-slot ${active ? "pane-active" : ""}`}
+      data-pane-leaf-id={leaf.id}
+      data-pane-active-agent-id={activeAgentId ?? ""}
+      data-pane-path={path.join(",")}
       onClick={() => ctx.setActivePath(path)}
       onDragOver={onPaneDragOver}
       onDragLeave={onPaneDragLeave}
