@@ -53,9 +53,9 @@ type Section = {
 
 type PendingSessionClick = {
   agentId: string;
+  pointerId: number;
   x: number;
   y: number;
-  moved: boolean;
   dragging: boolean;
 };
 
@@ -350,37 +350,59 @@ export function Sidebar({
   ) => {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest("button")) return;
-    pendingSessionClickRef.current = {
+    const pending: PendingSessionClick = {
       agentId,
+      pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      moved: false,
       dragging: false,
     };
-  };
+    pendingSessionClickRef.current = pending;
 
-  const updateSessionPointer = (
-    agentId: string,
-    event: ReactPointerEvent<HTMLElement>
-  ) => {
-    const pending = pendingSessionClickRef.current;
-    if (!pending || pending.agentId !== agentId) return;
-    if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 4) {
-      pending.moved = true;
-    }
-  };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handleMove, true);
+      window.removeEventListener("pointerup", handleUp, true);
+      window.removeEventListener("pointercancel", handleCancel, true);
+    };
 
-  const finishSessionPointer = (
-    agentId: string,
-    event: ReactPointerEvent<HTMLElement>
-  ) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    const pending = pendingSessionClickRef.current;
-    pendingSessionClickRef.current = null;
-    if (!pending || pending.agentId !== agentId) return;
-    if (!pending.moved && !pending.dragging) {
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pending.pointerId) return;
+      if (
+        !pending.dragging &&
+        Math.hypot(moveEvent.clientX - pending.x, moveEvent.clientY - pending.y) >
+          4
+      ) {
+        pending.dragging = true;
+        moveEvent.preventDefault();
+        onDragStart(agentId);
+      }
+      if (pending.dragging) {
+        moveEvent.preventDefault();
+      }
+    };
+
+    const handleUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pending.pointerId) return;
+      cleanup();
+      pendingSessionClickRef.current = null;
+      if (pending.dragging) {
+        upEvent.preventDefault();
+        return;
+      }
+      if ((upEvent.target as HTMLElement | null)?.closest("button")) return;
       onSelect(agentId);
-    }
+    };
+
+    const handleCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== pending.pointerId) return;
+      cleanup();
+      pendingSessionClickRef.current = null;
+      if (pending.dragging) onDragEnd();
+    };
+
+    window.addEventListener("pointermove", handleMove, true);
+    window.addEventListener("pointerup", handleUp, true);
+    window.addEventListener("pointercancel", handleCancel, true);
   };
 
   const renderItem = (
@@ -408,34 +430,18 @@ export function Sidebar({
         ]
           .filter(Boolean)
           .join(" ")}
-        draggable
-        onPointerDown={(e) => startSessionPointer(a.id, e)}
-        onPointerMove={(e) => updateSessionPointer(a.id, e)}
-        onPointerUp={(e) => finishSessionPointer(a.id, e)}
-        onPointerCancel={() => {
-          pendingSessionClickRef.current = null;
+        draggable={false}
+        onDragStart={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
         }}
+        onPointerDown={(e) => startSessionPointer(a.id, e)}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest("button")) return;
           pendingSessionClickRef.current = null;
           e.preventDefault();
           e.stopPropagation();
           onRenameSession(a.id);
-        }}
-        onDragStart={(e) => {
-          const pending = pendingSessionClickRef.current;
-          if (pending?.agentId === a.id) {
-            pending.dragging = true;
-            pending.moved = true;
-          }
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", a.id);
-          e.dataTransfer.setData("application/x-multiagent-agent", a.id);
-          onDragStart(a.id);
-        }}
-        onDragEnd={() => {
-          pendingSessionClickRef.current = null;
-          onDragEnd();
         }}
         onContextMenu={(e) => {
           pendingSessionClickRef.current = null;
@@ -527,9 +533,11 @@ export function Sidebar({
         ]
           .filter(Boolean)
           .join(" ")}
-        draggable
+        draggable={false}
         onDragStart={(e) => {
           if ((e.target as HTMLElement).closest(".project-session-list")) {
+            e.preventDefault();
+            e.stopPropagation();
             return;
           }
           e.dataTransfer.effectAllowed = "move";
@@ -577,6 +585,7 @@ export function Sidebar({
       >
         <div
           className="project-row"
+          draggable
           onContextMenu={(e) => {
             if (
               (e.target as HTMLElement).closest("button.project-caret-btn")

@@ -11,6 +11,7 @@ import type {
   TerminalEntry,
 } from "../types";
 import { formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
+import { computeDropZone } from "../lib/terminal";
 import { PaneSlot } from "./PaneSlot";
 import type { RenderCtx } from "./PaneSlot";
 import { Splitter } from "./Splitter";
@@ -35,6 +36,34 @@ function pastePathsToTerminal(
   entry.term.clearSelection();
   entry.term.paste(text);
   return true;
+}
+
+function paneDropTargetAt(
+  clientX: number,
+  clientY: number,
+  fromAgentId: string
+): DropTargetState | null {
+  const pane = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-pane-leaf-id]");
+  const leafId = pane?.dataset.paneLeafId;
+  if (!pane || !leafId) return null;
+
+  const agentIds = (pane.dataset.paneAgentIds ?? "")
+    .split(",")
+    .filter(Boolean);
+  if (agentIds.length === 1 && agentIds[0] === fromAgentId) {
+    return null;
+  }
+
+  const zone = computeDropZone(pane.getBoundingClientRect(), clientX, clientY);
+  return { leafId, zone };
+}
+
+function isOverEmptyState(clientX: number, clientY: number) {
+  return !!document
+    .elementFromPoint(clientX, clientY)
+    ?.closest(".empty-state");
 }
 
 export function TerminalArea({
@@ -125,6 +154,66 @@ export function TerminalArea({
       unlisten?.();
     };
   }, [setActivePath, termsRef]);
+
+  useEffect(() => {
+    if (!dragState) return;
+    const fromAgentId = dragState.fromAgentId;
+
+    const updateDropTarget = (event: PointerEvent) => {
+      const target = paneDropTargetAt(
+        event.clientX,
+        event.clientY,
+        fromAgentId
+      );
+      onDropTargetChange(target);
+      return target;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      updateDropTarget(event);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      event.preventDefault();
+      const target = updateDropTarget(event);
+      if (target) {
+        onDrop(fromAgentId, target.leafId, target.zone);
+      } else if (!layout && isOverEmptyState(event.clientX, event.clientY)) {
+        onDropToEmpty(fromAgentId);
+      }
+      onDragEnd();
+    };
+
+    const handlePointerCancel = () => {
+      onDragEnd();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDragEnd();
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", handlePointerCancel, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", handlePointerCancel, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [
+    dragState,
+    layout,
+    onDragEnd,
+    onDrop,
+    onDropTargetChange,
+    onDropToEmpty,
+  ]);
 
   const ctx: RenderCtx = {
     agents,

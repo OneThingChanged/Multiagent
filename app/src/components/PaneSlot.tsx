@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toolForId } from "../types";
 import { buildSpawnArgs } from "../lib/spawn";
@@ -35,6 +35,14 @@ function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | nu
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
 }
 
+type PendingTabDrag = {
+  agentId: string;
+  pointerId: number;
+  x: number;
+  y: number;
+  dragging: boolean;
+};
+
 export type RenderCtx = {
   agents: Agent[];
   sessionPins: Record<string, string> | null;
@@ -69,6 +77,8 @@ export function PaneSlot({
   ctx: RenderCtx;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
+  const suppressNextTabClickRef = useRef(false);
   const active = pathEq(path, ctx.activePath);
   const activeAgentId = activeAgentInLeaf(leaf);
   const activeAgent = activeAgentId
@@ -422,14 +432,67 @@ export function PaneSlot({
     return !(leaf.tabs.includes(agentId) && leaf.tabs.length === 1);
   };
 
-  const onTabDragStart = (e: React.DragEvent, tabAgentId: string) => {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", tabAgentId);
-    e.dataTransfer.setData("application/x-multiagent-agent", tabAgentId);
-    ctx.onDragStart(tabAgentId);
-  };
-  const onTabDragEnd = () => {
-    ctx.onDragEnd();
+  const onTabPointerDown = (
+    e: ReactPointerEvent<HTMLDivElement>,
+    tabAgentId: string
+  ) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.stopPropagation();
+    const pending: PendingTabDrag = {
+      agentId: tabAgentId,
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      dragging: false,
+    };
+    pendingTabDragRef.current = pending;
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handleMove, true);
+      window.removeEventListener("pointerup", handleUp, true);
+      window.removeEventListener("pointercancel", handleCancel, true);
+    };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pending.pointerId) return;
+      if (
+        !pending.dragging &&
+        Math.hypot(moveEvent.clientX - pending.x, moveEvent.clientY - pending.y) >
+          4
+      ) {
+        pending.dragging = true;
+        moveEvent.preventDefault();
+        ctx.onDragStart(tabAgentId);
+      }
+      if (pending.dragging) {
+        moveEvent.preventDefault();
+      }
+    };
+
+    const handleUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pending.pointerId) return;
+      cleanup();
+      pendingTabDragRef.current = null;
+      if (pending.dragging) {
+        suppressNextTabClickRef.current = true;
+        upEvent.preventDefault();
+      }
+    };
+
+    const handleCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== pending.pointerId) return;
+      cleanup();
+      pendingTabDragRef.current = null;
+      if (pending.dragging) {
+        suppressNextTabClickRef.current = true;
+        ctx.onDragEnd();
+      }
+    };
+
+    window.addEventListener("pointermove", handleMove, true);
+    window.addEventListener("pointerup", handleUp, true);
+    window.addEventListener("pointercancel", handleCancel, true);
   };
   const onPaneDragOver = (e: React.DragEvent) => {
     if (hasExternalFiles(e.dataTransfer)) {
@@ -493,6 +556,7 @@ export function PaneSlot({
       className={`pane-slot ${active ? "pane-active" : ""}`}
       data-pane-leaf-id={leaf.id}
       data-pane-active-agent-id={activeAgentId ?? ""}
+      data-pane-agent-ids={leaf.tabs.join(",")}
       data-pane-path={path.join(",")}
       onClick={() => ctx.setActivePath(path)}
       onDragOver={onPaneDragOver}
@@ -510,14 +574,15 @@ export function PaneSlot({
             <div
               key={tabAgentId}
               className={`pane-tab ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
-              draggable
-              onDragStart={(e) => onTabDragStart(e, tabAgentId)}
-              onDragEnd={onTabDragEnd}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-              }}
+              draggable={false}
+              onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
               onClick={(e) => {
                 e.stopPropagation();
+                if (suppressNextTabClickRef.current) {
+                  suppressNextTabClickRef.current = false;
+                  e.preventDefault();
+                  return;
+                }
                 ctx.onSelectTab(path, tabAgentId);
               }}
               onContextMenu={(e) => {
