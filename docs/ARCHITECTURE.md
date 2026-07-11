@@ -121,7 +121,7 @@ struct PtyHandle {
    - 둘 다 기존 사용자 hook 보존 + `__source: "multiagent"` 마커로 자기 hook만 교체
    - env var 주입: `MULTIAGENT_PORT` (호환용), `MULTIAGENT_TOKEN`, `MULTIAGENT_AGENT_ID`
 5. Claude/Codex가 hook 실행 → `powershell -File notify.ps1 working|done`; `UserPromptSubmit`의 `prompt`도 최대 500자로 캡처
-6. 스크립트가 `hook-info.json` 읽고 `POST http://127.0.0.1:PORT/event { id, event, token, prompt? }`
+6. 스크립트가 `hook-info.json` 읽고 UTF-8 JSON으로 `POST http://127.0.0.1:PORT/event { id, event, token, prompt? }`
 7. Rust HTTP 서버가 토큰 검증 → Tauri 이벤트 `agent:hook-event { id, event }` 발생
 8. 프론트가 listen 중 → 상태 갱신 + 알림
 

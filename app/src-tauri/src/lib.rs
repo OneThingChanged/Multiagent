@@ -308,11 +308,9 @@ fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
 }
 
-fn write_helper_script(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join("notify.ps1");
-    let script = r#"param([string]$Event)
+fn local_helper_script() -> &'static str {
+    r#"param([string]$Event)
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $base = Join-Path $env:LOCALAPPDATA "com.jintae.multiagent"
 $logPath = Join-Path $base "hook.log"
 $infoPath = Join-Path $base "hook-info.json"
@@ -358,13 +356,20 @@ try {
     $bodyMap.prompt = $prompt
   }
   $body = $bodyMap | ConvertTo-Json -Compress
-  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
+  $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 2 -UseBasicParsing | Out-Null
   "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 } catch {
   "$ts |   error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
 }
-"#;
-    fs::write(&path, script).map_err(|e| e.to_string())?;
+"#
+}
+
+fn write_helper_script(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("notify.ps1");
+    fs::write(&path, local_helper_script()).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -375,6 +380,7 @@ try {
 /// hook server.
 fn remote_helper_script() -> &'static str {
     r#"param([string]$Event)
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
 $logPath = Join-Path $env:TEMP "multiagent-remote-hook.log"
 $sessionId = $null
@@ -406,7 +412,8 @@ try {
     $bodyMap.prompt = $prompt
   }
   $body = $bodyMap | ConvertTo-Json -Compress
-  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
+  $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 2 -UseBasicParsing | Out-Null
   "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 } catch {
   "$ts |   error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
@@ -2556,6 +2563,81 @@ mod tests {
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16(&words).unwrap()
+    }
+
+    #[test]
+    fn hook_helpers_preserve_utf8_json_prompts() {
+        for script in [local_helper_script(), remote_helper_script()] {
+            assert!(script.contains("[Console]::InputEncoding = [System.Text.Encoding]::UTF8"));
+            assert!(script.contains("$bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)"));
+            assert!(script.contains("-Body $bodyBytes"));
+            assert!(script.contains("application/json; charset=utf-8"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hook_helper_posts_korean_prompt_as_utf8() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("multiagent-hook-test-{unique}"));
+        let app_data = root.join("local-app-data");
+        fs::create_dir_all(app_data.join("com.jintae.multiagent")).unwrap();
+        let script_path = root.join("notify.ps1");
+        fs::write(&script_path, local_helper_script()).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tiny_http::Server::from_listener(listener, None).unwrap();
+        let mut child = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script_path.to_str().unwrap(),
+                "working",
+            ])
+            .env("LOCALAPPDATA", &app_data)
+            .env("MULTIAGENT_PORT", port.to_string())
+            .env("MULTIAGENT_TOKEN", "test-token")
+            .env("MULTIAGENT_AGENT_ID", "agent-1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(r#"{"prompt":"한글 질문 테스트"}"#.as_bytes())
+            .unwrap();
+
+        let mut request = server
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .expect("PowerShell helper did not post a hook event");
+        assert_eq!(request.url(), "/event");
+        assert_eq!(
+            request
+                .headers()
+                .iter()
+                .find(|header| header.field.equiv("Content-Type"))
+                .map(|header| header.value.as_str()),
+            Some("application/json; charset=utf-8")
+        );
+        let mut body = String::new();
+        request.as_reader().read_to_string(&mut body).unwrap();
+        request.respond(tiny_http::Response::empty(200)).unwrap();
+        assert!(child.wait().unwrap().success());
+
+        let payload: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(payload["prompt"], "한글 질문 테스트");
+        assert_eq!(payload["token"], "test-token");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
