@@ -130,10 +130,18 @@ function formatBytes(n: number) {
 export function SettingsModal({
   theme,
   onThemeChange,
+  desktopPetEnabled,
+  desktopPetAvailable,
+  onDesktopPetEnabledChange,
+  onResetDesktopPetPosition,
   onClose,
 }: {
   theme: AppThemeId;
   onThemeChange: (theme: AppThemeId) => void;
+  desktopPetEnabled: boolean;
+  desktopPetAvailable: boolean;
+  onDesktopPetEnabledChange: (enabled: boolean) => void;
+  onResetDesktopPetPosition: () => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>("general");
@@ -695,6 +703,37 @@ export function SettingsModal({
             >
               Test
             </button>
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Desktop Pet</div>
+          <div className="app-about-card app-pet-settings-card">
+            <label className="app-checkbox-row app-pet-toggle-row">
+              <input
+                type="checkbox"
+                checked={desktopPetEnabled}
+                disabled={!desktopPetAvailable}
+                onChange={(event) =>
+                  onDesktopPetEnabledChange(event.target.checked)
+                }
+              />
+              <span>화면 위에 작업 상태 펫 표시</span>
+            </label>
+            <div className="app-update-message">
+              {desktopPetAvailable
+                ? "작업 중에는 움직이고, 완료되면 세션 이름과 완료 배지를 표시합니다. 펫 아래의 점을 끌어서 이동할 수 있습니다."
+                : "Desktop Pet은 중복 표시를 막기 위해 주 MultiAgent 창에서만 설정할 수 있습니다."}
+            </div>
+            <div className="app-sound-actions">
+              <button
+                className="btn-secondary app-sound-test-btn"
+                disabled={!desktopPetAvailable || !desktopPetEnabled}
+                onClick={onResetDesktopPetPosition}
+              >
+                위치 초기화
+              </button>
+            </div>
           </div>
         </div>
         </>

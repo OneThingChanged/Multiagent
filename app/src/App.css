@@ -356,6 +356,67 @@ body,
   color: var(--app-accent);
 }
 
+.desktop-pet-toggle-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-muted);
+  background: var(--app-button-bg);
+  cursor: pointer;
+}
+
+.desktop-pet-toggle-btn:hover,
+.desktop-pet-toggle-active {
+  color: var(--app-heading);
+  border-color: var(--app-accent);
+  background: var(--app-button-hover);
+}
+
+.desktop-pet-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.desktop-pet-toggle-icon {
+  position: relative;
+  width: 14px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+}
+
+.desktop-pet-toggle-icon::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 5px 0 0 currentColor;
+}
+
+.desktop-pet-toggle-icon::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 6px;
+  width: 1.5px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.desktop-pet-toggle-active .desktop-pet-toggle-icon {
+  color: var(--app-accent);
+}
+
 .new-window-btn {
   background: var(--app-button-bg);
   color: var(--app-muted);
@@ -2263,6 +2324,15 @@ body.docs-resizing .docs-resizer::after {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+
+.app-pet-settings-card {
+  padding-top: 4px;
+}
+
+.app-pet-toggle-row {
+  margin-top: 4px;
+  font-weight: 600;
 }
 
 .app-ssh-list {

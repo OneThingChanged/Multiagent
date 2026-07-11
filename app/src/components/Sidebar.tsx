@@ -90,6 +90,9 @@ export function Sidebar({
   onToggleDocs,
   alwaysOnTop,
   onToggleAlwaysOnTop,
+  desktopPetEnabled,
+  desktopPetAvailable,
+  onToggleDesktopPet,
   onOpenNewWindow,
   settingsOpen,
   onToggleSettings,
@@ -117,6 +120,9 @@ export function Sidebar({
   onToggleDocs: () => void;
   alwaysOnTop: boolean;
   onToggleAlwaysOnTop: () => void;
+  desktopPetEnabled: boolean;
+  desktopPetAvailable: boolean;
+  onToggleDesktopPet: () => void;
   onOpenNewWindow: () => void;
   settingsOpen: boolean;
   onToggleSettings: () => void;
@@ -665,6 +671,24 @@ export function Sidebar({
             aria-pressed={alwaysOnTop}
           >
             <span className="always-on-top-icon" aria-hidden="true" />
+          </button>
+          <button
+            className={`desktop-pet-toggle-btn ${
+              desktopPetEnabled ? "desktop-pet-toggle-active" : ""
+            }`}
+            onClick={onToggleDesktopPet}
+            disabled={!desktopPetAvailable}
+            title={
+              desktopPetAvailable
+                ? desktopPetEnabled
+                  ? "Desktop Pet 숨기기"
+                  : "Desktop Pet 보기"
+                : "Desktop Pet은 주 창에서만 사용할 수 있습니다"
+            }
+            aria-label="Desktop Pet"
+            aria-pressed={desktopPetEnabled}
+          >
+            <span className="desktop-pet-toggle-icon" aria-hidden="true" />
           </button>
           <button
             className="new-window-btn"

@@ -5,6 +5,7 @@
 ```
 app.exe (Tauri Rust 메인 프로세스)
 ├─ WebView2 (UI 렌더링, React + xterm.js)
+├─ Desktop Pet WebView2 (주 프로세스만, 투명·항상 위·non-focusable)
 ├─ tiny_http hook 서버 thread (127.0.0.1:RANDOM_PORT, Claude/Codex hook 수신)
 ├─ axum 원격 서버 (0.0.0.0:port, 켰을 때만 — REMOTE.md)
 │   └─ cloudflared 자식 프로세스 (터널 켰을 때만)
@@ -35,12 +36,14 @@ K:\AI\MultiAgent\
    │  │  ├─ appInfo.ts      ← 앱 버전·variant, GitHub repo URL
    │  │  ├─ notificationSound.ts ← 알림음 설정/재생
    │  │  ├─ scrollback.ts   ← xterm 스크롤백 저장/복원 (localStorage)
+   │  │  ├─ desktopPet.ts   ← 펫 설정·세션 상태 집계·완료 큐 payload
    │  │  └─ terminal.ts     ← createEntry / 테마 / md·html·이미지 링크 / search·serialize / zoom / Ctrl+Enter / notifyDone
    │  ├─ components/
    │  │  ├─ Sidebar.tsx        ← 프로젝트 트리·검색·1줄·드래그 재정렬
    │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
    │  │  ├─ DocsPanel.tsx      ← Markdown/HTML 목록·트리·뷰어
    │  │  ├─ ImageViewer.tsx    ← 터미널 이미지 경로 뷰어
+   │  │  ├─ DesktopPetPage.tsx / DesktopPetPage.css ← 펫 마스코트·상태 애니메이션
    │  │  ├─ SettingsModal.tsx  ← General/Usage/Remote/About 탭
    │  │  ├─ SearchBar.tsx      ← 터미널 Ctrl+F 검색바
    │  │  ├─ NewProjectModal / NewAgentModal / RenameSessionModal / RenameProjectModal
@@ -79,6 +82,9 @@ K:\AI\MultiAgent\
 | `resolve_markdown_path` | folder, path | 터미널 클릭 경로 검증·정규화 (폴더 밖 절대경로 지원) |
 | `read_image_data_url` | path, folder? | 이미지 파일을 data URL로 (이미지 뷰어용, 25MB 한도) |
 | `play_system_sound` / `read_audio_file` | — / path | 알림음 (시스템 비프 / 커스텀 파일 바이트) |
+| `set_desktop_pet_enabled` | enabled | setup에서 미리 만든 주 프로세스 Desktop Pet 창 표시/숨김 |
+| `update_desktop_pet` / `desktop_pet_snapshot` | update / — | 펫 상태 payload 캐시 + 창 이벤트 전달 / 초기 상태 조회 |
+| `reset_desktop_pet_position` | — | 펫을 주 창 모니터 오른쪽 아래 기본 위치로 이동 |
 
 추가 커맨드 그룹 (상세는 각 문서):
 - **원격** ([REMOTE.md](REMOTE.md)): `start/stop_remote_server`, `remote_server_status`, `start/stop_tunnel`, `tunnel_status`, `remote_config_get/set`, `remote_access_list/approve/revoke`, `sync_remote_agents`, `sync_remote_view`
@@ -272,6 +278,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - `multiagent.docsWidth.v1` — Docs 패널 폭
 - `multiagent.terminalFontSize.v1` — xterm 폰트 크기
 - `multiagent.notificationSound.v1` — 알림음 설정 (mode + customPath)
+- `multiagent.desktopPetEnabled.v1` — Desktop Pet 표시 여부 (기본 true)
 - `multiagent.scrollback.<agentId>.v1` — 세션별 스크롤백 스냅샷 (재시작 복원용)
 - (마이그레이션) `multiagent.layout.v1` — 옛 단일 트리. 첫 로드 시 단일 그룹으로 변환 후 삭제
 

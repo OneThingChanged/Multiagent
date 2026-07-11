@@ -64,6 +64,7 @@ struct AppState {
     remote: Arc<remote::RemoteHub>,
     monitor: Arc<monitor::MonitorHub>,
     usage: Arc<usage::UsageHub>,
+    desktop_pet: Mutex<DesktopPetUpdate>,
 }
 
 /// Allocate an unused reverse-tunnel remote port (49152+) and record it.
@@ -85,6 +86,18 @@ fn free_remote_port(used: &Mutex<HashSet<u16>>, port: u16) {
 struct PtyData {
     id: String,
     data: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopPetUpdate {
+    status: String,
+    working_count: usize,
+    completed_count: usize,
+    title: Option<String>,
+    body: Option<String>,
+    agent_id: Option<String>,
+    notification_key: Option<String>,
 }
 
 /// SSH connection parameters for spawning a remote session. Field names match
@@ -2261,60 +2274,120 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
-// Custom always-on-top notification popup. We use our own window instead of an
-// OS/web notification because Windows doesn't reliably deliver click events to
-// web notifications when the app is backgrounded — so "click to jump to the
-// session" never worked. This popup emits `notification:activate { agentId }`
-// on click, which the main window listens for to focus + navigate.
-#[tauri::command]
-fn show_session_notification(
-    app: AppHandle,
-    title: String,
-    body: String,
-    agent_id: String,
-) -> Result<(), String> {
-    use base64::Engine;
-    // Only the latest notification is shown.
-    if let Some(existing) = app.get_webview_window("notification") {
-        let _ = existing.close();
+const DESKTOP_PET_LABEL: &str = "desktop-pet";
+const DESKTOP_PET_WIDTH: f64 = 184.0;
+const DESKTOP_PET_HEIGHT: f64 = 176.0;
+
+fn position_desktop_pet(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten())
+        .or_else(|| win.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+
+    let scale = monitor.scale_factor();
+    let size = monitor.size();
+    let origin = monitor.position();
+    let win_w = DESKTOP_PET_WIDTH * scale;
+    let win_h = DESKTOP_PET_HEIGHT * scale;
+    let margin = 18.0 * scale;
+    // Tauri does not expose the Windows work area here. Leave enough room for
+    // the common bottom taskbar; users can drag the pet when their taskbar is
+    // placed elsewhere.
+    let taskbar = 52.0 * scale;
+    let x = origin.x as f64 + size.width as f64 - win_w - margin;
+    let y = origin.y as f64 + size.height as f64 - win_h - margin - taskbar;
+    let _ = win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+}
+
+fn create_desktop_pet_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window(DESKTOP_PET_LABEL).is_some() {
+        return Ok(());
     }
-    let payload = serde_json::json!({
-        "title": title,
-        "body": body,
-        "agentId": agent_id,
-    })
-    .to_string();
-    let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.as_bytes());
+    #[cfg(dev)]
+    let pet_url = tauri::WebviewUrl::External(
+        "http://localhost:24420/"
+            .parse()
+            .map_err(|e| format!("desktop pet dev URL: {e}"))?,
+    );
+    #[cfg(not(dev))]
+    let pet_url = tauri::WebviewUrl::App("index.html".into());
 
-    let win = tauri::WebviewWindowBuilder::new(
-        &app,
-        "notification",
-        tauri::WebviewUrl::App("notification.html".into()),
-    )
-    .title("MultiAgent")
-    .inner_size(360.0, 92.0)
-    .decorations(false)
-    .resizable(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .shadow(true)
-    .initialization_script(&format!("window.__NOTIF_DATA__ = \"{}\";", data))
-    .build()
-    .map_err(|e| e.to_string())?;
+    let app_for_pet_load = app.clone();
+    let win = tauri::WebviewWindowBuilder::new(app, DESKTOP_PET_LABEL, pet_url)
+        .initialization_script("window.__MULTIAGENT_DESKTOP_PET__ = true;")
+        .on_page_load(move |window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let _ = window.set_focusable(false);
+                position_desktop_pet(&app_for_pet_load, &window);
+            }
+        })
+        .title("MultiAgent Desktop Pet")
+        .inner_size(DESKTOP_PET_WIDTH, DESKTOP_PET_HEIGHT)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .transparent(true)
+        .shadow(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    position_desktop_pet(app, &win);
+    Ok(())
+}
 
-    // Position bottom-right of the current monitor (approx; leaves room for a
-    // typical taskbar).
-    if let Ok(Some(monitor)) = win.current_monitor() {
-        let size = monitor.size();
-        let scale = monitor.scale_factor();
-        let win_w = 360.0 * scale;
-        let win_h = 92.0 * scale;
-        let margin = 16.0 * scale;
-        let taskbar = 56.0 * scale;
-        let x = (size.width as f64 - win_w - margin).max(0.0);
-        let y = (size.height as f64 - win_h - margin - taskbar).max(0.0);
-        let _ = win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+#[tauri::command]
+fn set_desktop_pet_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    // A secondary MultiAgent window is a separate process. Until the shared
+    // pet broker lands, only the primary process owns a desktop pet so several
+    // identical always-on-top windows cannot stack on the desktop.
+    if state.secondary_window {
+        return Ok(());
+    }
+
+    let existing = app
+        .get_webview_window(DESKTOP_PET_LABEL)
+        .ok_or_else(|| "desktop pet window was not initialized".to_string())?;
+    if enabled {
+        existing.set_focusable(false).map_err(|e| e.to_string())?;
+        position_desktop_pet(&app, &existing);
+        existing.show().map_err(|e| e.to_string())?;
+    } else {
+        existing.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn update_desktop_pet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    update: DesktopPetUpdate,
+) -> Result<(), String> {
+    *state.desktop_pet.lock().unwrap() = update.clone();
+    app.emit_to(DESKTOP_PET_LABEL, "desktop-pet:update", update)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn desktop_pet_snapshot(state: State<'_, AppState>) -> DesktopPetUpdate {
+    state.desktop_pet.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn reset_desktop_pet_position(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(DESKTOP_PET_LABEL) {
+        position_desktop_pet(&app, &win);
+        app.emit_to(DESKTOP_PET_LABEL, "desktop-pet:position-reset", ())
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -2637,7 +2710,15 @@ pub fn run() {
                 remote: Arc::new(remote::RemoteHub::new()),
                 monitor: monitor_hub,
                 usage: usage_hub,
+                desktop_pet: Mutex::new(DesktopPetUpdate {
+                    status: "idle".to_string(),
+                    ..DesktopPetUpdate::default()
+                }),
             });
+            if !secondary_window {
+                create_desktop_pet_window(app.handle())
+                    .map_err(|e| format!("create desktop pet: {e}"))?;
+            }
             #[cfg(not(multiagent_company))]
             if !secondary_window {
                 remote::load_access(app.handle());
@@ -2733,7 +2814,10 @@ pub fn run() {
         resolve_cli_session,
         relink_cli_session,
         show_main_window,
-        show_session_notification
+        set_desktop_pet_enabled,
+        update_desktop_pet,
+        desktop_pet_snapshot,
+        reset_desktop_pet_position
     ]);
 
     #[cfg(multiagent_company)]
@@ -2781,7 +2865,10 @@ pub fn run() {
         resolve_cli_session,
         relink_cli_session,
         show_main_window,
-        show_session_notification
+        set_desktop_pet_enabled,
+        update_desktop_pet,
+        desktop_pet_snapshot,
+        reset_desktop_pet_position
     ]);
 
     builder

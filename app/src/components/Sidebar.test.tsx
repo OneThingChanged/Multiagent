@@ -24,6 +24,9 @@ function renderSidebar(projects: Project[]) {
       onToggleDocs={() => {}}
       alwaysOnTop={false}
       onToggleAlwaysOnTop={() => {}}
+      desktopPetEnabled={true}
+      desktopPetAvailable={true}
+      onToggleDesktopPet={() => {}}
       onOpenNewWindow={() => {}}
       settingsOpen={false}
       onToggleSettings={() => {}}

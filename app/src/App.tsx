@@ -60,6 +60,13 @@ import {
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
+import {
+  buildDesktopPetUpdate,
+  completionForAgent,
+  loadDesktopPetEnabled,
+  saveDesktopPetEnabled,
+  type DesktopPetCompletion,
+} from "./lib/desktopPet";
 
 import { Sidebar } from "./components/Sidebar";
 import { TerminalArea } from "./components/TerminalArea";
@@ -423,6 +430,12 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
+  const [desktopPetEnabled, setDesktopPetEnabled] = useState(
+    loadDesktopPetEnabled
+  );
+  const [desktopPetCompletions, setDesktopPetCompletions] = useState<
+    DesktopPetCompletion[]
+  >([]);
   const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
   const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
   const [imageViewer, setImageViewer] = useState<{
@@ -462,6 +475,7 @@ function App() {
   const remoteViewJsonRef = useRef<string | null>(null);
   const monitorStateJsonRef = useRef<string | null>(null);
   const usageCatalogJsonRef = useRef<string | null>(null);
+  const desktopPetJsonRef = useRef<string | null>(null);
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
@@ -558,6 +572,22 @@ function App() {
   useEffect(() => {
     agentsRef.current = agents;
   }, [agents]);
+
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    invoke("set_desktop_pet_enabled", { enabled: desktopPetEnabled }).catch(
+      () => {}
+    );
+  }, [desktopPetEnabled, isSecondaryWindow, runtimeFlags]);
+
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    const update = buildDesktopPetUpdate(agents, desktopPetCompletions);
+    const json = JSON.stringify(update);
+    if (desktopPetJsonRef.current === json) return;
+    desktopPetJsonRef.current = json;
+    invoke("update_desktop_pet", { update }).catch(() => {});
+  }, [agents, desktopPetCompletions, isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
@@ -939,33 +969,49 @@ function App() {
       });
   }, [pushToast]);
 
+  const handleDesktopPetEnabledChange = useCallback((enabled: boolean) => {
+    saveDesktopPetEnabled(enabled);
+    setDesktopPetEnabled(enabled);
+  }, []);
+
+  const resetDesktopPetPosition = useCallback(() => {
+    invoke("reset_desktop_pet_position").catch((error) => {
+      pushToast("", "Desktop Pet", `위치를 초기화할 수 없습니다: ${String(error)}`);
+    });
+  }, [pushToast]);
+
   const openNewAppWindow = useCallback((agentId?: string | null) => {
     invoke("open_new_app_window", { agentId: agentId ?? null }).catch((error) => {
       pushToast("", "새 창", `새 창을 열 수 없습니다: ${String(error)}`);
     });
   }, [pushToast]);
 
-  // Clicking our custom notification popup focuses the app and jumps to the
-  // session that finished.
+  // Clicking a completion surface focuses the app and jumps to the session.
+  // The desktop pet itself is non-focusable, so it must explicitly focus main.
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
-    listen<{ agentId?: string }>("notification:activate", (e) => {
+    const unsubscribes: Array<() => void> = [];
+    const activate = (agentId?: string) => {
       invoke("show_main_window").catch(() => {});
-      const agentId = e.payload?.agentId;
       if (agentId) selectAgentRef.current?.(agentId);
-    })
-      .then((un) => {
-        if (cancelled) un();
-        else unsubscribe = un;
-      })
-      .catch(() => {});
+    };
+    const track = (unsubscribe: () => void) => {
+      if (cancelled) unsubscribe();
+      else unsubscribes.push(unsubscribe);
+    };
+    listen<{ agentId?: string }>("desktop-pet:activate", (event) => {
+      activate(event.payload?.agentId);
+      setDesktopPetCompletions([]);
+    }).then(track).catch(() => {});
+    listen("desktop-pet:close-requested", () => {
+      handleDesktopPetEnabledChange(false);
+    }).then(track).catch(() => {});
     return () => {
       cancelled = true;
-      unsubscribe?.();
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [isSecondaryWindow, runtimeFlags]);
+  }, [handleDesktopPetEnabledChange, isSecondaryWindow, runtimeFlags]);
 
   // ---- PTY + hook event listeners
 
@@ -1086,6 +1132,14 @@ function App() {
             );
             const projectName = project?.name || "Unknown project";
             const title = `${projectName} / ${target.name}`;
+            const petCompletion = completionForAgent(
+              target,
+              projectsRef.current
+            );
+            setDesktopPetCompletions((previous) => [
+              ...previous.slice(-8),
+              petCompletion,
+            ]);
             playNotificationSound();
             pushToast(target.id, title, "작업이 끝났어요");
             // When the app isn't focused, flash the taskbar so the user notices
@@ -2030,6 +2084,11 @@ function App() {
         }
         alwaysOnTop={alwaysOnTop}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
+        desktopPetEnabled={desktopPetEnabled}
+        desktopPetAvailable={!isSecondaryWindow}
+        onToggleDesktopPet={() =>
+          handleDesktopPetEnabledChange(!desktopPetEnabled)
+        }
         onOpenNewWindow={openNewAppWindow}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((open) => !open)}
@@ -2095,6 +2154,10 @@ function App() {
         <SettingsModal
           theme={appTheme}
           onThemeChange={handleThemeChange}
+          desktopPetEnabled={desktopPetEnabled}
+          desktopPetAvailable={!isSecondaryWindow}
+          onDesktopPetEnabledChange={handleDesktopPetEnabledChange}
+          onResetDesktopPetPosition={resetDesktopPetPosition}
           onClose={() => setSettingsOpen(false)}
         />
       )}

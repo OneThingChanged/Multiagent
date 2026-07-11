@@ -46,6 +46,7 @@
 |---|---|
 | Working/Done 감지 | Claude/Codex hook(UserPromptSubmit/Stop) → 로컬 HTTP → 상태점(노란 펄스/초록) |
 | 알림 | 완료 시 인앱 토스트 + OS 알림 + **알림음**(시스템음/커스텀 파일/끄기, 설정에서 선택) |
+| Desktop Pet | 포커스를 받지 않는 항상-위 펫 창으로 idle/working/done과 작업·완료 수를 표시. 완료 말풍선 클릭 시 해당 세션으로 이동 |
 | 세션 Resume | SessionStart hook으로 session_id 캡처 → 다음 실행 시 `codex resume`/`claude --resume` ([RESUME.md](RESUME.md)) |
 | 스크롤백 복원 | 종료 직전 스크롤백 저장 → 재시작 시 복원 |
 

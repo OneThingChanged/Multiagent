@@ -1,0 +1,224 @@
+html.desktop-pet-document,
+body.desktop-pet-document,
+body.desktop-pet-document #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent !important;
+  color: #eaf6ff;
+  user-select: none;
+}
+
+.desktop-pet-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+}
+
+.desktop-pet-bubble {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 176px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid rgba(99, 194, 255, 0.72);
+  border-radius: 12px;
+  background: rgba(16, 28, 48, 0.96);
+  box-shadow: 0 8px 22px rgba(2, 8, 20, 0.35);
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transform-origin: 82% 100%;
+  transition: opacity 160ms ease, transform 180ms ease;
+  pointer-events: none;
+}
+
+.desktop-pet-bubble.visible { opacity: 1; transform: none; }
+.desktop-pet-bubble-title,
+.desktop-pet-bubble-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-pet-bubble-title { color: #7dd3fc; font-size: 11px; font-weight: 700; }
+.desktop-pet-bubble-body { margin-top: 3px; color: #d7e8f8; font-size: 11px; }
+
+.desktop-pet-robot {
+  position: absolute;
+  right: 18px;
+  bottom: 4px;
+  width: 112px;
+  height: 112px;
+  filter: drop-shadow(0 7px 8px rgba(2, 8, 20, 0.42));
+  animation: desktop-pet-breathe 2.8s ease-in-out infinite;
+}
+
+.desktop-pet-antenna {
+  position: absolute;
+  top: 0;
+  left: 54px;
+  width: 5px;
+  height: 17px;
+  border-radius: 5px;
+  background: #4978ae;
+}
+.desktop-pet-antenna::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: -4px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #67e8f9;
+  box-shadow: 0 0 11px rgba(103, 232, 249, 0.9);
+}
+
+.desktop-pet-head {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 88px;
+  height: 57px;
+  border: 3px solid #365f96;
+  border-radius: 22px 22px 19px 19px;
+  background: linear-gradient(150deg, #3d79b8, #24558d 65%, #1d3e6a);
+  box-shadow: inset 0 3px 2px rgba(255, 255, 255, 0.2);
+  transform-origin: 50% 90%;
+}
+.desktop-pet-screen {
+  position: absolute;
+  inset: 9px 10px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #213d62;
+  border-radius: 13px;
+  color: #8ff6ff;
+  background: radial-gradient(circle at 50% 30%, #173454, #0b1d36 76%);
+  box-shadow: inset 0 0 10px rgba(5, 13, 30, 0.8), 0 0 7px rgba(79, 211, 255, 0.24);
+  font: 800 21px/1 Consolas, monospace;
+  letter-spacing: -2px;
+  text-shadow: 0 0 8px rgba(103, 232, 249, 0.8);
+}
+.desktop-pet-shine {
+  position: absolute;
+  top: 5px;
+  left: 15px;
+  z-index: 1;
+  width: 28px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  transform: rotate(-8deg);
+}
+.desktop-pet-body {
+  position: absolute;
+  top: 65px;
+  left: 33px;
+  width: 46px;
+  height: 35px;
+  border: 3px solid #315886;
+  border-radius: 13px 13px 17px 17px;
+  background: linear-gradient(#4a82bd, #285787);
+}
+.desktop-pet-body span {
+  position: absolute;
+  top: 8px;
+  left: 13px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #b8f8ff;
+  border-radius: 5px;
+  color: #c7fbff;
+  font: 800 8px/10px Consolas, monospace;
+  text-align: center;
+  box-shadow: 0 0 8px rgba(103, 232, 249, 0.6);
+}
+.desktop-pet-arm,
+.desktop-pet-foot { position: absolute; border: 3px solid #315886; background: #3c70a8; }
+.desktop-pet-arm { top: 70px; width: 18px; height: 27px; border-radius: 10px; }
+.desktop-pet-arm-left { left: 17px; transform: rotate(12deg); }
+.desktop-pet-arm-right { right: 17px; transform: rotate(-12deg); }
+.desktop-pet-foot { top: 94px; width: 26px; height: 14px; border-radius: 9px 9px 11px 11px; }
+.desktop-pet-foot-left { left: 24px; }
+.desktop-pet-foot-right { right: 24px; }
+.desktop-pet-badge {
+  position: absolute;
+  right: 0;
+  top: 56px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 13px;
+  color: #062338;
+  background: #67e8f9;
+  font-size: 11px;
+  font-weight: 800;
+}
+.desktop-pet-drag {
+  position: absolute;
+  right: 49px;
+  bottom: 0;
+  width: 42px;
+  height: 12px;
+  border-radius: 8px;
+  color: rgba(199, 251, 255, 0.72);
+  background: rgba(15, 35, 57, 0.72);
+  cursor: grab;
+  font: 700 9px/10px Consolas, monospace;
+  text-align: center;
+  letter-spacing: 2px;
+}
+
+.desktop-pet-context-menu {
+  position: absolute;
+  z-index: 20;
+  width: 112px;
+  padding: 4px;
+  border: 1px solid #3a4657;
+  border-radius: 7px;
+  background: rgba(24, 29, 37, 0.98);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+}
+
+.desktop-pet-context-menu button {
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #f0f4f8;
+  background: transparent;
+  font: 12px/1 "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desktop-pet-context-menu button:hover {
+  color: #fff;
+  background: #344052;
+}
+
+.desktop-pet-shell[data-status="idle"] .desktop-pet-screen { color: #7eacc4; text-shadow: none; }
+.desktop-pet-shell[data-status="working"] .desktop-pet-head { animation: desktop-pet-work .42s ease-in-out infinite alternate; }
+.desktop-pet-shell[data-status="working"] .desktop-pet-antenna::before { animation: desktop-pet-signal .7s ease-in-out infinite; }
+.desktop-pet-shell[data-status="done"] .desktop-pet-badge { color: #092a18; background: #86efac; }
+.desktop-pet-celebrate .desktop-pet-robot { animation: desktop-pet-celebrate .58s cubic-bezier(.2,.8,.25,1) 3; }
+
+@keyframes desktop-pet-breathe { 50% { transform: translateY(-3px); } }
+@keyframes desktop-pet-work { to { transform: rotate(1.5deg) translateY(2px); } }
+@keyframes desktop-pet-signal { 50% { opacity: .5; transform: scale(.82); } }
+@keyframes desktop-pet-celebrate {
+  42% { transform: translateY(-14px) rotate(-5deg); }
+  70% { transform: translateY(-5px) rotate(4deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-pet-robot,
+  .desktop-pet-head,
+  .desktop-pet-antenna::before { animation: none !important; }
+}

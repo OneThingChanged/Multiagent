@@ -10,7 +10,7 @@
 - **프로젝트 드래그**: 사이드바에서 위/아래로 끌어 프로젝트 순서 변경
 - **세션 좌클릭**: 그 세션의 그룹으로 전환. 클릭한 세션이 그 leaf의 활성 탭이 됨
 - **세션 더블클릭**: 별명 변경 팝업
-- **상단 버튼**: `MD`(Docs 패널), 🔍 항상 위(always-on-top), 새 창, `설정`, `+`(활성 프로젝트면 새 세션, 없으면 새 프로젝트)
+- **상단 버튼**: `MD`(Docs 패널), 핀(항상 위), 로봇(**Desktop Pet 표시/숨김**), 새 창, `설정`, `+`(활성 프로젝트면 새 세션, 없으면 새 프로젝트)
 - **Projects 제목 옆 + 버튼**: 새 프로젝트
 - **세션 우클릭**: 컨텍스트 메뉴
   - 전환 (현재 그룹으로 이동) / 탭으로 추가 / 오른쪽 분할 / 아래로 분할
@@ -117,7 +117,7 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 
 사이드바 상단 **설정** 버튼으로 팝업을 연다 (`Esc`/바깥 클릭/닫기). 탭(General/Usage/Remote/SSH Hosts/About — company 빌드는 Remote 제외):
 
-- **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test)
+- **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test) + **Desktop Pet** 표시/위치 초기화
 - **Usage**: 사용량 대시보드 서버 on/off·포트, URL 복사, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 - **Remote**: 원격 서버·Cloudflare 터널 Start/Stop, GitHub OAuth(client id/secret)·Owner, named tunnel(token/hostname/port), 계정 승인 관리 ([REMOTE.md](REMOTE.md))
 - **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·remote OS·user·host·port·**auth method**·identity 파일[Browse] 또는 비밀번호·extra options) + **Test connection**. Windows 호스트는 **Use .cmd shims for npm CLIs**가 기본 켜짐이라 PowerShell 실행 정책이 `codex.ps1`/`claude.ps1`을 막아도 `codex.cmd`/`claude.cmd`로 실행한다. **Auth method**: 키(identity 지정 시 자동 IdentitiesOnly로 "Too many authentication failures" 방지) / 비밀번호(저장 시 연결할 때 자동 입력, 로컬 `ssh-secrets.json`에만 저장)
@@ -167,5 +167,16 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
   - 우측 상단 인앱 토스트 5초 (클릭으로 그 그룹 활성화)
   - Windows 토스트 (권한 허용 시)
   - **알림음**: 설정에서 시스템음 / 커스텀 사운드 파일 / 끄기 선택 (Test 버튼으로 미리듣기)
+  - **Desktop Pet**: 완료 애니메이션 + 프로젝트/세션 말풍선 + 미확인 완료 배지. 펫 클릭 시 앱을 앞으로 가져오고 최근 완료 세션으로 이동
 - 알림은 한 번만. hook이 중복 fire되어도 상태가 working이 아니면 무시
 - 원격 접속 승인 요청이 오면 별도 토스트 + 알림음 ([REMOTE.md](REMOTE.md))
+
+## Desktop Pet
+
+- 앱 시작 시 주 MultiAgent 프로세스가 투명한 항상-위 펫 창을 하나 만든다. 새 창 프로세스에는 중복 펫을 만들지 않는다
+- 펫 창은 `focusable(false)`이며 완료 순간 새 창을 만들지 않고 기존 창의 CSS 상태만 바꾼다. 따라서 활성 터미널의 키보드 포커스를 가져가지 않는다
+- idle은 잠든 얼굴, running은 깨어 있는 얼굴, working은 타이핑 애니메이션, done은 점프·완료 말풍선으로 표시한다
+- 여러 세션이 작업 중이면 `…N`, 미확인 완료가 있으면 `✓N` 배지를 표시한다. 완료가 working보다 우선 표시된다
+- 펫 아래 `•••` 핸들을 끌어 현재 실행 중 위치를 옮길 수 있다. 앱을 다시 실행하면 주 모니터 오른쪽 아래 기본 위치에서 시작한다
+- 펫을 우클릭하면 전용 메뉴가 열리며 **Close pet**으로 숨길 수 있다. 사이드바 로봇 토글과 Settings 옵션도 OFF로 동기화된다
+- 설정 → General에서 끄거나 기본 위치로 초기화할 수 있다
