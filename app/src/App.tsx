@@ -436,6 +436,9 @@ function App() {
   const [desktopPetCompletions, setDesktopPetCompletions] = useState<
     DesktopPetCompletion[]
   >([]);
+  const [desktopPetQuestions, setDesktopPetQuestions] = useState<
+    Record<string, string>
+  >({});
   const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
   const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
   const [imageViewer, setImageViewer] = useState<{
@@ -476,6 +479,7 @@ function App() {
   const monitorStateJsonRef = useRef<string | null>(null);
   const usageCatalogJsonRef = useRef<string | null>(null);
   const desktopPetJsonRef = useRef<string | null>(null);
+  const desktopPetQuestionsRef = useRef<Record<string, string>>({});
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
@@ -582,12 +586,24 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
-    const update = buildDesktopPetUpdate(agents, desktopPetCompletions);
+    const update = buildDesktopPetUpdate(
+      agents,
+      projects,
+      desktopPetQuestions,
+      desktopPetCompletions
+    );
     const json = JSON.stringify(update);
     if (desktopPetJsonRef.current === json) return;
     desktopPetJsonRef.current = json;
     invoke("update_desktop_pet", { update }).catch(() => {});
-  }, [agents, desktopPetCompletions, isSecondaryWindow, runtimeFlags]);
+  }, [
+    agents,
+    desktopPetCompletions,
+    desktopPetQuestions,
+    isSecondaryWindow,
+    projects,
+    runtimeFlags,
+  ]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
@@ -1111,12 +1127,25 @@ function App() {
       await invoke("confirm_close").catch(() => {});
     }).then(track);
 
-    listen<{ id: string; event: string; session_id?: string }>(
+    listen<{
+      id: string;
+      event: string;
+      session_id?: string;
+      prompt?: string;
+    }>(
       "agent:hook-event",
       (e) => {
         if (cancelled) return;
-        const { id, event, session_id } = e.payload;
+        const { id, event, session_id, prompt } = e.payload;
         if (event === "working") {
+          setDesktopPetQuestions((previous) => {
+            const next = { ...previous };
+            const question = prompt?.trim();
+            if (question) next[id] = question;
+            else delete next[id];
+            desktopPetQuestionsRef.current = next;
+            return next;
+          });
           setAgents((cur) =>
             cur.map((a) =>
               a.id === id && a.status !== "exited"
@@ -1125,6 +1154,14 @@ function App() {
             )
           );
         } else if (event === "done") {
+          const completedQuestion = desktopPetQuestionsRef.current[id];
+          setDesktopPetQuestions((previous) => {
+            if (!(id in previous)) return previous;
+            const next = { ...previous };
+            delete next[id];
+            desktopPetQuestionsRef.current = next;
+            return next;
+          });
           const target = agentsRef.current.find((a) => a.id === id);
           if (target && target.status === "working") {
             const project = projectsRef.current.find(
@@ -1134,7 +1171,8 @@ function App() {
             const title = `${projectName} / ${target.name}`;
             const petCompletion = completionForAgent(
               target,
-              projectsRef.current
+              projectsRef.current,
+              completedQuestion
             );
             setDesktopPetCompletions((previous) => [
               ...previous.slice(-8),

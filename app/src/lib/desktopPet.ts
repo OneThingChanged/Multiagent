@@ -9,16 +9,27 @@ export type DesktopPetCompletion = {
   agentId: string;
   title: string;
   body: string;
+  question: string | null;
+};
+
+export type DesktopPetWorkingItem = {
+  agentId: string;
+  projectName: string;
+  agentName: string;
+  tool: string;
+  question: string | null;
 };
 
 export type DesktopPetUpdate = {
   status: DesktopPetStatus;
   workingCount: number;
+  workingItems: DesktopPetWorkingItem[];
   completedCount: number;
   title: string | null;
   body: string | null;
   agentId: string | null;
   notificationKey: string | null;
+  question: string | null;
 };
 
 export function loadDesktopPetEnabled(): boolean {
@@ -37,10 +48,30 @@ export function saveDesktopPetEnabled(enabled: boolean) {
 }
 
 export function buildDesktopPetUpdate(
-  agents: Pick<Agent, "status">[],
+  agents: Pick<
+    Agent,
+    "id" | "name" | "projectId" | "aiToolId" | "status"
+  >[],
+  projects: Pick<Project, "id" | "name">[],
+  questions: Record<string, string>,
   completions: DesktopPetCompletion[]
 ): DesktopPetUpdate {
-  const workingCount = agents.filter((agent) => agent.status === "working").length;
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+  const workingItems = agents
+    .filter((agent) => agent.status === "working")
+    .map((agent) => ({
+      agentId: agent.id,
+      projectName: projectNames.get(agent.projectId) || "Unknown project",
+      agentName: agent.name,
+      tool:
+        agent.aiToolId === "claude"
+          ? "Claude"
+          : agent.aiToolId === "codex"
+            ? "Codex"
+            : "Shell",
+      question: questions[agent.id]?.trim() || null,
+    }));
+  const workingCount = workingItems.length;
   const runningCount = agents.filter(
     (agent) =>
       agent.status === "starting" ||
@@ -60,23 +91,27 @@ export function buildDesktopPetUpdate(
   return {
     status,
     workingCount,
+    workingItems,
     completedCount: completions.length,
     title: latest?.title ?? null,
     body: latest?.body ?? null,
     agentId: latest?.agentId ?? null,
     notificationKey: latest?.key ?? null,
+    question: latest?.question ?? null,
   };
 }
 
 export function completionForAgent(
   agent: Pick<Agent, "id" | "name" | "projectId">,
-  projects: Pick<Project, "id" | "name">[]
+  projects: Pick<Project, "id" | "name">[],
+  question?: string | null
 ): DesktopPetCompletion {
   const project = projects.find((candidate) => candidate.id === agent.projectId);
   return {
     key: `${Date.now()}-${crypto.randomUUID()}`,
     agentId: agent.id,
     title: `${project?.name || "Unknown project"} / ${agent.name}`,
-    body: "작업이 끝났어요",
+    body: question ? `완료 · ${question.trim()}` : "작업이 끝났어요",
+    question: question?.trim() || null,
   };
 }

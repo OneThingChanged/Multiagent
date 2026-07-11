@@ -159,6 +159,83 @@ body.desktop-pet-document #root {
   font-size: 11px;
   font-weight: 800;
 }
+.desktop-pet-work-badge { cursor: pointer; }
+.desktop-pet-work-badge:hover {
+  transform: scale(1.06);
+  filter: brightness(1.08);
+}
+
+.desktop-pet-work-panel {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  z-index: 15;
+  width: 176px;
+  max-height: 152px;
+  padding: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(99, 194, 255, 0.72);
+  border-radius: 10px;
+  color: #eaf6ff;
+  background: rgba(16, 28, 48, 0.97);
+  box-shadow: 0 8px 22px rgba(2, 8, 20, 0.5);
+}
+
+.desktop-pet-work-title {
+  margin: 0 2px 5px;
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.desktop-pet-work-list {
+  display: flex;
+  max-height: 122px;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.desktop-pet-work-list button {
+  position: relative;
+  min-height: 46px;
+  padding: 5px 38px 5px 6px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 6px;
+  color: #eaf6ff;
+  background: rgba(42, 66, 91, 0.66);
+  text-align: left;
+  cursor: pointer;
+}
+
+.desktop-pet-work-list button:hover {
+  border-color: rgba(125, 211, 252, 0.72);
+  background: rgba(55, 84, 114, 0.9);
+}
+
+.desktop-pet-work-session,
+.desktop-pet-work-question {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-pet-work-session { font-size: 10px; font-weight: 700; }
+.desktop-pet-work-question {
+  margin-top: 4px;
+  color: #c4d5e5;
+  font-size: 10px;
+}
+.desktop-pet-work-tool {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  color: #7dd3fc;
+  font-size: 9px;
+  font-weight: 700;
+}
 .desktop-pet-drag {
   position: absolute;
   right: 49px;

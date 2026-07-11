@@ -12,17 +12,20 @@ import "./DesktopPetPage.css";
 const IDLE: DesktopPetUpdate = {
   status: "idle",
   workingCount: 0,
+  workingItems: [],
   completedCount: 0,
   title: null,
   body: null,
   agentId: null,
   notificationKey: null,
+  question: null,
 };
 
 export function DesktopPetPage() {
   const [update, setUpdate] = useState(IDLE);
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
+  const [workPanelOpen, setWorkPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -40,12 +43,17 @@ export function DesktopPetPage() {
 
     const apply = (next: DesktopPetUpdate) => {
       if (cancelled) return;
-      setUpdate(next);
+      const normalized = {
+        ...next,
+        workingItems: next.workingItems ?? [],
+      };
+      setUpdate(normalized);
+      if (normalized.workingItems.length === 0) setWorkPanelOpen(false);
       if (
-        next.notificationKey &&
-        next.notificationKey !== lastNotificationRef.current
+        normalized.notificationKey &&
+        normalized.notificationKey !== lastNotificationRef.current
       ) {
-        lastNotificationRef.current = next.notificationKey;
+        lastNotificationRef.current = normalized.notificationKey;
         setBubbleVisible(true);
         setCelebrating(true);
         if (timer !== null) window.clearTimeout(timer);
@@ -91,8 +99,9 @@ export function DesktopPetPage() {
         : null;
 
   const activate = () => {
-    if (contextMenu) {
+    if (contextMenu || workPanelOpen) {
       setContextMenu(null);
+      setWorkPanelOpen(false);
       return;
     }
     setBubbleVisible(false);
@@ -102,6 +111,7 @@ export function DesktopPetPage() {
   const openContextMenu = (event: ReactMouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    setWorkPanelOpen(false);
     setContextMenu({
       x: Math.min(event.clientX, 64),
       y: Math.min(event.clientY, 136),
@@ -115,6 +125,18 @@ export function DesktopPetPage() {
     // versions when the source window is about to disappear.
     emit("desktop-pet:close-requested").catch(() => {});
     invoke("set_desktop_pet_enabled", { enabled: false }).catch(() => {});
+  };
+
+  const toggleWorkPanel = (event: ReactMouseEvent) => {
+    event.stopPropagation();
+    setBubbleVisible(false);
+    setContextMenu(null);
+    setWorkPanelOpen((open) => !open);
+  };
+
+  const openWorkingAgent = (agentId: string) => {
+    setWorkPanelOpen(false);
+    emit("desktop-pet:activate", { agentId }).catch(() => {});
   };
 
   return (
@@ -134,6 +156,35 @@ export function DesktopPetPage() {
         </div>
       </div>
 
+      {workPanelOpen && update.workingItems.length > 0 && (
+        <div
+          className="desktop-pet-work-panel"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="desktop-pet-work-title">
+            작업 중 {update.workingItems.length}
+          </div>
+          <div className="desktop-pet-work-list">
+            {update.workingItems.map((item) => (
+              <button
+                key={item.agentId}
+                type="button"
+                onClick={() => openWorkingAgent(item.agentId)}
+                title={item.question || `${item.projectName} / ${item.agentName}`}
+              >
+                <span className="desktop-pet-work-session">
+                  {item.projectName} / {item.agentName}
+                </span>
+                <span className="desktop-pet-work-question">
+                  {item.question || "질문 정보 없음"}
+                </span>
+                <span className="desktop-pet-work-tool">{item.tool}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="desktop-pet-robot">
         <div className="desktop-pet-antenna" />
         <div className="desktop-pet-head">
@@ -145,7 +196,21 @@ export function DesktopPetPage() {
         <div className="desktop-pet-body"><span>M</span></div>
         <div className="desktop-pet-foot desktop-pet-foot-left" />
         <div className="desktop-pet-foot desktop-pet-foot-right" />
-        {badge && <div className="desktop-pet-badge">{badge}</div>}
+        {badge && (
+          <div
+            className={`desktop-pet-badge ${
+              update.completedCount === 0 ? "desktop-pet-work-badge" : ""
+            }`}
+            onClick={
+              update.completedCount === 0 ? toggleWorkPanel : undefined
+            }
+            title={
+              update.completedCount === 0 ? "작업 내용 보기" : "완료된 작업"
+            }
+          >
+            {badge}
+          </div>
+        )}
       </div>
 
       <div

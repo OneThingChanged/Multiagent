@@ -93,11 +93,23 @@ struct PtyData {
 struct DesktopPetUpdate {
     status: String,
     working_count: usize,
+    working_items: Vec<DesktopPetWorkingItem>,
     completed_count: usize,
     title: Option<String>,
     body: Option<String>,
     agent_id: Option<String>,
     notification_key: Option<String>,
+    question: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopPetWorkingItem {
+    agent_id: String,
+    project_name: String,
+    agent_name: String,
+    tool: String,
+    question: Option<String>,
 }
 
 /// SSH connection parameters for spawning a remote session. Field names match
@@ -200,6 +212,8 @@ struct HookEvent {
     transcript_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -306,6 +320,7 @@ $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
 $sessionId = $null
 $transcriptPath = $null
 $cwd = $null
+$prompt = $null
 try {
   $stdinText = [Console]::In.ReadToEnd()
   if ($stdinText) {
@@ -313,6 +328,8 @@ try {
     if ($payload.session_id) { $sessionId = [string]$payload.session_id }
     if ($payload.transcript_path) { $transcriptPath = [string]$payload.transcript_path }
     if ($payload.cwd) { $cwd = [string]$payload.cwd }
+    if ($payload.prompt) { $prompt = [string]$payload.prompt }
+    elseif ($payload.message) { $prompt = [string]$payload.message }
   }
 } catch {}
 # Prefer the per-session env vars (set by the app that spawned this
@@ -336,6 +353,10 @@ try {
   if ($sessionId) { $bodyMap.session_id = $sessionId }
   if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
   if ($cwd) { $bodyMap.cwd = $cwd }
+  if ($Event -eq "working" -and $prompt) {
+    if ($prompt.Length -gt 500) { $prompt = $prompt.Substring(0, 500) }
+    $bodyMap.prompt = $prompt
+  }
   $body = $bodyMap | ConvertTo-Json -Compress
   Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
   "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
@@ -359,6 +380,7 @@ $logPath = Join-Path $env:TEMP "multiagent-remote-hook.log"
 $sessionId = $null
 $transcriptPath = $null
 $cwd = $null
+$prompt = $null
 try {
   $stdinText = [Console]::In.ReadToEnd()
   if ($stdinText) {
@@ -366,6 +388,8 @@ try {
     if ($payload.session_id) { $sessionId = [string]$payload.session_id }
     if ($payload.transcript_path) { $transcriptPath = [string]$payload.transcript_path }
     if ($payload.cwd) { $cwd = [string]$payload.cwd }
+    if ($payload.prompt) { $prompt = [string]$payload.prompt }
+    elseif ($payload.message) { $prompt = [string]$payload.message }
   }
 } catch {}
 $port = $env:MULTIAGENT_PORT
@@ -377,6 +401,10 @@ try {
   if ($sessionId) { $bodyMap.session_id = $sessionId }
   if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
   if ($cwd) { $bodyMap.cwd = $cwd }
+  if ($Event -eq "working" -and $prompt) {
+    if ($prompt.Length -gt 500) { $prompt = $prompt.Substring(0, 500) }
+    $bodyMap.prompt = $prompt
+  }
   $body = $bodyMap | ConvertTo-Json -Compress
   Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $body -ContentType 'application/json' -TimeoutSec 2 -UseBasicParsing | Out-Null
   "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
@@ -485,6 +513,12 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
                 .get("cwd")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let prompt = parsed
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().take(500).collect::<String>());
             if !id.is_empty() && !event.is_empty() {
                 let state: State<AppState> = app.state();
                 if event == "session-start" {
@@ -511,6 +545,7 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
                         session_id,
                         transcript_path,
                         cwd,
+                        prompt,
                     },
                 );
             }
