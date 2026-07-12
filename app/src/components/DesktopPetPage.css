@@ -142,10 +142,17 @@ body.desktop-pet-document #root {
 .desktop-pet-foot { top: 94px; width: 26px; height: 14px; border-radius: 9px 9px 11px 11px; }
 .desktop-pet-foot-left { left: 24px; }
 .desktop-pet-foot-right { right: 24px; }
-.desktop-pet-badge {
+.desktop-pet-badges {
   position: absolute;
   right: 0;
-  top: 56px;
+  top: 47px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.desktop-pet-badge {
   min-width: 26px;
   height: 26px;
   padding: 0 7px;
@@ -163,6 +170,10 @@ body.desktop-pet-document #root {
 .desktop-pet-work-badge:hover {
   transform: scale(1.06);
   filter: brightness(1.08);
+}
+.desktop-pet-complete-badge {
+  color: #092a18;
+  background: #86efac;
 }
 
 .desktop-pet-work-panel {
@@ -283,7 +294,6 @@ body.desktop-pet-document #root {
 .desktop-pet-shell[data-status="idle"] .desktop-pet-screen { color: #7eacc4; text-shadow: none; }
 .desktop-pet-shell[data-status="working"] .desktop-pet-head { animation: desktop-pet-work .42s ease-in-out infinite alternate; }
 .desktop-pet-shell[data-status="working"] .desktop-pet-antenna::before { animation: desktop-pet-signal .7s ease-in-out infinite; }
-.desktop-pet-shell[data-status="done"] .desktop-pet-badge { color: #092a18; background: #86efac; }
 .desktop-pet-celebrate .desktop-pet-robot { animation: desktop-pet-celebrate .58s cubic-bezier(.2,.8,.25,1) 3; }
 
 @keyframes desktop-pet-breathe { 50% { transform: translateY(-3px); } }

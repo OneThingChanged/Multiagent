@@ -49,13 +49,14 @@ export function DesktopPetPage() {
       };
       setUpdate(normalized);
       if (normalized.workingItems.length === 0) setWorkPanelOpen(false);
+      if (normalized.workingCount > 0) setCelebrating(false);
       if (
         normalized.notificationKey &&
         normalized.notificationKey !== lastNotificationRef.current
       ) {
         lastNotificationRef.current = normalized.notificationKey;
         setBubbleVisible(true);
-        setCelebrating(true);
+        setCelebrating(normalized.workingCount === 0);
         if (timer !== null) window.clearTimeout(timer);
         timer = window.setTimeout(() => {
           setBubbleVisible(false);
@@ -91,13 +92,6 @@ export function DesktopPetPage() {
         : update.status === "done"
           ? "✓"
           : "^_^";
-  const badge =
-    update.completedCount > 0
-      ? `✓${update.completedCount}`
-      : update.workingCount > 0
-        ? `…${update.workingCount}`
-        : null;
-
   const activate = () => {
     if (contextMenu || workPanelOpen) {
       setContextMenu(null);
@@ -162,7 +156,7 @@ export function DesktopPetPage() {
           onClick={(event) => event.stopPropagation()}
         >
           <div className="desktop-pet-work-title">
-            작업 중 {update.workingItems.length}
+            작업 중 {update.workingItems.length} · 완료 {update.completedCount}
           </div>
           <div className="desktop-pet-work-list">
             {update.workingItems.map((item) => (
@@ -196,19 +190,25 @@ export function DesktopPetPage() {
         <div className="desktop-pet-body"><span>M</span></div>
         <div className="desktop-pet-foot desktop-pet-foot-left" />
         <div className="desktop-pet-foot desktop-pet-foot-right" />
-        {badge && (
-          <div
-            className={`desktop-pet-badge ${
-              update.completedCount === 0 ? "desktop-pet-work-badge" : ""
-            }`}
-            onClick={
-              update.completedCount === 0 ? toggleWorkPanel : undefined
-            }
-            title={
-              update.completedCount === 0 ? "작업 내용 보기" : "완료된 작업"
-            }
-          >
-            {badge}
+        {(update.workingCount > 0 || update.completedCount > 0) && (
+          <div className="desktop-pet-badges">
+            {update.workingCount > 0 && (
+              <div
+                className="desktop-pet-badge desktop-pet-work-badge"
+                onClick={toggleWorkPanel}
+                title={`작업 중 ${update.workingCount}개 · 내용 보기`}
+              >
+                …{update.workingCount}
+              </div>
+            )}
+            {update.completedCount > 0 && (
+              <div
+                className="desktop-pet-badge desktop-pet-complete-badge"
+                title={`완료 ${update.completedCount}개`}
+              >
+                ✓{update.completedCount}
+              </div>
+            )}
           </div>
         )}
       </div>

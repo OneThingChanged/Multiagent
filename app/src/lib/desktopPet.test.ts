@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildDesktopPetUpdate, completionForAgent } from "./desktopPet";
 
 describe("buildDesktopPetUpdate", () => {
-  it("prefers unread completions over working sessions", () => {
+  it("keeps the working motion while reporting completed sessions", () => {
     const result = buildDesktopPetUpdate(
       [
         {
@@ -11,6 +11,7 @@ describe("buildDesktopPetUpdate", () => {
           projectId: "project-1",
           aiToolId: "codex",
           status: "working",
+          lastSessionId: "session-working",
         },
         {
           id: "agent-2",
@@ -18,6 +19,7 @@ describe("buildDesktopPetUpdate", () => {
           projectId: "project-1",
           aiToolId: "claude",
           status: "running",
+          lastSessionId: "session-running",
         },
       ],
       [{ id: "project-1", name: "MultiAgent" }],
@@ -25,7 +27,8 @@ describe("buildDesktopPetUpdate", () => {
       [
         {
           key: "done-1",
-          agentId: "agent-1",
+          agentId: "agent-3",
+          sessionKey: "session-completed",
           title: "Project / Session",
           body: "작업이 끝났어요",
           question: "펫 작업 목록을 만들어줘",
@@ -34,10 +37,10 @@ describe("buildDesktopPetUpdate", () => {
     );
 
     expect(result).toMatchObject({
-      status: "done",
+      status: "working",
       workingCount: 1,
       completedCount: 1,
-      agentId: "agent-1",
+      agentId: "agent-3",
       notificationKey: "done-1",
       question: "펫 작업 목록을 만들어줘",
     });
@@ -46,6 +49,64 @@ describe("buildDesktopPetUpdate", () => {
       agentName: "Implement",
       tool: "Codex",
       question: "펫 작업 목록을 만들어줘",
+    });
+  });
+
+  it("counts the same session once and excludes it from completed while working", () => {
+    const result = buildDesktopPetUpdate(
+      [
+        {
+          id: "agent-1",
+          name: "Session A",
+          projectId: "project-1",
+          aiToolId: "codex",
+          status: "working",
+          lastSessionId: "shared-session",
+        },
+        {
+          id: "agent-2",
+          name: "Session A duplicate",
+          projectId: "project-1",
+          aiToolId: "codex",
+          status: "working",
+          lastSessionId: "shared-session",
+        },
+      ],
+      [{ id: "project-1", name: "MultiAgent" }],
+      {},
+      [
+        {
+          key: "old-shared",
+          agentId: "agent-1",
+          sessionKey: "shared-session",
+          title: "MultiAgent / Session A",
+          body: "작업이 끝났어요",
+          question: null,
+        },
+        {
+          key: "old-completed",
+          agentId: "agent-3",
+          sessionKey: "completed-session",
+          title: "MultiAgent / Session B",
+          body: "작업이 끝났어요",
+          question: null,
+        },
+        {
+          key: "latest-completed",
+          agentId: "agent-3",
+          sessionKey: "completed-session",
+          title: "MultiAgent / Session B",
+          body: "작업이 끝났어요",
+          question: null,
+        },
+      ]
+    );
+
+    expect(result).toMatchObject({
+      status: "working",
+      workingCount: 1,
+      completedCount: 1,
+      notificationKey: "latest-completed",
     });
   });
 
@@ -76,5 +137,6 @@ describe("buildDesktopPetUpdate", () => {
 
     expect(completion.body).toBe("완료 · 작업 질문을 한 줄로 보여줘");
     expect(completion.question).toBe("작업 질문을 한 줄로 보여줘");
+    expect(completion.sessionKey).toBe("agent-1");
   });
 });

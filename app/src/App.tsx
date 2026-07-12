@@ -1143,6 +1143,14 @@ function App() {
         if (cancelled) return;
         const { id, event, session_id, prompt } = e.payload;
         if (event === "working") {
+          const workingAgent = agentsRef.current.find((agent) => agent.id === id);
+          const sessionKey = workingAgent?.lastSessionId?.trim() || id;
+          setDesktopPetCompletions((previous) =>
+            previous.filter(
+              (completion) =>
+                completion.sessionKey !== sessionKey && completion.agentId !== id
+            )
+          );
           setDesktopPetQuestions((previous) => {
             const next = { ...previous };
             const question = prompt?.trim();
@@ -1180,7 +1188,13 @@ function App() {
               completedQuestion
             );
             setDesktopPetCompletions((previous) => [
-              ...previous.slice(-8),
+              ...previous
+                .filter(
+                  (completion) =>
+                    completion.sessionKey !== petCompletion.sessionKey &&
+                    completion.agentId !== petCompletion.agentId
+                )
+                .slice(-8),
               petCompletion,
             ]);
             playNotificationSound();
