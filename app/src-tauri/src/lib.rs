@@ -2306,8 +2306,7 @@ fn relink_cli_session(
         .find_latest_for_folder(&ai_tool_id, &folder, agent_name.as_deref())
 }
 
-#[tauri::command]
-fn show_main_window(app: AppHandle) -> Result<(), String> {
+fn activate_main_window(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
@@ -2316,11 +2315,32 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn show_main_window(app: AppHandle) -> Result<(), String> {
+    activate_main_window(&app)
+}
+
 const DESKTOP_PET_LABEL: &str = "desktop-pet";
 const DESKTOP_PET_WIDTH: f64 = 184.0;
 const DESKTOP_PET_HEIGHT: f64 = 176.0;
 
+fn normalize_desktop_pet_window(win: &tauri::WebviewWindow) {
+    // Windows can occasionally retain its minimum caption-window geometry
+    // (160x28) while the WebView is being recreated after an updater restart.
+    // Reapply the runtime attributes after creation/focusability changes so the
+    // pet never ends up as an invisible strip even when the builder attributes
+    // were ignored during the native window transition.
+    let _ = win.set_decorations(false);
+    let _ = win.set_resizable(false);
+    let _ = win.set_always_on_top(true);
+    let _ = win.set_size(tauri::LogicalSize::new(
+        DESKTOP_PET_WIDTH,
+        DESKTOP_PET_HEIGHT,
+    ));
+}
+
 fn position_desktop_pet(app: &AppHandle, win: &tauri::WebviewWindow) {
+    normalize_desktop_pet_window(win);
     let monitor = app
         .get_webview_window("main")
         .and_then(|main| main.current_monitor().ok().flatten())
@@ -2374,6 +2394,9 @@ fn create_desktop_pet_window(app: &AppHandle) -> Result<(), String> {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
+        // The main window is the application entry point. The frontend shows
+        // the pet only after it has loaded the persisted sidebar toggle.
+        .visible(false)
         .transparent(true)
         .shadow(false)
         .build()
@@ -2434,14 +2457,19 @@ fn reset_desktop_pet_position(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
+fn exit_application(state: &AppState, app: &AppHandle) {
     #[cfg(not(multiagent_company))]
     state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.close();
-    }
+    // The pet is a second native window in this process. Closing only `main`
+    // leaves the process and always-on-top pet alive, so terminate the whole
+    // application once the frontend has completed its graceful shutdown.
+    app.exit(0);
+}
+
+#[tauri::command]
+fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
+    exit_application(state.inner(), &app);
 }
 
 #[cfg(windows)]
@@ -2541,10 +2569,7 @@ fn run_installer_and_quit(
     std::process::Command::new(&canon)
         .spawn()
         .map_err(|e| format!("spawn installer: {}", e))?;
-    *state.close_confirmed.lock().unwrap() = true;
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.close();
-    }
+    exit_application(state.inner(), &app);
     Ok(())
 }
 
@@ -2836,6 +2861,9 @@ pub fn run() {
                 create_desktop_pet_window(app.handle())
                     .map_err(|e| format!("create desktop pet: {e}"))?;
             }
+            // Best effort during native setup; the frontend repeats this once
+            // the main React tree is ready, before applying the pet toggle.
+            let _ = activate_main_window(app.handle());
             #[cfg(not(multiagent_company))]
             if !secondary_window {
                 remote::load_access(app.handle());

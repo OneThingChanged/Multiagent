@@ -579,6 +579,11 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
+    invoke("show_main_window").catch(() => {});
+  }, [isSecondaryWindow, runtimeFlags]);
+
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
     invoke("set_desktop_pet_enabled", { enabled: desktopPetEnabled }).catch(
       () => {}
     );

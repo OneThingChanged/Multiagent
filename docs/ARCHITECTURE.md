@@ -130,7 +130,7 @@ struct PtyHandle {
 setup 시 `window.on_window_event`로 `CloseRequested` 가로챔.
 - 플래그가 false면 `api.prevent_close()` + 프론트에 `app:close-requested` 이벤트
 - 프론트가 graceful shutdown (`/quit` 전송 + 2초 대기) 후 `confirm_close` 커맨드 호출
-- `confirm_close`는 플래그를 true로 세팅 + `window.close()` 재호출 → 두 번째 close 이벤트는 통과
+- `confirm_close`는 플래그를 true로 세팅하고 `app.exit(0)`을 호출 → 메인 창과 같은 프로세스의 Desktop Pet을 함께 종료
 
 전체 흐름과 토큰 캡처는 [RESUME.md](RESUME.md) 참고.
 
