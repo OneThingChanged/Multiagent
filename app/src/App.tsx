@@ -579,14 +579,12 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
-    invoke("show_main_window").catch(() => {});
-  }, [isSecondaryWindow, runtimeFlags]);
-
-  useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
-    invoke("set_desktop_pet_enabled", { enabled: desktopPetEnabled }).catch(
-      () => {}
-    );
+    // Showing the always-on-top pet can move the main window behind the current
+    // foreground app on some Windows setups. Make the main window the final
+    // startup action so launching MultiAgent never appears to open only the pet.
+    invoke("set_desktop_pet_enabled", { enabled: desktopPetEnabled })
+      .catch(() => {})
+      .finally(() => invoke("show_main_window").catch(() => {}));
   }, [desktopPetEnabled, isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {

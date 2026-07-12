@@ -2457,19 +2457,35 @@ fn reset_desktop_pet_position(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn exit_application(state: &AppState, app: &AppHandle) {
+fn close_application_windows(state: &AppState, app: &AppHandle) {
     #[cfg(not(multiagent_company))]
     state.remote.kill_tunnel();
     *state.close_confirmed.lock().unwrap() = true;
-    // The pet is a second native window in this process. Closing only `main`
-    // leaves the process and always-on-top pet alive, so terminate the whole
-    // application once the frontend has completed its graceful shutdown.
-    app.exit(0);
+    // Close the auxiliary pet first and the main WebView last. A normal WebView
+    // close gives Chromium time to flush localStorage (including the reopen
+    // session snapshot), while closing every native window still terminates the
+    // process instead of leaving the always-on-top pet behind.
+    if let Some(pet) = app.get_webview_window(DESKTOP_PET_LABEL) {
+        let _ = pet.close();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.close();
+    }
+
+    // Defensive fallback for a native window that refuses to close. The delay
+    // preserves the normal storage-flush path in the common case.
+    let app_for_exit = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(750));
+        if !app_for_exit.webview_windows().is_empty() {
+            app_for_exit.exit(0);
+        }
+    });
 }
 
 #[tauri::command]
 fn confirm_close(state: State<'_, AppState>, app: AppHandle) {
-    exit_application(state.inner(), &app);
+    close_application_windows(state.inner(), &app);
 }
 
 #[cfg(windows)]
@@ -2569,7 +2585,7 @@ fn run_installer_and_quit(
     std::process::Command::new(&canon)
         .spawn()
         .map_err(|e| format!("spawn installer: {}", e))?;
-    exit_application(state.inner(), &app);
+    close_application_windows(state.inner(), &app);
     Ok(())
 }
 
