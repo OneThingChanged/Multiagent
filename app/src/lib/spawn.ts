@@ -19,6 +19,19 @@ export type SpawnArgs = {
   cwd: string | null;
 };
 
+export function addTerminalCompatibilityArgs(
+  aiToolId: string,
+  command: string
+): string {
+  if (
+    aiToolId === "codex" &&
+    !/(?:^|\s)--no-alt-screen(?:\s|$)/.test(command)
+  ) {
+    return `${command} --no-alt-screen`;
+  }
+  return command;
+}
+
 export function resolveRemoteToolCommand(
   aiToolId: string,
   command: string,
@@ -100,6 +113,7 @@ export async function buildSpawnArgs(
         }
       }
     }
+    cmd = addTerminalCompatibilityArgs(agent.aiToolId, cmd);
     if (agent.dangerous && tool.dangerousFlag) {
       cmd = `${cmd} ${tool.dangerousFlag}`;
     }

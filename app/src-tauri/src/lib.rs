@@ -88,6 +88,51 @@ struct PtyData {
     data: String,
 }
 
+/// Codex inline mode currently emits `CSI 3 J`, which asks strict terminal
+/// emulators such as xterm.js to erase their saved scrollback. Keep that one
+/// sequence out of Codex PTY output while preserving all other TUI controls.
+/// The matcher retains partial sequences because a PTY read may split an ANSI
+/// control sequence across arbitrary chunks.
+#[derive(Default)]
+struct CodexScrollbackFilter {
+    matched: usize,
+}
+
+impl CodexScrollbackFilter {
+    const ERASE_SCROLLBACK: &'static [u8] = b"\x1b[3J";
+
+    fn push(&mut self, input: &[u8]) -> Vec<u8> {
+        let mut output = Vec::with_capacity(input.len());
+        for &byte in input {
+            if byte == Self::ERASE_SCROLLBACK[self.matched] {
+                self.matched += 1;
+                if self.matched == Self::ERASE_SCROLLBACK.len() {
+                    self.matched = 0;
+                }
+                continue;
+            }
+
+            if self.matched > 0 {
+                output.extend_from_slice(&Self::ERASE_SCROLLBACK[..self.matched]);
+                self.matched = 0;
+            }
+
+            if byte == Self::ERASE_SCROLLBACK[0] {
+                self.matched = 1;
+            } else {
+                output.push(byte);
+            }
+        }
+        output
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        let tail = Self::ERASE_SCROLLBACK[..self.matched].to_vec();
+        self.matched = 0;
+        tail
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopPetUpdate {
@@ -1634,18 +1679,27 @@ fn spawn_pty(
     let app_for_thread = app.clone();
     let remote_port_for_thread = remote_port;
     let writer_for_thread = writer.clone();
+    let protect_scrollback = ai_tool_id.as_deref() == Some("codex");
     #[cfg(not(multiagent_company))]
     let hub_for_thread = state.remote.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut scrollback_filter = CodexScrollbackFilter::default();
         let mut pw_injected = inject_password.is_none();
         let mut prompt_tail = String::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    let filtered;
+                    let output = if protect_scrollback {
+                        filtered = scrollback_filter.push(&buf[..n]);
+                        filtered.as_slice()
+                    } else {
+                        &buf[..n]
+                    };
                     #[cfg(not(multiagent_company))]
-                    hub_for_thread.push(&id_for_thread, &buf[..n]);
+                    hub_for_thread.push(&id_for_thread, output);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     if !pw_injected {
                         prompt_tail.push_str(&data);
@@ -1664,15 +1718,31 @@ fn spawn_pty(
                             prompt_tail.clear();
                         }
                     }
-                    let _ = app_for_thread.emit(
-                        "pty:data",
-                        PtyData {
-                            id: id_for_thread.clone(),
-                            data,
-                        },
-                    );
+                    if !output.is_empty() {
+                        let _ = app_for_thread.emit(
+                            "pty:data",
+                            PtyData {
+                                id: id_for_thread.clone(),
+                                data: String::from_utf8_lossy(output).to_string(),
+                            },
+                        );
+                    }
                 }
                 Err(_) => break,
+            }
+        }
+        if protect_scrollback {
+            let tail = scrollback_filter.finish();
+            if !tail.is_empty() {
+                #[cfg(not(multiagent_company))]
+                hub_for_thread.push(&id_for_thread, &tail);
+                let _ = app_for_thread.emit(
+                    "pty:data",
+                    PtyData {
+                        id: id_for_thread.clone(),
+                        data: String::from_utf8_lossy(&tail).to_string(),
+                    },
+                );
             }
         }
         let _ = app_for_thread.emit(
@@ -2604,6 +2674,36 @@ mod tests {
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16(&words).unwrap()
+    }
+
+    #[test]
+    fn codex_scrollback_filter_removes_only_csi_3j() {
+        let mut filter = CodexScrollbackFilter::default();
+        let output = filter.push(b"before\x1b[2Jmiddle\x1b[3Jafter");
+
+        assert_eq!(output, b"before\x1b[2Jmiddleafter");
+        assert!(filter.finish().is_empty());
+    }
+
+    #[test]
+    fn codex_scrollback_filter_handles_split_sequences() {
+        let mut filter = CodexScrollbackFilter::default();
+        let mut output = Vec::new();
+        output.extend(filter.push(b"one\x1b"));
+        output.extend(filter.push(b"[3"));
+        output.extend(filter.push(b"Jtwo\x1b[31mred"));
+        output.extend(filter.finish());
+
+        assert_eq!(output, b"onetwo\x1b[31mred");
+    }
+
+    #[test]
+    fn codex_scrollback_filter_flushes_incomplete_sequences() {
+        let mut filter = CodexScrollbackFilter::default();
+        let mut output = filter.push(b"text\x1b[3");
+        output.extend(filter.finish());
+
+        assert_eq!(output, b"text\x1b[3");
     }
 
     #[test]

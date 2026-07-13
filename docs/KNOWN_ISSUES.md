@@ -21,8 +21,14 @@
   - 마우스 리포팅이 **꺼져 있으면** `PageUp/PageDown`(`\x1b[5~`/`\x1b[6~`)으로 폴백한다.
   - `Shift+휠`은 3배.
 
+### Codex + xterm.js scrollback 삭제 완화
+- Windows의 xterm.js 호스트에서는 Codex TUI가 normal buffer에 `CSI 2J`/`CSI 3J`를 출력해, 세션 JSONL은 정상인데 터미널의 이전 화면만 사라지는 upstream 문제가 있다. 관련 보고: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
+- v0.5.26부터 Codex는 자동으로 `--no-alt-screen`을 사용하며, PTY 출력에서 Codex의 `CSI 3J`(scrollback purge)만 스트리밍 필터로 제거한다. `CSI 2J`와 다른 ANSI 제어는 TUI 렌더링을 위해 그대로 전달한다.
+- ANSI 시퀀스가 여러 PTY read로 나뉘어도 필터 상태를 유지한다. Claude와 일반 Shell 출력에는 적용하지 않는다.
+- 이미 실행 중인 Codex에는 소급 적용되지 않으므로 업데이트 후 세션을 다시 열어야 한다. 이 조치는 xterm 화면 보존을 위한 호환성 완화이며 Codex의 JSONL 대화 원본이나 resume 데이터는 변경하지 않는다.
+
 ### 머신마다 휠 동작이 다른 이유 (일반 스크롤 vs PageUp/Down)
-- 같은 앱·같은 코드라도 그 PC에서 도는 **claude/codex CLI 버전·모드**에 따라 인터랙티브 화면이 normal 버퍼로 그려질 수도, alternate 버퍼로 그려질 수도 있다. normal이면 오른쪽 scrollback이 보이고 휠이 부드럽게 굴러가며, alternate면 위 분기를 탄다.
+- 같은 앱·같은 코드라도 그 PC에서 도는 **claude/codex CLI 버전·모드**에 따라 인터랙티브 화면이 normal 버퍼로 그려질 수도, alternate 버퍼로 그려질 수도 있다. v0.5.26 이후 앱이 시작하는 Codex는 위 호환성 완화를 위해 normal buffer를 강제한다. Claude와 사용자가 직접 실행한 다른 TUI는 기존처럼 각 프로그램의 버퍼 선택을 따른다.
 - alternate라도 그 TUI가 마우스 리포팅을 켜면 휠 스크롤이 자연스럽게 되고, 끄면 PageUp/Down 페이지 단위로 보인다.
 - 즉 "어떤 컴퓨터는 일반 스크롤, 어떤 컴퓨터는 PageUp/Down"은 앱 버그가 아니라 **그 PC claude/codex의 화면 버퍼·마우스 리포팅 차이**다. 양쪽 `claude --version`을 맞추면 동작이 일치한다. git/man 등 pager가 원인이면 `git config --global core.pager 'less -X'` 또는 `export LESS='-X'`로 normal 버퍼를 유지할 수 있다.
 
