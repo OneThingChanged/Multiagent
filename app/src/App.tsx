@@ -701,6 +701,7 @@ function App() {
         aiToolId: a.aiToolId,
         status: a.status,
         lastSessionId: a.lastSessionId ?? null,
+        sshHostId: a.sshHostId ?? null,
       })),
       groups,
       view: {

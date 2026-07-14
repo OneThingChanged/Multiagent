@@ -93,6 +93,23 @@ type UsageIngestSummary = {
   errors: string[];
 };
 
+type HookRepairSummary = {
+  activeSessions: number;
+  supportedSessions: number;
+  repaired: number;
+  alreadyHealthy: number;
+  skipped: number;
+  restartRequired: number;
+  serverRestarted: boolean;
+  failures: Array<{ agentId: string; name: string; message: string }>;
+};
+
+type HookRepairState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "done"; summary: HookRepairSummary }
+  | { status: "error"; message: string };
+
 type SettingsTab = "general" | "dashboard" | "remote" | "ssh" | "about";
 
 const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
@@ -198,6 +215,9 @@ export function SettingsModal({
     null
   );
   const [usageError, setUsageError] = useState<string | null>(null);
+  const [hookRepair, setHookRepair] = useState<HookRepairState>({
+    status: "idle",
+  });
 
   const [sshHosts, setSshHosts] = useState<SshHost[]>(() => loadSshHosts());
   const [sshDraft, setSshDraft] = useState<SshHost>(() => emptySshDraft());
@@ -507,6 +527,24 @@ export function SettingsModal({
     }
   };
 
+  const handleHookRepair = async () => {
+    setHookRepair({ status: "running" });
+    try {
+      const summary = await invoke<HookRepairSummary>("repair_active_hooks");
+      setHookRepair({ status: "done", summary });
+    } catch (err) {
+      setHookRepair({
+        status: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : typeof err === "string"
+              ? err
+              : "Hook 복구에 실패했습니다.",
+      });
+    }
+  };
+
   const applySound = (next: NotificationSoundConfig) => {
     setSound(next);
     saveNotificationSound(next);
@@ -732,6 +770,48 @@ export function SettingsModal({
                 onClick={onResetDesktopPetPosition}
               >
                 위치 초기화
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Agent Hooks</div>
+          <div className="app-about-card">
+            <div className="app-update-message">
+              {hookRepair.status === "idle" &&
+                "실제로 실행 중인 PTY와 Codex/Claude 세션을 비교하고, 누락되거나 손상된 Hook 설정·helper·로컬 연결을 다시 구성합니다."}
+              {hookRepair.status === "running" && "Hook 상태를 점검하고 복구하는 중입니다..."}
+              {hookRepair.status === "error" && (
+                <span className="app-update-error">{hookRepair.message}</span>
+              )}
+              {hookRepair.status === "done" && (
+                <>
+                  활성 {hookRepair.summary.activeSessions}개 중 지원 세션 {hookRepair.summary.supportedSessions}개를 확인했습니다. 복구 {hookRepair.summary.repaired}개, 정상 {hookRepair.summary.alreadyHealthy}개
+                  {hookRepair.summary.serverRestarted ? ", Hook 서버 재연결 완료" : ""}.
+                  {hookRepair.summary.skipped > 0
+                    ? ` Hook 미사용 세션 ${hookRepair.summary.skipped}개는 제외했습니다.`
+                    : ""}
+                  {hookRepair.summary.restartRequired > 0 && (
+                    <div className="app-update-error">
+                      원격 세션 {hookRepair.summary.restartRequired}개는 SSH 역터널 재생성이 필요하므로 세션을 다시 열어주세요.
+                    </div>
+                  )}
+                  {hookRepair.summary.failures.map((failure) => (
+                    <div className="app-update-error" key={failure.agentId}>
+                      {failure.name}: {failure.message}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className="btn-primary app-update-btn"
+                onClick={handleHookRepair}
+                disabled={hookRepair.status === "running"}
+              >
+                {hookRepair.status === "running" ? "복구 중..." : "Hook 점검 및 복구"}
               </button>
             </div>
           </div>

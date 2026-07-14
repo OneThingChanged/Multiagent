@@ -41,6 +41,7 @@
 - "working/done" 상태는 Claude(`UserPromptSubmit`/`Stop`) + Codex(같은 이름 이벤트) hook이 fire되어야 동작
 - Claude는 `.claude/settings.local.json`, Codex는 `.codex/config.toml`에 hook 머지
 - hook 실행에 PowerShell 인터프리터가 한 번 더 떠야 함 — 작은 지연
+- 상태 표시가 멈추면 설정 → **General → Agent Hooks → Hook 점검 및 복구**에서 실제 활성 PTY와 hook 설정을 대조하고 local helper/config/HTTP 연결을 재구성할 수 있다. SSH 원격 세션은 역터널 때문에 세션 재시작이 필요할 수 있다.
 
 ### 같은 에이전트 동시 표시 불가
 - xterm Terminal 인스턴스 1개당 DOM 1곳에만 mount 가능

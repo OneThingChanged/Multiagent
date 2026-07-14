@@ -142,6 +142,66 @@ describe("splitWith", () => {
       expect(root.children.length).toBe(2);
     }
   });
+
+  it("replaces the previous split partner when the selected pane is split again", () => {
+    let s = leafState(["a", "b", "c"]);
+    s = ops.splitWith(s, "b", "h");
+    s = ops.selectAgent(s, "a");
+
+    const next = ops.splitWith(s, "c", "v");
+    const pair = next.groups.find((group) =>
+      collectAgentIds(group.layout).has("a")
+    );
+    const formerPartner = next.groups.find((group) =>
+      collectAgentIds(group.layout).has("b")
+    );
+
+    expect(pair).toBeTruthy();
+    expect(formerPartner).toBeTruthy();
+    expect(pair?.id).toBe("g-a");
+    expect(pair?.id).not.toBe(formerPartner?.id);
+    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+      "a",
+      "c",
+    ]);
+    expect([...collectAgentIds(formerPartner?.layout ?? null)]).toEqual(["b"]);
+    expect(formerPartner?.id).not.toBe("g-a");
+    expect(next.activeGroupId).toBe(pair?.id);
+    expect(pair?.layout.type).toBe("split");
+    if (pair?.layout.type === "split") {
+      expect(pair.layout.direction).toBe("v");
+      expect(pair.layout.children).toHaveLength(2);
+    }
+  });
+
+  it("keeps tabs together when their pane gets a new split partner", () => {
+    let s = leafState(["a", "tab", "b", "c"]);
+    s = ops.openAsTab(s, "tab");
+    s = ops.splitWith(s, "b", "h");
+    s = ops.selectAgent(s, "a");
+
+    const next = ops.splitWith(s, "c", "h");
+    const pair = next.groups.find((group) =>
+      collectAgentIds(group.layout).has("a")
+    );
+
+    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+      "a",
+      "c",
+      "tab",
+    ]);
+    expect(pair?.layout.type).toBe("split");
+    if (pair?.layout.type === "split") {
+      expect(pair.layout.children).toHaveLength(2);
+      const tabbedPane = pair.layout.children.find(
+        (child) => child.type === "leaf" && child.tabs.includes("a")
+      );
+      expect(tabbedPane?.type).toBe("leaf");
+      if (tabbedPane?.type === "leaf") {
+        expect(tabbedPane.tabs).toEqual(["a", "tab"]);
+      }
+    }
+  });
 });
 
 describe("closeTab", () => {
@@ -318,5 +378,46 @@ describe("performDrop", () => {
     const targetLeafId = (leafAt(s, "g-a", []) as { id: string }).id;
     const next = ops.performDrop(s, "a", targetLeafId, "left");
     expect(next).toBe(s);
+  });
+
+  it("replaces the previous split partner on an edge drop", () => {
+    let s = leafState(["a", "b", "c"]);
+    s = ops.splitWith(s, "b", "h");
+    s = ops.selectAgent(s, "a");
+    const activeGroup = s.groups.find((group) => group.id === s.activeGroupId);
+    const targetPath = activeGroup
+      ? findLeafPath(activeGroup.layout, "a")
+      : null;
+    const target =
+      activeGroup && targetPath
+        ? getAt(activeGroup.layout, targetPath)
+        : null;
+    expect(target?.type).toBe("leaf");
+    if (!target || target.type !== "leaf") return;
+
+    const next = ops.performDrop(s, "c", target.id, "right");
+    const pair = next.groups.find((group) =>
+      collectAgentIds(group.layout).has("a")
+    );
+    const formerPartner = next.groups.find((group) =>
+      collectAgentIds(group.layout).has("b")
+    );
+
+    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+      "a",
+      "c",
+    ]);
+    expect([...collectAgentIds(formerPartner?.layout ?? null)]).toEqual(["b"]);
+    expect(pair?.id).toBe("g-a");
+    expect(formerPartner?.id).not.toBe("g-a");
+    expect(pair?.id).not.toBe(formerPartner?.id);
+    expect(next.activeGroupId).toBe(pair?.id);
+    expect(pair?.layout.type).toBe("split");
+    if (pair?.layout.type === "split") {
+      expect(pair.layout.direction).toBe("h");
+      expect(pair.layout.children).toHaveLength(2);
+      expect(findLeafPath(pair.layout, "a")).toEqual([0]);
+      expect(findLeafPath(pair.layout, "c")).toEqual([1]);
+    }
   });
 });

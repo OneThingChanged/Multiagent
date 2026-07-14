@@ -21,6 +21,7 @@ OneThingChanged MultiAgent는 Codex, Claude, Shell 같은 여러 터미널 기�
 - 세션별 별명 지정 및 우클릭 메뉴에서 별명 변경
 - 터미널을 탭으로 관리
 - 터미널 화면을 분할해서 여러 세션을 동시에 확인
+- 사이드바 `SCREENS`에서 `Screen 1 (A+B)` 형태로 분할 그룹을 확인하고 전환
 - 드래그 앤 드롭으로 탭과 패널 위치 조정
 - `Ctrl+C`는 선택 영역 복사, `Ctrl+V`는 붙여넣기
 - `Ctrl + 마우스 휠`로 터미널 글자 크기 확대/축소
@@ -118,6 +119,7 @@ It is designed for workflows where you choose a project first, then run named se
 - Assign session aliases and rename them from the context menu
 - Manage terminal sessions with tabs
 - Split the terminal workspace to view multiple sessions at once
+- View and switch split groups from sidebar summaries such as `Screen 1 (A+B)`
 - Reorganize tabs and panes with drag and drop
 - `Ctrl+C` copies the selected terminal text, `Ctrl+V` pastes
 - `Ctrl + mouse wheel` zooms terminal text in and out

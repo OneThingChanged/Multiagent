@@ -49,6 +49,7 @@ pub struct MonitorAgentInfo {
     pub ai_tool_id: String,
     pub status: Option<String>,
     pub last_session_id: Option<String>,
+    pub ssh_host_id: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -240,6 +241,27 @@ struct HookReconnectResult {
     tool: String,
     folder: String,
     message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookRepairFailure {
+    agent_id: String,
+    name: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookRepairSummary {
+    active_sessions: usize,
+    supported_sessions: usize,
+    repaired: usize,
+    already_healthy: usize,
+    skipped: usize,
+    restart_required: usize,
+    server_restarted: bool,
+    failures: Vec<HookRepairFailure>,
 }
 
 #[derive(Clone, Serialize)]
@@ -736,7 +758,11 @@ fn reconnect_agent_hooks(app: &AppHandle, agent_id: &str) -> Result<HookReconnec
     if agent.folder.trim().is_empty() {
         return Err("agent folder is missing".to_string());
     }
+    if agent.ssh_host_id.is_some() {
+        return Err("remote hook reconnect requires reopening the SSH session".to_string());
+    }
 
+    crate::refresh_hook_runtime(app)?;
     match agent.ai_tool_id.as_str() {
         "claude" => crate::setup_claude_hooks(&agent.folder, &state.hook_info.helper_path)?,
         "codex" => crate::setup_codex_hooks(&agent.folder, &state.hook_info.helper_path)?,
@@ -757,6 +783,108 @@ fn reconnect_agent_hooks(app: &AppHandle, agent_id: &str) -> Result<HookReconnec
         folder: agent.folder,
         message: "hooks reconnected for future CLI hook events".to_string(),
     })
+}
+
+fn hook_settings_current(agent: &MonitorAgentInfo, helper_path: &str) -> Result<bool, String> {
+    let (settings_path, merged) = match agent.ai_tool_id.as_str() {
+        "claude" => {
+            let path = Path::new(&agent.folder)
+                .join(".claude")
+                .join("settings.local.json");
+            let existing = fs::read_to_string(&path).unwrap_or_default();
+            let merged = crate::merge_claude_settings(&existing, helper_path)?;
+            (path, (existing, merged))
+        }
+        "codex" => {
+            let path = Path::new(&agent.folder).join(".codex").join("config.toml");
+            let existing = fs::read_to_string(&path).unwrap_or_default();
+            let merged = crate::merge_codex_config(&existing, helper_path)?;
+            (path, (existing, merged))
+        }
+        _ => return Ok(true),
+    };
+    Ok(settings_path.exists() && merged.0 == merged.1)
+}
+
+pub fn repair_active_hooks(app: &AppHandle) -> Result<HookRepairSummary, String> {
+    let server_restarted = crate::refresh_hook_runtime(app)?;
+    let state = app.state::<AppState>();
+    let live_ids: HashSet<String> = state.ptys.lock().unwrap().keys().cloned().collect();
+    let agents = state.monitor.catalog.lock().unwrap().agents.clone();
+    let helper_path = state.hook_info.helper_path.clone();
+    let mut seen = HashSet::new();
+    let mut summary = HookRepairSummary {
+        active_sessions: live_ids.len(),
+        supported_sessions: 0,
+        repaired: 0,
+        already_healthy: 0,
+        skipped: 0,
+        restart_required: 0,
+        server_restarted,
+        failures: Vec::new(),
+    };
+
+    for agent in agents.iter().filter(|agent| live_ids.contains(&agent.id)) {
+        seen.insert(agent.id.clone());
+        if agent.ai_tool_id != "claude" && agent.ai_tool_id != "codex" {
+            summary.skipped += 1;
+            continue;
+        }
+        summary.supported_sessions += 1;
+        if agent.ssh_host_id.is_some() {
+            // An existing SSH reverse tunnel is pinned to the hook server port
+            // selected at spawn, so a remote process must be reopened if that
+            // connection itself is stale.
+            summary.restart_required += 1;
+            continue;
+        }
+        if agent.folder.trim().is_empty() {
+            summary.failures.push(HookRepairFailure {
+                agent_id: agent.id.clone(),
+                name: agent.name.clone(),
+                message: "프로젝트 폴더가 없습니다.".to_string(),
+            });
+            continue;
+        }
+
+        let was_current = hook_settings_current(agent, &helper_path).unwrap_or(false);
+        let result = match agent.ai_tool_id.as_str() {
+            "claude" => crate::setup_claude_hooks(&agent.folder, &helper_path),
+            "codex" => crate::setup_codex_hooks(&agent.folder, &helper_path),
+            _ => Ok(()),
+        };
+        match result {
+            Ok(()) => {
+                if was_current {
+                    summary.already_healthy += 1;
+                } else {
+                    summary.repaired += 1;
+                }
+                state.monitor.note_hook(
+                    agent.id.clone(),
+                    "hooks-reconnected".to_string(),
+                    agent.last_session_id.clone(),
+                    None,
+                    Some(agent.folder.clone()),
+                );
+            }
+            Err(message) => summary.failures.push(HookRepairFailure {
+                agent_id: agent.id.clone(),
+                name: agent.name.clone(),
+                message,
+            }),
+        }
+    }
+
+    for id in live_ids.difference(&seen) {
+        summary.failures.push(HookRepairFailure {
+            agent_id: id.clone(),
+            name: id.clone(),
+            message: "활성 PTY와 세션 목록이 아직 동기화되지 않았습니다.".to_string(),
+        });
+    }
+
+    Ok(summary)
 }
 
 fn effective_status(

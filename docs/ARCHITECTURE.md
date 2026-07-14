@@ -39,7 +39,7 @@ K:\AI\MultiAgent\
    │  │  ├─ desktopPet.ts   ← 펫 설정·세션 상태 집계·완료 큐 payload
    │  │  └─ terminal.ts     ← createEntry / 테마 / md·html·이미지 링크 / search·serialize / zoom / Ctrl+Enter / notifyDone
    │  ├─ components/
-   │  │  ├─ Sidebar.tsx        ← 프로젝트 트리·검색·1줄·드래그 재정렬
+   │  │  ├─ Sidebar.tsx        ← Screen 요약·프로젝트 트리·검색·1줄·드래그 재정렬
    │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
    │  │  ├─ DocsPanel.tsx      ← Markdown/HTML 목록·트리·뷰어
    │  │  ├─ ImageViewer.tsx    ← 터미널 이미지 경로 뷰어
@@ -169,7 +169,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - 각 leaf는 한 패널. tabs 배열 = 그 패널의 탭 순서, activeIndex = 현재 보이는 탭
-- split은 임의 깊이로 중첩 가능 (예: 좌-(상/하)-우 같은 3분할)
+- 새 split 조작은 한 그룹에 leaf 2개만 만든다. 이미 분할된 패널 A에 C를 붙이면 A를 기존 A+B 그룹에서 떼어 A+C 그룹으로 만들고 B는 단독 그룹으로 남긴다
+- 저장된 구버전 중첩 layout은 호환을 위해 로드·렌더링할 수 있지만, `splitWith`와 edge drop은 새 중첩/3분할을 만들지 않는다
 - `sizes`는 자식 비율 합 = 1
 
 ### 그룹 모델 불변식
@@ -180,9 +181,17 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 기존 `multiagent.agents.v1`만 있던 설치는 agent.folder별로 Project를 자동 생성해 마이그레이션한다
 - 어떤 이유로 누락되면 load 시 solo 그룹 생성으로 복구
 - 그룹 layout이 비면 그 그룹 자동 삭제
+- 새 분할 그룹은 패널 2개가 최대이며, 각 패널 내부에는 여러 탭을 둘 수 있음
 - `sessionPins?: Record<agentId, sessionId>`는 그룹에 고정된 resume 세션 ID
 - `sessionLocked?: true`이면 외부 세션을 해당 그룹에 탭/분할/드래그로 추가하지 않음
 - layout에서 제거된 세션의 session pin은 `updateGroup`에서 같이 정리됨
+
+### 사이드바 Screen 요약
+
+- root가 `split`인 그룹만 사이드바 프로젝트 트리 위 `SCREENS` 영역에 `Screen N (A+B)`로 표시한다. 탭만 여러 개인 단일 leaf 그룹은 Screen이 아니다
+- Screen 번호와 색은 현재 split 그룹 순서로 배정하고, 프로젝트의 각 멤버 행에도 같은 색 `SN` 배지를 표시한다
+- 서로 다른 프로젝트의 세션을 분할해도 Screen 요약 한 줄에서 함께 보이며, 행을 누르면 해당 그룹으로 전환한다
+- 분할 파트너 교체 시 대상 split 그룹 ID를 유지한다. 따라서 `Screen 1 (A+B)`에서 A를 C와 다시 분할하면 `Screen 1 (A+C)`로 갱신되고 B만 새 solo 그룹으로 이동한다
 
 ### 그룹 세션 고정
 
@@ -237,6 +246,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 좌/우/상/하 각 25% 영역에서 마우스 위치로부터 가장 가까운 가장자리가 winner
 - 모든 가장자리에서 25% 이상 떨어져 있으면 `center`
 - `top/bottom` → 수직 split (`v`), `left/right` → 수평 split (`h`)
+- edge drop 대상이 기존 split 안에 있으면 대상 패널을 떼어 드롭한 세션과 새 2패널 그룹을 만들고, 이전 파트너는 기존 그룹에 남김
 - `center` → addTabToLeafAt (탭 합치기)
 
 ### 핵심 헬퍼 (수정 시 주의)
@@ -253,6 +263,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 | `setLeafActiveTab(layout, path, agentId)` | activeIndex 변경 |
 | `insertNextTo(layout, targetPath, newLeaf, dir, before)` | 부모 split이 같은 dir이면 형제 추가, 아니면 wrap |
 | `validateLayout(node, validIds)` | 로드 시 검증. 옛 `{type:'leaf', agentId}` 포맷 자동 마이그레이션 |
+
+`groupOps.splitIntoPair`는 메뉴 분할과 edge drop이 공유하는 2패널 전용 조합 함수다. 대상 leaf가 기존 split에 있으면 먼저 분리하고, 대상 leaf와 새 leaf만 들어 있는 별도 그룹을 만든다.
 
 ### 상태 변경 패턴
 

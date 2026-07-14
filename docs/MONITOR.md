@@ -55,6 +55,10 @@
 
 `hook missing` 세션에는 **Reconnect hooks** 버튼이 표시된다. 이 버튼은 해당 agent의 `folder`에 있는 Claude/Codex hook 설정을 현재 MultiAgent 인스턴스의 `notify.ps1`, hook port/token으로 다시 쓴다.
 
+설정 → **General → Agent Hooks → Hook 점검 및 복구**는 `AppState.ptys`의 실제 활성 세션과 동기화된 세션 목록을 전체 비교한다. 활성 local Claude/Codex 세션에 대해 helper 파일과 hook 설정을 검증하고 누락·손상된 항목만 다시 병합한다. 로컬 hook HTTP 서버가 응답하지 않으면 새 port/token으로 서버를 다시 띄우고 `hook-info.json`도 갱신한다. 이미 실행 중인 local helper는 기존 env 연결이 실패하면 최신 `hook-info.json`으로 한 번 재시도하므로 앱이나 세션을 강제 종료하지 않고 복구할 수 있다.
+
+활성 SSH 세션의 역터널은 시작 당시 로컬 hook port에 고정된다. 이 경우 복구 결과에 **세션 다시 열기 필요**로 표시되며 해당 원격 세션을 재시작해야 한다.
+
 주의: 이미 실행 중인 CLI가 hook 설정을 언제 다시 읽는지는 도구 구현에 따라 다를 수 있다. 재연결은 미래 hook 이벤트 또는 다음 세션 시작에 확실히 반영되고, 실행 중 세션은 다음 prompt/stop 이벤트에서 반영될 수 있다.
 
 ## Usage 결합

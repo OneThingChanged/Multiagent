@@ -4,16 +4,33 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { toolForId } from "../types";
-import type { Agent, DragState, Group, Project } from "../types";
+import type {
+  Agent,
+  DragState,
+  Group,
+  LayoutNode,
+  LeafNode,
+  Project,
+} from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
 import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 const LS_COLLAPSED_MACHINES = "multiagent.collapsedMachines.v1";
 const LS_ACTIVE_ONLY = "multiagent.activeOnly.v1";
+
+const SCREEN_COLORS = [
+  "#58a6ff",
+  "#bc8cff",
+  "#39c5cf",
+  "#f0883e",
+  "#d2a8ff",
+  "#4f9cf9",
+];
 
 function loadActiveOnly(): boolean {
   try {
@@ -50,6 +67,26 @@ type Section = {
   sessionLocked: boolean;
   members: Agent[];
 };
+
+type ScreenSummary = {
+  groupId: string;
+  number: number;
+  color: string;
+  direction: "h" | "v";
+  label: string;
+  title: string;
+  memberIds: string[];
+  targetAgentId: string;
+};
+
+function collectLeaves(node: LayoutNode, out: LeafNode[] = []): LeafNode[] {
+  if (node.type === "leaf") {
+    out.push(node);
+    return out;
+  }
+  for (const child of node.children) collectLeaves(child, out);
+  return out;
+}
 
 type PendingSessionClick = {
   agentId: string;
@@ -202,6 +239,68 @@ export function Sidebar({
     }
     return counts;
   }, [agents]);
+
+  const screens = useMemo<ScreenSummary[]>(() => {
+    const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+    const projectById = new Map(
+      projects.map((project) => [project.id, project])
+    );
+    const result: ScreenSummary[] = [];
+
+    for (const group of groups) {
+      if (group.layout.type !== "split") continue;
+      const leaves = collectLeaves(group.layout);
+      if (leaves.length < 2) continue;
+
+      const memberIds = collectAgentIdsInOrder(group.layout).filter((id) =>
+        agentById.has(id)
+      );
+      if (memberIds.length < 2) continue;
+
+      const paneLabels = leaves.map((leaf) => {
+        const knownTabs = leaf.tabs.filter((id) => agentById.has(id));
+        const activeId = agentById.has(leaf.tabs[leaf.activeIndex])
+          ? leaf.tabs[leaf.activeIndex]
+          : knownTabs[0];
+        const activeName = activeId
+          ? agentById.get(activeId)?.name ?? activeId
+          : "Empty";
+        const extraTabs = Math.max(0, knownTabs.length - 1);
+        return extraTabs > 0 ? `${activeName}(+${extraTabs})` : activeName;
+      });
+      const number = result.length + 1;
+      const targetAgentId =
+        activeAgentId && memberIds.includes(activeAgentId)
+          ? activeAgentId
+          : memberIds[0];
+      const memberDescriptions = memberIds.map((id) => {
+        const agent = agentById.get(id)!;
+        const projectName = projectById.get(agent.projectId)?.name ?? "Unknown";
+        return `${projectName} / ${agent.name}`;
+      });
+
+      result.push({
+        groupId: group.id,
+        number,
+        color: SCREEN_COLORS[(number - 1) % SCREEN_COLORS.length],
+        direction: group.layout.direction,
+        label: `(${paneLabels.join(" + ")})`,
+        title: [`Screen ${number}`, ...memberDescriptions].join("\n"),
+        memberIds,
+        targetAgentId,
+      });
+    }
+
+    return result;
+  }, [activeAgentId, agents, groups, projects]);
+
+  const screenByAgentId = useMemo(() => {
+    const result = new Map<string, ScreenSummary>();
+    for (const screen of screens) {
+      for (const agentId of screen.memberIds) result.set(agentId, screen);
+    }
+    return result;
+  }, [screens]);
 
   const sectionsByProject = useMemo(() => {
     const result = new Map<string, Section[]>();
@@ -421,6 +520,7 @@ export function Sidebar({
     const inGroup = inGroupAgentIds.has(a.id);
     const isDragging = dragState?.fromAgentId === a.id;
     const isActiveGroup = groupId === activeGroupId;
+    const screen = screenByAgentId.get(a.id);
     return (
       <li
         key={a.id}
@@ -436,6 +536,11 @@ export function Sidebar({
         ]
           .filter(Boolean)
           .join(" ")}
+        style={
+          screen
+            ? ({ "--screen-color": screen.color } as CSSProperties)
+            : undefined
+        }
         draggable={false}
         onDragStart={(e) => {
           e.preventDefault();
@@ -478,6 +583,14 @@ export function Sidebar({
           >
             {a.name}
           </span>
+          {screen && (
+            <span
+              className="agent-screen-badge"
+              title={`Screen ${screen.number} 분할 그룹`}
+            >
+              S{screen.number}
+            </span>
+          )}
           {sessionLocked && (
             <span
               className="agent-session-pin"
@@ -753,6 +866,48 @@ export function Sidebar({
             </button>
           )}
         </div>
+        {screens.length > 0 && (
+          <section className="screen-groups" aria-label="Split screens">
+            <div className="screen-groups-heading">
+              <span>SCREENS</span>
+              <span className="screen-groups-count">{screens.length}</span>
+            </div>
+            <div className="screen-groups-list">
+              {screens.map((screen) => (
+                <button
+                  key={screen.groupId}
+                  className={`screen-group-row ${
+                    screen.groupId === activeGroupId
+                      ? "screen-group-row-active"
+                      : ""
+                  }`}
+                  style={
+                    { "--screen-color": screen.color } as CSSProperties
+                  }
+                  onClick={() => onSelect(screen.targetAgentId)}
+                  title={screen.title}
+                >
+                  <span className="screen-group-rail" aria-hidden="true" />
+                  <span className="screen-group-name">
+                    Screen {screen.number}
+                  </span>
+                  <span className="screen-group-members">{screen.label}</span>
+                  <span
+                    className="screen-group-direction"
+                    title={
+                      screen.direction === "h" ? "좌우 분할" : "상하 분할"
+                    }
+                    aria-label={
+                      screen.direction === "h" ? "좌우 분할" : "상하 분할"
+                    }
+                  >
+                    {screen.direction === "h" ? "↔" : "↕"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         {groupByMachine
           ? machineGroups.map((group) => {
               const visible = group.projects.filter(

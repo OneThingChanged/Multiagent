@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -41,9 +41,14 @@ impl Drop for SessionLock {
 }
 
 struct HookInfo {
+    runtime: Mutex<HookRuntime>,
+    helper_path: String,
+}
+
+#[derive(Clone)]
+struct HookRuntime {
     port: u16,
     token: String,
-    helper_path: String,
 }
 
 struct AppState {
@@ -391,8 +396,8 @@ if (-not $port -or -not $token) {
 }
 "$ts | event=$Event | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId | transcript=$transcriptPath | port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 if (-not $port -or -not $token) { "$ts |   ! no port/token" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
-try {
-  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $token }
+function Send-MultiAgentHook([string]$targetPort, [string]$targetToken) {
+  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $targetToken }
   if ($sessionId) { $bodyMap.session_id = $sessionId }
   if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
   if ($cwd) { $bodyMap.cwd = $cwd }
@@ -402,10 +407,31 @@ try {
   }
   $body = $bodyMap | ConvertTo-Json -Compress
   $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$port/event" -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 2 -UseBasicParsing | Out-Null
+  Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$targetPort/event" -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 2 -UseBasicParsing | Out-Null
+}
+try {
+  Send-MultiAgentHook $port $token
   "$ts |   posted ok port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 } catch {
-  "$ts |   error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
+  $primaryError = $_
+  $recovered = $false
+  if (Test-Path $infoPath) {
+    try {
+      $latest = Get-Content $infoPath -Raw | ConvertFrom-Json
+      $latestPort = [string]$latest.port
+      $latestToken = [string]$latest.token
+      if ($latestPort -and $latestToken -and ($latestPort -ne $port -or $latestToken -ne $token)) {
+        Send-MultiAgentHook $latestPort $latestToken
+        "$ts |   recovered via hook-info port=$latestPort" | Out-File -FilePath $logPath -Append -Encoding utf8
+        $recovered = $true
+      }
+    } catch {
+      "$ts |   fallback error: $_" | Out-File -FilePath $logPath -Append -Encoding utf8
+    }
+  }
+  if (-not $recovered) {
+    "$ts |   error: $primaryError" | Out-File -FilePath $logPath -Append -Encoding utf8
+  }
 }
 "#
 }
@@ -523,6 +549,10 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
 
     thread::spawn(move || {
         for mut req in server.incoming_requests() {
+            if req.method() == &tiny_http::Method::Get && req.url() == "/health" {
+                let _ = req.respond(tiny_http::Response::empty(200));
+                continue;
+            }
             if req.method() != &tiny_http::Method::Post || req.url() != "/event" {
                 let _ = req.respond(tiny_http::Response::empty(404));
                 continue;
@@ -606,6 +636,53 @@ fn start_hook_server(app: AppHandle, token: String) -> Result<u16, String> {
     });
 
     Ok(port)
+}
+
+fn hook_server_healthy(port: u16) -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(500)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = [0u8; 64];
+    let mut total = 0;
+    while total < response.len() {
+        match stream.read(&mut response[total..]) {
+            Ok(0) => break,
+            Ok(read) => {
+                total += read;
+                if response[..total].windows(2).any(|window| window == b"\r\n") {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    response[..total].starts_with(b"HTTP/1.1 200") || response[..total].starts_with(b"HTTP/1.0 200")
+}
+
+/// Recreate the helper metadata and, if necessary, replace a dead hook HTTP
+/// listener. Local helpers retry through hook-info.json when their per-process
+/// port/token becomes stale, so already-running local sessions recover too.
+pub(crate) fn refresh_hook_runtime(app: &AppHandle) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    let mut runtime = state.hook_info.runtime.lock().unwrap();
+    let restarted = !hook_server_healthy(runtime.port);
+    if restarted {
+        let token = uuid::Uuid::new_v4().to_string();
+        let port = start_hook_server(app.clone(), token.clone())?;
+        *runtime = HookRuntime { port, token };
+    }
+    write_helper_script(app)?;
+    write_hook_info(app, runtime.port, &runtime.token)?;
+    Ok(restarted)
 }
 
 /// The PowerShell command claude/codex run for each hook event. Identical shape
@@ -1523,7 +1600,8 @@ fn spawn_pty(
     }
     let session_lock = acquire_session_lock(&app, &id)?;
 
-    let hook_port = state.hook_info.port;
+    let hook_runtime = state.hook_info.runtime.lock().unwrap().clone();
+    let hook_port = hook_runtime.port;
     // Reverse-tunnel port for a remote (Windows) session, if hooks are enabled.
     let mut remote_port: Option<u16> = None;
 
@@ -1597,7 +1675,7 @@ fn spawn_pty(
         let env: Vec<(&'static str, String)> = if let Some(rp) = remote_port {
             vec![
                 ("MULTIAGENT_PORT", rp.to_string()),
-                ("MULTIAGENT_TOKEN", state.hook_info.token.clone()),
+                ("MULTIAGENT_TOKEN", hook_runtime.token.clone()),
                 ("MULTIAGENT_AGENT_ID", id.clone()),
             ]
         } else {
@@ -1629,8 +1707,8 @@ fn spawn_pty(
         c
     };
 
-    cmd.env("MULTIAGENT_PORT", state.hook_info.port.to_string());
-    cmd.env("MULTIAGENT_TOKEN", &state.hook_info.token);
+    cmd.env("MULTIAGENT_PORT", hook_runtime.port.to_string());
+    cmd.env("MULTIAGENT_TOKEN", &hook_runtime.token);
     cmd.env("MULTIAGENT_AGENT_ID", &id);
 
     let child = match pair.slave.spawn_command(cmd) {
@@ -2291,6 +2369,11 @@ fn sync_monitor_state(
 }
 
 #[tauri::command]
+fn repair_active_hooks(app: AppHandle) -> Result<monitor::HookRepairSummary, String> {
+    monitor::repair_active_hooks(&app)
+}
+
+#[tauri::command]
 async fn start_monitor_server(app: AppHandle) -> Result<monitor::MonitorStatus, String> {
     monitor::start(app).await
 }
@@ -2716,6 +2799,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn local_hook_helper_recovers_from_stale_session_connection() {
+        let script = local_helper_script();
+
+        assert!(script.contains("function Send-MultiAgentHook"));
+        assert!(script.contains("Get-Content $infoPath -Raw | ConvertFrom-Json"));
+        assert!(script.contains("recovered via hook-info"));
+    }
+
+    #[test]
+    fn hook_health_probe_accepts_http_200_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 128];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+
+        assert!(hook_server_healthy(port));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn hook_merges_are_idempotent_for_health_checks() {
+        let helper = r"C:\MultiAgent\notify.ps1";
+        let claude = merge_claude_settings("{}", helper).unwrap();
+        assert_eq!(merge_claude_settings(&claude, helper).unwrap(), claude);
+
+        let codex = merge_codex_config("", helper).unwrap();
+        assert_eq!(merge_codex_config(&codex, helper).unwrap(), codex);
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_hook_helper_posts_korean_prompt_as_utf8() {
@@ -2955,8 +3074,7 @@ pub fn run() {
             app.manage(AppState {
                 ptys: Mutex::new(HashMap::new()),
                 hook_info: HookInfo {
-                    port,
-                    token,
+                    runtime: Mutex::new(HookRuntime { port, token }),
                     helper_path: helper_path.to_string_lossy().to_string(),
                 },
                 close_confirmed: Mutex::new(false),
@@ -3060,6 +3178,7 @@ pub fn run() {
         remote_commands::remote_config_get,
         remote_commands::remote_config_set,
         sync_monitor_state,
+        repair_active_hooks,
         start_monitor_server,
         stop_monitor_server,
         monitor_server_status,
@@ -3111,6 +3230,7 @@ pub fn run() {
         read_audio_file,
         read_image_data_url,
         sync_monitor_state,
+        repair_active_hooks,
         start_monitor_server,
         stop_monitor_server,
         monitor_server_status,

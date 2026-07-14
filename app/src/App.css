@@ -803,6 +803,108 @@ body,
   color: var(--app-text);
 }
 
+.screen-groups {
+  margin: 0 8px 8px;
+}
+
+.screen-groups-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 5px;
+  color: var(--app-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.screen-groups-count {
+  min-width: 16px;
+  padding: 1px 5px;
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.screen-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.screen-group-row {
+  --screen-color: var(--app-accent);
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 3px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 0;
+  overflow: hidden;
+  background: var(--app-button-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  color: var(--app-text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.screen-group-row:hover {
+  background: var(--app-panel-hover);
+  border-color: var(--screen-color);
+}
+
+.screen-group-row-active {
+  background: var(--app-active-bg);
+  border-color: var(--screen-color);
+  box-shadow: inset 0 0 0 1px var(--screen-color);
+}
+
+.screen-group-rail {
+  align-self: stretch;
+  min-height: 18px;
+  background: var(--screen-color);
+  border-radius: 0 2px 2px 0;
+}
+
+.screen-group-name {
+  color: var(--screen-color);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.screen-group-members {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-soft-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-group-direction {
+  color: var(--screen-color);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.agent-screen-badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 4px;
+  border: 1px solid var(--screen-color, var(--app-accent));
+  border-radius: 999px;
+  color: var(--screen-color, var(--app-accent));
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
 .project-count {
   flex: 0 0 auto;
   margin-left: 6px;
@@ -2056,10 +2158,10 @@ body.docs-resizing .docs-resizer::after {
   top: 4px;
   bottom: 4px;
   width: 2px;
-  background: var(--app-border);
+  background: var(--screen-color, var(--app-border));
 }
 .agent-item.agent-grouped-active::before {
-  background: var(--app-accent);
+  background: var(--screen-color, var(--app-accent));
 }
 
 .modal-backdrop {
