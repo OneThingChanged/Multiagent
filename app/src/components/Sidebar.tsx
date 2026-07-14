@@ -119,6 +119,7 @@ export function Sidebar({
   dragState,
   onSelectProject,
   onSelect,
+  onSelectScreen,
   onRenameSession,
   onContextMenu,
   onNewProject,
@@ -149,6 +150,7 @@ export function Sidebar({
   dragState: DragState | null;
   onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
+  onSelectScreen: (groupId: string, agentId: string) => void;
   onRenameSession: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
@@ -884,7 +886,9 @@ export function Sidebar({
                   style={
                     { "--screen-color": screen.color } as CSSProperties
                   }
-                  onClick={() => onSelect(screen.targetAgentId)}
+                  onClick={() =>
+                    onSelectScreen(screen.groupId, screen.targetAgentId)
+                  }
                   title={screen.title}
                 >
                   <span className="screen-group-rail" aria-hidden="true" />

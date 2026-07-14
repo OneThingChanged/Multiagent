@@ -1,7 +1,6 @@
 import type { DropZone, Group, LayoutNode, Path } from "../types";
 import {
   addTabToLeafAt,
-  collectAgentIds,
   findLeafPath,
   findLeafPathById,
   firstLeafPath,
@@ -51,87 +50,6 @@ function preventsOutgoing(
   return !!group?.sessionLocked && group.id !== activeGroupId;
 }
 
-function groupWithLayoutMetadata(
-  source: Group,
-  id: string,
-  layout: LayoutNode
-): Group {
-  const agentIds = collectAgentIds(layout);
-  const sessionPins = Object.fromEntries(
-    Object.entries(source.sessionPins ?? {}).filter(
-      ([agentId, sessionId]) => agentIds.has(agentId) && sessionId.trim()
-    )
-  );
-  const hasPins = Object.keys(sessionPins).length > 0;
-  return {
-    id,
-    projectId: source.projectId,
-    layout,
-    sessionPins: hasPins ? sessionPins : undefined,
-    sessionLocked: source.sessionLocked && hasPins ? true : undefined,
-  };
-}
-
-/**
- * Put one pane and one incoming agent into a two-pane split group. If the
- * target pane already belongs to a split, detach that pane first and leave the
- * former siblings in their existing group. This keeps every newly-created
- * split to one pair while preserving tabs inside the target pane.
- */
-function splitIntoPair(
-  groups: Group[],
-  targetGroupId: string,
-  targetLeafId: string,
-  agentId: string,
-  direction: "h" | "v",
-  before: boolean,
-  metadataSource: Group
-): GroupState | null {
-  const targetGroup = groups.find((group) => group.id === targetGroupId);
-  if (!targetGroup) return null;
-  const targetPath = findLeafPathById(targetGroup.layout, targetLeafId);
-  if (!targetPath) return null;
-  const targetLeaf = getAt(targetGroup.layout, targetPath);
-  if (!targetLeaf || targetLeaf.type !== "leaf") return null;
-
-  const { layout: pairLayout, newPath } = insertNextTo(
-    targetLeaf,
-    [],
-    makeLeaf(agentId),
-    direction,
-    before
-  );
-  if (!pairLayout) return null;
-
-  if (targetPath.length === 0) {
-    return {
-      groups: groups.map((group) =>
-        group.id === targetGroupId
-          ? groupWithLayoutMetadata(metadataSource, targetGroupId, pairLayout)
-          : group
-      ),
-      activeGroupId: targetGroupId,
-      activePath: newPath,
-    };
-  }
-
-  const remainder = setAt(targetGroup.layout, targetPath, null);
-  if (!remainder) return null;
-  const remainderGroupId = crypto.randomUUID();
-  return {
-    groups: [
-      ...groups.map((group) =>
-        group.id === targetGroupId
-          ? groupWithLayoutMetadata(metadataSource, targetGroupId, pairLayout)
-          : group
-      ),
-      groupWithLayoutMetadata(metadataSource, remainderGroupId, remainder),
-    ],
-    activeGroupId: targetGroupId,
-    activePath: newPath,
-  };
-}
-
 export function selectAgent(
   state: GroupState,
   agentId: string,
@@ -150,6 +68,36 @@ export function selectAgent(
     }
   }
   return placeIntoSoloGroup(state, agentId, projectId);
+}
+
+export function selectGroup(
+  state: GroupState,
+  groupId: string,
+  preferredAgentId?: string
+): GroupState {
+  const group = state.groups.find((candidate) => candidate.id === groupId);
+  if (!group) return state;
+
+  const preferredPath = preferredAgentId
+    ? findLeafPath(group.layout, preferredAgentId)
+    : null;
+  const path =
+    preferredPath ??
+    (state.activeGroupId === groupId &&
+    state.activePath &&
+    getAt(group.layout, state.activePath)
+      ? state.activePath
+      : firstLeafPath(group.layout));
+  if (!path) return state;
+
+  const layout = preferredAgentId
+    ? setLeafActiveTab(group.layout, path, preferredAgentId)
+    : group.layout;
+  return {
+    groups: updateGroup(state.groups, groupId, layout),
+    activeGroupId: groupId,
+    activePath: path,
+  };
 }
 
 export function addNewAgent(
@@ -255,17 +203,23 @@ export function splitWith(
     nextGroups = updateGroup(nextGroups, source.id, newSourceLayout);
   }
 
-  return (
-    splitIntoPair(
-      nextGroups,
-      activeGroup.id,
-      activeLeaf.id,
-      agentId,
-      direction,
-      false,
-      activeGroup
-    ) ?? state
+  const target = nextGroups.find((group) => group.id === activeGroup.id);
+  if (!target) return state;
+  const targetPath = findLeafPathById(target.layout, activeLeaf.id);
+  if (!targetPath) return state;
+  const { layout, newPath } = insertNextTo(
+    target.layout,
+    targetPath,
+    makeLeaf(agentId),
+    direction,
+    false
   );
+  if (!layout) return state;
+  return {
+    groups: updateGroup(nextGroups, activeGroup.id, layout),
+    activeGroupId: activeGroup.id,
+    activePath: newPath,
+  };
 }
 
 export function closeTab(
@@ -465,15 +419,26 @@ export function performDrop(
 
   const dir: "h" | "v" = zone === "left" || zone === "right" ? "h" : "v";
   const before = zone === "left" || zone === "top";
-  return (
-    splitIntoPair(
-      nextGroups,
-      activeGroup.id,
-      targetLeafId,
-      fromAgentId,
-      dir,
-      before,
-      activeGroup
-    ) ?? state
+  const updatedTarget = nextGroups.find(
+    (group) => group.id === activeGroup.id
   );
+  if (!updatedTarget) return state;
+  const targetPathAfter = findLeafPathById(
+    updatedTarget.layout,
+    targetLeafId
+  );
+  if (!targetPathAfter) return state;
+  const { layout, newPath } = insertNextTo(
+    updatedTarget.layout,
+    targetPathAfter,
+    makeLeaf(fromAgentId),
+    dir,
+    before
+  );
+  if (!layout) return state;
+  return {
+    groups: updateGroup(nextGroups, activeGroup.id, layout),
+    activeGroupId: activeGroup.id,
+    activePath: newPath,
+  };
 }

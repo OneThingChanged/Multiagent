@@ -17,10 +17,14 @@ import type {
   StoredProject,
 } from "../types";
 import {
+  activeAgentInLeaf,
   collectAgentIds,
+  findLeafPath,
   firstLeafPath,
   getAt,
+  groupOf,
   makeLeaf,
+  pruneAgent,
   validateLayout,
 } from "./layout";
 
@@ -137,48 +141,13 @@ export function loadStoredGroups(
 
     const raw = localStorage.getItem(LS_GROUPS);
     if (!raw) {
-      return Array.from(validIds).map((aid) => ({
-        id: crypto.randomUUID(),
-        projectId: agentProjectIds.get(aid),
-        layout: makeLeaf(aid),
-      }));
+      return normalizeStoredGroups([], validIds, agentProjectIds);
     }
     const parsed = JSON.parse(raw) as Group[];
-
-    const used = new Set<string>();
-    const groups: Group[] = [];
-    for (const g of parsed) {
-      const seen = new Set<string>();
-      const lay = validateLayout(g.layout, validIds, seen);
-      if (lay) {
-        const projectId =
-          g.projectId ||
-          Array.from(seen)
-            .map((agentId) => agentProjectIds.get(agentId))
-            .find(Boolean);
-        for (const aid of seen) used.add(aid);
-        const sessionPins = sanitizeSessionPins(g.sessionPins, lay);
-        groups.push({
-          id: g.id || crypto.randomUUID(),
-          projectId,
-          layout: lay,
-          sessionPins,
-          sessionLocked:
-            !!g.sessionLocked && Object.keys(sessionPins ?? {}).length > 0
-              ? true
-              : undefined,
-        });
-      }
-    }
-
-    for (const aid of validIds) {
-      if (!used.has(aid)) {
-        groups.push({
-          id: crypto.randomUUID(),
-          projectId: agentProjectIds.get(aid),
-          layout: makeLeaf(aid),
-        });
-      }
+    const groups = normalizeStoredGroups(parsed, validIds, agentProjectIds);
+    if (JSON.stringify(parsed) !== JSON.stringify(groups)) {
+      localStorage.setItem(LS_GROUPS, JSON.stringify(groups));
+      repairStoredViewAfterGroupNormalization(parsed, groups);
     }
     return groups;
   } catch {
@@ -188,6 +157,155 @@ export function loadStoredGroups(
       layout: makeLeaf(aid),
     }));
   }
+}
+
+function repairStoredViewAfterGroupNormalization(
+  previousGroups: Group[],
+  normalizedGroups: Group[]
+) {
+  try {
+    const raw = localStorage.getItem(LS_VIEW);
+    if (!raw) return;
+    const view = JSON.parse(raw) as {
+      activeProjectId?: string | null;
+      activeGroupId?: string | null;
+      activePath?: Path | null;
+    };
+    if (!view.activeGroupId) return;
+
+    const currentGroup = normalizedGroups.find(
+      (group) => group.id === view.activeGroupId
+    );
+    if (
+      currentGroup &&
+      view.activePath &&
+      getAt(currentGroup.layout, view.activePath)
+    ) {
+      return;
+    }
+
+    const previousGroup = previousGroups.find(
+      (group) => group.id === view.activeGroupId
+    );
+    if (!previousGroup) return;
+    const previousPath =
+      view.activePath && getAt(previousGroup.layout, view.activePath)
+        ? view.activePath
+        : firstLeafPath(previousGroup.layout);
+    if (!previousPath) return;
+    const previousNode = getAt(previousGroup.layout, previousPath);
+    if (!previousNode || previousNode.type !== "leaf") return;
+    const agentId = activeAgentInLeaf(previousNode);
+    if (!agentId) return;
+    const replacement = groupOf(normalizedGroups, agentId);
+    if (!replacement) return;
+    const replacementPath = findLeafPath(replacement.layout, agentId);
+    if (!replacementPath) return;
+
+    localStorage.setItem(
+      LS_VIEW,
+      JSON.stringify({
+        activeProjectId:
+          view.activeProjectId ?? replacement.projectId ?? null,
+        activeGroupId: replacement.id,
+        activePath: replacementPath,
+      })
+    );
+  } catch {}
+}
+
+/**
+ * Enforce the global layout invariant that every agent belongs to exactly one
+ * group. Split groups win over stale solo/tab groups, and the preferred group
+ * wins when two split groups both contain the same agent. This repairs layouts
+ * written by older union-based multi-window persistence without discarding the
+ * visible Screen.
+ */
+export function normalizeStoredGroups(
+  rawGroups: Group[],
+  validIds: Set<string>,
+  agentProjectIds: Map<string, string>,
+  preferredGroupId: string | null = null
+): Group[] {
+  type Candidate = {
+    group: Group;
+    layout: LayoutNode;
+    agentIds: Set<string>;
+    score: number;
+  };
+
+  const candidates: Candidate[] = [];
+  const usedGroupIds = new Set<string>();
+  for (const rawGroup of rawGroups) {
+    if (!rawGroup?.layout) continue;
+    const localSeen = new Set<string>();
+    const layout = validateLayout(rawGroup.layout, validIds, localSeen);
+    if (!layout) continue;
+    let groupId = rawGroup.id || crypto.randomUUID();
+    if (usedGroupIds.has(groupId)) groupId = crypto.randomUUID();
+    usedGroupIds.add(groupId);
+    candidates.push({
+      group: { ...rawGroup, id: groupId },
+      layout,
+      agentIds: collectAgentIds(layout),
+      // A real Screen must survive a stale solo duplicate. The active group is
+      // only a tie-breaker between groups of the same shape.
+      score:
+        (layout.type === "split" ? 1_000 : 0) +
+        (groupId === preferredGroupId ? 100 : 0),
+    });
+  }
+
+  const ownerByAgent = new Map<string, { candidateIndex: number; score: number }>();
+  candidates.forEach((candidate, candidateIndex) => {
+    for (const agentId of candidate.agentIds) {
+      const owner = ownerByAgent.get(agentId);
+      if (!owner || candidate.score > owner.score) {
+        ownerByAgent.set(agentId, { candidateIndex, score: candidate.score });
+      }
+    }
+  });
+
+  const groups: Group[] = [];
+  const usedAgentIds = new Set<string>();
+  candidates.forEach((candidate, candidateIndex) => {
+    let layout: LayoutNode | null = candidate.layout;
+    for (const agentId of candidate.agentIds) {
+      if (ownerByAgent.get(agentId)?.candidateIndex !== candidateIndex) {
+        layout = pruneAgent(layout, agentId);
+      }
+    }
+    if (!layout) return;
+
+    const actualAgentIds = collectAgentIds(layout);
+    for (const agentId of actualAgentIds) usedAgentIds.add(agentId);
+    const sessionPins = sanitizeSessionPins(candidate.group.sessionPins, layout);
+    groups.push({
+      id: candidate.group.id,
+      projectId:
+        candidate.group.projectId ||
+        Array.from(actualAgentIds)
+          .map((agentId) => agentProjectIds.get(agentId))
+          .find(Boolean),
+      layout,
+      sessionPins,
+      sessionLocked:
+        !!candidate.group.sessionLocked &&
+        Object.keys(sessionPins ?? {}).length > 0
+          ? true
+          : undefined,
+    });
+  });
+
+  for (const agentId of validIds) {
+    if (usedAgentIds.has(agentId)) continue;
+    groups.push({
+      id: crypto.randomUUID(),
+      projectId: agentProjectIds.get(agentId),
+      layout: makeLeaf(agentId),
+    });
+  }
+  return groups;
 }
 
 function sanitizeSessionPins(

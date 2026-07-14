@@ -48,6 +48,33 @@ describe("selectAgent", () => {
   });
 });
 
+describe("selectGroup", () => {
+  it("opens the requested Screen even when a stale solo group contains the same agent", () => {
+    const solo = { id: "solo-a", layout: makeLeaf("a") };
+    const split = ops.splitWith(
+      {
+        groups: [
+          { id: "screen-ab", layout: makeLeaf("a") },
+          { id: "solo-b", layout: makeLeaf("b") },
+        ],
+        activeGroupId: "screen-ab",
+        activePath: [],
+      },
+      "b",
+      "h"
+    ).groups.find((group) => group.id === "screen-ab")!;
+    const state: ops.GroupState = {
+      groups: [solo, split],
+      activeGroupId: "solo-a",
+      activePath: [],
+    };
+
+    const next = ops.selectGroup(state, "screen-ab", "a");
+    expect(next.activeGroupId).toBe("screen-ab");
+    expect(next.activePath).toEqual([0]);
+  });
+});
+
 describe("openAsTab", () => {
   it("falls back to selectAgent when no active group", () => {
     const s: ops.GroupState = { groups: [], activeGroupId: null, activePath: null };
@@ -143,34 +170,33 @@ describe("splitWith", () => {
     }
   });
 
-  it("replaces the previous split partner when the selected pane is split again", () => {
+  it("adds a third pane without detaching the previous split partner", () => {
     let s = leafState(["a", "b", "c"]);
     s = ops.splitWith(s, "b", "h");
     s = ops.selectAgent(s, "a");
 
     const next = ops.splitWith(s, "c", "v");
-    const pair = next.groups.find((group) =>
+    const screen = next.groups.find((group) =>
       collectAgentIds(group.layout).has("a")
     );
-    const formerPartner = next.groups.find((group) =>
-      collectAgentIds(group.layout).has("b")
-    );
 
-    expect(pair).toBeTruthy();
-    expect(formerPartner).toBeTruthy();
-    expect(pair?.id).toBe("g-a");
-    expect(pair?.id).not.toBe(formerPartner?.id);
-    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+    expect(screen).toBeTruthy();
+    expect(screen?.id).toBe("g-a");
+    expect([...collectAgentIds(screen?.layout ?? null)].sort()).toEqual([
       "a",
+      "b",
       "c",
     ]);
-    expect([...collectAgentIds(formerPartner?.layout ?? null)]).toEqual(["b"]);
-    expect(formerPartner?.id).not.toBe("g-a");
-    expect(next.activeGroupId).toBe(pair?.id);
-    expect(pair?.layout.type).toBe("split");
-    if (pair?.layout.type === "split") {
-      expect(pair.layout.direction).toBe("v");
-      expect(pair.layout.children).toHaveLength(2);
+    expect(next.groups.filter((group) =>
+      collectAgentIds(group.layout).has("b")
+    )).toHaveLength(1);
+    expect(next.activeGroupId).toBe(screen?.id);
+    expect(next.activePath).toEqual([0, 1]);
+    expect(screen?.layout.type).toBe("split");
+    if (screen?.layout.type === "split") {
+      expect(screen.layout.direction).toBe("h");
+      expect(screen.layout.children).toHaveLength(2);
+      expect(screen.layout.children[0].type).toBe("split");
     }
   });
 
@@ -181,19 +207,20 @@ describe("splitWith", () => {
     s = ops.selectAgent(s, "a");
 
     const next = ops.splitWith(s, "c", "h");
-    const pair = next.groups.find((group) =>
+    const screen = next.groups.find((group) =>
       collectAgentIds(group.layout).has("a")
     );
 
-    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+    expect([...collectAgentIds(screen?.layout ?? null)].sort()).toEqual([
       "a",
+      "b",
       "c",
       "tab",
     ]);
-    expect(pair?.layout.type).toBe("split");
-    if (pair?.layout.type === "split") {
-      expect(pair.layout.children).toHaveLength(2);
-      const tabbedPane = pair.layout.children.find(
+    expect(screen?.layout.type).toBe("split");
+    if (screen?.layout.type === "split") {
+      expect(screen.layout.children).toHaveLength(3);
+      const tabbedPane = screen.layout.children.find(
         (child) => child.type === "leaf" && child.tabs.includes("a")
       );
       expect(tabbedPane?.type).toBe("leaf");
@@ -380,7 +407,7 @@ describe("performDrop", () => {
     expect(next).toBe(s);
   });
 
-  it("replaces the previous split partner on an edge drop", () => {
+  it("adds a third pane on an edge drop", () => {
     let s = leafState(["a", "b", "c"]);
     s = ops.splitWith(s, "b", "h");
     s = ops.selectAgent(s, "a");
@@ -396,28 +423,27 @@ describe("performDrop", () => {
     if (!target || target.type !== "leaf") return;
 
     const next = ops.performDrop(s, "c", target.id, "right");
-    const pair = next.groups.find((group) =>
+    const screen = next.groups.find((group) =>
       collectAgentIds(group.layout).has("a")
     );
-    const formerPartner = next.groups.find((group) =>
-      collectAgentIds(group.layout).has("b")
-    );
 
-    expect([...collectAgentIds(pair?.layout ?? null)].sort()).toEqual([
+    expect([...collectAgentIds(screen?.layout ?? null)].sort()).toEqual([
       "a",
+      "b",
       "c",
     ]);
-    expect([...collectAgentIds(formerPartner?.layout ?? null)]).toEqual(["b"]);
-    expect(pair?.id).toBe("g-a");
-    expect(formerPartner?.id).not.toBe("g-a");
-    expect(pair?.id).not.toBe(formerPartner?.id);
-    expect(next.activeGroupId).toBe(pair?.id);
-    expect(pair?.layout.type).toBe("split");
-    if (pair?.layout.type === "split") {
-      expect(pair.layout.direction).toBe("h");
-      expect(pair.layout.children).toHaveLength(2);
-      expect(findLeafPath(pair.layout, "a")).toEqual([0]);
-      expect(findLeafPath(pair.layout, "c")).toEqual([1]);
+    expect(next.groups.filter((group) =>
+      collectAgentIds(group.layout).has("b")
+    )).toHaveLength(1);
+    expect(screen?.id).toBe("g-a");
+    expect(next.activeGroupId).toBe(screen?.id);
+    expect(screen?.layout.type).toBe("split");
+    if (screen?.layout.type === "split") {
+      expect(screen.layout.direction).toBe("h");
+      expect(screen.layout.children).toHaveLength(3);
+      expect(findLeafPath(screen.layout, "a")).toEqual([0]);
+      expect(findLeafPath(screen.layout, "c")).toEqual([1]);
+      expect(findLeafPath(screen.layout, "b")).toEqual([2]);
     }
   });
 });

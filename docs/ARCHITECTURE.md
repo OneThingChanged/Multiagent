@@ -169,8 +169,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - 각 leaf는 한 패널. tabs 배열 = 그 패널의 탭 순서, activeIndex = 현재 보이는 탭
-- 새 split 조작은 한 그룹에 leaf 2개만 만든다. 이미 분할된 패널 A에 C를 붙이면 A를 기존 A+B 그룹에서 떼어 A+C 그룹으로 만들고 B는 단독 그룹으로 남긴다
-- 저장된 구버전 중첩 layout은 호환을 위해 로드·렌더링할 수 있지만, `splitWith`와 edge drop은 새 중첩/3분할을 만들지 않는다
+- split 조작은 현재 Screen에 새 leaf를 추가한다. 같은 방향의 부모 split이면 형제로 추가하고, 다른 방향이면 대상 leaf를 새 split으로 감싸 중첩한다
+- 따라서 한 Screen은 `A+B+C` 같은 3개 이상 패널과 좌우·상하 중첩 레이아웃을 모두 지원한다
 - `sizes`는 자식 비율 합 = 1
 
 ### 그룹 모델 불변식
@@ -181,7 +181,9 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 기존 `multiagent.agents.v1`만 있던 설치는 agent.folder별로 Project를 자동 생성해 마이그레이션한다
 - 어떤 이유로 누락되면 load 시 solo 그룹 생성으로 복구
 - 그룹 layout이 비면 그 그룹 자동 삭제
-- 새 분할 그룹은 패널 2개가 최대이며, 각 패널 내부에는 여러 탭을 둘 수 있음
+- 분할 그룹은 2개 이상의 패널을 가질 수 있고, 각 패널 내부에는 여러 탭을 둘 수 있음
+- 로드 시 `normalizeStoredGroups`가 전체 그룹을 한 번에 검증한다. 같은 agent가 여러 그룹에 있으면 split Screen이 stale solo보다 우선하며, 같은 형태끼리는 현재 활성 group이 우선한다
+- 멀티 윈도우 저장은 현재 groups 배열을 authoritative하게 덮어쓴다. 삭제된 예전 group ID를 localStorage에서 다시 합치지 않는다
 - `sessionPins?: Record<agentId, sessionId>`는 그룹에 고정된 resume 세션 ID
 - `sessionLocked?: true`이면 외부 세션을 해당 그룹에 탭/분할/드래그로 추가하지 않음
 - layout에서 제거된 세션의 session pin은 `updateGroup`에서 같이 정리됨
@@ -190,8 +192,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 - root가 `split`인 그룹만 사이드바 프로젝트 트리 위 `SCREENS` 영역에 `Screen N (A+B)`로 표시한다. 탭만 여러 개인 단일 leaf 그룹은 Screen이 아니다
 - Screen 번호와 색은 현재 split 그룹 순서로 배정하고, 프로젝트의 각 멤버 행에도 같은 색 `SN` 배지를 표시한다
-- 서로 다른 프로젝트의 세션을 분할해도 Screen 요약 한 줄에서 함께 보이며, 행을 누르면 해당 그룹으로 전환한다
-- 분할 파트너 교체 시 대상 split 그룹 ID를 유지한다. 따라서 `Screen 1 (A+B)`에서 A를 C와 다시 분할하면 `Screen 1 (A+C)`로 갱신되고 B만 새 solo 그룹으로 이동한다
+- 서로 다른 프로젝트의 세션을 분할해도 Screen 요약 한 줄에서 함께 보이며, 행을 누르면 대표 세션을 `groupOf`로 다시 찾지 않고 해당 `groupId`를 직접 활성화한다
+- `Screen 1 (A+B)`에서 A 패널에 C를 다시 분할하면 같은 group ID의 `Screen 1 (A+C+B)`가 된다. C가 다른 Screen에 있었다면 원래 Screen에서는 제거되어 두 Screen에 동시에 속하지 않는다
 
 ### 그룹 세션 고정
 
@@ -246,7 +248,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 좌/우/상/하 각 25% 영역에서 마우스 위치로부터 가장 가까운 가장자리가 winner
 - 모든 가장자리에서 25% 이상 떨어져 있으면 `center`
 - `top/bottom` → 수직 split (`v`), `left/right` → 수평 split (`h`)
-- edge drop 대상이 기존 split 안에 있으면 대상 패널을 떼어 드롭한 세션과 새 2패널 그룹을 만들고, 이전 파트너는 기존 그룹에 남김
+- edge drop은 대상 부모와 방향이 같으면 형제 패널을 추가하고, 방향이 다르면 대상 leaf를 새 split으로 감싼다
 - `center` → addTabToLeafAt (탭 합치기)
 
 ### 핵심 헬퍼 (수정 시 주의)
@@ -264,7 +266,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 | `insertNextTo(layout, targetPath, newLeaf, dir, before)` | 부모 split이 같은 dir이면 형제 추가, 아니면 wrap |
 | `validateLayout(node, validIds)` | 로드 시 검증. 옛 `{type:'leaf', agentId}` 포맷 자동 마이그레이션 |
 
-`groupOps.splitIntoPair`는 메뉴 분할과 edge drop이 공유하는 2패널 전용 조합 함수다. 대상 leaf가 기존 split에 있으면 먼저 분리하고, 대상 leaf와 새 leaf만 들어 있는 별도 그룹을 만든다.
+`groupOps.selectGroup`은 Screen 행의 `groupId`와 대표 agent를 받아 정확한 그룹·leaf를 활성화한다. 메뉴 분할과 edge drop은 `insertNextTo`를 공유하며, 이동 전 `pruneAgent`로 원래 그룹에서 세션을 제거해 전역 단일 소속을 유지한다.
 
 ### 상태 변경 패턴
 

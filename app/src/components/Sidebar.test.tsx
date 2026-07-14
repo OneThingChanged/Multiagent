@@ -21,6 +21,7 @@ function renderSidebar(
       dragState={null}
       onSelectProject={() => {}}
       onSelect={() => {}}
+      onSelectScreen={() => {}}
       onRenameSession={() => {}}
       onContextMenu={() => {}}
       onNewProject={() => {}}

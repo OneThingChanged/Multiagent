@@ -43,10 +43,17 @@ import type {
 import {
   activeAgentInLeaf,
   collectAgentIds,
+  findLeafPath,
+  firstLeafPath,
   getAt,
+  groupOf,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
-import { loadBootstrap, loadStoredView } from "./lib/persistence";
+import {
+  loadBootstrap,
+  loadStoredView,
+  normalizeStoredGroups,
+} from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
@@ -303,24 +310,66 @@ function groupContainsRemovedAgent(group: Group, removedIds: Set<string>) {
 function mergeGroupsFromStorage(
   current: Group[],
   stored: Group[],
-  removedAgentIds: Set<string>
+  agents: Agent[],
+  removedAgentIds: Set<string>,
+  preferredGroupId: string | null
 ) {
-  const currentById = new Map(current.map((group) => [group.id, group]));
-  const seen = new Set<string>();
-  const merged: Group[] = [];
-  for (const group of stored) {
-    if (!group?.id || groupContainsRemovedAgent(group, removedAgentIds)) {
-      continue;
+  const availableAgents = agents.filter(
+    (agent) => !removedAgentIds.has(agent.id)
+  );
+  const normalized = normalizeStoredGroups(
+    stored.filter(
+      (group) => !groupContainsRemovedAgent(group, removedAgentIds)
+    ),
+    new Set(availableAgents.map((agent) => agent.id)),
+    new Map(availableAgents.map((agent) => [agent.id, agent.projectId])),
+    preferredGroupId
+  );
+  return sameJson(current, normalized) ? current : normalized;
+}
+
+function selectedAgentId(
+  groups: Group[],
+  groupId: string | null,
+  path: Path | null
+) {
+  if (!groupId || !path) return null;
+  const group = groups.find((candidate) => candidate.id === groupId);
+  if (!group) return null;
+  const node = getAt(group.layout, path);
+  return node?.type === "leaf" ? activeAgentInLeaf(node) : null;
+}
+
+function reconcileGroupSelection(
+  groups: Group[],
+  groupId: string | null,
+  path: Path | null,
+  preferredAgentId: string | null
+) {
+  const currentGroup = groups.find((candidate) => candidate.id === groupId);
+  if (currentGroup) {
+    if (path && getAt(currentGroup.layout, path)) {
+      return { groupId: currentGroup.id, path };
     }
-    seen.add(group.id);
-    merged.push(group);
+    const preferredPath = preferredAgentId
+      ? findLeafPath(currentGroup.layout, preferredAgentId)
+      : null;
+    return {
+      groupId: currentGroup.id,
+      path: preferredPath ?? firstLeafPath(currentGroup.layout),
+    };
   }
-  for (const group of current) {
-    if (!seen.has(group.id) && !groupContainsRemovedAgent(group, removedAgentIds)) {
-      merged.push(currentById.get(group.id) ?? group);
-    }
-  }
-  return sameJson(current, merged) ? current : merged;
+
+  const replacement = preferredAgentId
+    ? groupOf(groups, preferredAgentId)
+    : null;
+  if (!replacement) return { groupId: null, path: null };
+  return {
+    groupId: replacement.id,
+    path:
+      findLeafPath(replacement.layout, preferredAgentId!) ??
+      firstLeafPath(replacement.layout),
+  };
 }
 
 function clampDocsWidth(width: number) {
@@ -505,6 +554,7 @@ function App() {
       }
     }
 
+    let nextAgents = agentsRef.current;
     if (agentsRaw !== storedAgentsJsonRef.current) {
       const storedAgents = parseStoredArray<StoredAgent>(agentsRaw);
       const merged = mergeAgentsFromStorage(
@@ -515,6 +565,7 @@ function App() {
       );
       storedAgentsJsonRef.current = agentsRaw;
       if (merged !== agentsRef.current) {
+        nextAgents = merged;
         agentsRef.current = merged;
         setAgents(merged);
       }
@@ -522,15 +573,32 @@ function App() {
 
     if (groupsRaw !== storedGroupsJsonRef.current) {
       const storedGroups = parseStoredArray<Group>(groupsRaw);
+      const previousAgentId = selectedAgentId(
+        groupsRef.current,
+        activeGroupIdRef.current,
+        activePathRef.current
+      );
       const merged = mergeGroupsFromStorage(
         groupsRef.current,
         storedGroups,
-        removedAgentIdsRef.current
+        nextAgents,
+        removedAgentIdsRef.current,
+        activeGroupIdRef.current
       );
       storedGroupsJsonRef.current = groupsRaw;
       if (merged !== groupsRef.current) {
         groupsRef.current = merged;
         setGroups(merged);
+        const selection = reconcileGroupSelection(
+          merged,
+          activeGroupIdRef.current,
+          activePathRef.current,
+          previousAgentId
+        );
+        activeGroupIdRef.current = selection.groupId;
+        activePathRef.current = selection.path;
+        setActiveGroupId(selection.groupId);
+        setActivePath(selection.path);
       }
     }
   }, []);
@@ -772,18 +840,10 @@ function App() {
   }, [agents]);
 
   useEffect(() => {
-    const storedGroups = parseStoredArray<Group>(readLocalStorageValue(LS_GROUPS));
-    const mergedGroups = mergeStoredByIdForWrite(
-      groups,
-      storedGroups.filter(
-        (group) => !groupContainsRemovedAgent(group, removedAgentIdsRef.current)
-      ),
-      new Set()
-    );
     writeLocalStorageIfChanged(
       storedGroupsJsonRef,
       LS_GROUPS,
-      JSON.stringify(mergedGroups)
+      JSON.stringify(groups)
     );
   }, [groups]);
 
@@ -1306,6 +1366,18 @@ function App() {
       if (current?.status === "exited") {
         restartAgent(agentId);
       }
+    },
+    [activateAgentProject, applyGroupOp, restartAgent]
+  );
+
+  const selectScreen = useCallback(
+    (groupId: string, agentId: string) => {
+      activateAgentProject(agentId);
+      applyGroupOp((state) =>
+        groupOps.selectGroup(state, groupId, agentId)
+      );
+      const current = agentsRef.current.find((agent) => agent.id === agentId);
+      if (current?.status === "exited") restartAgent(agentId);
     },
     [activateAgentProject, applyGroupOp, restartAgent]
   );
@@ -2125,6 +2197,7 @@ function App() {
         dragState={dragState}
         onSelectProject={selectProject}
         onSelect={selectAgent}
+        onSelectScreen={selectScreen}
         onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
         onNewProject={() => setShowProjectModal(true)}
