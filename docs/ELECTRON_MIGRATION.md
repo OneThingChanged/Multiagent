@@ -112,6 +112,12 @@ source key로 중복을 막는다. Hook `done` 때 해당 transcript를 자동 �
 실제 자동 업데이트는 첫 Electron `latest.yml`/NSIS/blockmap release와 Windows 코드 서명이
 게시된 뒤 다른 PC에서 최종 확인해야 한다.
 
+`-electron.*` prerelease 빌드는 Tauri의 GitHub Latest 채널과 분리된 고정
+`electron-test` 릴리스 asset URL을 사용한다. 최초 `0.5.28` Electron 시험본만 기존 Latest
+릴리스에 같은 `latest.yml`과 NSIS 파일을 올려 test 채널로 진입시키고, 이후 시험 업데이트는
+`electron-test` 릴리스의 asset을 교체한다. 이 릴리스는 prerelease로 유지해 Tauri의
+`latest.json`/`latest-company.json` 탐색에 영향을 주지 않는다.
+
 ## 실행과 검증
 
 `app` 폴더에서 실행한다.

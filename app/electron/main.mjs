@@ -186,15 +186,22 @@ const tunnelService = new TunnelService({
 const { autoUpdater } = electronUpdater;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+const electronTestUpdateFeed =
+  "https://github.com/OneThingChanged/Multiagent/releases/download/electron-test/";
 let updateDownloaded = false;
 
 async function checkForElectronUpdate() {
   if (!app.isPackaged && !process.env.MULTIAGENT_UPDATE_FEED_URL) return null;
-  if (process.env.MULTIAGENT_UPDATE_FEED_URL) {
+  const updateFeedOverride = process.env.MULTIAGENT_UPDATE_FEED_URL?.trim();
+  if (updateFeedOverride) {
     autoUpdater.setFeedURL({
       provider: "generic",
-      url: process.env.MULTIAGENT_UPDATE_FEED_URL,
+      url: updateFeedOverride,
     });
+  } else if (app.getVersion().includes("-electron.")) {
+    // Experimental Electron builds must not replace the Tauri GitHub Latest
+    // channel. A fixed prerelease asset URL lets testers update independently.
+    autoUpdater.setFeedURL({ provider: "generic", url: electronTestUpdateFeed });
   }
   const result = await autoUpdater.checkForUpdates();
   if (!result?.updateInfo) return null;
