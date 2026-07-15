@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -12,7 +12,82 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="startup-fallback" role="status" aria-live="polite">
+        <div class="startup-fallback-mark" aria-hidden="true">M</div>
+        <div class="startup-fallback-copy">
+          <strong>MultiAgent</strong>
+          <span>작업 공간을 준비하고 있습니다<span class="startup-fallback-dots">...</span></span>
+        </div>
+      </div>
+    </div>
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: #0d1117;
+        color: #dce8f5;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+
+      .startup-fallback {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        width: 100%;
+        height: 100%;
+      }
+
+      .startup-fallback-mark {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border: 1px solid #2f81f7;
+        border-radius: 12px;
+        background: #13243a;
+        color: #79c0ff;
+        font-weight: 700;
+        box-shadow: 0 0 24px rgb(47 129 247 / 18%);
+      }
+
+      .startup-fallback-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .startup-fallback-copy strong {
+        font-size: 15px;
+      }
+
+      .startup-fallback-copy span {
+        color: #8b9bab;
+        font-size: 12px;
+      }
+
+      .startup-fallback-dots {
+        display: inline-block;
+        width: 14px;
+        overflow: hidden;
+        vertical-align: bottom;
+        animation: startup-dots 1.2s steps(4, end) infinite;
+      }
+
+      @keyframes startup-dots {
+        from { width: 0; }
+        to { width: 14px; }
+      }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

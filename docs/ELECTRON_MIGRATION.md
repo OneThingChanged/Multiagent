@@ -126,6 +126,7 @@ npm run electron:pack
 npm run electron:packaged-smoke
 npm run electron:packaged-lifecycle-smoke
 npm run electron:dist
+npm run electron:portable-lifecycle-smoke
 ```
 
 자동 검증 범위:

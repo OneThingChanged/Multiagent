@@ -387,6 +387,9 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
   void loadRenderer(win, {
     secondaryWindow: secondary ? "1" : null,
     openAgentId,
+  }).catch((error) => {
+    console.error("[electron] renderer load failed:", error);
+    if (!win.isDestroyed()) win.show();
   });
   return win;
 }

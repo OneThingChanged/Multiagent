@@ -14,6 +14,7 @@
     "electron:bridge-smoke": "node scripts/electron-bridge-smoke.mjs",
     "electron:lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs",
     "electron:packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged",
+    "electron:portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable",
     "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
     "electron:pack": "npm run build && electron-builder --dir",
     "electron:dist": "npm run build && electron-builder --win nsis portable",
