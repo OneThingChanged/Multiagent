@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DesktopPetPage } from "./components/DesktopPetPage";
-import { importTauriStorageBeforeRender } from "./platform/storageMigration";
+import { syncSharedStorageBeforeRender } from "./platform/storageMigration";
 
 const desktopPet =
   (window as Window & { __MULTIAGENT_DESKTOP_PET__?: boolean })
@@ -10,7 +10,7 @@ const desktopPet =
   new URLSearchParams(window.location.search).has("desktopPet");
 
 async function render() {
-  if (!desktopPet) await importTauriStorageBeforeRender();
+  if (!desktopPet) await syncSharedStorageBeforeRender();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       {desktopPet ? <DesktopPetPage /> : <App />}

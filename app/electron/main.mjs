@@ -63,6 +63,12 @@ const IMAGE_MIME = new Map([
   [".svg", "image/svg+xml"],
   [".ico", "image/x-icon"],
 ]);
+const SHARED_WORKSPACE_KEYS = new Set([
+  "multiagent.projects.v1",
+  "multiagent.agents.v1",
+  "multiagent.groups.v1",
+  "multiagent.sshHosts.v1",
+]);
 const SKIPPED_DOC_DIRS = new Set([
   ".git",
   "node_modules",
@@ -850,13 +856,14 @@ async function persistStorageSnapshot(snapshot) {
   const cleanValues = {};
   let total = 0;
   for (const [key, value] of Object.entries(values)) {
-    if (!key.startsWith("multiagent.") || typeof value !== "string") continue;
+    if (!SHARED_WORKSPACE_KEYS.has(key) || typeof value !== "string") continue;
     total += key.length + value.length;
     if (total > 50 * 1024 * 1024) throw new Error("저장소 스냅샷이 너무 큽니다.");
     cleanValues[key] = value;
   }
   const clean = {
-    version: 1,
+    version: 2,
+    revision: asString(candidate.revision).slice(0, 128) || `${Date.now()}-${process.pid}`,
     updatedAt: new Date().toISOString(),
     values: cleanValues,
   };
@@ -877,7 +884,7 @@ async function importTauriStorage() {
   try {
     const raw = await fsPromises.readFile(storageSnapshotPath(), "utf8");
     const parsed = JSON.parse(raw);
-    if (parsed?.version !== 1 || !parsed.values) return null;
+    if ((parsed?.version !== 1 && parsed?.version !== 2) || !parsed.values) return null;
     return parsed;
   } catch {
     return null;

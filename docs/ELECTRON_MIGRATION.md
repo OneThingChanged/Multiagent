@@ -71,12 +71,15 @@ renderer가 임의 명령 이름으로 Node/PTY에 접근하는 범용 IPC는 �
 자동 close smoke 결과는 약 40~60ms(활성 agent가 없는 fixture)이며 기존 5초 fallback 대기는
 발생하지 않았다. renderer가 준비되기 전에 닫히면 main이 즉시 정리한다.
 
-Tauri와 Electron은 `%LOCALAPPDATA%\com.jintae.multiagent\storage-export.json`을 공유한다.
-업데이트된 Tauri가 `multiagent.*` localStorage를 주기적으로 snapshot하고, Electron 첫 실행은
-자기 값이 없는 key만 가져온다. Electron 값과 원본 Tauri 데이터는 덮어쓰지 않는다.
+Tauri와 Electron은 `%LOCALAPPDATA%\com.jintae.multiagent\storage-export.json`의 공용
+workspace를 사용한다. 프로젝트·세션·화면 그룹·SSH host registry는 stable id 기준으로 첫
+진입 시 합쳐지고, 이후에는 runtime별 revision marker로 최신 공용 snapshot을 적용한다.
+펫 위치·테마·현재 선택·reopen 목록·터미널 scrollback 같은 UI/runtime 상태와 SSH 비밀번호는
+공용화하지 않는다. 실행 중 PTY는 공유하지 않으며 저장된 `lastSessionId`만 다른 runtime에서
+resume한다.
 
-주의: 구버전 Tauri는 snapshot command가 없으므로 전환 전에 이 브랜치의 Tauri build를 한
-번 실행해야 자동 이전 파일이 생성된다.
+주의: 구버전 Tauri는 snapshot command가 없으므로 공용 workspace 지원 Tauri build를 한 번
+실행해야 기존 localStorage가 자동 병합된다.
 
 ## 5단계 — 남은 backend 기능
 
