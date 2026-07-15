@@ -121,6 +121,12 @@ source key로 중복을 막는다. Hook `done` 때 해당 transcript를 자동 �
 `electron-test` 릴리스의 asset을 교체한다. 이 릴리스는 prerelease로 유지해 Tauri의
 `latest.json`/`latest-company.json` 탐색에 영향을 주지 않는다.
 
+정식 전환 릴리스부터는 stable Electron 버전을 사용한다. standard Tauri가 읽는
+`latest.json`도 같은 Electron NSIS를 가리키고, 해당 설치본을 기존 Tauri updater 개인키로
+추가 서명한다. 따라서 데이터 export가 끝난 Tauri는 다음 업데이트에서 Electron 설치본을
+검증·실행한다. Electron 자체는 같은 릴리스의 `latest.yml`을 사용한다. company 채널은 기존
+Tauri manifest를 유지하며 자동 전환 대상에서 제외한다.
+
 ## 실행과 검증
 
 `app` 폴더에서 실행한다.

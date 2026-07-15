@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.29-electron.2",
+  "version": "0.5.30",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
     "tauri:build:all": "node scripts/build-all-variants.mjs",
     "release:build:all": "node scripts/build-all-variants.mjs --require-signed",
     "release:manifests": "node scripts/write-latest-json.mjs",
+    "release:electron-transition-manifest": "node scripts/write-electron-transition-manifest.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
