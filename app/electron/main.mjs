@@ -456,7 +456,15 @@ function ensurePetWindow() {
     petWindow = null;
   });
   petWindow.once("ready-to-show", positionPet);
-  void loadRenderer(petWindow, { desktopPet: "1" });
+  const loadingPetWindow = petWindow;
+  void loadRenderer(loadingPetWindow, { desktopPet: "1" }).catch((error) => {
+    // Closing during a lifecycle/update shutdown can cancel the in-flight
+    // file navigation. That is expected and must not become an unhandled
+    // rejection in the main process.
+    if (!loadingPetWindow.isDestroyed()) {
+      console.error("[electron] desktop pet renderer load failed:", error);
+    }
+  });
   positionPet();
   return petWindow;
 }
