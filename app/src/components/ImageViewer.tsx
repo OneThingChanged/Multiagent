@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 
 function fileName(path: string) {
   const parts = path.split(/[\\/]/);

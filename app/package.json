@@ -1,5 +1,7 @@
 {
   "name": "app",
+  "description": "MultiAgent desktop terminal workspace",
+  "author": "MultiAgent",
   "private": true,
   "version": "0.5.28",
   "type": "module",
@@ -7,6 +9,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:smoke": "electron electron/pty-smoke.mjs",
+    "electron:bridge-smoke": "node scripts/electron-bridge-smoke.mjs",
+    "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
+    "electron:pack": "npm run build && electron-builder --dir",
+    "electron:dist": "npm run build && electron-builder --win nsis portable",
     "tauri": "tauri",
     "tauri:build:standard": "node scripts/build-variant.mjs standard",
     "tauri:build:company": "node scripts/build-variant.mjs company",
@@ -28,6 +36,7 @@
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
@@ -38,9 +47,38 @@
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.6.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.8.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4",
+    "vite": "^7.3.6",
     "vitest": "^4.1.6"
+  },
+  "main": "electron/main.mjs",
+  "build": {
+    "appId": "com.jintae.multiagent.electron",
+    "productName": "MultiAgent Electron",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json",
+      "node_modules/node-pty/**"
+    ],
+    "directories": {
+      "output": "electron-dist"
+    },
+    "win": {
+      "icon": "src-tauri/icons/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
   }
 }

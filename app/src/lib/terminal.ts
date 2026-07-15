@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 import {
   isPermissionGranted,
   requestPermission,
-} from "@tauri-apps/plugin-notification";
+} from "../platform/plugins";
 import { Terminal } from "@xterm/xterm";
 import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 
 type KeyState = "loading" | "ready" | "none" | "generating";
 

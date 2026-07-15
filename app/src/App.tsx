@@ -6,9 +6,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import {
+  getCurrentWindow,
+  invoke,
+  listen,
+  UserAttentionType,
+} from "./platform/runtime";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 

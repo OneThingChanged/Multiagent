@@ -260,6 +260,14 @@ body.desktop-pet-document #root {
   font: 700 9px/10px Consolas, monospace;
   text-align: center;
   letter-spacing: 2px;
+  -webkit-app-region: drag;
+}
+
+.desktop-pet-context-menu,
+.desktop-pet-context-menu *,
+.desktop-pet-work-panel,
+.desktop-pet-work-panel * {
+  -webkit-app-region: no-drag;
 }
 
 .desktop-pet-context-menu {

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview } from "../platform/runtime";
 import type {
   Agent,
   AgentStatus,

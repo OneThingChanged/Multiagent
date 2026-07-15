@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "../platform/runtime";
+import {
+  check,
+  openDialog,
+  openUrl,
+  relaunch,
+  type Update,
+} from "../platform/plugins";
 import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
 import {

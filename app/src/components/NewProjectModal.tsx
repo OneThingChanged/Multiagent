@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openDialog } from "../platform/plugins";
 import type { NewProjectPayload } from "../types";
 import { loadSshHosts } from "../lib/sshHosts";
 

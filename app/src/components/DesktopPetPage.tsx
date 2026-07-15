@@ -4,8 +4,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, invoke, listen } from "../platform/runtime";
 import type { DesktopPetUpdate } from "../lib/desktopPet";
 import "./DesktopPetPage.css";
 

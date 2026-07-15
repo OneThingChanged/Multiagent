@@ -1,5 +1,5 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 import { toolForId } from "../types";
 import { buildSpawnArgs } from "../lib/spawn";
 import type {

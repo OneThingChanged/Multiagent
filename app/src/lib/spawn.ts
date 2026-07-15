@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 import { toolForId } from "../types";
 import type { Agent, SshHost } from "../types";
 import { findSshHost } from "./sshHosts";
