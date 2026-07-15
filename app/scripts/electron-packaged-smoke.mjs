@@ -26,6 +26,7 @@ const env = {
   ...process.env,
   MULTIAGENT_ELECTRON_BRIDGE_SMOKE: "1",
   MULTIAGENT_ELECTRON_USER_DATA: userDataDir,
+  MULTIAGENT_LOCAL_DATA: path.join(userDataDir, "local-data"),
 };
 delete env.ELECTRON_RUN_AS_NODE;
 

@@ -58,7 +58,7 @@ import {
   normalizeStoredGroups,
 } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
-import { applyTerminalTheme, createEntry } from "./lib/terminal";
+import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
 import {
@@ -70,6 +70,7 @@ import {
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
+import { persistStorageSnapshot } from "./platform/storageMigration";
 import {
   buildDesktopPetUpdate,
   completionForAgent,
@@ -622,6 +623,20 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags) return;
+    invoke("renderer_ready").catch(() => {});
+    if (isSecondaryWindow) return;
+    const persist = () => persistStorageSnapshot().catch(() => {});
+    persist();
+    const interval = window.setInterval(persist, 3000);
+    window.addEventListener("beforeunload", persist);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("beforeunload", persist);
+    };
+  }, [isSecondaryWindow, runtimeFlags]);
+
+  useEffect(() => {
+    if (!runtimeFlags) return;
     syncSharedStateFromStorage();
     const onStorage = (event: StorageEvent) => {
       if (
@@ -1150,50 +1165,6 @@ function App() {
     }
 
 
-    listen<void>("app:close-requested", async () => {
-      if (cancelled) return;
-      // Remember which sessions were running so the next launch can offer to
-      // reopen them all (across every group), not just the active one. Snapshot
-      // before /quit, which flips them to exited.
-      try {
-        const running = agentsRef.current
-          .filter((a) => {
-            if (a.status === "exited" || a.status === "idle") return false;
-            const e = termsRef.current.get(a.id);
-            return !!e && e.spawned;
-          })
-          .map((a) => a.id);
-        localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(running));
-      } catch {
-        // ignore
-      }
-      // Session IDs are already captured at SessionStart time; close path just
-      // needs to send /quit so the tools shut down cleanly, then confirm.
-      const targets = agentsRef.current.filter((a) => {
-        if (a.status === "exited" || a.status === "idle") return false;
-        if (a.aiToolId !== "codex" && a.aiToolId !== "claude") return false;
-        const e = termsRef.current.get(a.id);
-        return !!e && e.spawned;
-      });
-      await Promise.all(
-        targets.map((a) =>
-          invoke("write_pty", { id: a.id, data: "/quit\r" }).catch(() => {})
-        )
-      );
-      await new Promise((r) =>
-        setTimeout(r, targets.length > 0 ? 300 : 50)
-      );
-      for (const [agentId, entry] of termsRef.current) {
-        try {
-          const data = entry.serialize.serialize({ scrollback: 1000 });
-          saveScrollback(agentId, data);
-        } catch (err) {
-          console.warn("serialize failed", agentId, err);
-        }
-      }
-      await invoke("confirm_close").catch(() => {});
-    }).then(track);
-
     listen<{
       id: string;
       event: string;
@@ -1273,6 +1244,11 @@ function App() {
                 getCurrentWindow()
                   .requestUserAttention(UserAttentionType.Critical)
                   .catch(() => {});
+                notifyDone({
+                  projectName,
+                  sessionName: target.name,
+                  onActivate: () => selectAgentRef.current?.(target.id),
+                }).catch(() => {});
               })
               .catch(() => {});
           }
@@ -1300,6 +1276,61 @@ function App() {
       unsubs.forEach((u) => u());
     };
   }, [pushToast]);
+
+  // Keep the close handshake isolated from the frequently-changing PTY/hook
+  // listeners. That prevents an effect cleanup race from leaving Electron to
+  // wait for its fallback timeout during shutdown.
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    let closing = false;
+    let unsubscribe: (() => void) | null = null;
+    listen<void>("app:close-requested", async () => {
+      if (closing) return;
+      closing = true;
+      try {
+        const running = agentsRef.current
+          .filter((agent) => {
+            if (agent.status === "exited" || agent.status === "idle") return false;
+            return Boolean(termsRef.current.get(agent.id)?.spawned);
+          })
+          .map((agent) => agent.id);
+        localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(running));
+        await persistStorageSnapshot().catch(() => {});
+
+        const targets = agentsRef.current.filter((agent) => {
+          if (agent.status === "exited" || agent.status === "idle") return false;
+          if (agent.aiToolId !== "codex" && agent.aiToolId !== "claude") return false;
+          return Boolean(termsRef.current.get(agent.id)?.spawned);
+        });
+        await Promise.all(
+          targets.map((agent) =>
+            invoke("write_pty", { id: agent.id, data: "/quit\r" }).catch(() => {})
+          )
+        );
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, targets.length > 0 ? 300 : 20)
+        );
+        for (const [agentId, entry] of termsRef.current) {
+          try {
+            saveScrollback(
+              agentId,
+              entry.serialize.serialize({ scrollback: 1000 })
+            );
+          } catch (error) {
+            console.warn("serialize failed", agentId, error);
+          }
+        }
+        await persistStorageSnapshot().catch(() => {});
+      } finally {
+        await invoke("confirm_close").catch(() => {});
+      }
+    })
+      .then((remove) => {
+        unsubscribe = remove;
+      })
+      .catch(() => {});
+    return () => unsubscribe?.();
+  }, [isSecondaryWindow, runtimeFlags]);
 
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 

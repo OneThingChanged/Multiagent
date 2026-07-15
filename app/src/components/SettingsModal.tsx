@@ -5,6 +5,7 @@ import {
   openDialog,
   openUrl,
   relaunch,
+  writeClipboardText,
   type Update,
 } from "../platform/plugins";
 import { APP_THEMES } from "../lib/appTheme";
@@ -331,6 +332,9 @@ export function SettingsModal({
           identityFile: sshDraft.identityFile?.trim() || undefined,
           extraOptions: sshDraft.extraOptions?.trim() || undefined,
           remoteFolder: null,
+          authMethod: sshDraft.authMethod ?? "key",
+          hostId: sshDraft.id,
+          password: sshPasswordInput || undefined,
         },
       });
       setSshTest({ status: "ok", message: msg });
@@ -419,8 +423,7 @@ export function SettingsModal({
 
   const handleCopyTunnelUrl = () => {
     if (!tunnel.publicUrl) return;
-    navigator.clipboard
-      .writeText(tunnel.publicUrl)
+    writeClipboardText(tunnel.publicUrl)
       .then(() => {
         setTunnelCopied(true);
         setTimeout(() => setTunnelCopied(false), 1500);
@@ -445,8 +448,7 @@ export function SettingsModal({
 
   const handleCopyRemoteUrl = () => {
     if (!remote.url) return;
-    navigator.clipboard
-      .writeText(remote.url)
+    writeClipboardText(remote.url)
       .then(() => {
         setRemoteCopied(true);
         setTimeout(() => setRemoteCopied(false), 1500);
@@ -495,8 +497,7 @@ export function SettingsModal({
 
   const handleCopyMonitorUrl = () => {
     if (!monitor.url) return;
-    navigator.clipboard
-      .writeText(monitor.url)
+    writeClipboardText(monitor.url)
       .then(() => {
         setMonitorCopied(true);
         setTimeout(() => setMonitorCopied(false), 1500);

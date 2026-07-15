@@ -17,6 +17,7 @@
 
 ### 빌드·배포·이슈
 - **[BUILD.md](BUILD.md)** — 개발·디버그·릴리즈 빌드, 트러블슈팅
+- **[ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md)** — Electron 1~5단계 구현, 검증 결과, 전환 판단
 - **[RELEASE.md](RELEASE.md)** — 코드 서명 + GitHub 릴리즈 게시 + 자동 업데이터 절차/체크리스트
 - **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** — 알려진 제약 + 남은 개선 후보
 

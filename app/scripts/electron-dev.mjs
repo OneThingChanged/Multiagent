@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
-const devUrl = process.env.MULTIAGENT_DEV_URL || "http://127.0.0.1:24420";
+const devUrl = process.env.MULTIAGENT_DEV_URL || "http://127.0.0.1:4420";
 const require = createRequire(import.meta.url);
 const electronPath = require("electron");
 const viteBin = path.join(

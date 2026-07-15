@@ -501,6 +501,39 @@ fn write_hook_info(app: &AppHandle, port: u16, token: &str) -> Result<(), String
     Ok(())
 }
 
+#[tauri::command]
+fn persist_storage_snapshot(app: AppHandle, snapshot: serde_json::Value) -> Result<(), String> {
+    let values = snapshot
+        .get("values")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| "저장소 스냅샷 형식이 올바르지 않습니다.".to_string())?;
+    let mut total = 0usize;
+    for (key, value) in values {
+        if !key.starts_with("multiagent.") || !value.is_string() {
+            return Err("허용되지 않은 저장소 항목입니다.".to_string());
+        }
+        total = total.saturating_add(key.len());
+        total = total.saturating_add(value.as_str().map(str::len).unwrap_or_default());
+        if total > 50 * 1024 * 1024 {
+            return Err("저장소 스냅샷이 너무 큽니다.".to_string());
+        }
+    }
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let target = dir.join("storage-export.json");
+    let temporary = dir.join("storage-export.json.tmp");
+    let data = serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?;
+    fs::write(&temporary, &data).map_err(|error| error.to_string())?;
+    fs::rename(&temporary, &target)
+        .or_else(|_| fs::write(&target, &data))
+        .map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(temporary);
+    Ok(())
+}
+
 fn session_lock_file_name(id: &str) -> String {
     let mut safe = id
         .chars()
@@ -2524,7 +2557,7 @@ fn create_desktop_pet_window(app: &AppHandle) -> Result<(), String> {
     }
     #[cfg(dev)]
     let pet_url = tauri::WebviewUrl::External(
-        "http://localhost:24420/"
+        "http://localhost:4420/"
             .parse()
             .map_err(|e| format!("desktop pet dev URL: {e}"))?,
     );
@@ -3149,6 +3182,7 @@ pub fn run() {
         generate_ssh_key,
         open_new_app_window,
         runtime_flags,
+        persist_storage_snapshot,
         confirm_close,
         list_markdown_files,
         read_markdown_file,
@@ -3214,6 +3248,7 @@ pub fn run() {
         generate_ssh_key,
         open_new_app_window,
         runtime_flags,
+        persist_storage_snapshot,
         confirm_close,
         list_markdown_files,
         read_markdown_file,

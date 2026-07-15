@@ -1,4 +1,5 @@
-import { invoke } from "../platform/runtime";
+import { invoke, listen } from "../platform/runtime";
+import { isElectronRuntime } from "../platform/electronBridge";
 import {
   isPermissionGranted,
   requestPermission,
@@ -145,6 +146,31 @@ export async function notifyDone({
   onActivate?: () => void;
 }) {
   try {
+    const notificationKey = `multiagent:${projectName}:${sessionName}`;
+    if (isElectronRuntime()) {
+      let removeClickListener: (() => void) | null = null;
+      if (onActivate) {
+        removeClickListener = await listen<{ notificationKey?: string }>(
+          "native-notification:clicked",
+          (event) => {
+            if (event.payload?.notificationKey !== notificationKey) return;
+            removeClickListener?.();
+            removeClickListener = null;
+            onActivate();
+          }
+        );
+        window.setTimeout(() => {
+          removeClickListener?.();
+          removeClickListener = null;
+        }, 60 * 60 * 1000);
+      }
+      await invoke("show_native_notification", {
+        title: `${projectName} / ${sessionName}`,
+        body: "작업이 끝났어요",
+        notificationKey,
+      });
+      return;
+    }
     let granted = await isPermissionGranted();
     if (!granted) granted = (await requestPermission()) === "granted";
     if (!granted) return;
@@ -152,7 +178,7 @@ export async function notifyDone({
       `${projectName} / ${sessionName}`,
       {
         body: "작업이 끝났어요",
-        tag: `multiagent:${projectName}:${sessionName}`,
+        tag: notificationKey,
       }
     );
     notification.onclick = () => {
@@ -935,14 +961,30 @@ export function createEntry(
       !event.altKey &&
       !event.metaKey;
 
-    if (isPlainCtrlKey && event.key.toLowerCase() === "c") {
+    const isCtrlShiftKey =
+      event.type === "keydown" &&
+      event.ctrlKey &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey;
+
+    if (
+      (isPlainCtrlKey || isCtrlShiftKey) &&
+      event.key.toLowerCase() === "c"
+    ) {
       event.preventDefault();
       const selectedText = term.hasSelection() ? term.getSelection() : "";
       if (selectedText) {
-        navigator.clipboard
-          .writeText(selectedText)
+        const write = isElectronRuntime()
+          ? invoke("clipboard_write_text", { text: selectedText })
+          : navigator.clipboard.writeText(selectedText);
+        write
           .then(() => term.clearSelection())
           .catch(() => {});
+      } else if (isPlainCtrlKey) {
+        // No selection means the conventional terminal interrupt, including
+        // Claude Code. Copying a selection still takes precedence.
+        invoke("write_pty", { id, data: "\x03" }).catch(() => {});
       }
       return false;
     }
@@ -958,10 +1000,15 @@ export function createEntry(
       return false;
     }
 
-    if (isPlainCtrlKey && event.key.toLowerCase() === "v") {
+    if (
+      (isPlainCtrlKey || isCtrlShiftKey) &&
+      event.key.toLowerCase() === "v"
+    ) {
       event.preventDefault();
-      navigator.clipboard
-        .readText()
+      const read = isElectronRuntime()
+        ? invoke<string>("clipboard_read_text")
+        : navigator.clipboard.readText();
+      read
         .then((text) => {
           if (text && text.length > 0) {
             term.paste(text);

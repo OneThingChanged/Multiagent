@@ -7,6 +7,7 @@ import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as tauriCheck } from "@tauri-apps/plugin-updater";
 import { electronBridge } from "./electronBridge";
+import { listen } from "./runtime";
 
 export type UpdateDownloadEvent =
   | { event: "Started"; data: { contentLength?: number } }
@@ -39,6 +40,15 @@ export async function openUrl(url: string) {
   await tauriOpenUrl(url);
 }
 
+export async function writeClipboardText(text: string) {
+  const bridge = electronBridge();
+  if (bridge) {
+    await bridge.invoke("clipboard_write_text", { text });
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+}
+
 export async function isPermissionGranted() {
   if (electronBridge()) return true;
   return tauriIsPermissionGranted();
@@ -50,7 +60,26 @@ export async function requestPermission() {
 }
 
 export async function check(): Promise<Update | null> {
-  if (electronBridge()) return null;
+  const bridge = electronBridge();
+  if (bridge) {
+    const info = await bridge.invoke<{ version: string } | null>("check_for_update");
+    if (!info) return null;
+    return {
+      version: info.version,
+      async downloadAndInstall(listener) {
+        const unlisten = listener
+          ? await listen<UpdateDownloadEvent>("update:progress", (event) =>
+              listener(event.payload)
+            )
+          : null;
+        try {
+          await bridge.invoke("download_and_install_update");
+        } finally {
+          unlisten?.();
+        }
+      },
+    };
+  }
   return (await tauriCheck()) as Update | null;
 }
 

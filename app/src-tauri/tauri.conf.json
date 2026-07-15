@@ -5,7 +5,7 @@
   "identifier": "com.jintae.multiagent",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:24420",
+    "devUrl": "http://localhost:4420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

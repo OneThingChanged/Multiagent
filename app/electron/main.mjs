@@ -1,9 +1,11 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
-  nativeImage,
+  Notification,
+  safeStorage,
   screen,
   shell,
 } from "electron";
@@ -12,15 +14,41 @@ import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as nodePty from "node-pty";
+import electronUpdater from "electron-updater";
+import { HookService } from "./services/hook-service.mjs";
+import { SessionService } from "./services/session-service.mjs";
+import {
+  BoundedTerminalBuffer,
+  CodexScrollbackFilter,
+  PassThroughTerminalFilter,
+} from "./services/terminal-stream.mjs";
+import {
+  buildInteractiveSshArgs,
+  findWindowsExecutable,
+  generateSshKey,
+  readPublicKey,
+  sshConnectionArgs,
+  testSshConnection,
+} from "./services/ssh-service.mjs";
+import { resolveTerminalPath } from "./services/terminal-path-service.mjs";
+import {
+  LocalDashboardService,
+  RemoteDashboardService,
+  TunnelService,
+} from "./services/web-services.mjs";
+import { UsageService } from "./services/usage-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.cjs");
 const devUrl = process.env.MULTIAGENT_DEV_URL?.trim() || null;
 const bridgeSmoke = process.env.MULTIAGENT_ELECTRON_BRIDGE_SMOKE === "1";
+const closeSmoke = process.env.MULTIAGENT_ELECTRON_CLOSE_SMOKE === "1";
+const securitySmoke = process.env.MULTIAGENT_ELECTRON_SECURITY_SMOKE === "1";
 const iconPath = path.join(appRoot, "src-tauri", "icons", "icon.ico");
+const packagedRendererUrl = pathToFileURL(path.join(appRoot, "dist", "index.html")).href;
 const MAX_DOC_FILES = 500;
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -51,12 +79,14 @@ let mainWindow = null;
 let petWindow = null;
 let forceClosing = false;
 let closeFallback = null;
-/** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null}>} */
+let closeSmokeStartedAt = null;
+/** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null, ready: boolean}>} */
 const runtimeByWebContents = new Map();
-/** @type {Map<string, {process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null}>} */
+/** @type {Map<string, {id: string, name: string, process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null, aiToolId: string, cwd: string | null, ssh: unknown, filter: CodexScrollbackFilter | PassThroughTerminalFilter, buffer: BoundedTerminalBuffer}>} */
 const ptys = new Map();
 /** @type {Map<string, string>} */
 const sshPasswords = new Map();
+const remotePorts = new Set();
 let desktopPetUpdate = {
   status: "idle",
   workingCount: 0,
@@ -68,21 +98,138 @@ let desktopPetUpdate = {
   notificationKey: null,
   question: null,
 };
-let remoteConfig = {
-  client_id: "",
-  owner: "",
-  tunnel_token: "",
-  public_hostname: "",
-  server_port: 0,
-  client_secret: "",
-};
-let monitorConfig = { enabled: false, serverPort: 4421 };
+const monitorHooks = new Map();
 
 app.setName("MultiAgent Electron");
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", userDataOverride);
 if (process.platform === "win32") {
   app.setAppUserModelId("com.jintae.multiagent.electron");
+}
+const sessionService = new SessionService(app.getPath("userData"));
+const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
+  process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+  "com.jintae.multiagent"
+);
+const hookService = new HookService({
+  baseDir: hookBaseDir,
+  sendEvent(eventName, payload) {
+    if (eventName === "agent:hook-event" && payload?.id) {
+      monitorHooks.set(payload.id, { ...payload, lastTs: Date.now() });
+      if (payload.event === "done" && payload.transcript_path) {
+        try {
+          usageIndex.ingestHook(
+            payload.id,
+            payload.transcript_path,
+            payload.session_id,
+            payload.cwd
+          );
+        } catch (error) {
+          console.warn("[electron] usage hook ingest failed", error);
+        }
+      }
+    }
+    sendEventToAll(eventName, payload);
+  },
+  sessionService,
+});
+let hookReady = null;
+
+function liveOutputForAgents(agents) {
+  return (Array.isArray(agents) ? agents : []).map((agent) => ({
+    ...agent,
+    output: ptys.get(agent.id)?.buffer.snapshot().slice(-80_000) ?? "",
+    hook: monitorHooks.get(agent.id) ?? null,
+  }));
+}
+
+const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
+let monitorService;
+monitorService = new LocalDashboardService({
+  title: "MultiAgent Monitor",
+  defaultPort: 4421,
+  baseDir: hookBaseDir,
+  configName: "monitor-config.json",
+  stateProvider: () => ({
+    agents: liveOutputForAgents(monitorService.state.agents),
+    usage: usageIndex.dashboardSummary(),
+  }),
+});
+let usageDashboard;
+usageDashboard = new LocalDashboardService({
+  title: "MultiAgent Usage",
+  defaultPort: 3141,
+  baseDir: hookBaseDir,
+  configName: "usage-config.json",
+  stateProvider: () => ({
+    agents: liveOutputForAgents(usageDashboard.state.agents),
+    usage: usageIndex.dashboardSummary(),
+  }),
+});
+let remoteService;
+remoteService = new RemoteDashboardService({
+  baseDir: hookBaseDir,
+  stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents) }),
+  writePty(id, data) {
+    if (!id || data.length > 64 * 1024) return;
+    ptys.get(id)?.process.write(data);
+  },
+  requestAccess(login) {
+    sendEventToAll("remote:access-request", { login });
+  },
+});
+const tunnelService = new TunnelService({
+  baseDir: hookBaseDir,
+  getConfig: () => remoteService.config,
+  getLocalUrl: () => remoteService.status().url,
+});
+const { autoUpdater } = electronUpdater;
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+let updateDownloaded = false;
+
+async function checkForElectronUpdate() {
+  if (!app.isPackaged && !process.env.MULTIAGENT_UPDATE_FEED_URL) return null;
+  if (process.env.MULTIAGENT_UPDATE_FEED_URL) {
+    autoUpdater.setFeedURL({
+      provider: "generic",
+      url: process.env.MULTIAGENT_UPDATE_FEED_URL,
+    });
+  }
+  const result = await autoUpdater.checkForUpdates();
+  if (!result?.updateInfo) return null;
+  if (result.updateInfo.version === app.getVersion()) return null;
+  return {
+    version: result.updateInfo.version,
+    releaseDate: result.updateInfo.releaseDate,
+    releaseName: result.updateInfo.releaseName ?? null,
+  };
+}
+
+async function downloadElectronUpdate() {
+  let lastTransferred = 0;
+  const onProgress = (progress) => {
+    const transferred = Number(progress.transferred) || 0;
+    if (lastTransferred === 0) {
+      sendEventToAll("update:progress", {
+        event: "Started",
+        data: { contentLength: Number(progress.total) || undefined },
+      });
+    }
+    sendEventToAll("update:progress", {
+      event: "Progress",
+      data: { chunkLength: Math.max(0, transferred - lastTransferred) },
+    });
+    lastTransferred = transferred;
+  };
+  autoUpdater.on("download-progress", onProgress);
+  try {
+    await autoUpdater.downloadUpdate();
+    updateDownloaded = true;
+    sendEventToAll("update:progress", { event: "Finished", data: {} });
+  } finally {
+    autoUpdater.off("download-progress", onProgress);
+  }
 }
 
 function asObject(value) {
@@ -101,6 +248,61 @@ function asPositiveInt(value, fallback) {
 
 function eventSenderWindow(event) {
   return BrowserWindow.fromWebContents(event.sender);
+}
+
+function isTrustedRendererUrl(rawUrl) {
+  try {
+    const candidate = new URL(rawUrl);
+    if (devUrl) {
+      return candidate.origin === new URL(devUrl).origin;
+    }
+    candidate.search = "";
+    candidate.hash = "";
+    return candidate.href.toLowerCase() === packagedRendererUrl.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function assertTrustedSender(event) {
+  const senderId = event.sender.id;
+  if (!runtimeByWebContents.has(senderId)) {
+    throw new Error("등록되지 않은 Electron renderer의 IPC 요청을 차단했습니다.");
+  }
+  if (event.senderFrame !== event.sender.mainFrame) {
+    throw new Error("하위 frame의 Electron IPC 요청을 차단했습니다.");
+  }
+  if (!isTrustedRendererUrl(event.senderFrame.url)) {
+    throw new Error("신뢰하지 않는 페이지의 Electron IPC 요청을 차단했습니다.");
+  }
+}
+
+function openExternalIfAllowed(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      void shell.openExternal(url.href);
+    }
+  } catch {
+    // Invalid navigation targets are denied without side effects.
+  }
+}
+
+function installNavigationPolicy(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalIfAllowed(url);
+    return { action: "deny" };
+  });
+  const guardNavigation = (event, url) => {
+    if (isTrustedRendererUrl(url)) return;
+    event.preventDefault();
+    openExternalIfAllowed(url);
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
+  win.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
 }
 
 function sendEventToAll(eventName, payload) {
@@ -149,20 +351,18 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 
   runtimeByWebContents.set(win.webContents.id, {
     secondary_window: secondary,
     open_agent_id: openAgentId,
+    ready: false,
   });
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      void shell.openExternal(url);
-    }
-    return { action: "deny" };
-  });
+  installNavigationPolicy(win);
   const webContentsId = win.webContents.id;
   win.webContents.on("destroyed", () => {
     runtimeByWebContents.delete(webContentsId);
@@ -173,6 +373,11 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     win.on("close", (event) => {
       if (forceClosing) return;
       event.preventDefault();
+      const runtime = runtimeByWebContents.get(win.webContents.id);
+      if (!runtime?.ready) {
+        closeEverything();
+        return;
+      }
       sendEvent(win, "app:close-requested");
       if (closeFallback) clearTimeout(closeFallback);
       closeFallback = setTimeout(() => closeEverything(), 5000);
@@ -218,13 +423,17 @@ function ensurePetWindow() {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
+  installNavigationPolicy(petWindow);
   const petWebContentsId = petWindow.webContents.id;
   runtimeByWebContents.set(petWebContentsId, {
     secondary_window: true,
     open_agent_id: null,
+    ready: false,
   });
   petWindow.webContents.on("destroyed", () => {
     runtimeByWebContents.delete(petWebContentsId);
@@ -248,11 +457,21 @@ function closePty(id) {
   if (!entry) return;
   ptys.delete(id);
   if (entry.initTimer) clearTimeout(entry.initTimer);
+  if (entry.ssh?.reversePort) remotePorts.delete(entry.ssh.reversePort);
   try {
     entry.process.kill();
   } catch {
     // The child may already have exited.
   }
+}
+
+function allocateRemotePort(id) {
+  let hash = 0;
+  for (const character of id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  let port = 49152 + (hash % 10_000);
+  while (remotePorts.has(port)) port = port >= 59151 ? 49152 : port + 1;
+  remotePorts.add(port);
+  return port;
 }
 
 function closeEverything() {
@@ -265,6 +484,9 @@ function closeEverything() {
   for (const id of [...ptys.keys()]) closePty(id);
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.destroy();
+  }
+  if (closeSmokeStartedAt !== null) {
+    console.log(`[electron-smoke] MULTIAGENT_ELECTRON_CLOSE_OK ${Date.now() - closeSmokeStartedAt}ms`);
   }
   app.quit();
 }
@@ -307,17 +529,83 @@ function defaultShell(requested) {
   return executable;
 }
 
-function spawnPty(args) {
+async function testPasswordSshConnection(ssh, password) {
+  if (!password) throw new Error("저장된 SSH 비밀번호가 없습니다.");
+  const executable = findWindowsExecutable(process.platform === "win32" ? "ssh.exe" : "ssh");
+  if (!executable) throw new Error("OpenSSH 클라이언트를 찾을 수 없습니다.");
+  return new Promise((resolve, reject) => {
+    const handle = nodePty.spawn(
+      executable,
+      ["-tt", ...sshConnectionArgs(ssh), `${ssh.user}@${ssh.host}`, "echo multiagent-ok"],
+      { name: "xterm-256color", cols: 80, rows: 24, cwd: os.homedir(), env: process.env, useConpty: true }
+    );
+    let output = "";
+    let injected = false;
+    let settled = false;
+    let timer = null;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { handle.kill(); } catch {}
+      if (error) reject(error);
+      else resolve("연결 성공");
+    };
+    handle.onData((data) => {
+      output += data;
+      if (!injected && /(?:password|암호)\s*:/i.test(data)) {
+        injected = true;
+        handle.write(`${password}\r`);
+      }
+      if (output.includes("multiagent-ok")) finish();
+    });
+    handle.onExit(() => {
+      if (!settled) finish(new Error("SSH 비밀번호 연결에 실패했습니다."));
+    });
+    timer = setTimeout(
+      () => finish(new Error("SSH 연결 시간이 초과되었습니다.")),
+      12_000
+    );
+  });
+}
+
+async function spawnPty(args, event) {
   const id = asString(args.id).trim();
   if (!id) throw new Error("PTY id가 비어 있습니다.");
-  if (args.ssh) {
-    throw new Error("Electron prototype의 SSH PTY는 아직 연결되지 않았습니다.");
+  const existing = ptys.get(id);
+  if (existing) {
+    const snapshot = existing.buffer.snapshot();
+    if (snapshot) sendEvent(eventSenderWindow(event), "pty:data", { id, data: snapshot });
+    return { reattached: true };
   }
-  closePty(id);
 
-  const executable = defaultShell(asString(args.shell).trim() || null);
-  const lower = path.basename(executable).toLowerCase();
-  const shellArgs = lower.includes("powershell") || lower === "pwsh.exe" ? ["-NoLogo"] : [];
+  await hookReady?.catch(() => {});
+  const aiToolId = asString(args.aiToolId).trim();
+
+  const ssh = args.ssh ? asObject(args.ssh) : null;
+  let executable;
+  let shellArgs;
+  let reversePort = null;
+  if (ssh) {
+    executable = findWindowsExecutable(process.platform === "win32" ? "ssh.exe" : "ssh");
+    if (!executable) throw new Error("OpenSSH 클라이언트를 찾을 수 없습니다.");
+    reversePort = allocateRemotePort(id);
+    shellArgs = buildInteractiveSshArgs(
+      ssh,
+      asString(args.initCommand),
+      {
+        agentId: id,
+        port: hookService.port,
+        reversePort,
+        token: hookService.token,
+        aiToolId,
+      }
+    );
+  } else {
+    executable = defaultShell(asString(args.shell).trim() || null);
+    const lower = path.basename(executable).toLowerCase();
+    shellArgs = lower.includes("powershell") || lower === "pwsh.exe" ? ["-NoLogo"] : [];
+  }
   const requestedCwd = asString(args.cwd).trim();
   const asarSegment = `${path.sep}app.asar${path.sep}`;
   const isPackagedVirtualPath =
@@ -326,32 +614,77 @@ function spawnPty(args) {
     requestedCwd && !isPackagedVirtualPath && fs.existsSync(requestedCwd)
       ? requestedCwd
       : os.homedir();
-  const processHandle = nodePty.spawn(executable, shellArgs, {
-    name: "xterm-256color",
-    cols: asPositiveInt(args.cols, 120),
-    rows: asPositiveInt(args.rows, 30),
+  if (!ssh && (aiToolId === "codex" || aiToolId === "claude") && cwd) {
+    await hookService.setupProject(cwd, aiToolId).catch((error) => {
+      console.warn(`[electron] hook setup failed for ${id}:`, error);
+    });
+  }
+  let processHandle;
+  try {
+    processHandle = nodePty.spawn(executable, shellArgs, {
+      name: "xterm-256color",
+      cols: asPositiveInt(args.cols, 120),
+      rows: asPositiveInt(args.rows, 30),
+      cwd,
+      env: {
+        ...process.env,
+        TERM: "xterm-256color",
+        COLORTERM: "truecolor",
+        MULTIAGENT_AGENT_ID: id,
+        MULTIAGENT_PORT: String(hookService.port || ""),
+        MULTIAGENT_TOKEN: hookService.token || "",
+      },
+      useConpty: true,
+    });
+  } catch (error) {
+    if (reversePort) remotePorts.delete(reversePort);
+    throw error;
+  }
+  const entry = {
+    id,
+    name: asString(args.name).trim() || id,
+    process: processHandle,
+    initTimer: null,
+    aiToolId,
     cwd,
-    env: {
-      ...process.env,
-      TERM: "xterm-256color",
-      COLORTERM: "truecolor",
-      MULTIAGENT_AGENT_ID: id,
-    },
-    useConpty: true,
-  });
-  const entry = { process: processHandle, initTimer: null };
+    ssh: ssh ? { ...ssh, reversePort, passwordInjected: false } : null,
+    filter:
+      aiToolId === "codex"
+        ? new CodexScrollbackFilter()
+        : new PassThroughTerminalFilter(),
+    buffer: new BoundedTerminalBuffer(),
+  };
   ptys.set(id, entry);
 
   processHandle.onData((data) => {
-    sendEventToAll("pty:data", { id, data });
+    if (
+      entry.ssh?.authMethod === "password" &&
+      !entry.ssh.passwordInjected &&
+      /(?:password|암호)\s*:/i.test(data)
+    ) {
+      const password = sshPasswords.get(asString(entry.ssh.hostId));
+      if (password) {
+        entry.ssh.passwordInjected = true;
+        processHandle.write(`${password}\r`);
+      }
+    }
+    const visibleData = entry.filter.push(data);
+    if (!visibleData) return;
+    entry.buffer.append(visibleData);
+    sendEventToAll("pty:data", { id, data: visibleData });
   });
   processHandle.onExit(({ exitCode }) => {
+    const remaining = entry.filter.finish();
+    if (remaining) {
+      entry.buffer.append(remaining);
+      sendEventToAll("pty:data", { id, data: remaining });
+    }
     const current = ptys.get(id);
     if (current?.process === processHandle) ptys.delete(id);
     sendEventToAll("pty:exit", { id, exitCode });
   });
 
-  const initCommand = asString(args.initCommand).trim();
+  const initCommand = ssh ? "" : asString(args.initCommand).trim();
   if (initCommand) {
     entry.initTimer = setTimeout(() => {
       entry.initTimer = null;
@@ -359,6 +692,7 @@ function spawnPty(args) {
       processHandle.write(`${initCommand}\r`);
     }, 600);
   }
+  return { reattached: false };
 }
 
 function resolveExistingPath(folder, rawPath) {
@@ -468,6 +802,78 @@ async function showOpenDialog(event, args) {
   return args.multiple ? result.filePaths : result.filePaths[0];
 }
 
+function storageSnapshotPath() {
+  return path.join(hookBaseDir, "storage-export.json");
+}
+
+function sshSecretsPath() {
+  return path.join(app.getPath("userData"), "ssh-secrets.electron.json");
+}
+
+async function loadSshSecrets() {
+  if (!safeStorage.isEncryptionAvailable()) return;
+  try {
+    const stored = JSON.parse(await fsPromises.readFile(sshSecretsPath(), "utf8"));
+    for (const [hostId, encrypted] of Object.entries(asObject(stored))) {
+      if (typeof encrypted !== "string") continue;
+      const password = safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+      if (password) sshPasswords.set(hostId, password);
+    }
+  } catch {
+    // A missing or legacy secrets file simply starts with an empty keychain.
+  }
+}
+
+async function saveSshSecrets() {
+  if (!safeStorage.isEncryptionAvailable()) return;
+  const stored = {};
+  for (const [hostId, password] of sshPasswords) {
+    stored[hostId] = safeStorage.encryptString(password).toString("base64");
+  }
+  await fsPromises.mkdir(app.getPath("userData"), { recursive: true });
+  await fsPromises.writeFile(sshSecretsPath(), JSON.stringify(stored), "utf8");
+}
+
+async function persistStorageSnapshot(snapshot) {
+  const candidate = asObject(snapshot);
+  const values = asObject(candidate.values);
+  const cleanValues = {};
+  let total = 0;
+  for (const [key, value] of Object.entries(values)) {
+    if (!key.startsWith("multiagent.") || typeof value !== "string") continue;
+    total += key.length + value.length;
+    if (total > 50 * 1024 * 1024) throw new Error("저장소 스냅샷이 너무 큽니다.");
+    cleanValues[key] = value;
+  }
+  const clean = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    values: cleanValues,
+  };
+  await fsPromises.mkdir(hookBaseDir, { recursive: true });
+  const target = storageSnapshotPath();
+  const temporary = `${target}.${process.pid}.tmp`;
+  await fsPromises.writeFile(temporary, JSON.stringify(clean), "utf8");
+  try {
+    await fsPromises.rename(temporary, target);
+  } catch {
+    await fsPromises.writeFile(target, JSON.stringify(clean), "utf8");
+    await fsPromises.rm(temporary, { force: true }).catch(() => {});
+  }
+  return clean;
+}
+
+async function importTauriStorage() {
+  try {
+    const raw = await fsPromises.readFile(storageSnapshotPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== 1 || !parsed.values) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function invokeCommand(event, command, rawArgs) {
   const args = asObject(rawArgs);
   switch (command) {
@@ -476,9 +882,21 @@ async function invokeCommand(event, command, rawArgs) {
         secondary_window: false,
         open_agent_id: null,
       };
-    case "spawn_pty":
-      spawnPty(args);
+    case "renderer_ready": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (runtime) runtime.ready = true;
+      if (closeSmoke) console.log("[electron-smoke] renderer ready for close test");
+      if (closeSmoke && eventSenderWindow(event) === mainWindow && closeSmokeStartedAt === null) {
+        setTimeout(() => {
+          if (!mainWindow || mainWindow.isDestroyed()) return;
+          closeSmokeStartedAt = Date.now();
+          mainWindow.close();
+        }, 100);
+      }
       return null;
+    }
+    case "spawn_pty":
+      return spawnPty(args, event);
     case "write_pty": {
       const entry = ptys.get(asString(args.id));
       if (!entry) throw new Error("활성 PTY를 찾을 수 없습니다.");
@@ -530,7 +948,13 @@ async function invokeCommand(event, command, rawArgs) {
     case "show_open_dialog":
       return showOpenDialog(event, args);
     case "open_external_url":
-      await shell.openExternal(asString(args.url));
+      {
+        const target = new URL(asString(args.url));
+        if (target.protocol !== "http:" && target.protocol !== "https:") {
+          throw new Error("지원하지 않는 외부 URL scheme입니다.");
+        }
+        await shell.openExternal(target.href);
+      }
       return null;
     case "open_local_path":
       await openPath(resolveExistingPath("", args.path));
@@ -547,81 +971,150 @@ async function invokeCommand(event, command, rawArgs) {
       return readMarkdownFile(args.folder, args.relativePath);
     case "resolve_markdown_path":
       return resolveDocPath(args.folder, args.path);
+    case "resolve_terminal_path":
+      return resolveTerminalPath(asString(args.folder), asString(args.path));
     case "read_image_data_url":
       return readImageDataUrl(args.path, args.folder);
     case "play_system_sound":
       shell.beep();
       return null;
+    case "clipboard_read_text":
+      return clipboard.readText();
+    case "clipboard_write_text":
+      clipboard.writeText(asString(args.text));
+      return null;
+    case "show_native_notification": {
+      if (!Notification.isSupported()) return false;
+      const notification = new Notification({
+        title: asString(args.title, "MultiAgent"),
+        body: asString(args.body),
+        silent: Boolean(args.silent),
+      });
+      notification.on("click", () => {
+        showMainWindow();
+        sendEvent(mainWindow, "native-notification:clicked", {
+          notificationKey: asString(args.notificationKey),
+        });
+      });
+      notification.show();
+      return true;
+    }
+    case "persist_storage_snapshot":
+    case "export_tauri_storage":
+      return persistStorageSnapshot(args.snapshot);
+    case "import_tauri_storage":
+      return importTauriStorage();
     case "read_audio_file":
       return [...(await fsPromises.readFile(resolveExistingPath("", args.path)))];
     case "resolve_cli_session":
-      return asString(args.preferredSessionId).trim() || null;
+      return sessionService.resolve({
+        aiToolId: args.aiToolId,
+        folder: args.folder,
+        preferredSessionId: args.preferredSessionId,
+        agentId: args.agentId,
+      });
     case "relink_cli_session":
-      return null;
+      return sessionService.resolve({
+        aiToolId: args.aiToolId,
+        folder: args.folder,
+        preferredSessionId: null,
+        agentId: args.agentId,
+      });
     case "sync_remote_agents":
+      remoteService.syncAgents(args.agents);
+      return null;
     case "sync_remote_view":
+      remoteService.syncView(args.view);
+      return null;
     case "sync_usage_catalog":
+      usageIndex.syncCatalog(args.projects, args.agents);
+      usageDashboard.sync({ projects: args.projects, agents: args.agents });
+      return null;
     case "sync_monitor_state":
+      monitorService.sync(args);
       return null;
     case "repair_active_hooks":
-      return {
-        activeSessions: ptys.size,
-        supportedSessions: 0,
-        repaired: 0,
-        alreadyHealthy: 0,
-        skipped: ptys.size,
-        restartRequired: 0,
-        serverRestarted: false,
-        failures: [],
-      };
+      return hookService.repair([...ptys.values()]);
     case "usage_ingest_now":
-      return { files: 0, events: 0, errors: ["Electron prototype: usage ingest 미연결"] };
+      return usageIndex.ingestAll();
     case "remote_config_get":
-      return remoteConfig;
+      return remoteService.config;
     case "remote_config_set":
-      remoteConfig = { ...remoteConfig, ...asObject(args.config) };
-      return remoteConfig;
+      return remoteService.setConfig(asObject(args.config));
     case "remote_server_status":
+      return remoteService.status();
     case "start_remote_server":
+      return remoteService.start();
     case "stop_remote_server":
-      return { running: false, url: null, port: null };
+      return remoteService.stop();
     case "tunnel_status":
+      return tunnelService.status();
     case "start_tunnel":
+      if (!remoteService.status().running) await remoteService.start();
+      return tunnelService.start();
     case "stop_tunnel":
-      return { running: false, publicUrl: null };
+      return tunnelService.stop();
     case "remote_access_list":
+      return remoteService.accessList();
     case "remote_access_approve":
+      return remoteService.approve(asString(args.login));
     case "remote_access_revoke":
-      return { pending: [], approved: [] };
+      return remoteService.revoke(asString(args.login));
     case "monitor_config_get":
-      return monitorConfig;
+      return monitorService.config;
     case "monitor_config_set":
-      monitorConfig = { ...monitorConfig, ...asObject(args.config) };
-      return monitorConfig;
+      return monitorService.setConfig(asObject(args.config));
     case "monitor_server_status":
+      return monitorService.status();
     case "start_monitor_server":
+      return monitorService.start();
     case "stop_monitor_server":
-      return { running: false, url: null, port: null };
+      return monitorService.stop();
+    case "usage_config_get":
+      return usageDashboard.config;
+    case "usage_config_set":
+      return usageDashboard.setConfig(asObject(args.config));
+    case "usage_server_status":
+      return usageDashboard.status();
+    case "start_usage_server":
+      return usageDashboard.start();
+    case "stop_usage_server":
+      return usageDashboard.stop();
     case "ssh_password_set":
       sshPasswords.set(asString(args.hostId), asString(args.password));
+      await saveSshSecrets();
       return null;
     case "ssh_password_clear":
       sshPasswords.delete(asString(args.hostId));
+      await saveSshSecrets();
       return null;
     case "ssh_password_has":
       return sshPasswords.has(asString(args.hostId));
     case "ssh_test":
-      throw new Error("Electron prototype의 SSH 연결은 아직 구현되지 않았습니다.");
-    case "get_ssh_public_key": {
-      for (const name of ["id_ed25519.pub", "id_rsa.pub"]) {
-        const candidate = path.join(os.homedir(), ".ssh", name);
-        if (fs.existsSync(candidate)) return fsPromises.readFile(candidate, "utf8");
+      {
+        const ssh = asObject(args.ssh);
+        if (ssh.authMethod === "password") {
+          return testPasswordSshConnection(
+            ssh,
+            asString(ssh.password) || sshPasswords.get(asString(ssh.hostId))
+          );
+        }
+        return testSshConnection(ssh);
       }
-      return null;
-    }
+    case "get_ssh_public_key":
+      return readPublicKey();
     case "generate_ssh_key":
-      throw new Error("Electron prototype에서는 ssh-keygen을 직접 실행해주세요.");
+      return generateSshKey();
+    case "check_for_update":
+      return checkForElectronUpdate();
+    case "download_and_install_update":
+      return downloadElectronUpdate();
     case "relaunch":
+      if (updateDownloaded) {
+        forceClosing = true;
+        autoUpdater.quitAndInstall(false, true);
+        return null;
+      }
       app.relaunch();
       closeEverything();
       return null;
@@ -630,11 +1123,13 @@ async function invokeCommand(event, command, rawArgs) {
   }
 }
 
-ipcMain.handle("multiagent:invoke", (event, command, args) =>
-  invokeCommand(event, asString(command), args)
-);
+ipcMain.handle("multiagent:invoke", (event, command, args) => {
+  assertTrustedSender(event);
+  return invokeCommand(event, asString(command), args);
+});
 
 ipcMain.handle("multiagent:window", (event, operation, value) => {
+  assertTrustedSender(event);
   const win = eventSenderWindow(event);
   if (!win) throw new Error("현재 Electron 창을 찾을 수 없습니다.");
   switch (operation) {
@@ -652,6 +1147,7 @@ ipcMain.handle("multiagent:window", (event, operation, value) => {
 });
 
 ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
+  assertTrustedSender(_event);
   const name = asString(eventName);
   if (!name) return;
   sendEventToAll(name, payload);
@@ -660,6 +1156,12 @@ ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
 app.on("before-quit", () => {
   forceClosing = true;
   for (const id of [...ptys.keys()]) closePty(id);
+  void hookService.stop();
+  void monitorService.stop();
+  void usageDashboard.stop();
+  usageIndex.close();
+  void remoteService.stop();
+  void tunnelService.stop();
 });
 
 app.on("window-all-closed", () => {
@@ -675,8 +1177,16 @@ app.on("activate", () => {
 });
 
 console.log(`[electron] boot ${app.getVersion()} devUrl=${devUrl ?? "production"}`);
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   console.log("[electron] ready");
+  hookReady = hookService.start().catch((error) => {
+    console.error("[electron] hook service failed to start", error);
+    throw error;
+  });
+  await hookReady.catch(() => {});
+  await loadSshSecrets();
+  if (monitorService.config.enabled) await monitorService.start().catch(console.error);
+  if (usageDashboard.config.enabled) await usageDashboard.start().catch(console.error);
   mainWindow = createAppWindow();
   console.log(`[electron] main window created id=${mainWindow.id}`);
   if (bridgeSmoke) {
@@ -728,6 +1238,27 @@ void app.whenReady().then(() => {
         for (const ptyId of [...ptys.keys()]) closePty(ptyId);
         app.exit(1);
       }
+    });
+  }
+  if (securitySmoke) {
+    mainWindow.webContents.once("did-finish-load", async () => {
+      const original = mainWindow.webContents.getURL();
+      await mainWindow.webContents.executeJavaScript(
+        `location.href = "data:text/html,<h1>untrusted</h1>"; true`
+      );
+      setTimeout(async () => {
+        const current = mainWindow.webContents.getURL();
+        const bridgePresent = await mainWindow.webContents
+          .executeJavaScript("Boolean(window.multiAgentElectron)")
+          .catch(() => false);
+        if (current === original && bridgePresent) {
+          console.log("[electron-smoke] MULTIAGENT_ELECTRON_SECURITY_OK");
+          closeEverything();
+        } else {
+          console.error(`[electron-smoke] security failure original=${original} current=${current} bridge=${bridgePresent}`);
+          app.exit(1);
+        }
+      }, 300);
     });
   }
 });

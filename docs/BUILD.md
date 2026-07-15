@@ -27,6 +27,16 @@ npm run tauri dev
 - `src-tauri/**` 변경 → Tauri watcher가 자동 재컴파일 + 앱 재시작
 - 윈도우 닫으면 dev 세션 종료. 다시 띄우려면 `npm run tauri dev`
 
+Electron 실험 브랜치에서는 같은 renderer를 다음 명령으로 실행한다.
+
+```bash
+cd K:\AI\MultiAgent\app
+npm run electron:dev
+```
+
+Electron도 Vite `4420`을 사용하며 HMR 보조 포트는 `4422`다. 설치형/보안/PTY 검증 명령과
+전환 조건은 [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md)를 참고한다.
+
 ## 디버그 빌드
 
 ```bash
