@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 
 const allowMissing = process.argv.includes("--allow-missing");
 const appDir = fileURLToPath(new URL("..", import.meta.url));
-const packageJson = JSON.parse(
-  readFileSync(join(appDir, "package.json"), "utf8")
+// Electron prereleases and Tauri releases have independent update channels,
+// so the Tauri updater manifest must follow tauri.conf.json rather than the
+// npm package version used by electron-builder.
+const tauriConfig = JSON.parse(
+  readFileSync(join(appDir, "src-tauri", "tauri.conf.json"), "utf8")
 );
-const version = packageJson.version;
+const version = tauriConfig.version;
 const repo = "https://github.com/OneThingChanged/Multiagent";
 const bundleDir = join(appDir, "src-tauri", "target", "release", "bundle");
 const nsisDir = join(bundleDir, "nsis");

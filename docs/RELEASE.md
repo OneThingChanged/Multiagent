@@ -46,16 +46,18 @@ npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.
 
 ## 릴리즈 절차
 
-### 1. 버전 올리기 (소스 4곳 전부)
+### 1. Tauri 버전 올리기 (소스 3곳)
 
 | 파일 | 필드 |
 |---|---|
-| `app/package.json` | `"version"` |
 | `app/src-tauri/Cargo.toml` | `[package] version` |
 | `app/src-tauri/tauri.conf.json` | `"version"` |
 | `app/src/lib/appInfo.ts` | `APP_VERSION` |
 
-4곳이 어긋나면 빌드 산출물 파일명/표시 버전이 꼬인다. `app/package-lock.json`, `app/src-tauri/Cargo.lock`의 루트 패키지 버전도 최종 커밋에 같이 반영돼야 한다.
+3곳이 어긋나면 Tauri 빌드 산출물 파일명/표시 버전이 꼬인다. `app/src-tauri/Cargo.lock`의
+루트 패키지 버전도 최종 커밋에 같이 반영돼야 한다. `app/package.json`과
+`app/package-lock.json`은 Electron test 채널 버전(`0.5.x-electron.n`)을 사용하므로 Tauri와
+일치시키지 않는다. `write-latest-json.mjs`도 `tauri.conf.json` 버전을 기준으로 manifest를 쓴다.
 
 ### 2. 빠른 검증
 
@@ -194,7 +196,7 @@ curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>
 
 ## 자주 빠뜨리는 함정 (체크리스트)
 
-- [ ] 버전 소스 4곳과 lockfile 루트 버전이 모두 갱신됐나
+- [ ] Tauri 버전 소스 3곳과 Cargo.lock 루트 버전이 모두 갱신됐나
 - [ ] `TAURI_SIGNING_PRIVATE_KEY`(+빈 PASSWORD) 주고 `npm run release:build:all` 했나 → 두 variant `.sig` 생성 확인
 - [ ] `latest.json` / `latest-company.json`의 signature가 각 variant의 **NSIS setup.exe.sig** 내용인가
 - [ ] 릴리즈가 **draft 아님 + Latest 마킹**인가
