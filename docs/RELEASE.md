@@ -15,6 +15,37 @@
 2. `latest.json` / `latest-company.json` + `.sig` 자산이 릴리즈에 **첨부**돼 있어야 한다
 3. 빌드가 **올바른 키로 서명**돼 있어야 한다 (pubkey와 짝)
 
+## Electron 정식 채널 (0.5.31 이상)
+
+정식 Electron 전환 이후 한 Latest 릴리스에서 두 제품 채널을 함께 유지한다.
+
+| 설치 상태 | 조회 파일 | 다음 설치본 |
+|---|---|---|
+| standard Tauri | `latest.json` | standard Electron NSIS |
+| company Tauri | `latest-company.json` | Company Electron NSIS |
+| standard Electron | `latest.yml` | standard Electron NSIS |
+| Company Electron | `latest-company.yml` | Company Electron NSIS |
+
+빌드와 전환 manifest 생성 순서:
+
+```powershell
+cd "K:\AI\MultiAgent\app"
+npm run electron:dist:all
+
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+npm run tauri -- signer sign electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe
+npm run tauri -- signer sign electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe
+npm run release:electron-transition-manifest
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+```
+
+새 Latest에는 두 NSIS·blockmap·portable, `latest.yml`, `latest-company.yml`, Tauri 전환용
+`latest.json`, `latest-company.json`, 두 NSIS의 `.sig`를 빠짐없이 첨부한다. Company
+Electron은 `com.jintae.multiagent.company.electron`과 company 전용 local-data 경로를
+사용하며 Remote·Tunnel을 제공하지 않는다.
+
 ## 빌드 Variant
 
 | variant | 제품명 | identifier | updater manifest | 원격 기능 |

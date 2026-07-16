@@ -35,7 +35,7 @@ function limitedString(value, maxLength) {
 
 const HELPER_SCRIPT = `param([string]$Event, [string]$HookEventName)
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-$base = Join-Path $env:LOCALAPPDATA "com.jintae.multiagent"
+$base = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logPath = Join-Path $base "hook.log"
 $infoPath = Join-Path $base "hook-info.json"
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"

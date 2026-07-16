@@ -3,7 +3,8 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.30",
+  "version": "0.5.31",
+  "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,8 +17,13 @@
     "electron:packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged",
     "electron:portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable",
     "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
+    "electron:company-packaged-smoke": "node scripts/electron-packaged-smoke.mjs --company",
+    "electron:company-packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged --company",
+    "electron:company-portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable --company",
     "electron:pack": "npm run build && electron-builder --dir",
     "electron:dist": "npm run build && electron-builder --win nsis portable",
+    "electron:dist:company": "node scripts/build-electron-company.mjs",
+    "electron:dist:all": "node scripts/build-electron-all.mjs",
     "tauri": "tauri",
     "tauri:build:standard": "node scripts/build-variant.mjs standard",
     "tauri:build:company": "node scripts/build-variant.mjs company",
@@ -63,6 +69,9 @@
   "build": {
     "appId": "com.jintae.multiagent.electron",
     "productName": "MultiAgent Electron",
+    "extraMetadata": {
+      "multiAgentVariant": "standard"
+    },
     "electronDist": "node_modules/electron/dist",
     "asar": true,
     "npmRebuild": false,
@@ -95,7 +104,8 @@
       {
         "provider": "github",
         "owner": "OneThingChanged",
-        "repo": "Multiagent"
+        "repo": "Multiagent",
+        "channel": "latest"
       }
     ]
   }

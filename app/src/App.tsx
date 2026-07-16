@@ -165,6 +165,8 @@ type TerminalPathResolution = {
 type RuntimeFlags = {
   secondary_window: boolean;
   open_agent_id?: string | null;
+  build_variant?: "standard" | "company";
+  remote_enabled?: boolean;
 };
 
 function readLocalStorageValue(key: string) {
@@ -575,6 +577,7 @@ function App() {
   );
   const [runtimeFlags, setRuntimeFlags] = useState<RuntimeFlags | null>(null);
   const isSecondaryWindow = !!runtimeFlags?.secondary_window;
+  const remoteEnabled = runtimeFlags?.remote_enabled ?? !IS_COMPANY_BUILD;
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
@@ -768,7 +771,7 @@ function App() {
   // Mirror agent metadata into the Rust remote hub so the remote web
   // client can list sessions and show live status.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
+    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
     const projectNames = new Map(projects.map((p) => [p.id, p.name]));
     const payload = {
       agents: agents.map((a) => ({
@@ -783,13 +786,13 @@ function App() {
     if (remoteAgentsJsonRef.current === json) return;
     remoteAgentsJsonRef.current = json;
     invoke("sync_remote_agents", payload).catch(() => {});
-  }, [agents, isSecondaryWindow, projects, runtimeFlags]);
+  }, [agents, isSecondaryWindow, projects, remoteEnabled, runtimeFlags]);
 
   // Mirror projects + sessions so the remote web client can list them.
   // The web client is an independent viewer: it picks which session to
   // view locally, so desktop active/layout is intentionally not synced.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
+    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
     const payload = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -808,7 +811,7 @@ function App() {
     if (remoteViewJsonRef.current === view) return;
     remoteViewJsonRef.current = view;
     invoke("sync_remote_view", { view }).catch(() => {});
-  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+  }, [projects, agents, isSecondaryWindow, remoteEnabled, runtimeFlags]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
@@ -1322,7 +1325,7 @@ function App() {
       );
     }).then(track);
 
-    if (!IS_COMPANY_BUILD) {
+    if (remoteEnabled) {
       listen<{ login: string }>("remote:access-request", (e) => {
         if (cancelled) return;
         playNotificationSound();
@@ -1594,7 +1597,7 @@ function App() {
       })
       .catch(() => {});
     return () => unsubscribe?.();
-  }, [isSecondaryWindow, runtimeFlags]);
+  }, [isSecondaryWindow, remoteEnabled, runtimeFlags]);
 
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 

@@ -6,13 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
+const company = process.argv.includes("--company");
 const executable = path.join(
   appRoot,
   "electron-dist",
+  ...(company ? ["company"] : []),
   "win-unpacked",
-  "MultiAgent Electron.exe"
+  company ? "MultiAgentCompany Electron.exe" : "MultiAgent Electron.exe"
 );
 const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
+const variantMarker = `variant=${company ? "company" : "standard"}`;
 
 if (!fs.existsSync(executable)) {
   console.error("Packaged Electron executable is missing. Run npm run electron:pack first.");
@@ -57,7 +60,7 @@ child.stdout.on("data", (chunk) => {
   const text = chunk.toString();
   output += text;
   process.stdout.write(text);
-  if (output.includes(marker)) finish(0);
+  if (output.includes(marker) && output.includes(variantMarker)) finish(0);
 });
 child.stderr.on("data", (chunk) => process.stderr.write(chunk));
 child.on("exit", (code) => {

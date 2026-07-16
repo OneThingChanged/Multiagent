@@ -8,25 +8,41 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
   throw new Error(`Tauri cutover requires a stable Electron version: ${version}`);
 }
 
-const setupName = `MultiAgent-Electron-Setup-${version}-x64.exe`;
-const setupPath = join(appDir, "electron-dist", setupName);
-const signaturePath = `${setupPath}.sig`;
-if (!existsSync(setupPath) || !existsSync(signaturePath)) {
-  throw new Error(`Missing signed Electron transition installer: ${setupName}`);
-}
-
-const manifest = {
-  version,
-  notes: `MultiAgent ${version} Electron 전환`,
-  pub_date: new Date().toISOString(),
-  platforms: {
-    "windows-x86_64": {
-      signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/OneThingChanged/Multiagent/releases/download/v${version}/${setupName}`,
-    },
+const variants = [
+  {
+    name: "MultiAgent",
+    setupName: `MultiAgent-Electron-Setup-${version}-x64.exe`,
+    directory: join(appDir, "electron-dist"),
+    manifestName: "latest.json",
   },
-};
+  {
+    name: "MultiAgentCompany",
+    setupName: `MultiAgentCompany-Electron-Setup-${version}-x64.exe`,
+    directory: join(appDir, "electron-dist", "company"),
+    manifestName: "latest-company.json",
+  },
+];
 
-const output = join(appDir, "electron-dist", "latest.json");
-writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`Wrote ${output}`);
+for (const variant of variants) {
+  const setupPath = join(variant.directory, variant.setupName);
+  const signaturePath = `${setupPath}.sig`;
+  if (!existsSync(setupPath) || !existsSync(signaturePath)) {
+    throw new Error(`Missing signed Electron transition installer: ${variant.setupName}`);
+  }
+
+  const manifest = {
+    version,
+    notes: `${variant.name} ${version} Electron 전환`,
+    pub_date: new Date().toISOString(),
+    platforms: {
+      "windows-x86_64": {
+        signature: readFileSync(signaturePath, "utf8").trim(),
+        url: `https://github.com/OneThingChanged/Multiagent/releases/download/v${version}/${variant.setupName}`,
+      },
+    },
+  };
+
+  const output = join(variant.directory, variant.manifestName);
+  writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`Wrote ${output}`);
+}

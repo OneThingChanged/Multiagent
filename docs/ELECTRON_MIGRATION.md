@@ -169,10 +169,15 @@ redact한다.
 `latest.json`/`latest-company.json` 탐색에 영향을 주지 않는다.
 
 정식 전환 릴리스부터는 stable Electron 버전을 사용한다. standard Tauri가 읽는
-`latest.json`도 같은 Electron NSIS를 가리키고, 해당 설치본을 기존 Tauri updater 개인키로
-추가 서명한다. 따라서 데이터 export가 끝난 Tauri는 다음 업데이트에서 Electron 설치본을
-검증·실행한다. Electron 자체는 같은 릴리스의 `latest.yml`을 사용한다. company 채널은 기존
-Tauri manifest를 유지하며 자동 전환 대상에서 제외한다.
+`latest.json`은 standard Electron NSIS를, company Tauri가 읽는 `latest-company.json`은
+Company Electron NSIS를 가리킨다. 두 설치본 모두 기존 Tauri updater 개인키로 추가 서명해
+Tauri 0.5.29 이상에서 중간 버전 없이 검증·설치할 수 있다.
+
+Electron 자체 업데이트 metadata는 standard가 `latest.yml`, company가
+`latest-company.yml`을 사용한다. Company Electron은 별도 app ID와 userData를 사용하지만
+`%LOCALAPPDATA%\com.jintae.multiagent.company\storage-export.json`에서 기존 Company
+프로젝트·세션을 가져온다. Remote 탭을 숨기는 것에 그치지 않고 main IPC에서도 Remote와
+Tunnel 명령을 거부한다.
 
 ## 실행과 검증
 
@@ -188,7 +193,12 @@ npm run electron:pack
 npm run electron:packaged-smoke
 npm run electron:packaged-lifecycle-smoke
 npm run electron:dist
+npm run electron:dist:company
+npm run electron:dist:all
 npm run electron:portable-lifecycle-smoke
+npm run electron:company-packaged-smoke
+npm run electron:company-packaged-lifecycle-smoke
+npm run electron:company-portable-lifecycle-smoke
 ```
 
 자동 검증 범위:

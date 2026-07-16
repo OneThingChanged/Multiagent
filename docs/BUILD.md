@@ -37,6 +37,18 @@ npm run electron:dev
 Electron도 Vite `4420`을 사용하며 HMR 보조 포트는 `4422`다. 설치형/보안/PTY 검증 명령과
 전환 조건은 [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md)를 참고한다.
 
+Electron 설치형은 standard와 company를 분리해 빌드한다.
+
+| variant | 명령 | updater metadata |
+|---|---|---|
+| standard | `npm run electron:dist` | `latest.yml` |
+| company | `npm run electron:dist:company` | `latest-company.yml` |
+| both | `npm run electron:dist:all` | 두 채널 모두 생성 |
+
+Company Electron은 `com.jintae.multiagent.company.electron` 식별자와
+`%LOCALAPPDATA%\com.jintae.multiagent.company` 공용 snapshot을 사용하며 Remote·Tunnel
+명령을 main에서도 차단한다.
+
 Electron의 Windows 로컬 실행기는 npm 전역 CLI를 `codex.cmd`/`claude.cmd`로 호출한다.
 따라서 PowerShell ExecutionPolicy가 `codex.ps1`을 차단해도 별도 정책 변경 없이 세션을
 시작할 수 있다. 사용자가 직접 PowerShell에서 실행할 때도 같은 오류가 나면 `codex.cmd`

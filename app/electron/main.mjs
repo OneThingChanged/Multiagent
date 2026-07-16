@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as nodePty from "node-pty";
 import electronUpdater from "electron-updater";
 import ipcContract from "./ipc-contract.cjs";
+import runtimeVariantModule from "./runtime-variant.cjs";
 import { createTerminalHandlers } from "./handlers/terminal-handlers.mjs";
 import { HookService } from "./services/hook-service.mjs";
 import { SessionService } from "./services/session-service.mjs";
@@ -47,10 +48,26 @@ import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.cjs");
+const packageVariant = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"))
+      .multiAgentVariant;
+  } catch {
+    return null;
+  }
+})();
+const runtimeVariant = runtimeVariantModule.resolveRuntimeVariant({
+  environmentVariant: process.env.MULTIAGENT_BUILD_VARIANT,
+  packageVariant,
+});
+const isCompanyBuild = runtimeVariant.id === "company";
 const devUrl = process.env.MULTIAGENT_DEV_URL?.trim() || null;
-const bridgeSmoke = process.env.MULTIAGENT_ELECTRON_BRIDGE_SMOKE === "1";
-const closeSmoke = process.env.MULTIAGENT_ELECTRON_CLOSE_SMOKE === "1";
-const securitySmoke = process.env.MULTIAGENT_ELECTRON_SECURITY_SMOKE === "1";
+const bridgeSmoke = process.env.MULTIAGENT_ELECTRON_BRIDGE_SMOKE === "1" ||
+  process.argv.includes("--multiagent-bridge-smoke");
+const closeSmoke = process.env.MULTIAGENT_ELECTRON_CLOSE_SMOKE === "1" ||
+  process.argv.includes("--multiagent-close-smoke");
+const securitySmoke = process.env.MULTIAGENT_ELECTRON_SECURITY_SMOKE === "1" ||
+  process.argv.includes("--multiagent-security-smoke");
 const iconPath = path.join(appRoot, "src-tauri", "icons", "icon.ico");
 const packagedRendererUrl = pathToFileURL(path.join(appRoot, "dist", "index.html")).href;
 const MAX_DOC_FILES = 500;
@@ -83,6 +100,21 @@ const SKIPPED_DOC_DIRS = new Set([
   ".cache",
 ]);
 const { assertAllowed, assertInvokeRequest, emittedSet } = ipcContract;
+const COMPANY_DISABLED_COMMANDS = new Set([
+  "sync_remote_agents",
+  "sync_remote_view",
+  "remote_config_get",
+  "remote_config_set",
+  "remote_server_status",
+  "start_remote_server",
+  "stop_remote_server",
+  "tunnel_status",
+  "start_tunnel",
+  "stop_tunnel",
+  "remote_access_list",
+  "remote_access_approve",
+  "remote_access_revoke",
+]);
 const preloadContractArguments = [
   `--multiagent-invoke-commands=${ipcContract.INVOKE_COMMANDS.join(",")}`,
   `--multiagent-delivered-events=${ipcContract.DELIVERED_EVENTS.join(",")}`,
@@ -125,16 +157,16 @@ let desktopPetUpdate = {
 };
 const monitorHooks = new Map();
 
-app.setName("MultiAgent Electron");
+app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", userDataOverride);
 if (process.platform === "win32") {
-  app.setAppUserModelId("com.jintae.multiagent.electron");
+  app.setAppUserModelId(runtimeVariant.appUserModelId);
 }
 const sessionService = new SessionService(app.getPath("userData"));
 const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-  "com.jintae.multiagent"
+  runtimeVariant.localDataDirectory
 );
 const hookService = new HookService({
   baseDir: hookBaseDir,
@@ -241,6 +273,7 @@ const tunnelService = new TunnelService({
 const { autoUpdater } = electronUpdater;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.channel = runtimeVariant.updaterChannel;
 const electronTestUpdateFeed =
   "https://github.com/OneThingChanged/Multiagent/releases/download/electron-test/";
 let updateDownloaded = false;
@@ -263,6 +296,7 @@ const diagnosticsService = new DiagnosticsService({
   appInfoProvider: () => ({
     name: app.getName(),
     version: app.getVersion(),
+    variant: runtimeVariant.id,
     packaged: app.isPackaged,
     renderer: devUrl ? "development" : "production",
   }),
@@ -996,14 +1030,21 @@ const terminalHandlers = createTerminalHandlers({
 
 async function invokeCommand(event, command, rawArgs) {
   const args = assertInvokeRequest(command, rawArgs);
+  if (isCompanyBuild && COMPANY_DISABLED_COMMANDS.has(command)) {
+    throw new Error("Company 빌드에서는 Remote와 Tunnel 기능을 사용할 수 없습니다.");
+  }
   if (terminalHandlers.has(command)) {
     return terminalHandlers.invoke(event, command, args);
   }
   switch (command) {
     case "runtime_flags":
-      return runtimeByWebContents.get(event.sender.id) ?? {
+      return {
+        ...(runtimeByWebContents.get(event.sender.id) ?? {
         secondary_window: false,
         open_agent_id: null,
+        }),
+        build_variant: runtimeVariant.id,
+        remote_enabled: runtimeVariant.remoteEnabled,
       };
     case "renderer_ready": {
       const runtime = runtimeByWebContents.get(event.sender.id);
@@ -1085,7 +1126,7 @@ async function invokeCommand(event, command, rawArgs) {
     case "show_native_notification": {
       if (!Notification.isSupported()) return false;
       const notification = new Notification({
-        title: asString(args.title, "MultiAgent"),
+        title: asString(args.title, runtimeVariant.displayName),
         body: asString(args.body),
         silent: Boolean(args.silent),
       });
@@ -1307,7 +1348,9 @@ app.on("activate", () => {
   }
 });
 
-console.log(`[electron] boot ${app.getVersion()} devUrl=${devUrl ?? "production"}`);
+console.log(
+  `[electron] boot ${app.getVersion()} variant=${runtimeVariant.id} devUrl=${devUrl ?? "production"}`
+);
 void app.whenReady().then(async () => {
   console.log("[electron] ready");
   hookReady = hookService.start().catch((error) => {
