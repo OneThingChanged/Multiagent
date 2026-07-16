@@ -31,3 +31,6 @@ Thumbs.db
 
 # Electron experiment packaging output
 /app/electron-dist/
+
+# Local-only research and third-party comparison notes
+/local-research/
