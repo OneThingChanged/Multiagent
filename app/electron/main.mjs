@@ -17,13 +17,15 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as nodePty from "node-pty";
 import electronUpdater from "electron-updater";
+import ipcContract from "./ipc-contract.cjs";
+import { createTerminalHandlers } from "./handlers/terminal-handlers.mjs";
 import { HookService } from "./services/hook-service.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import {
-  BoundedTerminalBuffer,
   CodexScrollbackFilter,
   PassThroughTerminalFilter,
 } from "./services/terminal-stream.mjs";
+import { TerminalSessionService } from "./services/terminal-session-service.mjs";
 import {
   buildInteractiveSshArgs,
   findWindowsExecutable,
@@ -39,6 +41,8 @@ import {
   TunnelService,
 } from "./services/web-services.mjs";
 import { UsageService } from "./services/usage-service.mjs";
+import { DiagnosticsService } from "./services/diagnostics-service.mjs";
+import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
@@ -78,6 +82,12 @@ const SKIPPED_DOC_DIRS = new Set([
   ".next",
   ".cache",
 ]);
+const { assertAllowed, assertInvokeRequest, emittedSet } = ipcContract;
+const preloadContractArguments = [
+  `--multiagent-invoke-commands=${ipcContract.INVOKE_COMMANDS.join(",")}`,
+  `--multiagent-delivered-events=${ipcContract.DELIVERED_EVENTS.join(",")}`,
+  `--multiagent-emitted-events=${ipcContract.EMITTED_EVENTS.join(",")}`,
+];
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -88,8 +98,17 @@ let closeFallback = null;
 let closeSmokeStartedAt = null;
 /** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null, ready: boolean}>} */
 const runtimeByWebContents = new Map();
-/** @type {Map<string, {id: string, name: string, process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null, aiToolId: string, cwd: string | null, ssh: unknown, filter: CodexScrollbackFilter | PassThroughTerminalFilter, buffer: BoundedTerminalBuffer}>} */
+/** @type {Map<string, {id: string, name: string, process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null, aiToolId: string, cwd: string | null, ssh: unknown, filter: CodexScrollbackFilter | PassThroughTerminalFilter, buffer: import('./services/terminal-stream.mjs').SequencedTerminalBuffer, subscribers: Set<number>}>} */
 const ptys = new Map();
+const terminalSessions = new TerminalSessionService({
+  sessions: ptys,
+  sendDataToView(viewId, payload) {
+    sendEventToWebContentsId(viewId, "pty:data", payload);
+  },
+  broadcastExit(payload) {
+    sendEventToAll("pty:exit", payload);
+  },
+});
 /** @type {Map<string, string>} */
 const sshPasswords = new Map();
 const remotePorts = new Set();
@@ -121,7 +140,19 @@ const hookService = new HookService({
   baseDir: hookBaseDir,
   sendEvent(eventName, payload) {
     if (eventName === "agent:hook-event" && payload?.id) {
-      monitorHooks.set(payload.id, { ...payload, lastTs: Date.now() });
+      // Remote/monitor views only need concise state. Keep tool input and the
+      // full assistant response inside the local renderer/pet contract.
+      monitorHooks.set(payload.id, {
+        id: payload.id,
+        event: payload.event,
+        session_id: payload.session_id,
+        hook_event_name: payload.hook_event_name,
+        prompt: payload.prompt,
+        tool_name: payload.tool_name,
+        interactive_question: payload.interactive_question,
+        received_at: payload.received_at,
+        lastTs: Date.now(),
+      });
       if (payload.event === "done" && payload.transcript_path) {
         try {
           usageIndex.ingestHook(
@@ -140,6 +171,24 @@ const hookService = new HookService({
   sessionService,
 });
 let hookReady = null;
+let hookMaintenanceTimer = null;
+let hookMaintenancePromise = null;
+
+function maintainActiveHooks() {
+  if (hookMaintenancePromise) return hookMaintenancePromise;
+  hookMaintenancePromise = hookService
+    .maintain([...ptys.values()])
+    .finally(() => { hookMaintenancePromise = null; });
+  return hookMaintenancePromise;
+}
+
+async function repairActiveHooks() {
+  if (hookMaintenancePromise) await hookMaintenancePromise;
+  hookMaintenancePromise = hookService
+    .repair([...ptys.values()])
+    .finally(() => { hookMaintenancePromise = null; });
+  return hookMaintenancePromise;
+}
 
 function liveOutputForAgents(agents) {
   return (Array.isArray(agents) ? agents : []).map((agent) => ({
@@ -195,31 +244,78 @@ autoUpdater.autoInstallOnAppQuit = true;
 const electronTestUpdateFeed =
   "https://github.com/OneThingChanged/Multiagent/releases/download/electron-test/";
 let updateDownloaded = false;
+const updaterLifecycle = new UpdaterLifecycle({
+  baseDir: hookBaseDir,
+  onInstallTimeout() {
+    console.error("[electron] updater did not terminate the app; forcing exit");
+    app.exit(0);
+  },
+});
+autoUpdater.on("error", (error) => {
+  updaterLifecycle.record("updater-error", error);
+});
+autoUpdater.on("update-downloaded", (info) => {
+  updaterLifecycle.record("update-downloaded", info?.version ?? null);
+});
+
+const diagnosticsService = new DiagnosticsService({
+  baseDir: hookBaseDir,
+  appInfoProvider: () => ({
+    name: app.getName(),
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    renderer: devUrl ? "development" : "production",
+  }),
+  terminalProvider: () =>
+    [...ptys.values()].map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      aiToolId: entry.aiToolId,
+      cwd: entry.cwd,
+      processId: entry.process?.pid ?? null,
+      remote: Boolean(entry.ssh),
+      bufferedCharacters: entry.buffer.snapshot().length,
+    })),
+  hookProvider: () => hookService.diagnostics(),
+  updaterProvider: () => updaterLifecycle.snapshot(),
+});
 
 async function checkForElectronUpdate() {
   if (!app.isPackaged && !process.env.MULTIAGENT_UPDATE_FEED_URL) return null;
-  const updateFeedOverride = process.env.MULTIAGENT_UPDATE_FEED_URL?.trim();
-  if (updateFeedOverride) {
-    autoUpdater.setFeedURL({
-      provider: "generic",
-      url: updateFeedOverride,
-    });
-  } else if (app.getVersion().includes("-electron.")) {
-    // Experimental Electron builds must not replace the Tauri GitHub Latest
-    // channel. A fixed prerelease asset URL lets testers update independently.
-    autoUpdater.setFeedURL({ provider: "generic", url: electronTestUpdateFeed });
+  updaterLifecycle.record("check-started");
+  const result = await updaterLifecycle.withTimeout(
+    "check",
+    () => {
+      const updateFeedOverride = process.env.MULTIAGENT_UPDATE_FEED_URL?.trim();
+      if (updateFeedOverride) {
+        autoUpdater.setFeedURL({
+          provider: "generic",
+          url: updateFeedOverride,
+        });
+      } else if (app.getVersion().includes("-electron.")) {
+        // Experimental Electron builds must not replace the Tauri GitHub Latest
+        // channel. A fixed prerelease asset URL lets testers update independently.
+        autoUpdater.setFeedURL({ provider: "generic", url: electronTestUpdateFeed });
+      }
+      return autoUpdater.checkForUpdates();
+    },
+    30_000
+  );
+  if (!result?.updateInfo || result.updateInfo.version === app.getVersion()) {
+    updaterLifecycle.record("check-current", app.getVersion());
+    return null;
   }
-  const result = await autoUpdater.checkForUpdates();
-  if (!result?.updateInfo) return null;
-  if (result.updateInfo.version === app.getVersion()) return null;
-  return {
+  const update = {
     version: result.updateInfo.version,
     releaseDate: result.updateInfo.releaseDate,
     releaseName: result.updateInfo.releaseName ?? null,
   };
+  updaterLifecycle.record("check-available", update.version);
+  return update;
 }
 
 async function downloadElectronUpdate() {
+  updaterLifecycle.record("download-started");
   let lastTransferred = 0;
   const onProgress = (progress) => {
     const transferred = Number(progress.transferred) || 0;
@@ -237,8 +333,13 @@ async function downloadElectronUpdate() {
   };
   autoUpdater.on("download-progress", onProgress);
   try {
-    await autoUpdater.downloadUpdate();
+    await updaterLifecycle.withTimeout(
+      "download",
+      () => autoUpdater.downloadUpdate(),
+      15 * 60_000
+    );
     updateDownloaded = true;
+    updaterLifecycle.record("download-completed");
     sendEventToAll("update:progress", { event: "Finished", data: {} });
   } finally {
     autoUpdater.off("download-progress", onProgress);
@@ -332,6 +433,13 @@ function sendEvent(win, eventName, payload) {
   }
 }
 
+function sendEventToWebContentsId(webContentsId, eventName, payload) {
+  const target = BrowserWindow.getAllWindows().find(
+    (win) => !win.isDestroyed() && win.webContents.id === webContentsId
+  );
+  if (target) sendEvent(target, eventName, payload);
+}
+
 function withQuery(url, query) {
   const next = new URL(url);
   for (const [key, value] of Object.entries(query)) {
@@ -367,6 +475,7 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      additionalArguments: preloadContractArguments,
     },
   });
 
@@ -378,6 +487,7 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
   installNavigationPolicy(win);
   const webContentsId = win.webContents.id;
   win.webContents.on("destroyed", () => {
+    terminalSessions.detachView(webContentsId);
     runtimeByWebContents.delete(webContentsId);
   });
   if (!bridgeSmoke) win.once("ready-to-show", () => win.show());
@@ -442,6 +552,7 @@ function ensurePetWindow() {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      additionalArguments: preloadContractArguments,
     },
   });
   installNavigationPolicy(petWindow);
@@ -452,6 +563,7 @@ function ensurePetWindow() {
     ready: false,
   });
   petWindow.webContents.on("destroyed", () => {
+    terminalSessions.detachView(petWebContentsId);
     runtimeByWebContents.delete(petWebContentsId);
     petWindow = null;
   });
@@ -477,16 +589,7 @@ function showMainWindow() {
 }
 
 function closePty(id) {
-  const entry = ptys.get(id);
-  if (!entry) return;
-  ptys.delete(id);
-  if (entry.initTimer) clearTimeout(entry.initTimer);
-  if (entry.ssh?.reversePort) remotePorts.delete(entry.ssh.reversePort);
-  try {
-    entry.process.kill();
-  } catch {
-    // The child may already have exited.
-  }
+  terminalSessions.close(id, "close");
 }
 
 function allocateRemotePort(id) {
@@ -505,7 +608,7 @@ function closeEverything() {
     clearTimeout(closeFallback);
     closeFallback = null;
   }
-  for (const id of [...ptys.keys()]) closePty(id);
+  terminalSessions.closeAll("app-quit");
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.destroy();
   }
@@ -596,12 +699,8 @@ async function testPasswordSshConnection(ssh, password) {
 async function spawnPty(args, event) {
   const id = asString(args.id).trim();
   if (!id) throw new Error("PTY id가 비어 있습니다.");
-  const existing = ptys.get(id);
-  if (existing) {
-    const snapshot = existing.buffer.snapshot();
-    if (snapshot) sendEvent(eventSenderWindow(event), "pty:data", { id, data: snapshot });
-    return { reattached: true };
-  }
+  if (terminalSessions.has(id)) return { reattached: true };
+  const spawnGeneration = terminalSessions.beginSpawn(id);
 
   await hookReady?.catch(() => {});
   const aiToolId = asString(args.aiToolId).trim();
@@ -676,43 +775,33 @@ async function spawnPty(args, event) {
       aiToolId === "codex"
         ? new CodexScrollbackFilter()
         : new PassThroughTerminalFilter(),
-    buffer: new BoundedTerminalBuffer(),
-  };
-  ptys.set(id, entry);
-
-  processHandle.onData((data) => {
-    if (
-      entry.ssh?.authMethod === "password" &&
-      !entry.ssh.passwordInjected &&
-      /(?:password|암호)\s*:/i.test(data)
-    ) {
-      const password = sshPasswords.get(asString(entry.ssh.hostId));
-      if (password) {
-        entry.ssh.passwordInjected = true;
-        processHandle.write(`${password}\r`);
+    quitCommand: aiToolId === "codex" || aiToolId === "claude" ? "/quit\r" : "exit\r",
+    release: () => {
+      if (reversePort) remotePorts.delete(reversePort);
+    },
+    onRawData(data) {
+      if (
+        entry.ssh?.authMethod === "password" &&
+        !entry.ssh.passwordInjected &&
+        /(?:password|암호)\s*:/i.test(data)
+      ) {
+        const password = sshPasswords.get(asString(entry.ssh.hostId));
+        if (password) {
+          entry.ssh.passwordInjected = true;
+          processHandle.write(`${password}\r`);
+        }
       }
-    }
-    const visibleData = entry.filter.push(data);
-    if (!visibleData) return;
-    entry.buffer.append(visibleData);
-    sendEventToAll("pty:data", { id, data: visibleData });
-  });
-  processHandle.onExit(({ exitCode }) => {
-    const remaining = entry.filter.finish();
-    if (remaining) {
-      entry.buffer.append(remaining);
-      sendEventToAll("pty:data", { id, data: remaining });
-    }
-    const current = ptys.get(id);
-    if (current?.process === processHandle) ptys.delete(id);
-    sendEventToAll("pty:exit", { id, exitCode });
-  });
+    },
+  };
+  if (!terminalSessions.register(entry, spawnGeneration)) {
+    return { reattached: false, cancelled: true };
+  }
 
   const initCommand = ssh ? "" : asString(args.initCommand).trim();
   if (initCommand) {
     entry.initTimer = setTimeout(() => {
       entry.initTimer = null;
-      if (ptys.get(id)?.process !== processHandle) return;
+      if (terminalSessions.get(id)?.process !== processHandle) return;
       processHandle.write(`${initCommand}\r`);
     }, 600);
   }
@@ -899,8 +988,17 @@ async function importTauriStorage() {
   }
 }
 
+const terminalHandlers = createTerminalHandlers({
+  terminalSessions,
+  spawnPty,
+  closeEverything,
+});
+
 async function invokeCommand(event, command, rawArgs) {
-  const args = asObject(rawArgs);
+  const args = assertInvokeRequest(command, rawArgs);
+  if (terminalHandlers.has(command)) {
+    return terminalHandlers.invoke(event, command, args);
+  }
   switch (command) {
     case "runtime_flags":
       return runtimeByWebContents.get(event.sender.id) ?? {
@@ -920,30 +1018,6 @@ async function invokeCommand(event, command, rawArgs) {
       }
       return null;
     }
-    case "spawn_pty":
-      return spawnPty(args, event);
-    case "write_pty": {
-      const entry = ptys.get(asString(args.id));
-      if (!entry) throw new Error("활성 PTY를 찾을 수 없습니다.");
-      entry.process.write(asString(args.data));
-      return null;
-    }
-    case "resize_pty": {
-      const entry = ptys.get(asString(args.id));
-      if (entry) {
-        entry.process.resize(
-          asPositiveInt(args.cols, entry.process.cols),
-          asPositiveInt(args.rows, entry.process.rows)
-        );
-      }
-      return null;
-    }
-    case "kill_pty":
-      closePty(asString(args.id));
-      return null;
-    case "confirm_close":
-      closeEverything();
-      return null;
     case "show_main_window":
       showMainWindow();
       return null;
@@ -1059,7 +1133,24 @@ async function invokeCommand(event, command, rawArgs) {
       monitorService.sync(args);
       return null;
     case "repair_active_hooks":
-      return hookService.repair([...ptys.values()]);
+      return repairActiveHooks();
+    case "export_diagnostics": {
+      const suffix = new Date().toISOString().replace(/[:.]/g, "-");
+      const options = {
+        title: "MultiAgent 진단 번들 저장",
+        defaultPath: path.join(
+          app.getPath("documents"),
+          `MultiAgent-diagnostics-${suffix}.json`
+        ),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      };
+      const parent = eventSenderWindow(event);
+      const selected = parent
+        ? await dialog.showSaveDialog(parent, options)
+        : await dialog.showSaveDialog(options);
+      if (selected.canceled || !selected.filePath) return null;
+      return diagnosticsService.exportTo(selected.filePath);
+    }
     case "usage_ingest_now":
       return usageIndex.ingestAll();
     case "remote_config_get":
@@ -1137,9 +1228,19 @@ async function invokeCommand(event, command, rawArgs) {
     case "relaunch":
       if (updateDownloaded) {
         forceClosing = true;
-        autoUpdater.quitAndInstall(false, true);
-        return null;
+        updaterLifecycle.record("install-requested");
+        updaterLifecycle.armInstallWatchdog();
+        try {
+          autoUpdater.quitAndInstall(false, true);
+          return null;
+        } catch (error) {
+          updaterLifecycle.clearInstallWatchdog();
+          updaterLifecycle.record("install-launch-failed", error);
+          forceClosing = false;
+          throw error;
+        }
       }
+      updaterLifecycle.record("relaunch-requested");
       app.relaunch();
       closeEverything();
       return null;
@@ -1174,13 +1275,18 @@ ipcMain.handle("multiagent:window", (event, operation, value) => {
 ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
   assertTrustedSender(_event);
   const name = asString(eventName);
-  if (!name) return;
+  assertAllowed(emittedSet, name, "event emission");
   sendEventToAll(name, payload);
 });
 
 app.on("before-quit", () => {
   forceClosing = true;
-  for (const id of [...ptys.keys()]) closePty(id);
+  updaterLifecycle.clearInstallWatchdog();
+  if (hookMaintenanceTimer) {
+    clearInterval(hookMaintenanceTimer);
+    hookMaintenanceTimer = null;
+  }
+  terminalSessions.closeAll("app-quit");
   void hookService.stop();
   void monitorService.stop();
   void usageDashboard.stop();
@@ -1209,6 +1315,11 @@ void app.whenReady().then(async () => {
     throw error;
   });
   await hookReady.catch(() => {});
+  hookMaintenanceTimer = setInterval(async () => {
+    if (forceClosing) return;
+    await maintainActiveHooks();
+  }, 60_000);
+  hookMaintenanceTimer.unref?.();
   await loadSshSecrets();
   if (monitorService.config.enabled) await monitorService.start().catch(console.error);
   if (usageDashboard.config.enabled) await usageDashboard.start().catch(console.error);
@@ -1224,7 +1335,10 @@ void app.whenReady().then(async () => {
             const id = ${JSON.stringify(id)};
             const marker = ${JSON.stringify(marker)};
             let output = "";
-            const timeout = setTimeout(() => reject(new Error("bridge PTY timeout")), 8000);
+            const timeout = setTimeout(
+              () => reject(new Error("bridge PTY timeout; output=" + JSON.stringify(output.slice(-500)))),
+              8000
+            );
             const unlisten = window.multiAgentElectron.onEvent("pty:data", (payload) => {
               if (payload?.id !== id) return;
               output += payload.data ?? "";
@@ -1244,6 +1358,11 @@ void app.whenReady().then(async () => {
                 cols: 80,
                 rows: 24
               });
+              const replay = await window.multiAgentElectron.invoke("attach_terminal", {
+                id,
+                afterSequence: 0
+              });
+              output += replay?.data ?? "";
               await window.multiAgentElectron.invoke("write_pty", {
                 id,
                 data: "echo " + marker + "\\r"

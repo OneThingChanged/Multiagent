@@ -42,7 +42,13 @@ function loadActiveOnly(): boolean {
 
 // A session is "active" when its PTY is alive (spawned and not exited).
 function isActiveStatus(status: string): boolean {
-  return status === "running" || status === "working" || status === "starting";
+  return (
+    status === "running" ||
+    status === "working" ||
+    status === "waiting" ||
+    status === "blocked" ||
+    status === "starting"
+  );
 }
 
 type MachineGroup = {
@@ -132,6 +138,10 @@ export function Sidebar({
   desktopPetAvailable,
   onToggleDesktopPet,
   onOpenNewWindow,
+  onOpenQuickOpen,
+  quickOpenShortcut,
+  onOpenAttention,
+  attentionUnreadCount,
   settingsOpen,
   onToggleSettings,
   onRemove,
@@ -163,6 +173,10 @@ export function Sidebar({
   desktopPetAvailable: boolean;
   onToggleDesktopPet: () => void;
   onOpenNewWindow: () => void;
+  onOpenQuickOpen: () => void;
+  quickOpenShortcut: string;
+  onOpenAttention: () => void;
+  attentionUnreadCount: number;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   onRemove: (id: string) => void;
@@ -829,6 +843,28 @@ export function Sidebar({
             +
           </button>
         </div>
+      </div>
+      <div className="sidebar-p2-actions">
+        <button
+          className="quick-open-launch"
+          onClick={onOpenQuickOpen}
+          title={`Quick Open${quickOpenShortcut ? ` (${quickOpenShortcut})` : ""}`}
+        >
+          <span aria-hidden="true">⌕</span>
+          <span>Quick Open</span>
+          {quickOpenShortcut && <kbd>{quickOpenShortcut}</kbd>}
+        </button>
+        <button
+          className={`attention-launch ${attentionUnreadCount > 0 ? "attention-launch-unread" : ""}`}
+          onClick={onOpenAttention}
+          title="Attention Center"
+          aria-label={`Attention Center, 읽지 않음 ${attentionUnreadCount}개`}
+        >
+          <span aria-hidden="true">!</span>
+          {attentionUnreadCount > 0 && (
+            <b>{attentionUnreadCount > 99 ? "99+" : attentionUnreadCount}</b>
+          )}
+        </button>
       </div>
       <div className="project-tree">
         <div className="sidebar-section-heading">

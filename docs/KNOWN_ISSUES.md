@@ -8,7 +8,10 @@
 - 하지만 **터미널 세션의 OS 프로세스는 복원 불가**: 앱이 닫히면 PowerShell+Claude/Codex 프로세스가 죽음
 - **Codex 대화는 resume 가능**: 창 닫을 때 자동 `/quit` → token 캡처 → 다음 실행 시 `codex resume <token>`으로 재개
 - **Claude 대화도 resume 가능**: SessionStart hook으로 `session_id` 캡처 → 다음 실행 시 `claude --resume <id>`로 재개. 자세한 건 [RESUME.md](RESUME.md)
-- xterm scrollback도 휘발성 (Codex/Claude 자체의 세션 컨텍스트는 resume 시 부활하지만 터미널에 출력된 텍스트는 다시 안 보임)
+- Electron은 앱이 켜진 동안 main의 세션별 512K sequence model로 renderer reload/숨은 pane
+  재부착을 복구하고, 종료 시 xterm 최근 1,000줄을 runtime-local scrollback으로 저장한다.
+  다만 앱 종료 뒤 PTY 자체를 살리는 daemon은 없으므로 전체 출력 transcript를 영구 보존하는
+  기능은 아니다. Codex/Claude 대화 원본은 provider resume 데이터가 기준이다.
 
 ### Window 크기 변경 시 scrollback
 - xterm cols가 바뀌면 자동 reflow되지만, Codex/Claude가 **이전 너비 기준으로 줄바꿈을 baked in** 한 출력은 새 너비로 다시 펴지지 않음. 새 출력만 새 너비로 나옴
@@ -38,10 +41,12 @@
 - `node_modules`, `target`, `dist`, `.git`, `.claude`, `.codex` 등 내부/대형 폴더는 스캔 제외
 
 ### Hook 의존
-- "working/done" 상태는 Claude(`UserPromptSubmit`/`Stop`) + Codex(같은 이름 이벤트) hook이 fire되어야 동작
+- 작업 상태는 Codex 6종 Hook과 Claude 8종 Hook을 사용한다. `working/waiting/blocked/done`은 PTY 생존 상태와 별도로 관리한다.
 - Claude는 `.claude/settings.local.json`, Codex는 `.codex/config.toml`에 hook 머지
 - hook 실행에 PowerShell 인터프리터가 한 번 더 떠야 함 — 작은 지연
-- 상태 표시가 멈추면 설정 → **General → Agent Hooks → Hook 점검 및 복구**에서 실제 활성 PTY와 hook 설정을 대조하고 local helper/config/HTTP 연결을 재구성할 수 있다. SSH 원격 세션은 역터널 때문에 세션 재시작이 필요할 수 있다.
+- Electron은 1분마다 local Hook 서버/helper/config를 자동 점검한다. 상태 표시가 멈추면 설정 → **General → Agent Hooks → Hook 점검 및 복구**에서 즉시 재구성할 수 있다. SSH 원격 세션은 역터널 때문에 세션 재시작이 필요할 수 있다.
+- Codex는 새로 추가되거나 내용이 바뀐 project Hook을 hash 기준으로 다시 검토한다. 시작 경고가 보이면 `/hooks`에서 MultiAgent command와 경로를 확인한 뒤 신뢰한다. 앱은 다른 사용자 Hook까지 우회하는 `--dangerously-bypass-hook-trust`를 자동으로 사용하지 않는다.
+- 작업 event가 30분 이상 갱신되지 않으면 `done`으로 추정하지 않고 PTY의 `running` 표시로 낮춘다. 원인 분석이 필요하면 설정 → **About → Support diagnostics**에서 진단 JSON을 저장한다.
 
 ### 같은 에이전트 동시 표시 불가
 - xterm Terminal 인스턴스 1개당 DOM 1곳에만 mount 가능

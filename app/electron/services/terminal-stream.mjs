@@ -60,32 +60,70 @@ export class PassThroughTerminalFilter {
   }
 }
 
-export class BoundedTerminalBuffer {
+export class SequencedTerminalBuffer {
   constructor(maxCharacters = 512 * 1024) {
     this.maxCharacters = Math.max(1024, maxCharacters);
     this.chunks = [];
     this.length = 0;
+    this.baseSequence = 0;
+    this.nextSequence = 0;
   }
 
   append(chunk) {
     const value = String(chunk ?? "");
-    if (!value) return;
+    const sequenceStart = this.nextSequence;
+    if (!value) {
+      return {
+        sequenceStart,
+        sequenceEnd: sequenceStart,
+        data: "",
+      };
+    }
     this.chunks.push(value);
     this.length += value.length;
+    this.nextSequence += value.length;
     while (this.length > this.maxCharacters && this.chunks.length > 0) {
       const overflow = this.length - this.maxCharacters;
       const first = this.chunks[0];
       if (first.length <= overflow) {
         this.chunks.shift();
         this.length -= first.length;
+        this.baseSequence += first.length;
       } else {
         this.chunks[0] = first.slice(overflow);
         this.length -= overflow;
+        this.baseSequence += overflow;
       }
     }
+    return {
+      sequenceStart,
+      sequenceEnd: this.nextSequence,
+      data: value,
+    };
   }
 
   snapshot() {
     return this.chunks.join("");
   }
+
+  readSince(rawSequence = this.baseSequence) {
+    const requested = Number.isFinite(rawSequence)
+      ? Math.max(0, Math.trunc(rawSequence))
+      : this.baseSequence;
+    const resetRequired =
+      requested < this.baseSequence || requested > this.nextSequence;
+    const sequenceStart = resetRequired ? this.baseSequence : requested;
+    const offset = sequenceStart - this.baseSequence;
+    return {
+      sequenceStart,
+      sequenceEnd: this.nextSequence,
+      data: this.snapshot().slice(offset),
+      resetRequired,
+      truncated: requested < this.baseSequence,
+    };
+  }
 }
+
+// Kept as a compatibility export for older service tests and imports. New PTY
+// ownership uses SequencedTerminalBuffer directly.
+export class BoundedTerminalBuffer extends SequencedTerminalBuffer {}

@@ -2,8 +2,49 @@ import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
 import type { SerializeAddon } from "@xterm/addon-serialize";
+import type {
+  SpawnTerminalResult,
+  TerminalDataPayload,
+} from "./platform/ipcContract";
 
-export type AgentStatus = "idle" | "starting" | "running" | "working" | "exited";
+export type AgentRuntimeStatus =
+  | "idle"
+  | "starting"
+  | "running"
+  | "exited"
+  | "unreachable";
+
+export type AgentWorkStatus =
+  | "unknown"
+  | "idle"
+  | "working"
+  | "waiting"
+  | "blocked"
+  | "done";
+
+export type AgentActivitySource = "hook" | "process" | "terminal" | "recovery";
+
+export type AgentActivity = {
+  workStatus: AgentWorkStatus;
+  source: AgentActivitySource;
+  receivedAt: number;
+  stateStartedAt: number;
+  providerSessionId?: string;
+  hookEventName?: string;
+  lastPrompt?: string;
+  toolName?: string;
+  toolInput?: string;
+  interactiveQuestion?: string;
+  lastAssistantMessage?: string;
+};
+
+// Compatibility status used by the existing UI and remote dashboard contract.
+// It is derived from runtimeStatus + activity by lib/agentActivity.ts.
+export type AgentStatus =
+  | AgentRuntimeStatus
+  | "working"
+  | "waiting"
+  | "blocked";
 
 export type AiTool = {
   id: string;
@@ -79,6 +120,8 @@ export type Agent = {
   aiLabel: string;
   dangerous: boolean;
   status: AgentStatus;
+  runtimeStatus?: AgentRuntimeStatus;
+  activity?: AgentActivity;
   createdAt: number;
   lastSessionId?: string;
   // Derived from the owning project at load time (not persisted on the agent).
@@ -122,6 +165,13 @@ export type TerminalEntry = {
   el: HTMLDivElement;
   opened: boolean;
   spawned: boolean;
+  spawnPromise: Promise<SpawnTerminalResult> | null;
+  attached: boolean;
+  lastSequence: number;
+  syncing: boolean;
+  pendingOutput: TerminalDataPayload[];
+  restoreScrollbackOnAttach: boolean;
+  restoredScrollback: boolean;
 };
 
 export type NewAgentPayload = {

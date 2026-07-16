@@ -39,6 +39,11 @@ describe("Electron hook configuration", () => {
     expect(merged.hooks.Stop[0].hooks[0].command).toBe("user-hook");
     expect(merged.hooks.Stop[1].__source).toBe("multiagent");
     expect(merged.hooks.UserPromptSubmit[0].hooks[0].command).toContain("notify.ps1");
+    expect(merged.hooks.PreToolUse[0].hooks[0].command).toContain("tool-start PreToolUse");
+    expect(merged.hooks.PostToolUseFailure[0].hooks[0].command).toContain(
+      "working PostToolUseFailure"
+    );
+    expect(merged.hooks.StopFailure[0].hooks[0].command).toContain("blocked StopFailure");
   });
 
   it("creates an idempotent managed Codex block", () => {
@@ -47,6 +52,29 @@ describe("Electron hook configuration", () => {
     expect(second).toBe(first);
     expect((first.match(/multiagent electron hooks/g) ?? [])).toHaveLength(2);
     expect(first).toContain("[[hooks.SessionStart]]");
+    expect(first).toContain("[[hooks.PermissionRequest]]");
+  });
+
+  it("upgrades legacy Tauri Codex entries without removing user hooks", () => {
+    const existing = `model = "gpt"
+
+[[hooks.Stop]]
+matcher = "user"
+[[hooks.Stop.hooks]]
+type = "command"
+command = "user-hook"
+
+[[hooks.UserPromptSubmit]]
+matcher = ""
+__source = "multiagent"
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "old-helper working"
+`;
+    const merged = hookInternals.mergeCodex(existing, "C:\\helper\\notify.ps1");
+    expect(merged).toContain('command = "user-hook"');
+    expect(merged).not.toContain("old-helper");
+    expect((merged.match(/__source = "multiagent"/g) ?? [])).toHaveLength(6);
   });
 
   it.each(["claude", "codex"])("bootstraps %s hooks on a remote project", (tool) => {
@@ -66,6 +94,42 @@ describe("Electron hook configuration", () => {
 });
 
 describe("Electron hook runtime", () => {
+  it("repairs active local projects during automatic maintenance", async () => {
+    const baseDir = temporaryDirectory();
+    const project = path.join(baseDir, "project");
+    await fsPromises.mkdir(project);
+    const service = new HookService({
+      baseDir: path.join(baseDir, "runtime"),
+      sendEvent: () => {},
+      sessionService: { noteHook: async () => {} },
+    });
+    try {
+      await service.start();
+      const entry = {
+        id: "agent-maintain",
+        name: "Maintain",
+        cwd: project,
+        aiToolId: "codex",
+        ssh: null,
+      };
+      await expect(service.maintain([entry])).resolves.toMatchObject({
+        checkedProjects: 1,
+        repairedProjects: 1,
+        failures: [],
+      });
+      await expect(service.maintain([entry])).resolves.toMatchObject({
+        checkedProjects: 1,
+        repairedProjects: 0,
+        failures: [],
+      });
+      await expect(service.diagnostics()).resolves.toMatchObject({
+        lastMaintenance: { checkedProjects: 1, repairedProjects: 0 },
+      });
+    } finally {
+      await service.stop();
+    }
+  });
+
   it("accepts authenticated UTF-8 events and rejects a bad token", async () => {
     const baseDir = temporaryDirectory();
     const delivered = [];
@@ -85,6 +149,9 @@ describe("Electron hook runtime", () => {
           event: "working",
           token: runtime.token,
           prompt: "한글 질문",
+          hook_event_name: "PreToolUse",
+          tool_name: "AskUserQuestion",
+          tool_input: { questions: [{ question: "배포할까요?" }] },
         }),
       });
       const rejected = await fetch(`http://127.0.0.1:${runtime.port}/event`, {
@@ -95,10 +162,21 @@ describe("Electron hook runtime", () => {
       expect(rejected.status).toBe(401);
       expect(delivered[0]).toMatchObject({
         name: "agent:hook-event",
-        payload: { id: "agent-1", event: "working", prompt: "한글 질문" },
+        payload: {
+          id: "agent-1",
+          event: "working",
+          prompt: "한글 질문",
+          hook_event_name: "PreToolUse",
+          tool_name: "AskUserQuestion",
+          tool_input: '{"questions":[{"question":"배포할까요?"}]}',
+        },
       });
       expect(noted).toHaveLength(1);
       expect(await service.health()).toBe(true);
+      await expect(service.diagnostics()).resolves.toMatchObject({
+        healthy: true,
+        recentEvents: [{ id: "agent-1", hookEventName: "PreToolUse" }],
+      });
     } finally {
       await service.stop();
     }
@@ -131,7 +209,8 @@ describe("Electron hook runtime", () => {
           "Bypass",
           "-File",
           path.join(baseDir, "notify.ps1"),
-          "working",
+          "tool-start",
+          "PreToolUse",
         ],
         {
           env: {
@@ -147,10 +226,20 @@ describe("Electron hook runtime", () => {
       );
       let stderr = "";
       child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-      child.stdin.end(JSON.stringify({ prompt: "한글 질문이 깨지지 않습니다" }));
+      child.stdin.end(JSON.stringify({
+        prompt: "한글 질문이 깨지지 않습니다",
+        tool_name: "AskUserQuestion",
+        tool_input: { question: "계속할까요?" },
+      }));
       const exitCode = await new Promise((resolve) => child.once("exit", resolve));
       expect(exitCode, stderr).toBe(0);
       expect(delivered.at(-1)?.prompt).toBe("한글 질문이 깨지지 않습니다");
+      expect(delivered.at(-1)).toMatchObject({
+        event: "waiting",
+        hook_event_name: "PreToolUse",
+        tool_name: "AskUserQuestion",
+      });
+      expect(delivered.at(-1)?.interactive_question).toContain("계속할까요?");
     } finally {
       await service.stop();
     }

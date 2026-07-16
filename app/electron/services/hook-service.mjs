@@ -5,15 +5,35 @@ import http from "node:http";
 import path from "node:path";
 
 const HOOK_MARKER = "multiagent";
-const EVENTS = [
+const CODEX_EVENTS = [
   ["UserPromptSubmit", "working"],
+  ["PreToolUse", "tool-start"],
+  ["PermissionRequest", "waiting"],
+  ["PostToolUse", "tool-end"],
   ["Stop", "done"],
   ["SessionStart", "session-start"],
+];
+const CLAUDE_EVENTS = [
+  ...CODEX_EVENTS,
+  ["PostToolUseFailure", "working"],
+  ["StopFailure", "blocked"],
 ];
 const CODEX_BEGIN = "# >>> multiagent electron hooks >>>";
 const CODEX_END = "# <<< multiagent electron hooks <<<";
 
-const HELPER_SCRIPT = `param([string]$Event)
+function limitedString(value, maxLength) {
+  if (value == null) return null;
+  let text;
+  try {
+    text = typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+const HELPER_SCRIPT = `param([string]$Event, [string]$HookEventName)
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $base = Join-Path $env:LOCALAPPDATA "com.jintae.multiagent"
 $logPath = Join-Path $base "hook.log"
@@ -23,6 +43,19 @@ $sessionId = $null
 $transcriptPath = $null
 $cwd = $null
 $prompt = $null
+$toolName = $null
+$toolInput = $null
+$interactiveQuestion = $null
+$assistantMessage = $null
+function ConvertTo-CompactText($Value, [int]$MaxLength) {
+  if ($null -eq $Value) { return $null }
+  try {
+    if ($Value -is [string]) { $text = [string]$Value }
+    else { $text = $Value | ConvertTo-Json -Compress -Depth 12 }
+    if ($text.Length -gt $MaxLength) { return $text.Substring(0, $MaxLength) }
+    return $text
+  } catch { return $null }
+}
 try {
   $stdinText = [Console]::In.ReadToEnd()
   if ($stdinText) {
@@ -32,8 +65,18 @@ try {
     if ($payload.cwd) { $cwd = [string]$payload.cwd }
     if ($payload.prompt) { $prompt = [string]$payload.prompt }
     elseif ($payload.message) { $prompt = [string]$payload.message }
+    if ($payload.hook_event_name) { $HookEventName = [string]$payload.hook_event_name }
+    if ($payload.tool_name) { $toolName = [string]$payload.tool_name }
+    if ($payload.tool_input) { $toolInput = ConvertTo-CompactText $payload.tool_input 4000 }
+    if ($payload.interactive_question) { $interactiveQuestion = ConvertTo-CompactText $payload.interactive_question 2000 }
+    elseif ($toolName -eq "AskUserQuestion" -and $toolInput) { $interactiveQuestion = $toolInput }
+    if ($payload.last_assistant_message) { $assistantMessage = ConvertTo-CompactText $payload.last_assistant_message 4000 }
+    elseif ($payload.assistant_message) { $assistantMessage = ConvertTo-CompactText $payload.assistant_message 4000 }
+    elseif ($payload.response) { $assistantMessage = ConvertTo-CompactText $payload.response 4000 }
   }
 } catch {}
+$effectiveEvent = $Event
+if ($toolName -eq "AskUserQuestion") { $effectiveEvent = "waiting" }
 $port = $env:MULTIAGENT_PORT
 $token = $env:MULTIAGENT_TOKEN
 if (-not $port -or -not $token) {
@@ -45,17 +88,22 @@ if (-not $port -or -not $token) {
     } catch {}
   }
 }
-"$ts | event=$Event | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId | transcript=$transcriptPath | port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
+"$ts | event=$effectiveEvent | hook=$HookEventName | agent=$($env:MULTIAGENT_AGENT_ID) | session=$sessionId | transcript=$transcriptPath | port=$port" | Out-File -FilePath $logPath -Append -Encoding utf8
 if (-not $port -or -not $token) { "$ts |   ! no port/token" | Out-File -FilePath $logPath -Append -Encoding utf8; exit 0 }
 function Send-MultiAgentHook([string]$targetPort, [string]$targetToken) {
-  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $Event; token = $targetToken }
+  $bodyMap = @{ id = $env:MULTIAGENT_AGENT_ID; event = $effectiveEvent; token = $targetToken }
   if ($sessionId) { $bodyMap.session_id = $sessionId }
   if ($transcriptPath) { $bodyMap.transcript_path = $transcriptPath }
   if ($cwd) { $bodyMap.cwd = $cwd }
-  if ($Event -eq "working" -and $prompt) {
+  if ($HookEventName) { $bodyMap.hook_event_name = $HookEventName }
+  if ($prompt) {
     if ($prompt.Length -gt 500) { $prompt = $prompt.Substring(0, 500) }
     $bodyMap.prompt = $prompt
   }
+  if ($toolName) { $bodyMap.tool_name = $toolName }
+  if ($toolInput) { $bodyMap.tool_input = $toolInput }
+  if ($interactiveQuestion) { $bodyMap.interactive_question = $interactiveQuestion }
+  if ($assistantMessage) { $bodyMap.assistant_message = $assistantMessage }
   $body = $bodyMap | ConvertTo-Json -Compress
   $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
   Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:$targetPort/event" -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec 2 -UseBasicParsing | Out-Null
@@ -86,40 +134,54 @@ const NODE_HELPER_SCRIPT = `const chunks=[];
 for await (const chunk of process.stdin) chunks.push(chunk);
 let input={};
 try { input=JSON.parse(Buffer.concat(chunks).toString("utf8")||"{}"); } catch {}
-const event=process.argv[2]||"";
+let event=process.argv[2]||"";
+const hookEventName=process.argv[3]||input.hook_event_name||"";
+const toolName=input.tool_name?String(input.tool_name):"";
+const compact=(value,max)=>{if(value==null)return "";const text=typeof value==="string"?value:JSON.stringify(value);return text.slice(0,max)};
+const toolInput=compact(input.tool_input,4000);
+if(toolName.toLowerCase()==="askuserquestion")event="waiting";
 const payload={id:process.env.MULTIAGENT_AGENT_ID||"",event,token:process.env.MULTIAGENT_TOKEN||""};
 if(input.session_id)payload.session_id=String(input.session_id);
 if(input.transcript_path)payload.transcript_path=String(input.transcript_path);
 if(input.cwd)payload.cwd=String(input.cwd);
 const prompt=input.prompt||input.message;
-if(event==="working"&&prompt)payload.prompt=String(prompt).slice(0,500);
+if(prompt)payload.prompt=String(prompt).slice(0,500);
+if(hookEventName)payload.hook_event_name=String(hookEventName).slice(0,200);
+if(toolName)payload.tool_name=toolName.slice(0,200);
+if(toolInput)payload.tool_input=toolInput;
+const question=compact(input.interactive_question,2000)||(toolName.toLowerCase()==="askuserquestion"?toolInput:"");
+if(question)payload.interactive_question=question;
+const assistant=compact(input.last_assistant_message??input.assistant_message??input.response,4000);
+if(assistant)payload.assistant_message=assistant;
 const port=process.env.MULTIAGENT_PORT;
 if(port&&payload.token){try{await fetch("http://127.0.0.1:"+port+"/event",{method:"POST",headers:{"content-type":"application/json; charset=utf-8"},body:JSON.stringify(payload),signal:AbortSignal.timeout(2000)});}catch{}}
 `;
 
 function remoteBootstrap(aiToolId) {
   const helperBase64 = Buffer.from(NODE_HELPER_SCRIPT, "utf8").toString("base64");
+  const events = aiToolId === "claude" ? CLAUDE_EVENTS : CODEX_EVENTS;
   return `const fs=require("fs"),path=require("path"),os=require("os");
 const dir=path.join(os.homedir(),".multiagent"),helper=path.join(dir,"notify.mjs"),root=process.cwd();
 fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(helper,Buffer.from(${JSON.stringify(helperBase64)},"base64"));
-const command=event=>"node "+JSON.stringify(helper)+" "+event;
-const events=[["UserPromptSubmit","working"],["Stop","done"],["SessionStart","session-start"]];
+const command=(event,hookName)=>"node "+JSON.stringify(helper)+" "+event+" "+hookName;
+const events=${JSON.stringify(events)};
 if(${JSON.stringify(aiToolId)}==="claude"){
  const target=path.join(root,".claude","settings.local.json");let settings={};try{settings=JSON.parse(fs.readFileSync(target,"utf8"))}catch{}
  if(!settings||Array.isArray(settings)||typeof settings!=="object")settings={};if(!settings.hooks||typeof settings.hooks!=="object")settings.hooks={};
- for(const [name,event] of events){const current=Array.isArray(settings.hooks[name])?settings.hooks[name]:[];settings.hooks[name]=[...current.filter(item=>item?.__source!=="multiagent"),{matcher:".*",__source:"multiagent",hooks:[{type:"command",command:command(event)}]}]}
+ for(const [name,event] of events){const current=Array.isArray(settings.hooks[name])?settings.hooks[name]:[];settings.hooks[name]=[...current.filter(item=>item?.__source!=="multiagent"),{matcher:".*",__source:"multiagent",hooks:[{type:"command",command:command(event,name)}]}]}
  fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,JSON.stringify(settings,null,2)+"\\n");
 }else if(${JSON.stringify(aiToolId)}==="codex"){
  const target=path.join(root,".codex","config.toml");let body="";try{body=fs.readFileSync(target,"utf8")}catch{}
  body=body.replace(/# >>> multiagent electron hooks >>>[\\s\\S]*?# <<< multiagent electron hooks <<</g,"").trimEnd();
+ body=body.split(/(?=^\\[\\[hooks\\.[^\\].]+\\]\\]\\s*$)/gm).filter(block=>!/__source\\s*=\\s*["']multiagent["']/.test(block)).join("").trimEnd();
  const lines=["# >>> multiagent electron hooks >>>"];
- for(const [name,event] of events)lines.push("[[hooks."+name+"]]","matcher = \\\"\\\"","__source = \\\"multiagent\\\"","[[hooks."+name+".hooks]]","type = \\\"command\\\"","command = "+JSON.stringify(command(event)),"");
+ for(const [name,event] of events)lines.push("[[hooks."+name+"]]","matcher = \\\"\\\"","__source = \\\"multiagent\\\"","[[hooks."+name+".hooks]]","type = \\\"command\\\"","command = "+JSON.stringify(command(event,name)),"");
  lines.push("# <<< multiagent electron hooks <<<");fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,body+(body?"\\n\\n":"")+lines.join("\\n")+"\\n");
 }`;
 }
 
-function commandFor(helperPath, event) {
-  return `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${helperPath}" ${event}`;
+function commandFor(helperPath, event, hookEventName) {
+  return `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${helperPath}" ${event} ${hookEventName}`;
 }
 
 async function atomicWrite(filePath, body) {
@@ -145,14 +207,14 @@ function mergeClaude(existing, helperPath) {
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
     settings.hooks = {};
   }
-  for (const [eventName, event] of EVENTS) {
+  for (const [eventName, event] of CLAUDE_EVENTS) {
     const current = Array.isArray(settings.hooks[eventName]) ? settings.hooks[eventName] : [];
     settings.hooks[eventName] = [
       ...current.filter((entry) => entry?.__source !== HOOK_MARKER),
       {
         matcher: ".*",
         __source: HOOK_MARKER,
-        hooks: [{ type: "command", command: commandFor(helperPath, event) }],
+        hooks: [{ type: "command", command: commandFor(helperPath, event, eventName) }],
       },
     ];
   }
@@ -166,21 +228,25 @@ function removeManagedCodexBlock(existing) {
   return `${existing.slice(0, start)}${existing.slice(end + CODEX_END.length)}`.trimEnd();
 }
 
+function removeLegacyManagedCodexEntries(existing) {
+  return existing
+    .split(/(?=^\[\[hooks\.[^\].]+\]\]\s*$)/gm)
+    .filter((block) => !/__source\s*=\s*["']multiagent["']/.test(block))
+    .join("")
+    .trimEnd();
+}
+
 function mergeCodex(existing, helperPath) {
-  const cleaned = removeManagedCodexBlock(existing);
-  // The current Tauri implementation already writes compatible entries with
-  // the same marker and helper path. Keep that valid configuration instead of
-  // duplicating every event.
-  if (/__source\s*=\s*["']multiagent["']/.test(cleaned)) return cleaned.endsWith("\n") ? cleaned : `${cleaned}\n`;
+  const cleaned = removeLegacyManagedCodexEntries(removeManagedCodexBlock(existing));
   const lines = [CODEX_BEGIN];
-  for (const [eventName, event] of EVENTS) {
+  for (const [eventName, event] of CODEX_EVENTS) {
     lines.push(
       `[[hooks.${eventName}]]`,
       `matcher = ""`,
       `__source = "${HOOK_MARKER}"`,
       `[[hooks.${eventName}.hooks]]`,
       `type = "command"`,
-      `command = ${JSON.stringify(commandFor(helperPath, event))}`,
+      `command = ${JSON.stringify(commandFor(helperPath, event, eventName))}`,
       ""
     );
   }
@@ -200,6 +266,9 @@ export class HookService {
     this.port = 0;
     this.token = "";
     this.mergeQueue = Promise.resolve();
+    this.recentEvents = [];
+    this.lastRepairSummary = null;
+    this.lastMaintenance = null;
   }
 
   async start() {
@@ -270,12 +339,24 @@ export class HookService {
         session_id: typeof payload.session_id === "string" ? payload.session_id : null,
         transcript_path: typeof payload.transcript_path === "string" ? payload.transcript_path : null,
         cwd: typeof payload.cwd === "string" ? payload.cwd : null,
-        prompt:
-          typeof payload.prompt === "string" && payload.prompt.trim()
-            ? payload.prompt.trim().slice(0, 500)
-            : null,
+        hook_event_name: limitedString(payload.hook_event_name, 200),
+        received_at: Date.now(),
+        prompt: limitedString(payload.prompt, 500),
+        tool_name: limitedString(payload.tool_name, 200),
+        tool_input: limitedString(payload.tool_input, 4_000),
+        interactive_question: limitedString(payload.interactive_question, 2_000),
+        assistant_message: limitedString(payload.assistant_message, 4_000),
       };
       if (event.id && event.event) {
+        this.recentEvents.push({
+          id: event.id,
+          event: event.event,
+          hookEventName: event.hook_event_name,
+          toolName: event.tool_name,
+          receivedAt: event.received_at,
+          hasSessionId: Boolean(event.session_id),
+        });
+        this.recentEvents = this.recentEvents.slice(-50);
         await this.sessionService.noteHook(event).catch(() => {});
         await this.onHook?.(event);
         this.sendEvent("agent:hook-event", event);
@@ -373,7 +454,56 @@ export class HookService {
         });
       }
     }
+    this.lastRepairSummary = { ...summary, checkedAt: Date.now() };
     return summary;
+  }
+
+  async maintain(entries) {
+    const startedAt = Date.now();
+    const result = {
+      checkedAt: startedAt,
+      serverRestarted: false,
+      checkedProjects: 0,
+      repairedProjects: 0,
+      failures: [],
+    };
+    try {
+      result.serverRestarted = await this.refresh();
+      for (const entry of entries) {
+        if (
+          entry.ssh ||
+          !entry.cwd ||
+          !["codex", "claude"].includes(entry.aiToolId)
+        ) {
+          continue;
+        }
+        result.checkedProjects += 1;
+        try {
+          if (await this.setupProject(entry.cwd, entry.aiToolId)) {
+            result.repairedProjects += 1;
+          }
+        } catch (error) {
+          result.failures.push({ id: entry.id, message: String(error) });
+        }
+      }
+    } catch (error) {
+      result.failures.push({ id: "hook-server", message: String(error) });
+    }
+    this.lastMaintenance = result;
+    return result;
+  }
+
+  async diagnostics() {
+    return {
+      listening: Boolean(this.server?.listening),
+      healthy: await this.health(),
+      port: this.port || null,
+      helperPresent: fs.existsSync(this.helperPath),
+      runtimeInfoPresent: fs.existsSync(this.infoPath),
+      recentEvents: [...this.recentEvents],
+      lastRepairSummary: this.lastRepairSummary,
+      lastMaintenance: this.lastMaintenance,
+    };
   }
 
   async stop() {

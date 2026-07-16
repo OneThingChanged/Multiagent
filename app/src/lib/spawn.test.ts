@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
   addTerminalCompatibilityArgs,
+  resolveLocalToolCommand,
   resolveRemoteToolCommand,
 } from "./spawn";
+
+describe("resolveLocalToolCommand", () => {
+  it("uses npm .cmd shims for built-in agents on local Windows", () => {
+    expect(resolveLocalToolCommand("codex", "codex", "win32")).toBe(
+      "codex.cmd"
+    );
+    expect(resolveLocalToolCommand("claude", "claude", "Windows 11")).toBe(
+      "claude.cmd"
+    );
+  });
+
+  it("keeps POSIX and custom commands unchanged", () => {
+    expect(resolveLocalToolCommand("codex", "codex", "linux")).toBe("codex");
+    expect(
+      resolveLocalToolCommand("codex", "C:\\Tools\\codex.exe", "win32")
+    ).toBe("C:\\Tools\\codex.exe");
+  });
+});
 
 describe("resolveRemoteToolCommand", () => {
   it("uses .cmd shims for Codex on Windows SSH by default", () => {

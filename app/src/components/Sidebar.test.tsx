@@ -34,6 +34,10 @@ function renderSidebar(
       desktopPetAvailable={true}
       onToggleDesktopPet={() => {}}
       onOpenNewWindow={() => {}}
+      onOpenQuickOpen={() => {}}
+      quickOpenShortcut="Ctrl+K"
+      onOpenAttention={() => {}}
+      attentionUnreadCount={0}
       settingsOpen={false}
       onToggleSettings={() => {}}
       onRemove={() => {}}

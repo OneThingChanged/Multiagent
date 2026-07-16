@@ -1024,7 +1024,22 @@ export function createEntry(
     return true;
   });
 
-  return { term, fit, search, serialize, el, opened: false, spawned: false };
+  return {
+    term,
+    fit,
+    search,
+    serialize,
+    el,
+    opened: false,
+    spawned: false,
+    spawnPromise: null,
+    attached: false,
+    lastSequence: 0,
+    syncing: false,
+    pendingOutput: [],
+    restoreScrollbackOnAttach: false,
+    restoredScrollback: false,
+  };
 }
 
 type TerminalPrivateCore = {

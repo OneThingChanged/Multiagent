@@ -30,7 +30,11 @@ export function ProjectPropertiesModal({
 
   const projectAgents = agents.filter((a) => a.projectId === project.id);
   const activeCount = projectAgents.filter(
-    (a) => a.status === "working" || a.status === "running"
+    (a) =>
+      a.status === "working" ||
+      a.status === "waiting" ||
+      a.status === "blocked" ||
+      a.status === "running"
   ).length;
 
   const sshHost = project.sshHostId ? findSshHost(project.sshHostId) : null;

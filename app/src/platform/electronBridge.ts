@@ -1,7 +1,20 @@
+import type {
+  RuntimeCommand,
+  RuntimeCommandArgs,
+  RuntimeCommandResult,
+  RuntimeEmittedEventName,
+  RuntimeEventName,
+  TypedRuntimeCommand,
+} from "./ipcContract";
+
 export type ElectronBridge = {
-  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
-  onEvent<T>(eventName: string, listener: (payload: T) => void): () => void;
-  emit(eventName: string, payload?: unknown): Promise<void>;
+  invoke<C extends TypedRuntimeCommand>(
+    command: C,
+    args: RuntimeCommandArgs<C>
+  ): Promise<RuntimeCommandResult<C>>;
+  invoke<T>(command: RuntimeCommand, args?: Record<string, unknown>): Promise<T>;
+  onEvent<T>(eventName: RuntimeEventName, listener: (payload: T) => void): () => void;
+  emit(eventName: RuntimeEmittedEventName, payload?: unknown): Promise<void>;
   getPathForFile(file: File): string;
   showOpenDialog(options: {
     directory?: boolean;

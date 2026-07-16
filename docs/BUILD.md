@@ -37,6 +37,11 @@ npm run electron:dev
 Electron도 Vite `4420`을 사용하며 HMR 보조 포트는 `4422`다. 설치형/보안/PTY 검증 명령과
 전환 조건은 [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md)를 참고한다.
 
+Electron의 Windows 로컬 실행기는 npm 전역 CLI를 `codex.cmd`/`claude.cmd`로 호출한다.
+따라서 PowerShell ExecutionPolicy가 `codex.ps1`을 차단해도 별도 정책 변경 없이 세션을
+시작할 수 있다. 사용자가 직접 PowerShell에서 실행할 때도 같은 오류가 나면 `codex.cmd`
+또는 `claude.cmd`를 사용한다.
+
 ## 디버그 빌드
 
 ```bash

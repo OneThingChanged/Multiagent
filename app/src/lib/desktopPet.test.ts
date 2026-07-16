@@ -139,4 +139,31 @@ describe("buildDesktopPetUpdate", () => {
     expect(completion.question).toBe("작업 질문을 한 줄로 보여줘");
     expect(completion.sessionKey).toBe("agent-1");
   });
+
+  it("shows hook waiting state and uses the provider session once", () => {
+    const result = buildDesktopPetUpdate(
+      [
+        {
+          id: "agent-waiting",
+          name: "Session",
+          projectId: "project-1",
+          aiToolId: "claude",
+          status: "waiting",
+          activity: {
+            workStatus: "waiting",
+            source: "hook",
+            receivedAt: Date.now(),
+            stateStartedAt: Date.now(),
+            providerSessionId: "provider-session",
+            interactiveQuestion: "배포할까요?",
+          },
+        },
+      ],
+      [{ id: "project-1", name: "MultiAgent" }],
+      {},
+      []
+    );
+    expect(result).toMatchObject({ status: "working", workingCount: 1 });
+    expect(result.workingItems[0].question).toBe("배포할까요?");
+  });
 });

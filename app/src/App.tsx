@@ -24,6 +24,7 @@ import {
 } from "./types";
 import type {
   Agent,
+  AgentRuntimeStatus,
   AgentStatus,
   ContextMenuState,
   DragState,
@@ -62,6 +63,33 @@ import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
 import {
+  AGENT_ACTIVITY_STALE_AFTER_MS,
+  applyAgentHookEvent,
+  applyAgentRuntimeStatus,
+  deriveAgentStatus,
+  isAgentActivelyWorking,
+  runtimeStatusOf,
+  type AgentHookEvent,
+} from "./lib/agentActivity";
+import {
+  COMMAND_DEFINITIONS,
+  commandForKeyboardEvent,
+  loadCommandShortcuts,
+  saveCommandShortcuts,
+  type CommandId,
+  type CommandShortcuts,
+} from "./lib/commandRegistry";
+import {
+  loadAttentionItems,
+  markAttentionRead,
+  removeSessionAttention,
+  saveAttentionItems,
+  upsertAttentionItem,
+  type AttentionItem,
+  type AttentionKind,
+} from "./lib/attention";
+import type { QuickOpenItem } from "./lib/quickOpen";
+import {
   clearScrollback,
   loadScrollback,
   pruneScrollback,
@@ -71,6 +99,16 @@ import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
 import { persistStorageSnapshot } from "./platform/storageMigration";
+import { isElectronRuntime } from "./platform/electronBridge";
+import type {
+  SpawnTerminalResult,
+  TerminalDataPayload,
+  TerminalReplay,
+} from "./platform/ipcContract";
+import {
+  completeTerminalSync,
+  deliverTerminalData,
+} from "./lib/terminalDelivery";
 import {
   buildDesktopPetUpdate,
   completionForAgent,
@@ -94,6 +132,8 @@ import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
 import { ProjectPropertiesModal } from "./components/ProjectPropertiesModal";
+import { QuickOpen } from "./components/QuickOpen";
+import { AttentionCenter } from "./components/AttentionCenter";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
@@ -107,6 +147,15 @@ type DocsRequest = {
   relativePath: string;
   key: number;
 };
+
+type QuickDocument = {
+  projectId: string;
+  projectName: string;
+  relativePath: string;
+  name: string;
+};
+
+type AttentionDraft = Omit<AttentionItem, "id" | "read">;
 
 type TerminalPathResolution = {
   kind: "image" | "html" | "markdown" | "folder" | "file";
@@ -267,6 +316,8 @@ function agentFromStored(
       stored.lastResumeToken ??
       existing?.lastSessionId,
     status: existing?.status ?? "idle",
+    runtimeStatus: existing?.runtimeStatus ?? "idle",
+    activity: existing?.activity,
     sshHostId: project.sshHostId,
     remoteFolder: project.remoteFolder,
   };
@@ -512,6 +563,16 @@ function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickDocuments, setQuickDocuments] = useState<QuickDocument[]>([]);
+  const [quickDocumentsLoading, setQuickDocumentsLoading] = useState(false);
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>(
+    loadAttentionItems
+  );
+  const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcuts>(
+    loadCommandShortcuts
+  );
   const [runtimeFlags, setRuntimeFlags] = useState<RuntimeFlags | null>(null);
   const isSecondaryWindow = !!runtimeFlags?.secondary_window;
 
@@ -536,6 +597,7 @@ function App() {
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
+  const executeCommandRef = useRef<((commandId: CommandId) => void) | null>(null);
 
   const syncSharedStateFromStorage = useCallback(() => {
     const projectsRaw = readLocalStorageValue(LS_PROJECTS);
@@ -891,6 +953,47 @@ function App() {
   }, [docsWidth]);
 
   useEffect(() => {
+    saveAttentionItems(attentionItems);
+  }, [attentionItems]);
+
+  useEffect(() => {
+    saveCommandShortcuts(commandShortcuts);
+  }, [commandShortcuts]);
+
+  useEffect(() => {
+    if (!quickOpen) return;
+    let cancelled = false;
+    setQuickDocumentsLoading(true);
+    void Promise.all(
+      projects
+        .filter((project) => !project.sshHostId)
+        .map(async (project) => {
+          try {
+            const files = await invoke<Array<{ name: string; relative_path: string }>>(
+              "list_markdown_files",
+              { folder: project.folder }
+            );
+            return files.map((file) => ({
+              projectId: project.id,
+              projectName: project.name,
+              relativePath: file.relative_path,
+              name: file.name,
+            }));
+          } catch {
+            return [];
+          }
+        })
+    ).then((groups) => {
+      if (!cancelled) setQuickDocuments(groups.flat());
+    }).finally(() => {
+      if (!cancelled) setQuickDocumentsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projects, quickOpen]);
+
+  useEffect(() => {
     for (const entry of termsRef.current.values()) {
       applyTerminalTheme(entry.term, appTheme);
     }
@@ -922,42 +1025,32 @@ function App() {
         setSearchOpen(false);
         return;
       }
+      if (event.key === "Escape" && quickOpen) {
+        event.preventDefault();
+        setQuickOpen(false);
+        return;
+      }
+      if (event.key === "Escape" && attentionOpen) {
+        event.preventDefault();
+        setAttentionOpen(false);
+        return;
+      }
       if (event.key === "Escape" && docsOpen && !settingsOpen) {
         event.preventDefault();
         setDocsOpen(false);
         return;
       }
-      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
+      const commandId = commandForKeyboardEvent(event, commandShortcuts);
+      if (
+        commandId &&
+        (!inField || commandId === "quick-open" || commandId === "attention-center")
+      ) {
+        event.preventDefault();
+        executeCommandRef.current?.(commandId);
         return;
       }
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
       const key = event.key.toLowerCase();
-      if (key === "f") {
-        if (inField) return;
-        event.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-      if (key === "t") {
-        if (inField) return;
-        event.preventDefault();
-        if (activeProjectIdRef.current) setShowModal(true);
-        else setShowProjectModal(true);
-        return;
-      }
-      if (key === "w") {
-        if (inField) return;
-        event.preventDefault();
-        const groupId = activeGroupIdRef.current;
-        const path = activePathRef.current;
-        if (!groupId || !path) return;
-        const group = groupsRef.current.find((g) => g.id === groupId);
-        if (!group) return;
-        const node = getAt(group.layout, path);
-        if (!node || node.type !== "leaf") return;
-        const activeId = node.tabs[node.activeIndex];
-        if (activeId) closeTabRef.current?.(path, activeId);
-        return;
-      }
       if (key >= "1" && key <= "9") {
         if (inField) return;
         const idx = parseInt(key, 10) - 1;
@@ -976,7 +1069,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [docsOpen, searchOpen, settingsOpen]);
+  }, [attentionOpen, commandShortcuts, docsOpen, quickOpen, searchOpen, settingsOpen]);
 
   const handleThemeChange = useCallback((theme: AppThemeId) => {
     setAppTheme(theme);
@@ -1023,6 +1116,22 @@ function App() {
     },
     []
   );
+
+  const pushAttention = useCallback((draft: AttentionDraft) => {
+    setAttentionItems((items) => {
+      const existing = items.find((item) => item.dedupeKey === draft.dedupeKey);
+      if (
+        existing &&
+        existing.createdAt === draft.createdAt &&
+        existing.body === draft.body
+      ) return items;
+      return upsertAttentionItem(items, {
+        ...draft,
+        id: `${draft.dedupeKey}:${draft.createdAt}:${crypto.randomUUID()}`,
+        read: false,
+      });
+    });
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -1101,6 +1210,15 @@ function App() {
     listen<{ agentId?: string }>("desktop-pet:activate", (event) => {
       activate(event.payload?.agentId);
       setDesktopPetCompletions([]);
+      if (event.payload?.agentId) {
+        const agentId = event.payload.agentId;
+        setAttentionItems((items) =>
+          markAttentionRead(
+            items,
+            new Set(items.filter((item) => item.agentId === agentId).map((item) => item.id))
+          )
+        );
+      }
     }).then(track).catch(() => {});
     listen("desktop-pet:close-requested", () => {
       handleDesktopPetEnabledChange(false);
@@ -1121,17 +1239,43 @@ function App() {
       else unsubs.push(u);
     };
 
-    listen<{ id: string; data: string }>("pty:data", (e) => {
+    listen<TerminalDataPayload>("pty:data", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
-      const data = e.payload.data;
       const entry = termsRef.current.get(id);
-      entry?.term.write(data);
+      if (entry) {
+        const result = deliverTerminalData(
+          entry,
+          e.payload,
+          (data) => entry.term.write(data)
+        );
+        if (result === "gap" && isElectronRuntime()) {
+          const resync = async () => {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              const replay = await invoke<TerminalReplay>("attach_terminal", {
+                id,
+                afterSequence: entry.lastSequence,
+              });
+              if (termsRef.current.get(id) !== entry) {
+                await invoke("detach_terminal", { id }).catch(() => {});
+                return;
+              }
+              const syncResult = completeTerminalSync(
+                entry,
+                replay,
+                (data) => entry.term.write(data)
+              );
+              if (syncResult !== "gap") return;
+            }
+          };
+          void resync().catch(() => {});
+        }
+      }
 
       setAgents((cur) =>
         cur.map((a) =>
           a.id === id && (a.status === "idle" || a.status === "starting")
-            ? { ...a, status: "running" }
+            ? applyAgentRuntimeStatus(a, "running")
             : a
         )
       );
@@ -1140,15 +1284,41 @@ function App() {
     listen<{ id: string }>("pty:exit", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
+      const exitingAgent = agentsRef.current.find((agent) => agent.id === id);
+      if (exitingAgent && isAgentActivelyWorking(exitingAgent)) {
+        const sessionKey =
+          exitingAgent.activity?.providerSessionId?.trim() ||
+          exitingAgent.lastSessionId?.trim() ||
+          id;
+        const projectName =
+          projectsRef.current.find((project) => project.id === exitingAgent.projectId)
+            ?.name || "Unknown project";
+        pushAttention({
+          dedupeKey: `stale:${sessionKey}`,
+          kind: "stale",
+          agentId: id,
+          sessionKey,
+          title: `${projectName} / ${exitingAgent.name}`,
+          body: "작업 중 PTY가 종료되었습니다. 세션 상태를 확인해 주세요.",
+          createdAt: Date.now(),
+        });
+      }
       const entry = termsRef.current.get(id);
       if (entry) {
+        entry.spawned = false;
+        entry.spawnPromise = null;
+        entry.attached = false;
+        entry.syncing = false;
+        entry.pendingOutput = [];
         try {
           const data = entry.serialize.serialize({ scrollback: 1000 });
           saveScrollback(id, data);
         } catch {}
       }
       setAgents((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: "exited" } : a))
+        prev.map((a) =>
+          a.id === id ? applyAgentRuntimeStatus(a, "exited") : a
+        )
       );
     }).then(track);
 
@@ -1165,19 +1335,51 @@ function App() {
     }
 
 
-    listen<{
-      id: string;
-      event: string;
-      session_id?: string;
-      prompt?: string;
-    }>(
+    listen<AgentHookEvent>(
       "agent:hook-event",
       (e) => {
         if (cancelled) return;
-        const { id, event, session_id, prompt } = e.payload;
-        if (event === "working") {
-          const workingAgent = agentsRef.current.find((agent) => agent.id === id);
-          const sessionKey = workingAgent?.lastSessionId?.trim() || id;
+        const payload = e.payload;
+        const { id, event } = payload;
+        const currentAgent = agentsRef.current.find((agent) => agent.id === id);
+        const nextAgent = currentAgent
+          ? applyAgentHookEvent(currentAgent, payload)
+          : null;
+        const nextWorkStatus = nextAgent?.activity?.workStatus;
+        const isActiveWork =
+          nextWorkStatus === "working" ||
+          nextWorkStatus === "waiting" ||
+          nextWorkStatus === "blocked";
+
+        if (isActiveWork && nextAgent) {
+          const sessionKey =
+            nextAgent.activity?.providerSessionId?.trim() ||
+            nextAgent.lastSessionId?.trim() ||
+            id;
+          const projectName =
+            projectsRef.current.find((project) => project.id === nextAgent.projectId)
+              ?.name || "Unknown project";
+          setAttentionItems((items) =>
+            removeSessionAttention(items, sessionKey)
+          );
+          if (nextWorkStatus === "waiting" || nextWorkStatus === "blocked") {
+            const kind: AttentionKind = nextWorkStatus;
+            const body =
+              nextAgent.activity?.interactiveQuestion?.trim() ||
+              nextAgent.activity?.lastPrompt?.trim() ||
+              (kind === "waiting"
+                ? "사용자 응답 또는 권한 승인을 기다리고 있습니다."
+                : "작업이 차단되었습니다. 세션을 확인해 주세요.");
+            pushAttention({
+              dedupeKey: `${kind}:${sessionKey}`,
+              kind,
+              agentId: id,
+              sessionKey,
+              title: `${projectName} / ${nextAgent.name}`,
+              body,
+              createdAt: nextAgent.activity?.receivedAt || Date.now(),
+            });
+          }
           setDesktopPetCompletions((previous) =>
             previous.filter(
               (completion) =>
@@ -1186,21 +1388,21 @@ function App() {
           );
           setDesktopPetQuestions((previous) => {
             const next = { ...previous };
-            const question = prompt?.trim();
+            const question =
+              payload.interactive_question?.trim() ||
+              (payload.tool_name?.toLowerCase() === "askuserquestion"
+                ? payload.tool_input?.trim()
+                : undefined) ||
+              payload.prompt?.trim();
             if (question) next[id] = question;
-            else delete next[id];
             desktopPetQuestionsRef.current = next;
             return next;
           });
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.status !== "exited"
-                ? { ...a, status: "working" }
-                : a
-            )
-          );
-        } else if (event === "done") {
-          const completedQuestion = desktopPetQuestionsRef.current[id];
+        } else if (event === "done" && nextAgent) {
+          const completedQuestion =
+            desktopPetQuestionsRef.current[id] ||
+            currentAgent?.activity?.interactiveQuestion ||
+            currentAgent?.activity?.lastPrompt;
           setDesktopPetQuestions((previous) => {
             if (!(id in previous)) return previous;
             const next = { ...previous };
@@ -1208,15 +1410,20 @@ function App() {
             desktopPetQuestionsRef.current = next;
             return next;
           });
-          const target = agentsRef.current.find((a) => a.id === id);
-          if (target && target.status === "working") {
+          const hadActiveWork =
+            currentAgent &&
+            (isAgentActivelyWorking(currentAgent) ||
+              currentAgent.activity?.workStatus === "working" ||
+              currentAgent.activity?.workStatus === "waiting" ||
+              currentAgent.activity?.workStatus === "blocked");
+          if (currentAgent && hadActiveWork) {
             const project = projectsRef.current.find(
-              (candidate) => candidate.id === target.projectId
+              (candidate) => candidate.id === currentAgent.projectId
             );
             const projectName = project?.name || "Unknown project";
-            const title = `${projectName} / ${target.name}`;
+            const title = `${projectName} / ${currentAgent.name}`;
             const petCompletion = completionForAgent(
-              target,
+              nextAgent,
               projectsRef.current,
               completedQuestion
             );
@@ -1230,8 +1437,23 @@ function App() {
                 .slice(-8),
               petCompletion,
             ]);
+            const sessionKey = petCompletion.sessionKey;
+            setAttentionItems((items) =>
+              removeSessionAttention(items, sessionKey)
+            );
+            pushAttention({
+              dedupeKey: `completed:${sessionKey}`,
+              kind: "completed",
+              agentId: currentAgent.id,
+              sessionKey,
+              title,
+              body: completedQuestion?.trim()
+                ? `완료 · ${completedQuestion.trim()}`
+                : "작업이 끝났습니다.",
+              createdAt: nextAgent.activity?.receivedAt || Date.now(),
+            });
             playNotificationSound();
-            pushToast(target.id, title, "작업이 끝났어요");
+            pushToast(currentAgent.id, title, "작업이 끝났어요");
             // When the app isn't focused, flash the taskbar so the user notices
             // (clicking the taskbar brings the app forward, where the in-app
             // toast is clickable to jump to the session). The always-on-top
@@ -1246,28 +1468,18 @@ function App() {
                   .catch(() => {});
                 notifyDone({
                   projectName,
-                  sessionName: target.name,
-                  onActivate: () => selectAgentRef.current?.(target.id),
+                  sessionName: currentAgent.name,
+                  onActivate: () => selectAgentRef.current?.(currentAgent.id),
                 }).catch(() => {});
               })
               .catch(() => {});
           }
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.status === "working"
-                ? { ...a, status: "running" }
-                : a
-            )
-          );
-        } else if (event === "session-start" && session_id) {
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.lastSessionId !== session_id
-                ? { ...a, lastSessionId: session_id }
-                : a
-            )
-          );
         }
+        setAgents((cur) =>
+          cur.map((agent) =>
+            agent.id === id ? applyAgentHookEvent(agent, payload) : agent
+          )
+        );
       }
     ).then(track);
 
@@ -1275,7 +1487,51 @@ function App() {
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [pushToast]);
+  }, [pushAttention, pushToast]);
+
+  // A lost Stop hook must not leave the UI and desktop pet spinning forever.
+  // Keep the detailed activity for diagnostics, but degrade stale work to the
+  // live process state until a new hook event arrives.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      for (const agent of agentsRef.current) {
+        const activity = agent.activity;
+        if (
+          !activity ||
+          now - activity.receivedAt <= AGENT_ACTIVITY_STALE_AFTER_MS ||
+          !["working", "waiting", "blocked"].includes(activity.workStatus)
+        ) continue;
+        const sessionKey =
+          activity.providerSessionId?.trim() ||
+          agent.lastSessionId?.trim() ||
+          agent.id;
+        const projectName =
+          projectsRef.current.find((project) => project.id === agent.projectId)?.name ||
+          "Unknown project";
+        pushAttention({
+          dedupeKey: `stale:${sessionKey}`,
+          kind: "stale",
+          agentId: agent.id,
+          sessionKey,
+          title: `${projectName} / ${agent.name}`,
+          body: "Hook 상태가 오래되어 현재 작업 상태를 다시 확인해야 합니다.",
+          createdAt: activity.receivedAt,
+        });
+      }
+      setAgents((current) =>
+        current.map((agent) => {
+          const status = deriveAgentStatus(
+            runtimeStatusOf(agent),
+            agent.activity,
+            now
+          );
+          return status === agent.status ? agent : { ...agent, status };
+        })
+      );
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [pushAttention]);
 
   // Keep the close handshake isolated from the frequently-changing PTY/hook
   // listeners. That prevents an effect cleanup race from leaving Electron to
@@ -1304,7 +1560,15 @@ function App() {
         });
         await Promise.all(
           targets.map((agent) =>
-            invoke("write_pty", { id: agent.id, data: "/quit\r" }).catch(() => {})
+            isElectronRuntime()
+              ? invoke("terminal_session_action", {
+                  id: agent.id,
+                  action: "quit",
+                }).catch(() => {})
+              : invoke("write_pty", {
+                  id: agent.id,
+                  data: "/quit\r",
+                }).catch(() => {})
           )
         );
         await new Promise((resolve) =>
@@ -1364,7 +1628,13 @@ function App() {
     return agent;
   }, []);
 
-  const restartAgent = useCallback((id: string) => {
+  const restartAgent = useCallback(async (id: string) => {
+    const wasIdle = agentsRef.current.find((agent) => agent.id === id)?.status === "idle";
+    if (isElectronRuntime()) {
+      await invoke("terminal_session_action", { id, action: "restart" }).catch(() => {});
+    } else {
+      await invoke("kill_pty", { id }).catch(() => {});
+    }
     const entry = termsRef.current.get(id);
     if (entry) {
       entry.term.dispose();
@@ -1372,14 +1642,22 @@ function App() {
     }
     clearScrollback(id);
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+      prev.map((a) =>
+        a.id === id
+          ? applyAgentRuntimeStatus(a, wasIdle ? "starting" : "idle")
+          : a
+      )
     );
   }, []);
 
   // Stop a running session's PTY process to free CPU/memory, but keep it
   // in the list (and its lastSessionId). Selecting it again respawns/resumes.
-  const deactivateAgent = useCallback((id: string) => {
-    invoke("kill_pty", { id }).catch(() => {});
+  const deactivateAgent = useCallback(async (id: string) => {
+    if (isElectronRuntime()) {
+      await invoke("terminal_session_action", { id, action: "sleep" }).catch(() => {});
+    } else {
+      await invoke("kill_pty", { id }).catch(() => {});
+    }
     const entry = termsRef.current.get(id);
     if (entry) {
       try {
@@ -1388,18 +1666,24 @@ function App() {
       termsRef.current.delete(id);
     }
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+      prev.map((a) =>
+        a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
+      )
     );
-  }, []);
+    applyGroupOp((state) => groupOps.removeAgentFromLayout(state, id));
+  }, [applyGroupOp]);
 
   const selectAgent = useCallback(
     (agentId: string) => {
       const agent = activateAgentProject(agentId);
-      applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
       const current = agentsRef.current.find((a) => a.id === agentId);
       if (current?.status === "exited") {
-        restartAgent(agentId);
+        void restartAgent(agentId).then(() => {
+          applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
+        });
+        return;
       }
+      applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
     },
     [activateAgentProject, applyGroupOp, restartAgent]
   );
@@ -1571,7 +1855,12 @@ function App() {
       if (!ok) return;
 
       for (const a of members) {
-        await invoke("kill_pty", { id: a.id }).catch(() => {});
+        await invoke(
+          isElectronRuntime() ? "terminal_session_action" : "kill_pty",
+          isElectronRuntime()
+            ? { id: a.id, action: "close" }
+            : { id: a.id }
+        ).catch(() => {});
         const entry = termsRef.current.get(a.id);
         entry?.term.dispose();
         termsRef.current.delete(a.id);
@@ -1617,6 +1906,7 @@ function App() {
           aiLabel: tool.label,
           dangerous: payload.dangerous && !!tool.dangerousFlag,
           status: "starting",
+          runtimeStatus: "starting",
           createdAt: Date.now(),
           sshHostId: project.sshHostId,
           remoteFolder: project.remoteFolder,
@@ -1628,7 +1918,21 @@ function App() {
   );
 
   const setAgentStatus = useCallback((id: string, status: AgentStatus) => {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    setAgents((prev) =>
+      prev.map((agent) => {
+        if (agent.id !== id) return agent;
+        if (
+          status === "idle" ||
+          status === "starting" ||
+          status === "running" ||
+          status === "exited" ||
+          status === "unreachable"
+        ) {
+          return applyAgentRuntimeStatus(agent, status as AgentRuntimeStatus);
+        }
+        return { ...agent, runtimeStatus: "running", status };
+      })
+    );
   }, []);
 
   const setAgentSessionId = useCallback((id: string, sessionId: string | null) => {
@@ -1644,7 +1948,10 @@ function App() {
   const removeAgent = useCallback(
     async (id: string) => {
       removedAgentIdsRef.current.add(id);
-      await invoke("kill_pty", { id }).catch(() => {});
+      await invoke(
+        isElectronRuntime() ? "terminal_session_action" : "kill_pty",
+        isElectronRuntime() ? { id, action: "close" } : { id }
+      ).catch(() => {});
       const entry = termsRef.current.get(id);
       entry?.term.dispose();
       termsRef.current.delete(id);
@@ -1823,10 +2130,9 @@ function App() {
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
       else if (action === "restart") {
-        selectAgent(id);
-        restartAgent(id);
+        void restartAgent(id).then(() => selectAgent(id));
       } else if (action === "deactivate") {
-        deactivateAgent(id);
+        void deactivateAgent(id);
       } else if (action === "relink") {
         relinkSession(id);
       } else if (action === "properties") {
@@ -2016,7 +2322,7 @@ function App() {
         );
         termsRef.current.set(agentId, entry);
       }
-      if (!entry.opened) {
+      if (!entry.opened && !isElectronRuntime()) {
         // Don't call term.open() on a detached element — xterm's renderer needs
         // an attached, sized node. Writes still buffer and render when PaneSlot
         // opens it on first view. Restore scrollback here, since PaneSlot only
@@ -2032,25 +2338,35 @@ function App() {
       entry.spawned = true;
       setAgentStatus(agentId, "starting");
       try {
-        const group = groupsRef.current.find((g) =>
-          collectAgentIds(g.layout).has(agentId)
-        );
-        const { initCommand, ssh, cwd } = await buildSpawnArgs(
-          agent,
-          group?.sessionPins ?? null,
-          setAgentSessionId
-        );
-        await invoke("spawn_pty", {
-          id: agentId,
-          shell: null,
-          cwd,
-          initCommand,
-          aiToolId: agent.aiToolId,
-          ssh,
-          cols: 120,
-          rows: 30,
-        });
+        entry.spawnPromise = (async () => {
+          const group = groupsRef.current.find((g) =>
+            collectAgentIds(g.layout).has(agentId)
+          );
+          const { initCommand, ssh, cwd } = await buildSpawnArgs(
+            agent,
+            group?.sessionPins ?? null,
+            setAgentSessionId
+          );
+          return invoke<SpawnTerminalResult>("spawn_pty", {
+            id: agentId,
+            shell: null,
+            cwd,
+            initCommand,
+            aiToolId: agent.aiToolId,
+            ssh,
+            cols: 120,
+            rows: 30,
+          });
+        })();
+        const pendingSpawn = entry.spawnPromise;
+        const result = await pendingSpawn;
+        if (entry.spawnPromise === pendingSpawn) entry.spawnPromise = null;
+        if (isElectronRuntime()) {
+          entry.restoreScrollbackOnAttach = !result.reattached;
+          if (result.cancelled) entry.spawned = false;
+        }
       } catch (err) {
+        entry.spawnPromise = null;
         entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
         setAgentStatus(agentId, "exited");
       }
@@ -2119,6 +2435,151 @@ function App() {
       setActivePath(path);
     },
     [activateAgentProject, groups]
+  );
+
+  const executeCommand = useCallback((commandId: CommandId) => {
+    switch (commandId) {
+      case "quick-open":
+        setQuickOpen(true);
+        break;
+      case "attention-center":
+        setAttentionOpen(true);
+        break;
+      case "terminal-search":
+        setSearchOpen(true);
+        break;
+      case "new-session":
+        if (activeProjectIdRef.current) setShowModal(true);
+        else setShowProjectModal(true);
+        break;
+      case "new-project":
+        setShowProjectModal(true);
+        break;
+      case "close-pane": {
+        const groupId = activeGroupIdRef.current;
+        const path = activePathRef.current;
+        const group = groupsRef.current.find((candidate) => candidate.id === groupId);
+        const node = group && path ? getAt(group.layout, path) : null;
+        if (node?.type === "leaf") {
+          const agentId = node.tabs[node.activeIndex];
+          if (agentId) closeTab(path!, agentId);
+        }
+        break;
+      }
+      case "toggle-docs":
+        setDocsOpen((open) => {
+          if (!open) setDocsRequest(null);
+          return !open;
+        });
+        break;
+      case "toggle-pet":
+        handleDesktopPetEnabledChange(!desktopPetEnabled);
+        break;
+      case "toggle-always-on-top":
+        toggleAlwaysOnTop();
+        break;
+      case "open-new-window":
+        openNewAppWindow();
+        break;
+      case "settings":
+        setSettingsOpen(true);
+        break;
+    }
+  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, toggleAlwaysOnTop]);
+
+  useEffect(() => {
+    executeCommandRef.current = executeCommand;
+  }, [executeCommand]);
+
+  const quickOpenItems = useMemo<QuickOpenItem[]>(() => {
+    const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+    const projectItems: QuickOpenItem[] = projects.map((project) => ({
+      id: `project:${project.id}`,
+      kind: "project",
+      title: project.name,
+      subtitle: project.folder,
+      searchText: `${project.folder} project`,
+      projectId: project.id,
+    }));
+    const sessionItems: QuickOpenItem[] = agents.map((agent) => ({
+      id: `session:${agent.id}`,
+      kind: "session",
+      title: agent.name,
+      subtitle: `${projectNames.get(agent.projectId) || "Unknown project"} · ${agent.aiLabel} · ${agent.status}`,
+      searchText: `${agent.folder} ${agent.aiToolId} ${agent.lastSessionId || ""}`,
+      projectId: agent.projectId,
+      agentId: agent.id,
+    }));
+    const screenItems: QuickOpenItem[] = groups.flatMap((group, index) => {
+      const memberIds = [...collectAgentIds(group.layout)];
+      const memberNames = memberIds
+        .map((id) => agents.find((agent) => agent.id === id)?.name)
+        .filter(Boolean) as string[];
+      const targetAgentId = memberIds[0];
+      if (!targetAgentId) return [];
+      return [{
+        id: `screen:${group.id}`,
+        kind: "screen" as const,
+        title: `Screen ${index + 1}`,
+        subtitle: memberNames.join(" + "),
+        searchText: memberNames.join(" "),
+        groupId: group.id,
+        agentId: targetAgentId,
+      }];
+    });
+    const documentItems: QuickOpenItem[] = quickDocuments.map((document) => ({
+      id: `document:${document.projectId}:${document.relativePath}`,
+      kind: "document",
+      title: document.name,
+      subtitle: `${document.projectName} · ${document.relativePath}`,
+      searchText: `${document.projectName} ${document.relativePath}`,
+      projectId: document.projectId,
+      relativePath: document.relativePath,
+    }));
+    const commandItems: QuickOpenItem[] = COMMAND_DEFINITIONS.map((command) => ({
+      id: `command:${command.id}`,
+      kind: "command",
+      title: command.title,
+      subtitle: [command.description, commandShortcuts[command.id]].filter(Boolean).join(" · "),
+      searchText: command.keywords,
+      commandId: command.id,
+    }));
+    return [...projectItems, ...sessionItems, ...screenItems, ...documentItems, ...commandItems];
+  }, [agents, commandShortcuts, groups, projects, quickDocuments]);
+
+  const handleQuickOpenSelect = useCallback((item: QuickOpenItem) => {
+    setQuickOpen(false);
+    if (item.kind === "project" && item.projectId) {
+      selectProject(item.projectId);
+    } else if (item.kind === "session" && item.agentId) {
+      selectAgent(item.agentId);
+    } else if (item.kind === "screen" && item.groupId && item.agentId) {
+      selectScreen(item.groupId, item.agentId);
+    } else if (item.kind === "document" && item.projectId && item.relativePath) {
+      setActiveProjectId(item.projectId);
+      setDocsRequest({
+        projectId: item.projectId,
+        agentId: null,
+        relativePath: item.relativePath,
+        key: Date.now(),
+      });
+      setDocsOpen(true);
+    } else if (item.kind === "command" && item.commandId) {
+      executeCommand(item.commandId as CommandId);
+    }
+  }, [executeCommand, selectAgent, selectProject, selectScreen]);
+
+  const handleAttentionSelect = useCallback((item: AttentionItem) => {
+    setAttentionItems((items) => markAttentionRead(items, new Set([item.id])));
+    setAttentionOpen(false);
+    if (agentsRef.current.some((agent) => agent.id === item.agentId)) {
+      selectAgent(item.agentId);
+    }
+  }, [selectAgent]);
+
+  const attentionUnreadCount = useMemo(
+    () => attentionItems.filter((item) => !item.read).length,
+    [attentionItems]
   );
 
   // ---- Derived
@@ -2253,6 +2714,10 @@ function App() {
           handleDesktopPetEnabledChange(!desktopPetEnabled)
         }
         onOpenNewWindow={openNewAppWindow}
+        onOpenQuickOpen={() => setQuickOpen(true)}
+        quickOpenShortcut={commandShortcuts["quick-open"]}
+        onOpenAttention={() => setAttentionOpen(true)}
+        attentionUnreadCount={attentionUnreadCount}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((open) => !open)}
         onRemove={removeAgent}
@@ -2321,6 +2786,8 @@ function App() {
           desktopPetAvailable={!isSecondaryWindow}
           onDesktopPetEnabledChange={handleDesktopPetEnabledChange}
           onResetDesktopPetPosition={resetDesktopPetPosition}
+          commandShortcuts={commandShortcuts}
+          onCommandShortcutsChange={setCommandShortcuts}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -2382,6 +2849,27 @@ function App() {
         onSelect={selectAgent}
         onDismiss={dismissToast}
       />
+      {quickOpen && (
+        <QuickOpen
+          items={quickOpenItems}
+          loadingDocuments={quickDocumentsLoading}
+          onSelect={handleQuickOpenSelect}
+          onClose={() => setQuickOpen(false)}
+        />
+      )}
+      {attentionOpen && (
+        <AttentionCenter
+          items={attentionItems}
+          onSelect={handleAttentionSelect}
+          onMarkAllRead={() =>
+            setAttentionItems((items) => markAttentionRead(items))
+          }
+          onClearRead={() =>
+            setAttentionItems((items) => items.filter((item) => !item.read))
+          }
+          onClose={() => setAttentionOpen(false)}
+        />
+      )}
       {imageViewer && (
         <ImageViewer
           path={imageViewer.path}

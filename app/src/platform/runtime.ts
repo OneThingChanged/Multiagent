@@ -6,14 +6,30 @@ import {
 } from "@tauri-apps/api/window";
 import { getCurrentWebview as getTauriCurrentWebview } from "@tauri-apps/api/webview";
 import { electronBridge } from "./electronBridge";
+import type {
+  RuntimeCommand,
+  RuntimeCommandArgs,
+  RuntimeCommandResult,
+  RuntimeEmittedEventName,
+  RuntimeEventName,
+  TypedRuntimeCommand,
+} from "./ipcContract";
 
 export { UserAttentionType };
 
 export type RuntimeEvent<T> = { payload: T };
 export type RuntimeUnlisten = () => void;
 
+export function invoke<C extends TypedRuntimeCommand>(
+  command: C,
+  args: RuntimeCommandArgs<C>
+): Promise<RuntimeCommandResult<C>>;
+export function invoke<T = unknown>(
+  command: RuntimeCommand,
+  args?: Record<string, unknown>
+): Promise<T>;
 export async function invoke<T = unknown>(
-  command: string,
+  command: RuntimeCommand,
   args?: Record<string, unknown>
 ): Promise<T> {
   const bridge = electronBridge();
@@ -22,7 +38,7 @@ export async function invoke<T = unknown>(
 }
 
 export async function listen<T>(
-  eventName: string,
+  eventName: RuntimeEventName,
   listener: (event: RuntimeEvent<T>) => void
 ): Promise<RuntimeUnlisten> {
   const bridge = electronBridge();
@@ -32,7 +48,10 @@ export async function listen<T>(
   return tauriListen<T>(eventName, listener);
 }
 
-export async function emit(eventName: string, payload?: unknown): Promise<void> {
+export async function emit(
+  eventName: RuntimeEmittedEventName,
+  payload?: unknown
+): Promise<void> {
   const bridge = electronBridge();
   if (bridge) return bridge.emit(eventName, payload);
   await tauriEmit(eventName, payload);

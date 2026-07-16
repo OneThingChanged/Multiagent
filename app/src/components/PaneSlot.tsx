@@ -1,5 +1,10 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "../platform/runtime";
+import { isElectronRuntime } from "../platform/electronBridge";
+import type {
+  SpawnTerminalResult,
+  TerminalReplay,
+} from "../platform/ipcContract";
 import { toolForId } from "../types";
 import { buildSpawnArgs } from "../lib/spawn";
 import type {
@@ -30,6 +35,10 @@ import {
   formatDroppedPathForTerminal,
   hasExternalFiles,
 } from "../lib/fileDrop";
+import {
+  beginTerminalSync,
+  completeTerminalSync,
+} from "../lib/terminalDelivery";
 
 function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
@@ -122,7 +131,7 @@ export function PaneSlot({
     if (!entry.opened) {
       entry.term.open(entry.el);
       entry.opened = true;
-      if (freshlyCreated) {
+      if (freshlyCreated && !isElectronRuntime()) {
         const saved = loadScrollback(agentId);
         if (saved) {
           entry.term.write(saved);
@@ -137,6 +146,90 @@ export function PaneSlot({
     let lastCols = 0;
     let lastRows = 0;
     let debounceTimer: number | undefined;
+    let disposed = false;
+    let attachStarted = false;
+
+    const restoreSavedScrollback = (target: TerminalEntry) => {
+      if (
+        target.restoredScrollback ||
+        !target.restoreScrollbackOnAttach
+      ) return;
+      const saved = loadScrollback(agentId);
+      if (saved) {
+        target.term.write(saved);
+        target.term.write(
+          "\r\n\x1b[2m--- restored from previous session ---\x1b[0m\r\n"
+        );
+      }
+      target.restoredScrollback = true;
+      target.restoreScrollbackOnAttach = false;
+    };
+
+    const attachElectronView = async (
+      target: TerminalEntry,
+      cols: number,
+      rows: number
+    ) => {
+      beginTerminalSync(target);
+      let spawnResult: SpawnTerminalResult = { reattached: true };
+      if (!target.spawned) {
+        target.spawned = true;
+        const cur = activeAgentRef.current;
+        if (!cur || cur.id !== agentId) return;
+        target.spawnPromise = (async () => {
+          const { initCommand, ssh, cwd } = await buildSpawnArgs(
+            cur,
+            ctx.sessionPins,
+            setAgentSessionId
+          );
+          return invoke<SpawnTerminalResult>("spawn_pty", {
+            id: agentId,
+            shell: null,
+            cwd,
+            initCommand,
+            aiToolId: cur.aiToolId,
+            ssh,
+            cols,
+            rows,
+          });
+        })();
+      }
+      if (target.spawnPromise) {
+        const pendingSpawn = target.spawnPromise;
+        spawnResult = await pendingSpawn;
+        if (target.spawnPromise === pendingSpawn) target.spawnPromise = null;
+        if (spawnResult.cancelled) {
+          target.spawned = false;
+          target.syncing = false;
+          return;
+        }
+        target.restoreScrollbackOnAttach = !spawnResult.reattached;
+      }
+      if (disposed) return;
+
+      restoreSavedScrollback(target);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const replay = await invoke<TerminalReplay>("attach_terminal", {
+          id: agentId,
+          afterSequence: target.lastSequence,
+        });
+        if (disposed) {
+          await invoke("detach_terminal", { id: agentId }).catch(() => {});
+          return;
+        }
+        target.attached = true;
+        const result = completeTerminalSync(
+          target,
+          replay,
+          (data) => target.term.write(data)
+        );
+        if (result !== "gap") {
+          await invoke("resize_pty", { id: agentId, cols, rows }).catch(() => {});
+          return;
+        }
+      }
+      throw new Error("터미널 출력 동기화를 완료하지 못했습니다.");
+    };
 
     const apply = () => {
       const e = termsRef.current.get(agentId);
@@ -150,7 +243,29 @@ export function PaneSlot({
       const { cols, rows } = e.term;
       if (cols < 2 || rows < 2) return;
 
-      if (!e.spawned) {
+      if (isElectronRuntime()) {
+        if (!attachStarted) {
+          attachStarted = true;
+          lastCols = cols;
+          lastRows = rows;
+          void attachElectronView(e, cols, rows).catch((err) => {
+            if (disposed) return;
+            e.spawned = false;
+            e.spawnPromise = null;
+            e.attached = false;
+            e.syncing = false;
+            e.term.write(`\r\n\x1b[31mspawn/attach failed: ${err}\x1b[0m\r\n`);
+            setAgentStatus(agentId, "exited");
+          });
+        } else if (
+          e.attached &&
+          (cols !== lastCols || rows !== lastRows)
+        ) {
+          lastCols = cols;
+          lastRows = rows;
+          invoke("resize_pty", { id: agentId, cols, rows }).catch(() => {});
+        }
+      } else if (!e.spawned) {
         e.spawned = true;
         lastCols = cols;
         lastRows = rows;
@@ -364,6 +479,12 @@ export function PaneSlot({
     });
 
     return () => {
+      disposed = true;
+      entry!.attached = false;
+      if (isElectronRuntime() && attachStarted) {
+        beginTerminalSync(entry!);
+        invoke("detach_terminal", { id: agentId }).catch(() => {});
+      }
       ro.disconnect();
       window.clearTimeout(debounceTimer);
       container.removeEventListener("mousedown", linkMouseDownHandler, {

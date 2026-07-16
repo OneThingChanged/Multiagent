@@ -50,6 +50,25 @@ export function resolveRemoteToolCommand(
   return command;
 }
 
+function currentPlatform(): string {
+  if (typeof navigator === "undefined") return "";
+  return `${navigator.userAgent} ${navigator.platform}`;
+}
+
+export function resolveLocalToolCommand(
+  aiToolId: string,
+  command: string,
+  platform = currentPlatform()
+): string {
+  if (!/(?:win32|windows|win64)/i.test(platform)) return command;
+
+  // npm installs both .ps1 and .cmd launchers on Windows. PowerShell resolves
+  // the blocked .ps1 first on restricted PCs, while the .cmd shim is safe.
+  if (aiToolId === "codex" && command === "codex") return "codex.cmd";
+  if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  return command;
+}
+
 // Builds the spawn_pty arguments for an agent: resolves the resume session id
 // (codex resume / claude --resume), appends the dangerous flag, and assembles
 // the ssh descriptor for remote hosts. Shared by the visible-pane spawn
@@ -64,7 +83,9 @@ export async function buildSpawnArgs(
   let initCommand: string | null = null;
 
   if (tool.command) {
-    let cmd = resolveRemoteToolCommand(agent.aiToolId, tool.command, sshHost);
+    let cmd = sshHost
+      ? resolveRemoteToolCommand(agent.aiToolId, tool.command, sshHost)
+      : resolveLocalToolCommand(agent.aiToolId, tool.command);
     if (sshHost) {
       // Windows remote (Phase 2): remote hooks capture session_id into
       // lastSessionId, so resume directly (no local-disk resolve, which can't

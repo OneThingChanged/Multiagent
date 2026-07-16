@@ -25,6 +25,8 @@ import {
 } from "../lib/notificationSound";
 import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
 import { SshSetupGuide } from "./SshSetupGuide";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
+import type { CommandShortcuts } from "../lib/commandRegistry";
 import type { SshHost } from "../types";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
@@ -114,6 +116,18 @@ type HookRepairState =
   | { status: "done"; summary: HookRepairSummary }
   | { status: "error"; message: string };
 
+type DiagnosticExportState =
+  | { status: "idle" }
+  | { status: "running" }
+  | {
+      status: "done";
+      path: string;
+      terminalCount: number;
+      hookHealthy: boolean;
+    }
+  | { status: "cancelled" }
+  | { status: "error"; message: string };
+
 type SettingsTab = "general" | "dashboard" | "remote" | "ssh" | "about";
 
 const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
@@ -155,6 +169,8 @@ export function SettingsModal({
   desktopPetAvailable,
   onDesktopPetEnabledChange,
   onResetDesktopPetPosition,
+  commandShortcuts,
+  onCommandShortcutsChange,
   onClose,
 }: {
   theme: AppThemeId;
@@ -163,6 +179,8 @@ export function SettingsModal({
   desktopPetAvailable: boolean;
   onDesktopPetEnabledChange: (enabled: boolean) => void;
   onResetDesktopPetPosition: () => void;
+  commandShortcuts: CommandShortcuts;
+  onCommandShortcutsChange: (shortcuts: CommandShortcuts) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>("general");
@@ -222,6 +240,8 @@ export function SettingsModal({
   const [hookRepair, setHookRepair] = useState<HookRepairState>({
     status: "idle",
   });
+  const [diagnosticExport, setDiagnosticExport] =
+    useState<DiagnosticExportState>({ status: "idle" });
 
   const [sshHosts, setSshHosts] = useState<SshHost[]>(() => loadSshHosts());
   const [sshDraft, setSshDraft] = useState<SshHost>(() => emptySshDraft());
@@ -549,6 +569,30 @@ export function SettingsModal({
     }
   };
 
+  const handleDiagnosticExport = async () => {
+    setDiagnosticExport({ status: "running" });
+    try {
+      const result = await invoke<{
+        path: string;
+        terminalCount: number;
+        hookHealthy: boolean;
+      } | null>("export_diagnostics");
+      setDiagnosticExport(
+        result ? { status: "done", ...result } : { status: "cancelled" }
+      );
+    } catch (err) {
+      setDiagnosticExport({
+        status: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : typeof err === "string"
+              ? err
+              : "진단 번들을 저장하지 못했습니다.",
+      });
+    }
+  };
+
   const applySound = (next: NotificationSoundConfig) => {
     setSound(next);
     saveNotificationSound(next);
@@ -705,6 +749,19 @@ export function SettingsModal({
         </div>
 
         <div className="app-settings-section">
+          <div className="field-label">Keyboard shortcuts</div>
+          <div className="app-about-card">
+            <div className="app-update-message">
+              버튼을 누른 뒤 새 단축키를 입력하세요. Backspace로 해제하고 Esc로 취소할 수 있습니다.
+            </div>
+            <KeyboardShortcuts
+              shortcuts={commandShortcuts}
+              onChange={onCommandShortcutsChange}
+            />
+          </div>
+        </div>
+
+        <div className="app-settings-section">
           <div className="field-label">Notification sound</div>
           <div className="app-theme-options">
             {SOUND_MODES.map((option) => (
@@ -784,7 +841,7 @@ export function SettingsModal({
           <div className="app-about-card">
             <div className="app-update-message">
               {hookRepair.status === "idle" &&
-                "실제로 실행 중인 PTY와 Codex/Claude 세션을 비교하고, 누락되거나 손상된 Hook 설정·helper·로컬 연결을 다시 구성합니다."}
+                "실행 중인 PTY와 Codex/Claude Hook 상태를 1분마다 자동 점검합니다. 아래 버튼은 helper·설정·로컬 연결을 즉시 다시 구성합니다. Codex가 변경된 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다."}
               {hookRepair.status === "running" && "Hook 상태를 점검하고 복구하는 중입니다..."}
               {hookRepair.status === "error" && (
                 <span className="app-update-error">{hookRepair.message}</span>
@@ -798,7 +855,7 @@ export function SettingsModal({
                     : ""}
                   {hookRepair.summary.restartRequired > 0 && (
                     <div className="app-update-error">
-                      원격 세션 {hookRepair.summary.restartRequired}개는 SSH 역터널 재생성이 필요하므로 세션을 다시 열어주세요.
+                      Hook 정의 또는 SSH 연결이 바뀐 세션 {hookRepair.summary.restartRequired}개는 다시 열어주세요. Codex가 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.
                     </div>
                   )}
                   {hookRepair.summary.failures.map((failure) => (
@@ -1541,6 +1598,40 @@ export function SettingsModal({
                 onClick={handleOpenReleases}
               >
                 Releases
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">Support diagnostics</div>
+          <div className="app-about-card">
+            <div
+              className={`app-update-message ${
+                diagnosticExport.status === "error" ? "app-update-error" : ""
+              }`}
+            >
+              {diagnosticExport.status === "idle" &&
+                "앱·터미널·Hook·업데이트 상태와 제한된 로그를 JSON으로 저장합니다. 토큰·비밀번호와 사용자 홈 경로는 자동으로 제거됩니다."}
+              {diagnosticExport.status === "running" && "진단 정보를 수집하는 중입니다..."}
+              {diagnosticExport.status === "cancelled" && "저장을 취소했습니다."}
+              {diagnosticExport.status === "error" && diagnosticExport.message}
+              {diagnosticExport.status === "done" && (
+                <>
+                  저장 완료 · 터미널 {diagnosticExport.terminalCount}개 · Hook {diagnosticExport.hookHealthy ? "정상" : "점검 필요"}
+                  <div title={diagnosticExport.path}>{diagnosticExport.path}</div>
+                </>
+              )}
+            </div>
+            <div className="app-update-actions">
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleDiagnosticExport}
+                disabled={diagnosticExport.status === "running"}
+              >
+                {diagnosticExport.status === "running"
+                  ? "수집 중..."
+                  : "진단 번들 저장"}
               </button>
             </div>
           </div>

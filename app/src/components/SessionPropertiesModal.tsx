@@ -17,7 +17,10 @@ const STATUS_LABEL: Record<string, string> = {
   starting: "시작 중",
   running: "실행 중",
   working: "작업 중",
+  waiting: "응답 대기",
+  blocked: "확인 필요",
   exited: "종료됨",
+  unreachable: "연결 끊김",
 };
 
 export function SessionPropertiesModal({
@@ -49,6 +52,19 @@ export function SessionPropertiesModal({
     { label: "프로젝트", value: project?.name ?? "—" },
     { label: "도구", value: tool.label },
     { label: "상태", value: STATUS_LABEL[agent.status] ?? agent.status },
+    ...(agent.activity
+      ? [
+          {
+            label: "작업 상태",
+            value: STATUS_LABEL[agent.activity.workStatus] ?? agent.activity.workStatus,
+          },
+          {
+            label: "최근 Hook",
+            value: agent.activity.hookEventName ?? "—",
+            mono: true,
+          },
+        ]
+      : []),
     {
       label: "원격 호스트",
       value: sshHost ? sshHostSummary(sshHost) : "로컬",

@@ -36,9 +36,22 @@ renderer가 임의 명령 이름으로 Node/PTY에 접근하는 범용 IPC는 �
 - UTF-8 `notify.ps1`, `hook-info.json`, `hook.log`
 - 사용자 Hook을 보존하는 Claude JSON/Codex TOML managed merge
 - 실행 중 PTY와 설정을 비교하는 설정 > **Hook 점검 및 복구**
+- Hook 서버/helper/활성 local 프로젝트를 1분마다 확인하는 무중단 자동 유지보수
 - 포트가 바뀐 경우 `hook-info.json` fallback으로 살아 있는 helper 자동 복구
 - SSH 세션의 `ssh -R` 역방향 포워딩과 원격 Node bootstrap
 - Windows/POSIX 원격의 Claude/Codex Hook 파일 생성
+
+상태는 PTY 생존을 나타내는 runtime 축과 provider 작업을 나타내는 activity 축으로
+분리했다. Codex는 `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`PermissionRequest`, `PostToolUse`, `Stop`을 전달하고 Claude는 여기에
+`PostToolUseFailure`, `StopFailure`를 더한다. `AskUserQuestion`은 `waiting`, 복구 가능한
+tool failure는 `working`, 턴을 끝낸 API `StopFailure`는 `blocked`로 표시된다. 30분 동안 새 event가 없는 working 표시는 완료로 오판하지 않고
+살아 있는 PTY의 `running`으로 낮춘다.
+
+Codex는 변경된 project Hook을 hash 기준으로 재검토하므로 최초 확장 또는 복구 뒤 시작
+경고가 나오면 `/hooks`에서 MultiAgent command를 확인하고 신뢰해야 한다. 앱 소유 Hook만
+선택적으로 우회할 수 없으므로 다른 사용자 Hook까지 실행하는
+`--dangerously-bypass-hook-trust`는 자동으로 붙이지 않는다.
 
 `app/electron/services/session-service.mjs`는 Codex/Claude transcript를 스캔해 선호 session ID를
 검증하고, 없으면 같은 작업 폴더의 최신 세션으로 resume/relink한다. PowerShell helper를
@@ -48,8 +61,22 @@ renderer가 임의 명령 이름으로 Node/PTY에 접근하는 범용 IPC는 �
 
 - `node-pty`의 spawn/write/resize/kill과 packaged native module 왕복 확인
 - Codex가 내보내는 `CSI 3 J`만 chunk 경계까지 추적해 제거. 다른 ANSI sequence는 보존
-- main에 PTY별 512K 문자 bounded buffer를 두어 renderer reload 시 살아 있는 PTY 재부착
-- xterm scrollback은 5,000줄로 제한되어 숨은 pane도 무제한 메모리를 사용하지 않음
+- main에 PTY별 512K 문자 bounded sequence model을 두고 `baseSequence`와
+  `nextSequence` 사이를 증분 replay
+- 보이는 renderer만 PTY output을 구독한다. pane/tab 전환·Screen 이동은 detach/attach하고,
+  숨은 세션 출력은 main model에만 쌓여 renderer queue를 늘리지 않는다.
+- attach 중 도착한 live output을 queue한 뒤 replay sequence와 겹치는 부분을 제거한다.
+  buffer가 잘렸거나 이전 process cursor가 들어오면 retained reset snapshot으로 복구한다.
+- renderer reload에서 살아 있는 PTY는 main model만 replay하고, 새 PTY일 때만 저장된
+  xterm scrollback을 먼저 복원해 같은 출력의 이중 표시를 막는다.
+- xterm scrollback은 5,000줄, main model은 512K 문자로 제한한다.
+- `detach / sleep / close / restart / quit`을 서로 다른 session action으로 정의한다.
+  close-before-spawn과 old-exit-after-restart race는 main generation/entry identity로 막는다.
+- terminal session owner와 IPC handler를 각각
+  `app/electron/services/terminal-session-service.mjs`,
+  `app/electron/handlers/terminal-handlers.mjs`로 분리했다.
+- command/event allowlist와 main validator는 `app/electron/ipc-contract.cjs`, renderer의
+  terminal 요청/응답 타입은 `app/src/platform/ipcContract.ts`가 소유한다.
 - Claude/Codex 공통 네이티브 clipboard
   - 선택 + `Ctrl+C`/`Ctrl+Shift+C`: 복사
   - 선택 없음 + `Ctrl+C`: ETX 인터럽트
@@ -63,7 +90,7 @@ renderer가 임의 명령 이름으로 Node/PTY에 접근하는 범용 IPC는 �
 
 1. 실행 중 agent ID 저장
 2. localStorage snapshot 저장
-3. Codex/Claude에 `/quit` 전송
+3. Codex/Claude 세션에 명시적 `quit` action 전송
 4. xterm scrollback 직렬화
 5. Electron main에 `confirm_close`
 6. 모든 PTY, Dashboard, Remote, Tunnel, Pet 창과 앱 프로세스 종료
@@ -112,8 +139,28 @@ source key로 중복을 막는다. Hook `done` 때 해당 transcript를 자동 �
 
 `electron-updater`를 GitHub `OneThingChanged/Multiagent` 채널에 연결했다. 다운로드 progress는
 기존 Settings UI contract로 전달하고, 다운로드 후 relaunch가 `quitAndInstall`을 호출한다.
+check는 30초, download는 15분 제한을 두며 단계별 기록을
+`%LOCALAPPDATA%\com.jintae.multiagent\electron-updater.log`에 bounded 상태와 함께 남긴다.
+설치 종료가 20초 안에 시작되지 않으면 watchdog이 앱 프로세스를 정리한다. 동기
+`quitAndInstall` 실패는 창 닫기 잠금을 되돌려 사용자가 다시 시도할 수 있다.
 실제 자동 업데이트는 첫 Electron `latest.yml`/NSIS/blockmap release와 Windows 코드 서명이
 게시된 뒤 다른 PC에서 최종 확인해야 한다.
+
+설정 → **About → Support diagnostics**는 앱/runtime 버전, PTY metadata, Hook health와 최근
+event metadata, updater lifecycle, 제한된 Hook/updater 로그를 JSON으로 저장한다. terminal
+출력과 prompt는 제외하고 token/password/secret 및 사용자 home path는 내보내기 전에
+redact한다.
+
+### Quick Open, Command Registry, Attention Center
+
+- Sidebar의 **Quick Open** 또는 `Ctrl+K`에서 프로젝트·세션·Screen·로컬 문서·명령을
+  통합 검색한다. 문서는 열 때 모든 로컬 프로젝트의 기존 bounded docs scanner를 사용한다.
+- `app/src/lib/commandRegistry.ts`가 명령 metadata와 기본/사용자 단축키를 소유한다.
+  설정 General 탭에서 새 조합을 기록하고 중복·해제·기본값 복원을 처리한다.
+- `app/src/lib/attention.ts`가 최대 100개 Attention 항목을 runtime-local localStorage에
+  보존한다. provider session ID로 waiting/blocked/stale/completed를 중복 제거한다.
+- Hook 진행 재개 시 해결된 대기/차단 항목을 제거하고, 완료·stale·작업 중 PTY exit는
+  읽지 않은 항목으로 남긴다. 항목을 누르면 해당 세션으로 이동한다.
 
 `-electron.*` prerelease 빌드는 Tauri의 GitHub Latest 채널과 분리된 고정
 `electron-test` 릴리스 asset URL을 사용한다. 최초 `0.5.28` Electron 시험본만 기존 Latest
@@ -146,10 +193,13 @@ npm run electron:portable-lifecycle-smoke
 
 자동 검증 범위:
 
-- 13개 test file, 67개 unit/integration test
+- 23개 test file, 109개 unit/integration test
 - `node-pty` 단독 및 renderer → preload → main → PTY → renderer 왕복
 - 한글 PowerShell Hook, Hook auth/merge/repair contract
-- session resolve/fallback, terminal path, CSI 3 J split sequence, bounded buffer
+- session resolve/fallback, terminal path, CSI 3 J split sequence, bounded sequence replay
+- hidden view delivery 제한, replay/live 중복 제거, move detach/attach, lifecycle race/멱등성,
+  typed IPC validation
+- command shortcut 정규화/충돌, Quick Open 한글·prefix 검색, Attention dedupe/해결/상한
 - SSH 인수/Windows 인코딩/remote Hook bootstrap
 - Usage SQLite 증분/멱등 적재, Dashboard HTTP state
 - source와 packaged renderer의 close/security lifecycle
