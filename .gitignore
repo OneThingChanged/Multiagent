@@ -28,3 +28,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only research and third-party comparison notes
+/local-research/
