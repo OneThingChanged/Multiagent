@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LS_COMMAND_SHORTCUTS,
   commandForKeyboardEvent,
   conflictingShortcutIds,
   defaultCommandShortcuts,
+  loadCommandShortcuts,
   normalizeShortcut,
   shortcutFromKeyboardEvent,
 } from "./commandRegistry";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("command registry", () => {
   it("normalizes and matches keyboard shortcuts", () => {
@@ -24,5 +28,23 @@ describe("command registry", () => {
     expect(conflictingShortcutIds(shortcuts)).toEqual(
       new Set(["quick-open", "attention-center"])
     );
+  });
+
+  it("uses Ctrl+Shift+T to reopen a closed tab", () => {
+    const shortcuts = defaultCommandShortcuts();
+    expect(shortcuts["reopen-closed-tab"]).toBe("Ctrl+Shift+T");
+    expect(shortcuts["new-project"]).toBe("Ctrl+Shift+P");
+  });
+
+  it("migrates the previous new-project default without creating a conflict", () => {
+    const stored = JSON.stringify({ "new-project": "Ctrl+Shift+T" });
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => key === LS_COMMAND_SHORTCUTS ? stored : null,
+    });
+
+    const shortcuts = loadCommandShortcuts();
+    expect(shortcuts["new-project"]).toBe("Ctrl+Shift+P");
+    expect(shortcuts["reopen-closed-tab"]).toBe("Ctrl+Shift+T");
+    expect(conflictingShortcutIds(shortcuts)).toEqual(new Set());
   });
 });

@@ -90,6 +90,26 @@ it("makes duplicate close idempotent and ignores a late exit", () => {
   expect(exits).toEqual([]);
 });
 
+it("uses an entry process-tree terminator before the PTY fallback", () => {
+  const service = new TerminalSessionService();
+  const pty = fakePty();
+  const terminate = vi.fn(() => true);
+  register(service, "agent-tree", pty, { terminate });
+
+  expect(service.close("agent-tree", "sleep")).toBe(true);
+  expect(terminate).toHaveBeenCalledTimes(1);
+  expect(pty.kill).not.toHaveBeenCalled();
+});
+
+it("falls back to PTY kill when process-tree termination fails", () => {
+  const service = new TerminalSessionService();
+  const pty = fakePty();
+  register(service, "agent-tree", pty, { terminate: () => false });
+
+  expect(service.close("agent-tree", "restart")).toBe(true);
+  expect(pty.kill).toHaveBeenCalledTimes(1);
+});
+
 it("does not let an in-flight spawn resurrect a session after close", () => {
   const service = new TerminalSessionService();
   const process = fakePty();

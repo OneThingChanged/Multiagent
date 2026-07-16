@@ -299,6 +299,77 @@ describe("closeTab", () => {
     expect(remaining?.sessionLocked).toBe(true);
     expect(remaining?.sessionPins).toEqual({ a: "session-a" });
   });
+
+  it("reopens a detached tab at its original index without restarting it", () => {
+    const initial = ops.openAsTab(leafState(["a", "b"]), "b");
+    const closed = ops.closeTabWithHistory(initial, [], "a");
+
+    expect(closed.closed).toBeTruthy();
+    const reopened = ops.reopenClosedTab(closed.state, closed.closed!);
+    expect(reopened.restored).toBe(true);
+    expect(reopened.state.activeGroupId).toBe("g-a");
+    expect(reopened.state.activePath).toEqual([]);
+    const leaf = leafAt(reopened.state, "g-a", []);
+    expect(leaf?.type).toBe("leaf");
+    if (leaf?.type === "leaf") {
+      expect(leaf.tabs).toEqual(["a", "b"]);
+      expect(leaf.activeIndex).toBe(0);
+    }
+    expect(reopened.state.groups.filter((group) =>
+      collectAgentIds(group.layout).has("a")
+    )).toHaveLength(1);
+  });
+
+  it("restores a collapsed split with its original sizes and path", () => {
+    let initial = leafState(["a", "b"]);
+    initial = ops.splitWith(initial, "b", "h");
+    const screen = initial.groups.find((group) => group.id === "g-a")!;
+    if (screen.layout.type !== "split") throw new Error("expected split");
+    screen.layout.sizes = [0.35, 0.65];
+
+    const closed = ops.closeTabWithHistory(initial, [1], "b");
+    expect(closed.state.groups.find((group) => group.id === "g-a")?.layout.type)
+      .toBe("leaf");
+
+    const reopened = ops.reopenClosedTab(closed.state, closed.closed!);
+    const restored = reopened.state.groups.find((group) => group.id === "g-a");
+    expect(restored?.layout.type).toBe("split");
+    if (restored?.layout.type === "split") {
+      expect(restored.layout.sizes).toEqual([0.35, 0.65]);
+      expect(findLeafPath(restored.layout, "b")).toEqual([1]);
+    }
+    expect(reopened.state.activePath).toEqual([1]);
+  });
+
+  it("reopens consecutive closes in last-closed-first order", () => {
+    const initial = ops.openAsTab(leafState(["a", "b"]), "b");
+    const first = ops.closeTabWithHistory(initial, [], "a");
+    const second = ops.closeTabWithHistory(first.state, [], "b");
+
+    const reopenSecond = ops.reopenClosedTab(second.state, second.closed!);
+    const reopenFirst = ops.reopenClosedTab(reopenSecond.state, first.closed!);
+    const leaf = leafAt(reopenFirst.state, "g-a", []);
+    expect(leaf?.type).toBe("leaf");
+    if (leaf?.type === "leaf") expect(leaf.tabs).toEqual(["a", "b"]);
+  });
+
+  it("falls back to the surviving pane when the original leaf changed", () => {
+    let initial = leafState(["a", "b", "c"]);
+    initial = ops.splitWith(initial, "b", "h");
+    const closed = ops.closeTabWithHistory(initial, [1], "b");
+    const changed = ops.openAsTab(
+      { ...closed.state, activeGroupId: "g-a", activePath: [] },
+      "c"
+    );
+
+    const reopened = ops.reopenClosedTab(changed, closed.closed!);
+    expect(reopened.restored).toBe(true);
+    const target = reopened.state.groups.find((group) => group.id === "g-a");
+    expect(target).toBeTruthy();
+    expect(collectAgentIds(target?.layout ?? null)).toEqual(
+      new Set(["a", "b", "c"])
+    );
+  });
 });
 
 describe("setActiveTabInPane", () => {

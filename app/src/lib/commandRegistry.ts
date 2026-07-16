@@ -34,7 +34,7 @@ export const COMMAND_DEFINITIONS = [
     title: "새 프로젝트",
     description: "새 작업 폴더 등록",
     keywords: "folder add create",
-    defaultShortcut: "Ctrl+Shift+T",
+    defaultShortcut: "Ctrl+Shift+P",
   },
   {
     id: "close-pane",
@@ -42,6 +42,13 @@ export const COMMAND_DEFINITIONS = [
     description: "세션 PTY는 유지하고 현재 Screen에서 분리",
     keywords: "detach hide tab pane",
     defaultShortcut: "Ctrl+W",
+  },
+  {
+    id: "reopen-closed-tab",
+    title: "최근 닫은 탭 다시 열기",
+    description: "마지막으로 닫은 탭을 원래 Screen과 패널에 복원",
+    keywords: "restore reopen undo close tab 복원",
+    defaultShortcut: "Ctrl+Shift+T",
   },
   {
     id: "toggle-docs",
@@ -160,6 +167,14 @@ export function loadCommandShortcuts(): CommandShortcuts {
       if (typeof stored === "string") {
         defaults[command.id] = normalizeShortcut(stored);
       }
+    }
+    if (
+      !("reopen-closed-tab" in parsed) &&
+      normalizeShortcut(String(parsed["new-project"] ?? "")) ===
+        "Ctrl+Shift+T"
+    ) {
+      defaults["new-project"] = "Ctrl+Shift+P";
+      defaults["reopen-closed-tab"] = "Ctrl+Shift+T";
     }
   } catch {}
   return defaults;

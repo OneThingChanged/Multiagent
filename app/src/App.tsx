@@ -140,6 +140,7 @@ const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
 const DEFAULT_DOCS_WIDTH = 640;
 const MIN_DOCS_WIDTH = 360;
 const MIN_WORKSPACE_WIDTH = 260;
+const MAX_RECENTLY_CLOSED_TABS = 20;
 
 type DocsRequest = {
   projectId: string;
@@ -601,6 +602,7 @@ function App() {
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
   const executeCommandRef = useRef<((commandId: CommandId) => void) | null>(null);
+  const recentlyClosedTabsRef = useRef<groupOps.ClosedTabHistoryEntry[]>([]);
 
   const syncSharedStateFromStorage = useCallback(() => {
     const projectsRaw = readLocalStorageValue(LS_PROJECTS);
@@ -1617,6 +1619,15 @@ function App() {
     []
   );
 
+  const commitGroupState = useCallback((next: groupOps.GroupState) => {
+    groupsRef.current = next.groups;
+    activeGroupIdRef.current = next.activeGroupId;
+    activePathRef.current = next.activePath;
+    setGroups(next.groups);
+    setActiveGroupId(next.activeGroupId);
+    setActivePath(next.activePath);
+  }, []);
+
   const activateAgentProject = useCallback((agentId: string) => {
     const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
     if (!agent) return null;
@@ -1760,18 +1771,45 @@ function App() {
     [activateAgentProject, applyGroupOp]
   );
 
-  const closeTab = useCallback(
-    (path: Path, agentId: string) =>
-      applyGroupOp((s) =>
-        groupOps.closeTab(
-          s,
-          path,
-          agentId,
-          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
-        )
-      ),
-    [applyGroupOp]
-  );
+  const closeTab = useCallback((path: Path, agentId: string) => {
+    const result = groupOps.closeTabWithHistory(
+      {
+        groups: groupsRef.current,
+        activeGroupId: activeGroupIdRef.current,
+        activePath: activePathRef.current,
+      },
+      path,
+      agentId,
+      agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+    );
+    if (!result.closed) return;
+    recentlyClosedTabsRef.current = [
+      ...recentlyClosedTabsRef.current.slice(-(MAX_RECENTLY_CLOSED_TABS - 1)),
+      result.closed,
+    ];
+    commitGroupState(result.state);
+  }, [commitGroupState]);
+
+  const reopenClosedTab = useCallback(() => {
+    while (recentlyClosedTabsRef.current.length > 0) {
+      const closed = recentlyClosedTabsRef.current.pop()!;
+      if (!agentsRef.current.some((agent) => agent.id === closed.agentId)) {
+        continue;
+      }
+      const result = groupOps.reopenClosedTab(
+        {
+          groups: groupsRef.current,
+          activeGroupId: activeGroupIdRef.current,
+          activePath: activePathRef.current,
+        },
+        closed
+      );
+      if (!result.restored) continue;
+      commitGroupState(result.state);
+      activateAgentProject(closed.agentId);
+      return;
+    }
+  }, [activateAgentProject, commitGroupState]);
 
   useEffect(() => {
     closeTabRef.current = closeTab;
@@ -2469,6 +2507,9 @@ function App() {
         }
         break;
       }
+      case "reopen-closed-tab":
+        reopenClosedTab();
+        break;
       case "toggle-docs":
         setDocsOpen((open) => {
           if (!open) setDocsRequest(null);
@@ -2488,7 +2529,7 @@ function App() {
         setSettingsOpen(true);
         break;
     }
-  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, toggleAlwaysOnTop]);
+  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, reopenClosedTab, toggleAlwaysOnTop]);
 
   useEffect(() => {
     executeCommandRef.current = executeCommand;
@@ -2974,7 +3015,12 @@ function App() {
       {tabContextMenu && (
         <TabContextMenu
           state={tabContextMenu}
+          canReopen={recentlyClosedTabsRef.current.length > 0}
           onClose={() => setTabContextMenu(null)}
+          onReopen={() => {
+            reopenClosedTab();
+            setTabContextMenu(null);
+          }}
           onCloseTab={() => {
             closeTab(tabContextMenu.path, tabContextMenu.agentId);
             setTabContextMenu(null);

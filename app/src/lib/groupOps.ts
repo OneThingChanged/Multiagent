@@ -1,6 +1,7 @@
 import type { DropZone, Group, LayoutNode, Path } from "../types";
 import {
   addTabToLeafAt,
+  collectAgentIds,
   findLeafPath,
   findLeafPathById,
   firstLeafPath,
@@ -20,6 +21,28 @@ export type GroupState = {
   groups: Group[];
   activeGroupId: string | null;
   activePath: Path | null;
+};
+
+export type ClosedTabHistoryEntry = {
+  agentId: string;
+  sourceGroup: Group;
+  sourceGroupIndex: number;
+  sourcePath: Path;
+  sourceLeafId: string;
+  sourceTabIndex: number;
+  sourceAfterClose: Group | null;
+  detachedGroup: Group;
+  closedAt: number;
+};
+
+export type CloseTabResult = {
+  state: GroupState;
+  closed: ClosedTabHistoryEntry | null;
+};
+
+export type ReopenClosedTabResult = {
+  state: GroupState;
+  restored: boolean;
 };
 
 function placeIntoSoloGroup(
@@ -275,6 +298,217 @@ export function closeTab(
     groups: nextGroups,
     activeGroupId: state.activeGroupId,
     activePath: firstLeafPath(newLayout),
+  };
+}
+
+export function closeTabWithHistory(
+  state: GroupState,
+  path: Path,
+  agentId: string,
+  projectId?: string
+): CloseTabResult {
+  const sourceGroupIndex = state.groups.findIndex(
+    (group) => group.id === state.activeGroupId
+  );
+  const sourceGroup = state.groups[sourceGroupIndex];
+  const sourceLeaf = sourceGroup ? getAt(sourceGroup.layout, path) : null;
+  if (
+    !sourceGroup ||
+    !sourceLeaf ||
+    sourceLeaf.type !== "leaf" ||
+    !sourceLeaf.tabs.includes(agentId)
+  ) {
+    return { state, closed: null };
+  }
+
+  const sourceTabIndex = sourceLeaf.tabs.indexOf(agentId);
+  const next = closeTab(state, path, agentId, projectId);
+  if (next === state) return { state, closed: null };
+
+  const detachedGroup = groupOf(next.groups, agentId);
+  if (!detachedGroup) return { state, closed: null };
+
+  return {
+    state: next,
+    closed: {
+      agentId,
+      sourceGroup,
+      sourceGroupIndex,
+      sourcePath: [...path],
+      sourceLeafId: sourceLeaf.id,
+      sourceTabIndex,
+      sourceAfterClose:
+        next.groups.find((group) => group.id === sourceGroup.id) ?? null,
+      detachedGroup,
+      closedAt: Date.now(),
+    },
+  };
+}
+
+function sameGroupSnapshot(left: Group | null, right: Group | null) {
+  if (!left || !right) return left === right;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function removeAgentFromGroups(groups: Group[], agentId: string) {
+  const next: Group[] = [];
+  for (const group of groups) {
+    const layout = pruneAgent(group.layout, agentId);
+    if (!layout) continue;
+    next.push(updateGroup([group], group.id, layout)[0]);
+  }
+  return next;
+}
+
+function insertTabAt(
+  layout: LayoutNode,
+  path: Path,
+  agentId: string,
+  requestedIndex: number
+) {
+  const leaf = getAt(layout, path);
+  if (!leaf || leaf.type !== "leaf") return layout;
+  const tabs = leaf.tabs.filter((tabId) => tabId !== agentId);
+  const index = Math.max(0, Math.min(requestedIndex, tabs.length));
+  tabs.splice(index, 0, agentId);
+  return setAt(layout, path, { ...leaf, tabs, activeIndex: index }) ?? layout;
+}
+
+function restoreGroupPin(group: Group, source: Group, agentId: string): Group {
+  const sessionId = source.sessionPins?.[agentId]?.trim();
+  if (!sessionId) return group;
+  return {
+    ...group,
+    sessionPins: { ...(group.sessionPins ?? {}), [agentId]: sessionId },
+    sessionLocked: source.sessionLocked || group.sessionLocked ? true : undefined,
+  };
+}
+
+export function reopenClosedTab(
+  state: GroupState,
+  closed: ClosedTabHistoryEntry
+): ReopenClosedTabResult {
+  const currentSource = state.groups.find(
+    (group) => group.id === closed.sourceGroup.id
+  ) ?? null;
+  const alreadyRestoredPath = currentSource
+    ? findLeafPath(currentSource.layout, closed.agentId)
+    : null;
+  if (currentSource && alreadyRestoredPath) {
+    return {
+      restored: true,
+      state: {
+        groups: updateGroup(
+          state.groups,
+          currentSource.id,
+          setLeafActiveTab(
+            currentSource.layout,
+            alreadyRestoredPath,
+            closed.agentId
+          )
+        ),
+        activeGroupId: currentSource.id,
+        activePath: alreadyRestoredPath,
+      },
+    };
+  }
+
+  const currentDetached = state.groups.find(
+    (group) => group.id === closed.detachedGroup.id
+  ) ?? null;
+  const sourceUnchanged = sameGroupSnapshot(
+    currentSource,
+    closed.sourceAfterClose
+  );
+  const detachedUnchanged = sameGroupSnapshot(
+    currentDetached,
+    closed.detachedGroup
+  );
+  const groupsWithoutAgent = removeAgentFromGroups(
+    state.groups,
+    closed.agentId
+  );
+
+  if (sourceUnchanged && detachedUnchanged) {
+    const restoredPath =
+      findLeafPath(closed.sourceGroup.layout, closed.agentId) ??
+      closed.sourcePath;
+    const restoredSource = {
+      ...closed.sourceGroup,
+      layout: setLeafActiveTab(
+        closed.sourceGroup.layout,
+        restoredPath,
+        closed.agentId
+      ) ?? closed.sourceGroup.layout,
+    };
+    const withoutSource = groupsWithoutAgent.filter(
+      (group) => group.id !== closed.sourceGroup.id
+    );
+    const insertIndex = Math.max(
+      0,
+      Math.min(closed.sourceGroupIndex, withoutSource.length)
+    );
+    const groups = [...withoutSource];
+    groups.splice(insertIndex, 0, restoredSource);
+    return {
+      restored: true,
+      state: {
+        groups,
+        activeGroupId: closed.sourceGroup.id,
+        activePath: restoredPath,
+      },
+    };
+  }
+
+  const target = groupsWithoutAgent.find(
+    (group) => group.id === closed.sourceGroup.id
+  );
+  if (target) {
+    const targetPath =
+      findLeafPathById(target.layout, closed.sourceLeafId) ??
+      (getAt(target.layout, closed.sourcePath)?.type === "leaf"
+        ? closed.sourcePath
+        : firstLeafPath(target.layout));
+    if (!targetPath) return { state, restored: false };
+    const layout = insertTabAt(
+      target.layout,
+      targetPath,
+      closed.agentId,
+      closed.sourceTabIndex
+    );
+    const restoredTarget = restoreGroupPin(
+      { ...target, layout },
+      closed.sourceGroup,
+      closed.agentId
+    );
+    return {
+      restored: true,
+      state: {
+        groups: groupsWithoutAgent.map((group) =>
+          group.id === target.id ? restoredTarget : group
+        ),
+        activeGroupId: target.id,
+        activePath: targetPath,
+      },
+    };
+  }
+
+  if (collectAgentIds(closed.sourceGroup.layout).size !== 1) {
+    return { state, restored: false };
+  }
+  const insertIndex = Math.max(
+    0,
+    Math.min(closed.sourceGroupIndex, groupsWithoutAgent.length)
+  );
+  const groups = [...groupsWithoutAgent];
+  groups.splice(insertIndex, 0, closed.sourceGroup);
+  return {
+    restored: true,
+    state: {
+      groups,
+      activeGroupId: closed.sourceGroup.id,
+      activePath: closed.sourcePath,
+    },
   };
 }
 

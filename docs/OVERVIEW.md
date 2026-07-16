@@ -64,7 +64,9 @@
 | 휠 스크롤 | 일반 버퍼는 항상 scrollback(mouse tracking 무시), 전체화면 TUI는 휠을 TUI에 전달(마우스 휠 이벤트 또는 PageUp/Down) |
 
 ### 단축키
-`Ctrl+T` 새 세션 · `Ctrl+W` 활성 탭 닫기 · `Ctrl+1~9` 탭 전환 · `Ctrl+F` 검색 · `Esc` 검색/Docs 닫기.
+`Ctrl+T` 새 세션 · `Ctrl+Shift+P` 새 프로젝트 · `Ctrl+W` 활성 탭 닫기 ·
+`Ctrl+Shift+T` 최근 닫은 탭 복원 · `Ctrl+1~9` 탭 전환 · `Ctrl+F` 검색 ·
+`Esc` 검색/Docs 닫기.
 
 ### 원격 접속 ([REMOTE.md](REMOTE.md))
 내장 axum 웹 서버 + Cloudflare Tunnel(quick/named, 고정 도메인 가능) + GitHub 로그인 + **계정 승인제**. 외부 브라우저에서 세션 목록·터미널·입력. 독립 뷰어(데스크탑과 다른 세션을 따로 봄).

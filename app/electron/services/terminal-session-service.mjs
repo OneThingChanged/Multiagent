@@ -142,6 +142,11 @@ export class TerminalSessionService {
     entry.release?.();
     if (!killProcess) return;
     try {
+      if (entry.terminate?.() === true) return;
+    } catch {
+      // Fall through to the PTY kill when tree termination is unavailable.
+    }
+    try {
       entry.process.kill();
     } catch {
       // The child may already have exited.

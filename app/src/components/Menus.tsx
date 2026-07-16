@@ -77,11 +77,15 @@ export function ProjectContextMenu({
 
 export function TabContextMenu({
   state,
+  canReopen,
   onClose,
+  onReopen,
   onCloseTab,
 }: {
   state: TabCtxState;
+  canReopen: boolean;
   onClose: () => void;
+  onReopen: () => void;
   onCloseTab: () => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
@@ -101,6 +105,10 @@ export function TabContextMenu({
         style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => e.preventDefault()}
       >
+        <button className="ctx-item" onClick={onReopen} disabled={!canReopen}>
+          최근 닫은 탭 다시 열기 (Ctrl+Shift+T)
+        </button>
+        <div className="ctx-separator" />
         <button className="ctx-item" onClick={onCloseTab}>
           Close
         </button>

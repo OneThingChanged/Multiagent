@@ -27,6 +27,7 @@ import {
   PassThroughTerminalFilter,
 } from "./services/terminal-stream.mjs";
 import { TerminalSessionService } from "./services/terminal-session-service.mjs";
+import { terminateWindowsProcessTree } from "./services/process-tree.mjs";
 import {
   buildInteractiveSshArgs,
   findWindowsExecutable,
@@ -810,6 +811,12 @@ async function spawnPty(args, event) {
         ? new CodexScrollbackFilter()
         : new PassThroughTerminalFilter(),
     quitCommand: aiToolId === "codex" || aiToolId === "claude" ? "/quit\r" : "exit\r",
+    terminate:
+      process.platform === "win32" &&
+      !ssh &&
+      (aiToolId === "codex" || aiToolId === "claude")
+        ? () => terminateWindowsProcessTree(processHandle.pid)
+        : null,
     release: () => {
       if (reversePort) remotePorts.delete(reversePort);
     },

@@ -72,6 +72,10 @@ Codex는 변경된 project Hook을 hash 기준으로 재검토하므로 최초 �
 - xterm scrollback은 5,000줄, main model은 512K 문자로 제한한다.
 - `detach / sleep / close / restart / quit`을 서로 다른 session action으로 정의한다.
   close-before-spawn과 old-exit-after-restart race는 main generation/entry identity로 막는다.
+- Windows의 로컬 Codex/Claude를 sleep·close·restart하거나 앱을 종료할 때는 PTY 루트만
+  끊지 않고 `taskkill /T /F`로 하위 프로세스 트리를 먼저 정리한다. 일반 Shell과 SSH는
+  백그라운드 작업 및 원격 소유권을 보존하기 위해 기존 PTY 종료 계약을 유지하며,
+  tree 종료가 실패하면 PTY kill로 안전하게 폴백한다.
 - terminal session owner와 IPC handler를 각각
   `app/electron/services/terminal-session-service.mjs`,
   `app/electron/handlers/terminal-handlers.mjs`로 분리했다.
