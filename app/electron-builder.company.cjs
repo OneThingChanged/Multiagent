@@ -11,6 +11,10 @@ module.exports = {
     ...base.directories,
     output: "electron-dist/company",
   },
+  files: [
+    ...base.files,
+    "!electron/remote-pwa/**",
+  ],
   nsis: {
     ...base.nsis,
     artifactName: "MultiAgentCompany-Electron-Setup-${version}-${arch}.${ext}",

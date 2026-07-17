@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MultiAgent">
+  <defs>
+    <linearGradient id="bg" x1="70" y1="40" x2="440" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#153652" />
+      <stop offset="0.56" stop-color="#0b2033" />
+      <stop offset="1" stop-color="#06111c" />
+    </linearGradient>
+    <linearGradient id="accent" x1="130" y1="130" x2="390" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5bbcff" />
+      <stop offset="1" stop-color="#50dfd0" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+  <rect x="82" y="98" width="348" height="286" rx="92" fill="#0b1724" stroke="url(#accent)" stroke-width="18" />
+  <path d="M162 317V195c0-18 13-31 31-31h13l50 76 50-76h13c18 0 31 13 31 31v122h-48v-72l-46 66-46-66v72h-48Z" fill="url(#accent)" />
+  <circle cx="256" cy="68" r="25" fill="#50dfd0" />
+  <path d="M256 88v22" stroke="#50dfd0" stroke-width="15" stroke-linecap="round" />
+  <rect x="166" y="405" width="180" height="24" rx="12" fill="#5bbcff" opacity=".34" />
+  <circle cx="214" cy="417" r="10" fill="#5bbcff" />
+  <circle cx="256" cy="417" r="10" fill="#50dfd0" />
+  <circle cx="298" cy="417" r="10" fill="#67dda0" />
+</svg>

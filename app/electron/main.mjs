@@ -223,10 +223,10 @@ async function repairActiveHooks() {
   return hookMaintenancePromise;
 }
 
-function liveOutputForAgents(agents) {
+function liveOutputForAgents(agents, maxOutput = 80_000) {
   return (Array.isArray(agents) ? agents : []).map((agent) => ({
     ...agent,
-    output: ptys.get(agent.id)?.buffer.snapshot().slice(-80_000) ?? "",
+    output: ptys.get(agent.id)?.buffer.snapshot().slice(-maxOutput) ?? "",
     hook: monitorHooks.get(agent.id) ?? null,
   }));
 }
@@ -257,10 +257,13 @@ usageDashboard = new LocalDashboardService({
 let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
-  stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents) }),
+  stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
   writePty(id, data) {
-    if (!id || data.length > 64 * 1024) return;
-    ptys.get(id)?.process.write(data);
+    if (!id || data.length > 8 * 1024) return false;
+    const entry = ptys.get(id);
+    if (!entry) return false;
+    entry.process.write(data);
+    return true;
   },
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });

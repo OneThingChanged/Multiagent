@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
 import runtimeVariantModule from "./runtime-variant.cjs";
 
 const { resolveRuntimeVariant } = runtimeVariantModule;
+const require = createRequire(import.meta.url);
 
 describe("Electron runtime variant", () => {
   it("uses the standard identity and update channel by default", () => {
@@ -30,5 +32,10 @@ describe("Electron runtime variant", () => {
       environmentVariant: "company",
       packageVariant: "standard",
     }).id).toBe("company");
+  });
+
+  it("excludes the Remote PWA assets from the Company package", () => {
+    const companyBuild = require("../electron-builder.company.cjs");
+    expect(companyBuild.files).toContain("!electron/remote-pwa/**");
   });
 });

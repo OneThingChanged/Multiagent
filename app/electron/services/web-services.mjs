@@ -4,6 +4,9 @@ import { promises as fsPromises } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -16,13 +19,62 @@ async function load(){try{const r=await fetch('/api/state');if(r.status===401){l
 load();setInterval(load,1500);
 </script></body></html>`;
 
-function sendJson(response, status, value) {
+const REMOTE_PWA_DIR = fileURLToPath(new URL("../remote-pwa/", import.meta.url));
+const REMOTE_PWA_ASSETS = new Map([
+  ["/", { file: "index.html", type: "text/html; charset=utf-8", cache: "no-store" }],
+  ["/login", { file: "login.html", type: "text/html; charset=utf-8", cache: "no-store" }],
+  ["/pwa/styles.css", { file: "styles.css", type: "text/css; charset=utf-8", cache: "no-cache" }],
+  ["/pwa/app.js", { file: "app.js", type: "text/javascript; charset=utf-8", cache: "no-cache" }],
+  ["/pwa/login.js", { file: "login.js", type: "text/javascript; charset=utf-8", cache: "no-cache" }],
+  ["/manifest.webmanifest", { file: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8", cache: "no-cache" }],
+  ["/sw.js", { file: "sw.js", type: "text/javascript; charset=utf-8", cache: "no-cache", serviceWorker: true }],
+  ["/icon.svg", { file: "icon.svg", type: "image/svg+xml; charset=utf-8", cache: "public, max-age=86400" }],
+  ["/icons/icon-192.png", { file: "icon-192.png", type: "image/png", cache: "public, max-age=86400" }],
+  ["/icons/icon-512.png", { file: "icon-512.png", type: "image/png", cache: "public, max-age=86400" }],
+]);
+const REMOTE_CSP = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "connect-src 'self'",
+  "font-src 'self'",
+  "form-action 'self' https://github.com",
+  "frame-ancestors 'none'",
+  "img-src 'self' data:",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "worker-src 'self'",
+].join("; ");
+
+function sendRemoteAsset(response, pathname) {
+  const asset = REMOTE_PWA_ASSETS.get(pathname);
+  if (!asset) return false;
+  const body = fs.readFileSync(path.join(REMOTE_PWA_DIR, asset.file));
+  response.writeHead(200, {
+    "content-type": asset.type,
+    "content-length": body.length,
+    "cache-control": asset.cache,
+    "content-security-policy": REMOTE_CSP,
+    "cross-origin-opener-policy": "same-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    ...(asset.serviceWorker ? { "service-worker-allowed": "/" } : {}),
+  });
+  response.end(body);
+  return true;
+}
+
+function sendJson(response, status, value, headers = {}) {
   const body = Buffer.from(JSON.stringify(value));
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": body.length,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
+    ...headers,
   });
   response.end(body);
 }
@@ -149,13 +201,14 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
     this.stateProvider = stateProvider;
     this.writePty = writePty;
     this.requestAccess = requestAccess;
+    this.fetchImpl = fetchImpl;
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -228,6 +281,46 @@ export class RemoteDashboardService {
     return !request.headers["cf-connecting-ip"] && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.socket.remoteAddress);
   }
 
+  isSameOrigin(request) {
+    if (String(request.headers["sec-fetch-site"] || "").toLowerCase() === "cross-site") return false;
+    const origin = String(request.headers.origin || "").trim().toLowerCase();
+    if (!origin) return this.isDirectLocal(request);
+    const forwardedHost = String(request.headers["x-forwarded-host"] || request.headers.host || "")
+      .split(",")[0]
+      .trim()
+      .toLowerCase();
+    if (!forwardedHost) return false;
+    const allowed = new Set([`http://${forwardedHost}`, `https://${forwardedHost}`]);
+    const publicHostname = String(this.config.public_hostname || "").trim().toLowerCase();
+    if (publicHostname) allowed.add(`https://${publicHostname}`);
+    return allowed.has(origin);
+  }
+
+  cookieFor(login, request, maxAge = 604800) {
+    const secure = this.config.public_hostname || request.headers["x-forwarded-proto"] === "https";
+    const value = login ? this.sign(login) : "";
+    return `multiagent_remote=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+  }
+
+  async registerLogin(login) {
+    if (!this.isApproved(login) && !this.access.pending.some((value) => value.toLowerCase() === login.toLowerCase())) {
+      this.access.pending.push(login);
+      await this.save(this.accessPath, this.access);
+      this.requestAccess?.(login);
+    }
+  }
+
+  async githubLoginFromToken(token) {
+    const userResponse = await this.fetchImpl("https://api.github.com/user", {
+      headers: { authorization: `Bearer ${token}`, "user-agent": "MultiAgent" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const login = String((await userResponse.json()).login || "");
+    if (!userResponse.ok || !login) throw new Error("github user failed");
+    await this.registerLogin(login);
+    return login;
+  }
+
   status() {
     return { running: Boolean(this.server?.listening), url: this.port ? `http://127.0.0.1:${this.port}` : null, port: this.port };
   }
@@ -255,25 +348,84 @@ export class RemoteDashboardService {
       return true;
     }
     this.states.delete(state);
-    const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+    const tokenResponse = await this.fetchImpl("https://github.com/login/oauth/access_token", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({ client_id: this.config.client_id, client_secret: this.config.client_secret, code }),
+      signal: AbortSignal.timeout(15_000),
     });
     const token = (await tokenResponse.json()).access_token;
     if (!token) { response.writeHead(401).end("github login failed"); return true; }
-    const userResponse = await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${token}`, "user-agent": "MultiAgent" } });
-    const login = String((await userResponse.json()).login || "");
+    const login = await this.githubLoginFromToken(token).catch(() => "");
     if (!login) { response.writeHead(401).end("github user failed"); return true; }
-    if (!this.isApproved(login) && !this.access.pending.some((value) => value.toLowerCase() === login.toLowerCase())) {
-      this.access.pending.push(login);
-      await this.save(this.accessPath, this.access);
-      this.requestAccess?.(login);
-    }
     response.writeHead(302, {
       location: "/",
-      "set-cookie": `multiagent_remote=${this.sign(login)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${this.config.public_hostname ? "; Secure" : ""}`,
+      "set-cookie": this.cookieFor(login, request),
     }).end();
+    return true;
+  }
+
+  async handleDeviceAuth(request, response, url) {
+    if (request.method === "GET" && url.pathname === "/auth/mode") {
+      sendJson(response, 200, {
+        configured: Boolean(this.config.client_id),
+        web: Boolean(this.config.client_id && this.config.client_secret && this.config.public_hostname),
+      });
+      return true;
+    }
+    if (request.method !== "POST" || !["/auth/start", "/auth/poll"].includes(url.pathname)) return false;
+    if (!this.isSameOrigin(request)) {
+      sendJson(response, 403, { error: "cross-origin request blocked" });
+      return true;
+    }
+    if (!this.config.client_id) {
+      sendJson(response, 503, { error: "GitHub Client ID가 설정되지 않았습니다." });
+      return true;
+    }
+    if (url.pathname === "/auth/start") {
+      const githubResponse = await this.fetchImpl("https://github.com/login/device/code", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "MultiAgent" },
+        body: new URLSearchParams({ client_id: this.config.client_id, scope: "read:user" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const result = await githubResponse.json();
+      sendJson(response, githubResponse.ok ? 200 : 502, result);
+      return true;
+    }
+    const body = await readJson(request);
+    const deviceCode = String(body.device_code || "").trim();
+    if (!deviceCode) {
+      sendJson(response, 400, { error: "device_code required" });
+      return true;
+    }
+    const tokenResponse = await this.fetchImpl("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "MultiAgent" },
+      body: new URLSearchParams({
+        client_id: this.config.client_id,
+        device_code: deviceCode,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const tokenResult = await tokenResponse.json();
+    if (["authorization_pending", "slow_down"].includes(tokenResult.error)) {
+      sendJson(response, 200, {
+        pending: true,
+        slow_down: tokenResult.error === "slow_down",
+        interval: Number(tokenResult.interval) || undefined,
+      });
+      return true;
+    }
+    if (!tokenResponse.ok || tokenResult.error || !tokenResult.access_token) {
+      sendJson(response, 401, { error: tokenResult.error_description || tokenResult.error || "github login failed" });
+      return true;
+    }
+    const login = await this.githubLoginFromToken(tokenResult.access_token);
+    sendJson(response, 200, { login, approved: this.isApproved(login) }, {
+      "set-cookie": this.cookieFor(login, request),
+    });
     return true;
   }
 
@@ -283,6 +435,27 @@ export class RemoteDashboardService {
       try {
         const url = new URL(request.url || "/", "http://127.0.0.1");
         if (await this.handleOAuth(request, response, url)) return;
+        if (await this.handleDeviceAuth(request, response, url)) return;
+        if (request.method === "POST" && url.pathname === "/auth/logout") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          response.writeHead(204, {
+            "set-cookie": this.cookieFor("", request, 0),
+            "cache-control": "no-store",
+          }).end();
+          return;
+        }
+        const publicAsset = request.method === "GET" && [
+          "/login",
+          "/pwa/styles.css",
+          "/pwa/login.js",
+          "/icon.svg",
+          "/icons/icon-192.png",
+          "/icons/icon-512.png",
+        ].includes(url.pathname);
+        if (publicAsset && sendRemoteAsset(response, url.pathname)) return;
         const login = this.sessionLogin(request);
         const approved = this.isDirectLocal(request) || this.isApproved(login);
         if (!approved) {
@@ -291,33 +464,57 @@ export class RemoteDashboardService {
               response.writeHead(403, { "content-type": "text/html; charset=utf-8" })
                 .end(`<meta charset="utf-8"><title>승인 대기</title><body style="background:#0d1117;color:#c9d1d9;font:16px system-ui;padding:40px"><h2>GitHub @${login.replace(/[<>&"']/g, "")}</h2><p>MultiAgent 앱에서 원격 접속 요청을 승인해 주세요.</p></body>`);
             } else {
-              response.writeHead(302, { location: "/auth/github" }).end();
+              response.writeHead(302, { location: "/login" }).end();
             }
           } else sendJson(response, 401, { error: "unauthorized", pending: Boolean(login) });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/state") {
           const runtime = this.stateProvider?.() ?? {};
-          sendJson(response, 200, { title: "MultiAgent Remote", remote: true, agents: this.agents, view: this.view, ...runtime });
+          sendJson(response, 200, {
+            title: "MultiAgent Remote",
+            remote: true,
+            pwa: true,
+            generatedAt: new Date().toISOString(),
+            agents: this.agents,
+            view: this.view,
+            ...runtime,
+          });
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/input") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
           const body = await readJson(request);
-          this.writePty?.(String(body.id || ""), String(body.data || ""));
+          const id = String(body.id || "").trim();
+          const data = String(body.data || "");
+          if (!id || !data || data.length > 8 * 1024) {
+            sendJson(response, 400, { error: "invalid input" });
+            return;
+          }
+          const accepted = this.writePty?.(id, data);
+          if (accepted === false) {
+            sendJson(response, 409, { error: "session is not active" });
+            return;
+          }
           sendJson(response, 200, { ok: true });
           return;
         }
-        if (request.method === "GET" && url.pathname === "/") {
-          response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-          response.end(DASHBOARD_HTML);
-          return;
-        }
+        if (request.method === "GET" && sendRemoteAsset(response, url.pathname)) return;
         response.writeHead(404).end();
       } catch (error) {
         sendJson(response, 500, { error: error.message });
       }
     });
-    this.port = await listen(this.server, Number(this.config.server_port) || 18800);
+    const configuredPort = Number(this.config.server_port);
+    const desiredPort = Number.isInteger(configuredPort) && configuredPort >= 0 ? configuredPort : 18800;
+    this.port = await listen(this.server, desiredPort);
     return this.status();
   }
 
@@ -329,35 +526,118 @@ export class RemoteDashboardService {
 }
 
 export class TunnelService {
-  constructor({ baseDir, getConfig, getLocalUrl }) {
+  constructor({ baseDir, getConfig, getLocalUrl, fetchImpl = fetch, spawnImpl = spawn }) {
     this.baseDir = baseDir;
     this.getConfig = getConfig;
     this.getLocalUrl = getLocalUrl;
+    this.fetchImpl = fetchImpl;
+    this.spawnImpl = spawnImpl;
     this.child = null;
     this.publicUrl = null;
+    this.downloadPromise = null;
+    this.startPromise = null;
   }
   status() { return { running: Boolean(this.child && !this.child.killed), publicUrl: this.publicUrl }; }
-  async start() {
-    if (this.child && !this.child.killed) return this.status();
-    const config = this.getConfig();
+
+  async ensureExecutable() {
     const executable = path.join(this.baseDir, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
-    if (!fs.existsSync(executable)) throw new Error("cloudflared 실행 파일을 찾을 수 없습니다.");
-    const args = config.tunnel_token
-      ? ["tunnel", "run", "--token", config.tunnel_token]
-      : ["tunnel", "--url", this.getLocalUrl()];
-    this.child = spawn(executable, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    this.publicUrl = config.public_hostname ? `https://${config.public_hostname}` : null;
-    const inspect = (chunk) => {
-      const match = String(chunk).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
-      if (match) this.publicUrl = match[0];
-    };
-    this.child.stdout.on("data", inspect); this.child.stderr.on("data", inspect);
-    this.child.once("exit", () => { this.child = null; });
-    return this.status();
+    if (fs.existsSync(executable)) return executable;
+    if (process.platform !== "win32") {
+      throw new Error("cloudflared를 PATH 또는 MultiAgent 데이터 폴더에 설치해 주세요.");
+    }
+    if (this.downloadPromise) return this.downloadPromise;
+    this.downloadPromise = (async () => {
+      await fsPromises.mkdir(this.baseDir, { recursive: true });
+      const temporary = `${executable}.${process.pid}.download`;
+      try {
+        const response = await this.fetchImpl(
+          "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe",
+          {
+            headers: { "user-agent": "MultiAgent" },
+            redirect: "follow",
+            signal: AbortSignal.timeout(120_000),
+          }
+        );
+        if (!response.ok || !response.body) throw new Error(`cloudflared download failed: HTTP ${response.status}`);
+        await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temporary));
+        const downloaded = await fsPromises.stat(temporary);
+        if (downloaded.size < 1024 * 1024) throw new Error("cloudflared download was unexpectedly small");
+        await fsPromises.rename(temporary, executable);
+        return executable;
+      } catch (error) {
+        await fsPromises.rm(temporary, { force: true }).catch(() => {});
+        throw error;
+      }
+    })().finally(() => { this.downloadPromise = null; });
+    return this.downloadPromise;
+  }
+
+  async start() {
+    if (this.startPromise) return this.startPromise;
+    if (this.child && !this.child.killed && this.publicUrl) return this.status();
+    this.startPromise = (async () => {
+      const config = this.getConfig();
+      const executable = await this.ensureExecutable();
+      const named = Boolean(config.tunnel_token);
+      const localUrl = this.getLocalUrl();
+      if (!named && !localUrl) throw new Error("Remote PWA 서버가 실행 중이 아닙니다.");
+      const args = named
+        ? ["tunnel", "run", "--token", config.tunnel_token]
+        : ["tunnel", "--url", localUrl, "--no-autoupdate"];
+      const child = this.spawnImpl(executable, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      this.child = child;
+      this.publicUrl = null;
+
+      return await new Promise((resolve, reject) => {
+        let settled = false;
+        let recent = "";
+        let timeout = null;
+        const finish = (error = null) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          if (error) {
+            if (this.child === child) this.child = null;
+            this.publicUrl = null;
+            if (!child.killed) child.kill();
+            reject(error);
+          } else resolve(this.status());
+        };
+        const inspect = (chunk) => {
+          recent = `${recent}${String(chunk)}`.slice(-8192);
+          if (named && recent.includes("Registered tunnel connection")) {
+            this.publicUrl = config.public_hostname ? `https://${config.public_hostname}` : null;
+            finish();
+            return;
+          }
+          if (!named) {
+            const match = recent.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+            if (match) {
+              this.publicUrl = match[0].replace(/\/$/, "");
+              finish();
+            }
+          }
+        };
+        child.stdout?.on("data", inspect);
+        child.stderr?.on("data", inspect);
+        child.once("error", (error) => finish(error));
+        child.once("exit", (code) => {
+          if (this.child === child) this.child = null;
+          if (!settled) finish(new Error(`cloudflared exited before the tunnel was ready (${code ?? "unknown"})`));
+        });
+        timeout = setTimeout(() => {
+          finish(new Error(named
+            ? "cloudflared did not connect within 45s (check tunnel token)"
+            : "cloudflared did not report a tunnel URL within 45s"));
+        }, 45_000);
+      });
+    })().finally(() => { this.startPromise = null; });
+    return this.startPromise;
   }
   async stop() {
     if (this.child) this.child.kill();
-    this.child = null; this.publicUrl = null;
+    this.child = null;
+    this.publicUrl = null;
     return this.status();
   }
 }

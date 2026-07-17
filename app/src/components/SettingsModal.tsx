@@ -1025,7 +1025,7 @@ export function SettingsModal({
 
         {tab === "remote" && (
         <div className="app-settings-section">
-          <div className="field-label">Remote access</div>
+          <div className="field-label">Remote PWA</div>
           <div className="app-about-card">
             <div className="app-about-row">
               <span className="app-about-label">Status</span>
@@ -1048,8 +1048,8 @@ export function SettingsModal({
             )}
             <div className="app-update-message">
               {remote.running
-                ? "같은 네트워크의 폰/PC 브라우저에서 위 URL로 접속하세요. 외부에서 접속하려면 Tailscale 같은 VPN을 권장합니다."
-                : "원격 모니터링/입력 서버를 켭니다. 같은 Wi-Fi의 브라우저에서 세션을 보고 명령을 보낼 수 있습니다."}
+                ? "모바일 리모컨 서버가 준비됐습니다. 위 주소는 이 PC에서 확인할 때 사용하고, 휴대폰에서는 아래 HTTPS 터널 주소를 사용하세요."
+                : "세션 상태·최근 출력·질문을 확인하고 짧은 지시를 보낼 수 있는 모바일 PWA 서버를 켭니다."}
             </div>
             <div className="app-update-actions">
               <button
@@ -1093,7 +1093,7 @@ export function SettingsModal({
                 : tunnelBusy && !tunnel.running
                   ? "터널 시작 중... 처음이면 cloudflared 다운로드(~60MB) 때문에 오래 걸릴 수 있어요."
                   : tunnel.running
-                    ? "외부 어디서든 위 HTTPS 주소로 접속할 수 있습니다. 주소는 터널을 새로 켤 때마다 바뀝니다."
+                    ? "휴대폰에서 위 HTTPS 주소를 열고 브라우저 메뉴의 ‘앱 설치’ 또는 ‘홈 화면에 추가’를 선택하세요. Quick tunnel 주소는 다시 켤 때 바뀝니다."
                     : "Cloudflare Tunnel로 공개 HTTPS 주소를 발급해 외부 인터넷에서 접속할 수 있게 합니다."}
             </div>
             <div className="app-update-actions">
@@ -1158,7 +1158,7 @@ export function SettingsModal({
               github.com/settings/developers에서 OAuth App을 만들고 Client ID를
               입력하세요. Client Secret + Public hostname까지 설정하면 코드 입력
               없는 리다이렉트 로그인이 되고 (callback URL:
-              https://호스트네임/auth/callback), 비우면 Device Flow를 사용합니다.
+              https://호스트네임/auth/github/callback), 비우면 Device Flow를 사용합니다.
               Owner 계정은 승인 없이 항상 접속할 수 있습니다.
             </div>
 

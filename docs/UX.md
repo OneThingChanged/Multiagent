@@ -119,7 +119,7 @@ target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추�
 
 - **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test) + **Desktop Pet** 표시/위치 초기화
 - **Usage**: 사용량 대시보드 서버 on/off·포트, URL 복사, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
-- **Remote**: 원격 서버·Cloudflare 터널 Start/Stop, GitHub OAuth(client id/secret)·Owner, named tunnel(token/hostname/port), 계정 승인 관리 ([REMOTE.md](REMOTE.md))
+- **Remote PWA**(standard 전용): 모바일 리모컨 서버·Cloudflare 터널 Start/Stop, GitHub OAuth/Device Flow·Owner, named tunnel(token/hostname/port), 계정 승인 관리. Monitor에서 작업 중·질문·완료·대기·비활성을 구분하고, 데스크톱의 Screen/패널/탭 구성 또는 개별 Session을 골라 최근 요청·출력·질문을 확인하고 짧은 지시를 전송한다. 모바일 홈 화면 설치와 실행 중 알림을 지원한다 ([REMOTE.md](REMOTE.md))
 - **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·remote OS·user·host·port·**auth method**·identity 파일[Browse] 또는 비밀번호·extra options) + **Test connection**. Windows 호스트는 **Use .cmd shims for npm CLIs**가 기본 켜짐이라 PowerShell 실행 정책이 `codex.ps1`/`claude.ps1`을 막아도 `codex.cmd`/`claude.cmd`로 실행한다. **Auth method**: 키(identity 지정 시 자동 IdentitiesOnly로 "Too many authentication failures" 방지) / 비밀번호(저장 시 연결할 때 자동 입력, 로컬 `ssh-secrets.json`에만 저장)
 - **About**: 제작자, 버전, **Check**(자동 업데이트 — 서명 검증 후 다운로드·설치·재시작), Releases
 

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07111d" />
+  <meta name="color-scheme" content="dark" />
+  <title>MultiAgent Remote 로그인</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/pwa/styles.css" />
+  <script type="module" src="/pwa/login.js"></script>
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <div class="login-brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <span>MultiAgent Remote</span>
+    </div>
+    <p class="eyebrow">SECURE REMOTE ACCESS</p>
+    <h1>GitHub 계정으로<br />내 작업에 연결</h1>
+    <p class="login-copy">로그인 후 PC의 MultiAgent에서 계정을 한 번 승인해야 세션과 터미널 입력에 접근할 수 있습니다.</p>
+
+    <section class="login-card">
+      <div id="loginReady">
+        <strong id="loginTitle">로그인 방식을 확인하는 중…</strong>
+        <p id="loginDescription">잠시만 기다려 주세요.</p>
+        <button class="send-button login-start" id="startLogin" type="button" disabled>GitHub 로그인</button>
+      </div>
+
+      <div class="device-panel" id="devicePanel" hidden>
+        <span class="question-label">DEVICE CODE</span>
+        <strong class="device-code" id="deviceCode">----</strong>
+        <p>아래 버튼으로 GitHub를 열고 위 코드를 입력하세요. 인증이 끝나면 이 화면이 자동으로 넘어갑니다.</p>
+        <a class="device-link" id="deviceLink" href="https://github.com/login/device" target="_blank" rel="noreferrer">GitHub 인증 페이지 열기</a>
+        <button class="small-button" id="copyCode" type="button">코드 복사</button>
+        <span class="login-progress" id="loginProgress">GitHub 인증 대기 중…</span>
+      </div>
+
+      <div class="login-error" id="loginError" hidden></div>
+    </section>
+
+    <p class="login-foot">세션 쿠키는 7일 후 만료되며, PC에서 승인을 해제하면 즉시 접근할 수 없게 됩니다.</p>
+  </main>
+</body>
+</html>

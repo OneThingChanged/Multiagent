@@ -128,9 +128,10 @@ resume한다.
 - 기존 `cloudflared.exe`의 named/quick tunnel 실행과 URL 감지
 - Monitor와 legacy Usage loopback dashboard, 포트 충돌 fallback, 자동 시작 설정
 
-현재 Electron Remote UI는 1.5초 polling + 최근 출력/입력 방식이다. Tauri Remote의 xterm.js
-WebSocket 스트림과 브라우저 탭 UX보다 단순하므로 원격 사용 비중이 높다면 아직 Tauri가
-우세하다.
+Electron Remote는 모바일 우선 PWA로 제공한다. 1.6초 상태 polling으로 프로젝트·세션·Hook·최근
+출력을 표시하고 질문 답변/짧은 입력, 홈 화면 설치, 실행 중 완료·질문 알림을 지원한다. API는
+loopback에만 바인드하고 Quick tunnel용 GitHub Device Flow와 cloudflared 자동 준비를 포함한다.
+전체 xterm.js 원격 터미널과 백그라운드 Web Push는 후속 범위다.
 
 ### Usage
 

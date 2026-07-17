@@ -790,9 +790,9 @@ function App() {
     invoke("sync_remote_agents", payload).catch(() => {});
   }, [agents, isSecondaryWindow, projects, remoteEnabled, runtimeFlags]);
 
-  // Mirror projects + sessions so the remote web client can list them.
-  // The web client is an independent viewer: it picks which session to
-  // view locally, so desktop active/layout is intentionally not synced.
+  // Mirror projects, sessions, and the read-only Screen layout so the remote
+  // client can offer the same Screen/session navigation as the desktop app.
+  // Remote selection remains independent and never changes the desktop view.
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
     const payload = {
@@ -808,12 +808,26 @@ function App() {
         status: a.status,
         aiToolId: a.aiToolId,
       })),
+      groups: groups.map((group) => ({
+        id: group.id,
+        projectId: group.projectId,
+        layout: group.layout,
+      })),
+      activeGroupId,
     };
     const view = JSON.stringify(payload);
     if (remoteViewJsonRef.current === view) return;
     remoteViewJsonRef.current = view;
     invoke("sync_remote_view", { view }).catch(() => {});
-  }, [projects, agents, isSecondaryWindow, remoteEnabled, runtimeFlags]);
+  }, [
+    projects,
+    agents,
+    groups,
+    activeGroupId,
+    isSecondaryWindow,
+    remoteEnabled,
+    runtimeFlags,
+  ]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
