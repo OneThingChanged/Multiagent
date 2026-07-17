@@ -1204,6 +1204,8 @@ async function invokeCommand(event, command, rawArgs) {
     }
     case "usage_ingest_now":
       return usageIndex.ingestAll();
+    case "usage_rate_limits_get":
+      return usageIndex.getRateLimits(args.refresh === true);
     case "remote_config_get":
       return remoteService.config;
     case "remote_config_set":

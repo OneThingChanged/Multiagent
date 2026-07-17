@@ -140,6 +140,11 @@ Codex `last_token_usage`를 `usage_sources.last_offset` 이후만 증분 파싱�
 source key로 중복을 막는다. Hook `done` 때 해당 transcript를 자동 적재하며 설정의 Reindex는
 전체 known transcript를 재색인한다.
 
+Codex `token_count.rate_limits`의 최신 스냅샷은 `usage_rate_limits`에 한도 ID별로 저장한다.
+Electron 렌더러는 하단 상태 바에서 사용률과 초기화 남은 시간을 항상 표시하고, 클릭 시 복수
+한도 윈도우의 상세 팝오버를 연다. 최초 조회와 수동 새로고침은 최근 transcript의 마지막 1MiB만
+확인하므로 대형 세션 기록 전체를 다시 읽지 않는다.
+
 ### updater와 installer
 
 `electron-updater`를 GitHub `OneThingChanged/Multiagent` 채널에 연결했다. 다운로드 progress는

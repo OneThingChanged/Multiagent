@@ -1,9 +1,17 @@
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
+const RATE_LIMIT_TAIL_BYTES = 1024 * 1024;
+const RATE_LIMIT_TRANSCRIPT_LIMIT = 32;
+
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+}
+
+function optionalNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function timestamp(value) {
@@ -23,6 +31,7 @@ export class UsageService {
     this.sessionService = sessionService;
     this.catalog = { projects: [], agents: [] };
     this.database = null;
+    this.rateLimitRefresh = null;
   }
 
   db() {
@@ -46,6 +55,15 @@ export class UsageService {
       );
       CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(ts);
       CREATE INDEX IF NOT EXISTS idx_usage_events_agent_ts ON usage_events(agent_id, ts);
+      CREATE TABLE IF NOT EXISTS usage_rate_limits (
+        limit_id TEXT PRIMARY KEY, limit_name TEXT, plan_type TEXT,
+        primary_used_percent REAL, primary_window_minutes INTEGER, primary_resets_at INTEGER,
+        secondary_used_percent REAL, secondary_window_minutes INTEGER, secondary_resets_at INTEGER,
+        has_credits INTEGER NOT NULL DEFAULT 0, unlimited INTEGER NOT NULL DEFAULT 0,
+        credit_balance TEXT, source_path TEXT, updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_rate_limits_updated_at
+        ON usage_rate_limits(updated_at);
     `);
     return this.database;
   }
@@ -128,6 +146,71 @@ export class UsageService {
     }
   }
 
+  rateLimitSnapshot(item, sourcePath = null) {
+    const payload = item?.payload;
+    const rateLimits = payload?.type === "token_count" ? payload.rate_limits : null;
+    const limitId = typeof rateLimits?.limit_id === "string"
+      ? rateLimits.limit_id.trim()
+      : "";
+    if (!limitId) return null;
+    const window = (value) => value && typeof value === "object" ? {
+      usedPercent: optionalNumber(value.used_percent),
+      windowMinutes: optionalNumber(value.window_minutes),
+      resetsAt: optionalNumber(value.resets_at),
+    } : { usedPercent: null, windowMinutes: null, resetsAt: null };
+    const primary = window(rateLimits.primary);
+    const secondary = window(rateLimits.secondary);
+    if (primary.usedPercent === null && secondary.usedPercent === null) return null;
+    return {
+      limitId,
+      limitName: typeof rateLimits.limit_name === "string" && rateLimits.limit_name.trim()
+        ? rateLimits.limit_name.trim()
+        : null,
+      planType: typeof rateLimits.plan_type === "string" && rateLimits.plan_type.trim()
+        ? rateLimits.plan_type.trim()
+        : null,
+      primary,
+      secondary,
+      hasCredits: Boolean(rateLimits.credits?.has_credits),
+      unlimited: Boolean(rateLimits.credits?.unlimited),
+      creditBalance: rateLimits.credits?.balance == null
+        ? null
+        : String(rateLimits.credits.balance),
+      sourcePath,
+      updatedAt: timestamp(item.timestamp),
+    };
+  }
+
+  captureRateLimits(item, sourcePath = null) {
+    const snapshot = this.rateLimitSnapshot(item, sourcePath);
+    if (!snapshot) return false;
+    this.db().prepare(`INSERT INTO usage_rate_limits (
+      limit_id,limit_name,plan_type,
+      primary_used_percent,primary_window_minutes,primary_resets_at,
+      secondary_used_percent,secondary_window_minutes,secondary_resets_at,
+      has_credits,unlimited,credit_balance,source_path,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(limit_id) DO UPDATE SET
+      limit_name=excluded.limit_name,plan_type=excluded.plan_type,
+      primary_used_percent=excluded.primary_used_percent,
+      primary_window_minutes=excluded.primary_window_minutes,
+      primary_resets_at=excluded.primary_resets_at,
+      secondary_used_percent=excluded.secondary_used_percent,
+      secondary_window_minutes=excluded.secondary_window_minutes,
+      secondary_resets_at=excluded.secondary_resets_at,
+      has_credits=excluded.has_credits,unlimited=excluded.unlimited,
+      credit_balance=excluded.credit_balance,source_path=excluded.source_path,
+      updated_at=excluded.updated_at
+    WHERE excluded.updated_at >= usage_rate_limits.updated_at`).run(
+      snapshot.limitId, snapshot.limitName, snapshot.planType,
+      snapshot.primary.usedPercent, snapshot.primary.windowMinutes, snapshot.primary.resetsAt,
+      snapshot.secondary.usedPercent, snapshot.secondary.windowMinutes, snapshot.secondary.resetsAt,
+      snapshot.hasCredits ? 1 : 0, snapshot.unlimited ? 1 : 0,
+      snapshot.creditBalance, snapshot.sourcePath, snapshot.updatedAt
+    );
+    return true;
+  }
+
   ingestFile(entry, tool) {
     const db = this.db();
     const stat = fs.statSync(entry.path);
@@ -161,6 +244,7 @@ export class UsageService {
       let item;
       try { item = JSON.parse(line); } catch { continue; }
       this.updateContext(item, context);
+      this.captureRateLimits(item, entry.path);
       const event = this.eventFromItem(item, context, offset);
       if (!event) continue;
       const result = insert.run(
@@ -194,6 +278,99 @@ export class UsageService {
       }
     }
     return summary;
+  }
+
+  readLatestRateLimit(entry) {
+    let fd;
+    try {
+      const stat = fs.statSync(entry.path);
+      const start = Math.max(0, stat.size - RATE_LIMIT_TAIL_BYTES);
+      const buffer = Buffer.alloc(stat.size - start);
+      fd = fs.openSync(entry.path, "r");
+      fs.readSync(fd, buffer, 0, buffer.length, start);
+      let text = buffer.toString("utf8");
+      if (start > 0) {
+        const firstNewline = text.indexOf("\n");
+        text = firstNewline >= 0 ? text.slice(firstNewline + 1) : "";
+      }
+      const lines = text.split(/\r?\n/);
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index].trim();
+        if (!line || !line.includes('"rate_limits"')) continue;
+        let item;
+        try { item = JSON.parse(line); } catch { continue; }
+        if (this.captureRateLimits(item, entry.path)) return true;
+      }
+    } catch {
+      // A session may rotate while the latest usage snapshot is being read.
+    } finally {
+      if (fd !== undefined) {
+        try { fs.closeSync(fd); } catch {}
+      }
+    }
+    return false;
+  }
+
+  async refreshRateLimits() {
+    if (this.rateLimitRefresh) return this.rateLimitRefresh;
+    this.rateLimitRefresh = (async () => {
+      const entries = await this.sessionService.scan("codex");
+      const activeSessionIds = new Set(
+        this.catalog.agents
+          .filter((agent) => agent.aiToolId === "codex" && agent.lastSessionId)
+          .map((agent) => String(agent.lastSessionId).toLowerCase())
+      );
+      const prioritized = [...entries].sort((left, right) => {
+        const leftActive = activeSessionIds.has(String(left.sessionId || "").toLowerCase());
+        const rightActive = activeSessionIds.has(String(right.sessionId || "").toLowerCase());
+        if (leftActive !== rightActive) return leftActive ? -1 : 1;
+        return Number(right.mtimeMs || 0) - Number(left.mtimeMs || 0);
+      });
+      for (const entry of prioritized.slice(0, RATE_LIMIT_TRANSCRIPT_LIMIT)) {
+        this.readLatestRateLimit(entry);
+      }
+      return this.rateLimitSummary();
+    })().finally(() => {
+      this.rateLimitRefresh = null;
+    });
+    return this.rateLimitRefresh;
+  }
+
+  rateLimitSummary() {
+    const freshAfter = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const rows = this.db().prepare(`SELECT * FROM usage_rate_limits
+      WHERE updated_at >= ? ORDER BY CASE WHEN limit_id='codex' THEN 0 ELSE 1 END,
+      updated_at DESC`).all(freshAfter);
+    const rateWindow = (row, prefix) => row[`${prefix}_used_percent`] == null ? null : ({
+      usedPercent: Number(row[`${prefix}_used_percent`]),
+      windowMinutes: row[`${prefix}_window_minutes`] == null
+        ? null
+        : Number(row[`${prefix}_window_minutes`]),
+      resetsAt: row[`${prefix}_resets_at`] == null
+        ? null
+        : Number(row[`${prefix}_resets_at`]),
+    });
+    const limits = rows.map((row) => ({
+      limitId: row.limit_id,
+      limitName: row.limit_name ?? null,
+      planType: row.plan_type ?? null,
+      primary: rateWindow(row, "primary"),
+      secondary: rateWindow(row, "secondary"),
+      credits: {
+        hasCredits: Boolean(row.has_credits),
+        unlimited: Boolean(row.unlimited),
+        balance: row.credit_balance ?? null,
+      },
+      updatedAt: Number(row.updated_at) * 1000,
+    }));
+    return {
+      updatedAt: limits.reduce((latest, limit) => Math.max(latest, limit.updatedAt), 0),
+      limits,
+    };
+  }
+
+  async getRateLimits(refresh = false) {
+    return refresh ? this.refreshRateLimits() : this.rateLimitSummary();
   }
 
   ingestHook(agentId, transcriptPath, sessionId = null, cwd = null) {

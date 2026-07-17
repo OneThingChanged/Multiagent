@@ -134,6 +134,7 @@ import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
 import { ProjectPropertiesModal } from "./components/ProjectPropertiesModal";
 import { QuickOpen } from "./components/QuickOpen";
 import { AttentionCenter } from "./components/AttentionCenter";
+import { UsageStatusBar } from "./components/UsageStatusBar";
 
 const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
@@ -2738,7 +2739,11 @@ function App() {
   // ---- Render
 
   return (
-    <div className={`app app-theme-${appTheme}`}>
+    <div
+      className={`app app-theme-${appTheme} ${
+        isElectronRuntime() ? "app-with-usage-status" : ""
+      }`}
+    >
       <Sidebar
         projects={projects}
         agents={agents}
@@ -2811,6 +2816,7 @@ function App() {
         onOpenFolderPath={handleOpenFolderPath}
         onOpenTerminalPath={handleOpenTerminalPath}
       />
+      {isElectronRuntime() && <UsageStatusBar />}
       {docsOpen && (
         <div className="docs-overlay">
           <div className="docs-drawer-shell" style={{ width: docsWidth + 7 }}>

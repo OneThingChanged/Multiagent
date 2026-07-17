@@ -39,6 +39,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "repair_active_hooks",
   "export_diagnostics",
   "usage_ingest_now",
+  "usage_rate_limits_get",
   "usage_config_get",
   "usage_config_set",
   "usage_server_status",

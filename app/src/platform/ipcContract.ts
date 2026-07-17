@@ -12,6 +12,7 @@ export type RuntimeCommand =
   | "resolve_cli_session" | "relink_cli_session" | "sync_remote_agents"
   | "sync_remote_view" | "sync_usage_catalog" | "sync_monitor_state"
   | "repair_active_hooks" | "export_diagnostics" | "usage_ingest_now"
+  | "usage_rate_limits_get"
   | "usage_config_get" | "usage_config_set" | "usage_server_status"
   | "start_usage_server" | "stop_usage_server" | "remote_config_get"
   | "remote_config_set" | "remote_server_status" | "start_remote_server"
