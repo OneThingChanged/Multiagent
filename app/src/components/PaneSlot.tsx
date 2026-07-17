@@ -1,6 +1,6 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "../platform/runtime";
-import { isElectronRuntime } from "../platform/electronBridge";
+import { electronBridge, isElectronRuntime } from "../platform/electronBridge";
 import type {
   SpawnTerminalResult,
   TerminalReplay,
@@ -536,7 +536,11 @@ export function PaneSlot({
     if (!activeAgentId) return false;
     const entry = ctx.termsRef.current.get(activeAgentId);
     if (!entry) return false;
-    const text = extractDroppedFilePaths(dataTransfer)
+    const bridge = electronBridge();
+    const text = extractDroppedFilePaths(
+      dataTransfer,
+      bridge ? (file) => bridge.getPathForFile(file) : undefined
+    )
       .map(formatDroppedPathForTerminal)
       .filter(Boolean)
       .join(" ");

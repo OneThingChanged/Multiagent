@@ -43,11 +43,21 @@ function looksLikeAbsolutePath(value: string) {
   return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
 
-export function extractDroppedFilePaths(dataTransfer: DataTransfer) {
+export function extractDroppedFilePaths(
+  dataTransfer: DataTransfer,
+  resolveFilePath?: (file: File) => string
+) {
   const paths: string[] = [];
 
   for (const file of Array.from(dataTransfer.files) as DroppedFileWithPath[]) {
+    let resolvedPath = "";
+    try {
+      resolvedPath = resolveFilePath?.(file)?.trim() ?? "";
+    } catch {
+      // Keep the browser/Tauri fallbacks available if a runtime resolver fails.
+    }
     const path =
+      resolvedPath ||
       file.path?.trim() ||
       file.mozFullPath?.trim() ||
       file.webkitRelativePath?.trim() ||
