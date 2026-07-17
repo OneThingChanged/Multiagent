@@ -79,7 +79,7 @@
 
 ### 사용량 대시보드 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 transcript JSONL을 파싱해 토큰 사용량을 SQLite에 적재, 별도 로컬 웹 대시보드(차트·요약·세션별)로 시각화.
-Electron 앱은 Codex transcript에서 관측한 기간별 계정 한도도 SQLite에 보존하고 하단 상태 바와 상세 팝오버로 표시한다.
+Electron 앱은 Codex(세션 transcript)·Claude(OAuth usage 엔드포인트)에서 관측한 기간별 계정 한도도 SQLite에 보존하고 하단 상태 바와 상세 팝오버로 표시한다.
 
 ### 기타
 | 기능 | 설명 |

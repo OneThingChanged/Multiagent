@@ -1,8 +1,15 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const RATE_LIMIT_TAIL_BYTES = 1024 * 1024;
 const RATE_LIMIT_TRANSCRIPT_LIMIT = 32;
+const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_USAGE_MIN_INTERVAL_MS = 60_000;
+const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
+const FIVE_HOUR_MINUTES = 300;
+const SEVEN_DAY_MINUTES = 10_080;
 
 function number(value) {
   const parsed = Number(value);
@@ -26,12 +33,21 @@ function sameFolder(left, right) {
 }
 
 export class UsageService {
-  constructor(databasePath, sessionService) {
+  constructor(databasePath, sessionService, options = {}) {
     this.databasePath = databasePath;
     this.sessionService = sessionService;
     this.catalog = { projects: [], agents: [] };
     this.database = null;
     this.rateLimitRefresh = null;
+    // Claude has no rate-limit snapshot inside its transcript (unlike Codex's
+    // token_count.rate_limits), so account limits are read live from the OAuth
+    // usage endpoint using the local Claude Code credentials.
+    this.claudeCredentialsPath = options.claudeCredentialsPath
+      ?? path.join(os.homedir(), ".claude", ".credentials.json");
+    // Injectable for tests: () => Promise<{ usage, subscriptionType } | null>.
+    this.claudeUsageFetcher = options.claudeUsageFetcher ?? null;
+    this.claudeRateLimitRefresh = null;
+    this.claudeRateLimitFetchedAt = 0;
   }
 
   db() {
@@ -153,6 +169,9 @@ export class UsageService {
       ? rateLimits.limit_id.trim()
       : "";
     if (!limitId) return null;
+    // Only surface the canonical Codex account limit; skip per-model weekly
+    // ceilings (e.g. "GPT-5.3-Codex-Spark" reported as codex_<model>) as noise.
+    if (limitId !== "codex" && limitId.toLowerCase().startsWith("codex")) return null;
     const window = (value) => value && typeof value === "object" ? {
       usedPercent: optionalNumber(value.used_percent),
       windowMinutes: optionalNumber(value.window_minutes),
@@ -181,9 +200,7 @@ export class UsageService {
     };
   }
 
-  captureRateLimits(item, sourcePath = null) {
-    const snapshot = this.rateLimitSnapshot(item, sourcePath);
-    if (!snapshot) return false;
+  writeRateLimitSnapshot(snapshot) {
     this.db().prepare(`INSERT INTO usage_rate_limits (
       limit_id,limit_name,plan_type,
       primary_used_percent,primary_window_minutes,primary_resets_at,
@@ -203,11 +220,19 @@ export class UsageService {
       updated_at=excluded.updated_at
     WHERE excluded.updated_at >= usage_rate_limits.updated_at`).run(
       snapshot.limitId, snapshot.limitName, snapshot.planType,
-      snapshot.primary.usedPercent, snapshot.primary.windowMinutes, snapshot.primary.resetsAt,
-      snapshot.secondary.usedPercent, snapshot.secondary.windowMinutes, snapshot.secondary.resetsAt,
+      snapshot.primary?.usedPercent ?? null, snapshot.primary?.windowMinutes ?? null,
+      snapshot.primary?.resetsAt ?? null,
+      snapshot.secondary?.usedPercent ?? null, snapshot.secondary?.windowMinutes ?? null,
+      snapshot.secondary?.resetsAt ?? null,
       snapshot.hasCredits ? 1 : 0, snapshot.unlimited ? 1 : 0,
       snapshot.creditBalance, snapshot.sourcePath, snapshot.updatedAt
     );
+  }
+
+  captureRateLimits(item, sourcePath = null) {
+    const snapshot = this.rateLimitSnapshot(item, sourcePath);
+    if (!snapshot) return false;
+    this.writeRateLimitSnapshot(snapshot);
     return true;
   }
 
@@ -311,24 +336,141 @@ export class UsageService {
     return false;
   }
 
+  async refreshCodexRateLimits() {
+    const entries = await this.sessionService.scan("codex");
+    const activeSessionIds = new Set(
+      this.catalog.agents
+        .filter((agent) => agent.aiToolId === "codex" && agent.lastSessionId)
+        .map((agent) => String(agent.lastSessionId).toLowerCase())
+    );
+    const prioritized = [...entries].sort((left, right) => {
+      const leftActive = activeSessionIds.has(String(left.sessionId || "").toLowerCase());
+      const rightActive = activeSessionIds.has(String(right.sessionId || "").toLowerCase());
+      if (leftActive !== rightActive) return leftActive ? -1 : 1;
+      return Number(right.mtimeMs || 0) - Number(left.mtimeMs || 0);
+    });
+    for (const entry of prioritized.slice(0, RATE_LIMIT_TRANSCRIPT_LIMIT)) {
+      this.readLatestRateLimit(entry);
+    }
+  }
+
+  readClaudeCredentials() {
+    try {
+      const oauth = JSON.parse(fs.readFileSync(this.claudeCredentialsPath, "utf8"))?.claudeAiOauth;
+      if (!oauth?.accessToken) return null;
+      // Expired access tokens return 401; skip and keep the last known snapshot.
+      if (Number.isFinite(oauth.expiresAt) && oauth.expiresAt <= Date.now()) return null;
+      return { token: String(oauth.accessToken), subscriptionType: oauth.subscriptionType ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  async fetchClaudeUsage() {
+    if (this.claudeUsageFetcher) return this.claudeUsageFetcher();
+    const creds = this.readClaudeCredentials();
+    if (!creds) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLAUDE_USAGE_TIMEOUT_MS);
+    try {
+      const response = await fetch(CLAUDE_USAGE_URL, {
+        headers: {
+          Authorization: `Bearer ${creds.token}`,
+          "anthropic-beta": "oauth-2025-04-20",
+          "anthropic-version": "2023-06-01",
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      return { usage: await response.json(), subscriptionType: creds.subscriptionType };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  claudeRateLimitSnapshots(usage, subscriptionType, updatedAt) {
+    if (!usage || typeof usage !== "object") return [];
+    const resets = (value) => {
+      const parsed = value ? Math.floor(Date.parse(value) / 1000) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const window = (source, windowMinutes) => {
+      const usedPercent = optionalNumber(source?.utilization ?? source?.percent);
+      if (usedPercent === null) return null;
+      return { usedPercent, windowMinutes, resetsAt: resets(source?.resets_at) };
+    };
+    const snapshots = [];
+    const primary = window(usage.five_hour, FIVE_HOUR_MINUTES);
+    const secondary = window(usage.seven_day, SEVEN_DAY_MINUTES);
+    if (primary || secondary) {
+      snapshots.push({
+        limitId: "claude",
+        limitName: "Claude",
+        planType: subscriptionType || null,
+        primary,
+        secondary,
+        hasCredits: Boolean(usage.extra_usage?.is_enabled || usage.spend?.enabled),
+        unlimited: false,
+        creditBalance: usage.spend?.balance == null ? null : String(usage.spend.balance),
+        sourcePath: CLAUDE_USAGE_URL,
+        updatedAt,
+      });
+    }
+    // Model-scoped weekly ceilings (e.g. Opus/Fable) surface as their own rows,
+    // mirroring how Codex shows an extra row per model limit.
+    for (const entry of Array.isArray(usage.limits) ? usage.limits : []) {
+      const displayName = typeof entry?.scope?.model?.display_name === "string"
+        ? entry.scope.model.display_name.trim()
+        : "";
+      if (!displayName) continue;
+      const usedPercent = optionalNumber(entry.percent);
+      if (usedPercent === null) continue;
+      const windowMinutes = entry.group === "weekly"
+        ? SEVEN_DAY_MINUTES
+        : entry.group === "session" ? FIVE_HOUR_MINUTES : null;
+      snapshots.push({
+        limitId: `claude:${entry.kind || entry.group || "scoped"}:${displayName.toLowerCase()}`,
+        limitName: `Claude ${displayName}`,
+        planType: subscriptionType || null,
+        primary: { usedPercent, windowMinutes, resetsAt: resets(entry.resets_at) },
+        secondary: null,
+        hasCredits: false,
+        unlimited: false,
+        creditBalance: null,
+        sourcePath: CLAUDE_USAGE_URL,
+        updatedAt,
+      });
+    }
+    return snapshots;
+  }
+
+  async refreshClaudeRateLimits(force = false) {
+    if (this.claudeRateLimitRefresh) return this.claudeRateLimitRefresh;
+    if (!force && Date.now() - this.claudeRateLimitFetchedAt < CLAUDE_USAGE_MIN_INTERVAL_MS) {
+      return false;
+    }
+    this.claudeRateLimitRefresh = (async () => {
+      const result = await this.fetchClaudeUsage();
+      if (!result?.usage) return false;
+      this.claudeRateLimitFetchedAt = Date.now();
+      const snapshots = this.claudeRateLimitSnapshots(
+        result.usage, result.subscriptionType, Math.floor(Date.now() / 1000)
+      );
+      for (const snapshot of snapshots) this.writeRateLimitSnapshot(snapshot);
+      return snapshots.length > 0;
+    })().finally(() => { this.claudeRateLimitRefresh = null; });
+    return this.claudeRateLimitRefresh;
+  }
+
   async refreshRateLimits() {
     if (this.rateLimitRefresh) return this.rateLimitRefresh;
     this.rateLimitRefresh = (async () => {
-      const entries = await this.sessionService.scan("codex");
-      const activeSessionIds = new Set(
-        this.catalog.agents
-          .filter((agent) => agent.aiToolId === "codex" && agent.lastSessionId)
-          .map((agent) => String(agent.lastSessionId).toLowerCase())
-      );
-      const prioritized = [...entries].sort((left, right) => {
-        const leftActive = activeSessionIds.has(String(left.sessionId || "").toLowerCase());
-        const rightActive = activeSessionIds.has(String(right.sessionId || "").toLowerCase());
-        if (leftActive !== rightActive) return leftActive ? -1 : 1;
-        return Number(right.mtimeMs || 0) - Number(left.mtimeMs || 0);
-      });
-      for (const entry of prioritized.slice(0, RATE_LIMIT_TRANSCRIPT_LIMIT)) {
-        this.readLatestRateLimit(entry);
-      }
+      await Promise.allSettled([
+        this.refreshCodexRateLimits(),
+        this.refreshClaudeRateLimits(true),
+      ]);
       return this.rateLimitSummary();
     })().finally(() => {
       this.rateLimitRefresh = null;
@@ -339,7 +481,9 @@ export class UsageService {
   rateLimitSummary() {
     const freshAfter = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
     const rows = this.db().prepare(`SELECT * FROM usage_rate_limits
-      WHERE updated_at >= ? ORDER BY CASE WHEN limit_id='codex' THEN 0 ELSE 1 END,
+      WHERE updated_at >= ? AND limit_id NOT LIKE 'codex\\_%' ESCAPE '\\'
+      ORDER BY
+      CASE limit_id WHEN 'codex' THEN 0 WHEN 'claude' THEN 1 ELSE 2 END,
       updated_at DESC`).all(freshAfter);
     const rateWindow = (row, prefix) => row[`${prefix}_used_percent`] == null ? null : ({
       usedPercent: Number(row[`${prefix}_used_percent`]),

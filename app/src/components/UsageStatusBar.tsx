@@ -135,11 +135,11 @@ export function UsageStatusBar() {
   const limits = summary?.limits ?? [];
   const visibleLimits = useMemo(() => limits.slice(0, 3), [limits]);
   const statusText = loading
-    ? "Codex 사용량 불러오는 중"
+    ? "사용량 불러오는 중"
     : error
-      ? "Codex 사용량 확인 실패"
+      ? "사용량 확인 실패"
       : limits.length === 0
-        ? "Codex 사용량 준비 중"
+        ? "사용량 준비 중"
         : null;
 
   return (
@@ -179,10 +179,10 @@ export function UsageStatusBar() {
         {refreshing ? "갱신 중" : "새로고침"}
       </button>
       {open && (
-        <div className="usage-status-popover" id="usage-status-popover" role="dialog" aria-label="Codex 사용량 상세">
+        <div className="usage-status-popover" id="usage-status-popover" role="dialog" aria-label="사용량 상세">
           <div className="usage-popover-heading">
             <div>
-              <strong>Codex 사용량</strong>
+              <strong>사용량</strong>
               <span>{formatUpdatedAgo(summary?.updatedAt ?? 0, now)}</span>
             </div>
             <button type="button" onClick={() => setOpen(false)}>닫기</button>
@@ -191,7 +191,7 @@ export function UsageStatusBar() {
             {error && <div className="usage-popover-message usage-popover-error">{error}</div>}
             {!error && limits.length === 0 && (
               <div className="usage-popover-message">
-                Codex에서 다음 응답을 받으면 사용량이 자동으로 표시됩니다.
+                Codex·Claude에서 다음 응답을 받으면 사용량이 자동으로 표시됩니다.
               </div>
             )}
             {limits.map((limit) => (

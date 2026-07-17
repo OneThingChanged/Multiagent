@@ -2,7 +2,7 @@
 
 세션·프로젝트별 토큰 사용량을 집계해 `usage.db`에 저장하는 기능. 현재 사용량 화면은 별도 Usage 서버가 아니라 [MONITOR.md](MONITOR.md)의 단일 Dashboard 서버(`/api/usage/*`) 안에서 제공한다. 집계 구현 파일은 Tauri의 `app/src-tauri/src/usage.rs`와 Electron의 `app/electron/services/usage-service.mjs`다.
 
-Electron 앱은 토큰 합계와 별개로 Codex 계정의 기간별 한도를 하단 상태 바에 표시한다. 토큰 사용량은 세션·프로젝트별 누적 통계이고, 계정 한도는 현재 계정에서 보고된 최신 사용률 스냅샷이다.
+Electron 앱은 토큰 합계와 별개로 Codex·Claude 계정의 기간별 한도를 하단 상태 바에 표시한다. 토큰 사용량은 세션·프로젝트별 누적 통계이고, 계정 한도는 현재 계정에서 보고된 최신 사용률 스냅샷이다. Codex 한도는 세션 transcript에서, Claude 한도는 OAuth usage 엔드포인트에서 읽는다.
 
 ## 데이터 소스
 
@@ -15,16 +15,22 @@ CLI transcript JSONL을 파싱해 토큰 수치를 읽는다 (앱은 PTY로 CLI�
 
 ## Electron 계정 한도 상태 바
 
-Codex transcript의 `token_count.rate_limits`에는 한도 ID별 사용률, 기간, 초기화 시각, 플랜 정보가 포함될 수 있다. Electron 백엔드는 이 메타데이터가 관측되면 `usage_rate_limits`에 최신 스냅샷을 저장한다.
+Codex transcript의 `token_count.rate_limits`에는 한도 ID별 사용률, 기간, 초기화 시각, 플랜 정보가 포함될 수 있다. Claude는 transcript에 이 정보가 없어 대신 OAuth usage 엔드포인트 응답의 `five_hour`·`seven_day`·`limits[]`를 읽는다. Electron 백엔드는 이 메타데이터가 관측되면 `usage_rate_limits`에 최신 스냅샷을 저장한다(Codex·Claude 공통 스키마).
 
-- 앱 하단에는 기본 한도와 모델별 한도를 독립된 항목으로 표시한다
+- 앱 하단에는 기본 한도와 (Claude) 모델별 한도를 독립된 항목으로 표시한다. 단 Codex는 대표 한도(`limit_id="codex"`)만 남기고 `codex_<model>` 형태의 모델별 주간 한도는 저장·표시하지 않는다(예: GPT-5.3-Codex-Spark)
 - 각 항목은 사용률, 진행 막대, 초기화까지 남은 시간을 제공한다
 - 항목을 누르면 전체 한도 윈도우, 마지막 갱신 시각, 플랜과 추가 사용량 여부를 확인할 수 있다
 - 사용률 70% 이상은 경고색, 90% 이상은 위험색으로 표시한다
 - Hook `done` 이벤트 뒤 자동으로 갱신하며 사용자가 상태 바의 새로고침 버튼으로 다시 확인할 수 있다
 - 최초 조회와 수동 새로고침은 최근 transcript의 마지막 1MiB만 확인해 대형 세션 전체를 반복해서 읽지 않는다
 
-Claude transcript의 `message.usage`는 토큰 합계에는 사용할 수 있지만 계정의 기간별 한도 스냅샷은 포함하지 않는다. 따라서 Claude 토큰은 기존 대시보드에 집계되지만 현재 Electron 하단 계정 한도에는 표시되지 않는다. SSH 원격 세션도 로컬 transcript 기반 계정 한도 조회 대상에 포함하지 않는다.
+Claude transcript의 `message.usage`는 토큰 합계에는 사용할 수 있지만 Codex의 `token_count.rate_limits` 같은 계정의 기간별 한도 스냅샷은 포함하지 않는다. 그래서 Claude 한도는 transcript가 아니라 **Claude Code의 OAuth 자격증명으로 usage 엔드포인트를 직접 조회**해서 채운다.
+
+- `~/.claude/.credentials.json`의 `claudeAiOauth.accessToken`으로 `GET https://api.anthropic.com/api/oauth/usage`를 호출한다(`anthropic-beta: oauth-2025-04-20`). 토큰이 만료됐거나 파일이 없으면 조용히 건너뛰고 마지막 스냅샷을 유지한다.
+- 응답의 `five_hour`(5시간)·`seven_day`(주간)를 `limit_id="claude"` 한 행의 primary/secondary window로 저장하고, `limits[]`의 모델 스코프 한도(예: `weekly_scoped` / Fable·Opus)는 `claude:<kind>:<model>` 별도 행으로 저장한다. Codex와 같은 `usage_rate_limits` 스키마·상태 바 UI를 그대로 쓴다.
+- 최소 60초 throttle로 갱신하며, Claude 세션의 hook `done` 뒤 자동으로, 그리고 상태 바 새로고침·앱 시작 시 강제로 다시 조회한다.
+
+SSH 원격 세션은 로컬 자격증명·transcript 기반 계정 한도 조회 대상에 포함하지 않는다.
 
 **중복 방지(source_key)** — 같은 record를 다시 읽어도 합계가 안 늘게 deterministic key 사용:
 - Claude: `claude:<session_id>:<requestId|message.id|uuid>`

@@ -198,6 +198,15 @@ const hookService = new HookService({
           console.warn("[electron] usage hook ingest failed", error);
         }
       }
+      if (payload.event === "done") {
+        // Claude limits live behind the OAuth usage endpoint (not the transcript),
+        // so refresh them after a Claude turn completes. Throttled inside the service.
+        const tool = usageIndex.catalog.agents
+          .find((agent) => agent.id === payload.id)?.aiToolId;
+        if (tool === "claude") {
+          usageIndex.refreshClaudeRateLimits(false).catch(() => {});
+        }
+      }
     }
     sendEventToAll(eventName, payload);
   },
