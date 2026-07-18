@@ -23,18 +23,51 @@ describe("ContextMenu", () => {
 });
 
 describe("TabContextMenu", () => {
-  it("shows the recently closed tab action and its shortcut", () => {
+  it("shows split, pin, close and color actions", () => {
     const html = renderToStaticMarkup(
       <TabContextMenu
         state={{ agentId: "agent-1", path: [], x: 0, y: 0 }}
+        pinned={false}
+        tabColor={null}
         canReopen={true}
-        onClose={() => {}}
-        onReopen={() => {}}
+        onDismiss={() => {}}
+        onSplit={() => {}}
+        onTogglePin={() => {}}
         onCloseTab={() => {}}
+        onCloseOthers={() => {}}
+        onCloseRight={() => {}}
+        onRename={() => {}}
+        onSetColor={() => {}}
+        onReopen={() => {}}
       />
     );
 
-    expect(html).toContain("최근 닫은 탭 다시 열기");
+    expect(html).toContain("오른쪽으로 분할");
+    expect(html).toContain("탭 고정");
+    expect(html).toContain("다른 탭 닫기");
+    expect(html).toContain("탭 색상");
     expect(html).toContain("Ctrl+Shift+T");
+  });
+
+  it("shows unpin label when the tab is pinned", () => {
+    const html = renderToStaticMarkup(
+      <TabContextMenu
+        state={{ agentId: "agent-1", path: [], x: 0, y: 0 }}
+        pinned={true}
+        tabColor="#4c8bf5"
+        canReopen={false}
+        onDismiss={() => {}}
+        onSplit={() => {}}
+        onTogglePin={() => {}}
+        onCloseTab={() => {}}
+        onCloseOthers={() => {}}
+        onCloseRight={() => {}}
+        onRename={() => {}}
+        onSetColor={() => {}}
+        onReopen={() => {}}
+      />
+    );
+
+    expect(html).toContain("탭 고정 해제");
   });
 });

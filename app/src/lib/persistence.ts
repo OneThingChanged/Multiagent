@@ -108,6 +108,8 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
         aiLabel: toolForId(c.aiToolId).label,
         dangerous: !!c.dangerous,
         useAltScreen: c.useAltScreen || undefined,
+        pinned: c.pinned || undefined,
+        tabColor: c.tabColor || undefined,
         createdAt: c.createdAt,
         // Migrate legacy fields: prefer new lastSessionId, fall back to either
         // older field (both held the same session UUID).

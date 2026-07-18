@@ -75,25 +75,140 @@ export function ProjectContextMenu({
   );
 }
 
+export const TAB_COLORS: { name: string; value: string }[] = [
+  { name: "파랑", value: "#4c8bf5" },
+  { name: "보라", value: "#a371f7" },
+  { name: "분홍", value: "#f778ba" },
+  { name: "빨강", value: "#f85149" },
+  { name: "주황", value: "#e3742f" },
+  { name: "노랑", value: "#d29922" },
+  { name: "초록", value: "#3fb950" },
+  { name: "청록", value: "#2dd4bf" },
+  { name: "회색", value: "#8b949e" },
+];
+
 export function TabContextMenu({
   state,
+  pinned,
+  tabColor,
   canReopen,
-  onClose,
-  onReopen,
+  onDismiss,
+  onSplit,
+  onTogglePin,
   onCloseTab,
+  onCloseOthers,
+  onCloseRight,
+  onRename,
+  onSetColor,
+  onReopen,
 }: {
   state: TabCtxState;
+  pinned: boolean;
+  tabColor: string | null;
   canReopen: boolean;
-  onClose: () => void;
-  onReopen: () => void;
+  onDismiss: () => void;
+  onSplit: (direction: "h" | "v") => void;
+  onTogglePin: () => void;
   onCloseTab: () => void;
+  onCloseOthers: () => void;
+  onCloseRight: () => void;
+  onRename: () => void;
+  onSetColor: (color: string | null) => void;
+  onReopen: () => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  const run = (action: () => void) => () => {
+    action();
+    onDismiss();
+  };
   return (
     <>
       <div
         className="ctx-backdrop"
-        onClick={onClose}
+        onClick={onDismiss}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onDismiss();
+        }}
+      />
+      <div
+        ref={ref}
+        className="ctx-menu"
+        style={{ left: pos.left, top: pos.top }}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <button className="ctx-item" onClick={run(() => onSplit("h"))}>
+          오른쪽으로 분할
+        </button>
+        <button className="ctx-item" onClick={run(() => onSplit("v"))}>
+          아래로 분할
+        </button>
+        <div className="ctx-separator" />
+        <button className="ctx-item" onClick={run(onTogglePin)}>
+          {pinned ? "탭 고정 해제" : "탭 고정"}
+        </button>
+        <div className="ctx-separator" />
+        <button className="ctx-item" onClick={run(onCloseTab)}>
+          닫기 <span className="ctx-shortcut">Ctrl+W</span>
+        </button>
+        <button className="ctx-item" onClick={run(onCloseOthers)}>
+          다른 탭 닫기
+        </button>
+        <button className="ctx-item" onClick={run(onCloseRight)}>
+          오른쪽 탭 모두 닫기
+        </button>
+        <button className="ctx-item" onClick={run(onReopen)} disabled={!canReopen}>
+          최근 닫은 탭 다시 열기 <span className="ctx-shortcut">Ctrl+Shift+T</span>
+        </button>
+        <div className="ctx-separator" />
+        <button className="ctx-item" onClick={run(onRename)}>
+          이름 변경
+        </button>
+        <div className="ctx-color-label">탭 색상</div>
+        <div className="ctx-color-row">
+          <button
+            className={`ctx-color-swatch ctx-color-none ${!tabColor ? "ctx-color-active" : ""}`}
+            title="색상 없음"
+            onClick={run(() => onSetColor(null))}
+          />
+          {TAB_COLORS.map((color) => (
+            <button
+              key={color.value}
+              className={`ctx-color-swatch ${tabColor === color.value ? "ctx-color-active" : ""}`}
+              style={{ background: color.value }}
+              title={color.name}
+              onClick={run(() => onSetColor(color.value))}
+            />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function TerminalContextMenu({
+  x,
+  y,
+  hasSelection,
+  onClose,
+  onCopy,
+  onPaste,
+  onSelectAll,
+}: {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+  onClose: () => void;
+  onCopy: () => void;
+  onPaste: () => void;
+  onSelectAll: () => void;
+}) {
+  const { ref, pos } = useClampedMenuPosition(x, y);
+  return (
+    <>
+      <div
+        className="ctx-backdrop"
+        onMouseDown={onClose}
         onContextMenu={(e) => {
           e.preventDefault();
           onClose();
@@ -105,12 +220,15 @@ export function TabContextMenu({
         style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <button className="ctx-item" onClick={onReopen} disabled={!canReopen}>
-          최근 닫은 탭 다시 열기 (Ctrl+Shift+T)
+        <button className="ctx-item" onClick={onCopy} disabled={!hasSelection}>
+          복사 (Ctrl+C)
+        </button>
+        <button className="ctx-item" onClick={onPaste}>
+          붙여넣기 (Ctrl+V)
         </button>
         <div className="ctx-separator" />
-        <button className="ctx-item" onClick={onCloseTab}>
-          Close
+        <button className="ctx-item" onClick={onSelectAll}>
+          모두 선택
         </button>
       </div>
     </>

@@ -231,6 +231,8 @@ export function FileTreePanel({
     dirCacheRef.current = dirCache;
   }, [dirCache]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Single-click selects (highlights) a file row; double-click opens it.
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(() => new Set());
   const [expandingAll, setExpandingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -715,11 +717,27 @@ export function FileTreePanel({
       items.push(
         <button
           key={entry.relativePath}
-          className={`file-tree-row ${entry.isDir ? "file-tree-row-dir" : "file-tree-row-file"}${gitClassFor(entry)}`}
+          className={`file-tree-row ${entry.isDir ? "file-tree-row-dir" : "file-tree-row-file"}${gitClassFor(entry)}${
+            !entry.isDir && selectedPath === entry.relativePath
+              ? " file-tree-row-selected"
+              : ""
+          }`}
           style={{ paddingLeft: 8 + depth * 16 }}
           onClick={() => {
-            if (entry.isDir) toggleDir(entry.relativePath);
-            else if (projectId) onOpenFile(projectId, entry.relativePath);
+            // Folder: single click toggles. File: single click selects /
+            // deselects; double click (below) opens it.
+            if (entry.isDir) {
+              toggleDir(entry.relativePath);
+            } else {
+              setSelectedPath((current) =>
+                current === entry.relativePath ? null : entry.relativePath
+              );
+            }
+          }}
+          onDoubleClick={() => {
+            if (!entry.isDir && projectId) {
+              onOpenFile(projectId, entry.relativePath);
+            }
           }}
           onContextMenu={(event) => openCtxMenu(event, entry)}
           title={entry.relativePath}
@@ -1029,6 +1047,9 @@ function SourceControlView({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  // Multi-select for batch stage/unstage/discard (keyed by relative_path).
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const lastClickedRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!folder) {
@@ -1039,6 +1060,16 @@ function SourceControlView({
     try {
       const result = await invoke<GitChangesResult>("git_changes", { folder });
       setChanges(result);
+      // Drop selections for paths that are no longer changed.
+      setSelected((current) => {
+        if (current.size === 0) return current;
+        const live = new Set([
+          ...result.staged.map((e) => e.relative_path),
+          ...result.unstaged.map((e) => e.relative_path),
+        ]);
+        const next = new Set([...current].filter((p) => live.has(p)));
+        return next.size === current.size ? current : next;
+      });
     } catch (err) {
       onError(err);
     } finally {
@@ -1070,15 +1101,47 @@ function SourceControlView({
     [busy, load, onError, onMutated]
   );
 
-  const stage = (paths: string[]) =>
+  const stage = (paths: string[]) => {
+    if (paths.length === 0) return;
     void runGitOp(() => invoke("git_stage", { folder, paths }));
-  const unstage = (paths: string[]) =>
+  };
+  const unstage = (paths: string[]) => {
+    if (paths.length === 0) return;
     void runGitOp(() => invoke("git_unstage", { folder, paths }));
-  const commit = () =>
+  };
+  const discard = (paths: string[]) => {
+    if (paths.length === 0) return;
+    const label =
+      paths.length === 1 ? `"${baseName(paths[0])}"의` : `${paths.length}개 파일의`;
+    const ok = window.confirm(
+      `${label} 변경을 되돌립니다.\n미추적 파일은 휴지통으로, 나머지는 마지막 커밋 상태로 복원됩니다.\n이 동작은 git으로 되돌릴 수 없습니다.`
+    );
+    if (!ok) return;
     void runGitOp(async () => {
+      await invoke("git_discard", { folder, paths });
+      setSelected(new Set());
+    });
+  };
+  // VS Code behavior: with nothing staged, Commit stages every change first
+  // (commit-all), so the button isn't a dead end when the user just types a
+  // message. With staged files, it commits only those (selective).
+  const commit = (commitAll: boolean, unstagedPaths: string[]) =>
+    void runGitOp(async () => {
+      if (commitAll && unstagedPaths.length > 0) {
+        await invoke("git_stage", { folder, paths: unstagedPaths });
+      }
       await invoke("git_commit", { folder, message: message.trim() });
       setMessage("");
     });
+
+  const toggleSelected = (relativePath: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(relativePath)) next.delete(relativePath);
+      else next.add(relativePath);
+      return next;
+    });
+  };
 
   if (!folder) {
     return (
@@ -1106,15 +1169,62 @@ function SourceControlView({
     );
   }
 
-  const canCommit = changes.staged.length > 0 && !!message.trim() && !busy;
+  const commitAll = changes.staged.length === 0;
+  const unstagedPaths = changes.unstaged.map((entry) => entry.relative_path);
+  const canCommit =
+    (changes.staged.length > 0 || changes.unstaged.length > 0) &&
+    !!message.trim() &&
+    !busy;
+  const doCommit = () => commit(commitAll, unstagedPaths);
+
+  // Flat display order (staged then changes, deduped) for Shift+click ranges.
+  const orderedPaths: string[] = [];
+  const seenOrder = new Set<string>();
+  for (const entry of [...changes.staged, ...changes.unstaged]) {
+    if (!seenOrder.has(entry.relative_path)) {
+      seenOrder.add(entry.relative_path);
+      orderedPaths.push(entry.relative_path);
+    }
+  }
+
+  const handleRowClick = (
+    event: ReactMouseEvent<HTMLDivElement>,
+    relativePath: string
+  ) => {
+    if (event.shiftKey && lastClickedRef.current) {
+      const a = orderedPaths.indexOf(lastClickedRef.current);
+      const b = orderedPaths.indexOf(relativePath);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a <= b ? [a, b] : [b, a];
+        setSelected((current) => {
+          const next = new Set(current);
+          for (let i = lo; i <= hi; i += 1) next.add(orderedPaths[i]);
+          return next;
+        });
+        return;
+      }
+    }
+    toggleSelected(relativePath);
+    lastClickedRef.current = relativePath;
+  };
 
   const changeRow = (entry: GitChangeEntry, staged: boolean) => (
-    <button
+    <div
       key={`${staged ? "s" : "u"}:${entry.relative_path}`}
-      className={`scm-row git-${entry.status}`}
-      onClick={() => onOpenFile(entry.relative_path)}
-      title={entry.relative_path}
+      className={`scm-row git-${entry.status} ${
+        selected.has(entry.relative_path) ? "scm-row-selected" : ""
+      }`}
+      onClick={(event) => handleRowClick(event, entry.relative_path)}
+      onDoubleClick={() => onOpenFile(entry.relative_path)}
+      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: 열기)`}
     >
+      <input
+        type="checkbox"
+        className="scm-check"
+        checked={selected.has(entry.relative_path)}
+        onClick={(event) => event.stopPropagation()}
+        onChange={() => toggleSelected(entry.relative_path)}
+      />
       <span className={`file-tree-icon ${fileIconClass(baseName(entry.relative_path))}`} />
       <span className="scm-name">{baseName(entry.relative_path)}</span>
       <span className="scm-dir">{parentPath(entry.relative_path)}</span>
@@ -1128,6 +1238,16 @@ function SourceControlView({
         <span className="scm-letter">{entry.status}</span>
       </span>
       <span
+        className="scm-act scm-act-discard"
+        title="변경 되돌리기 (Discard)"
+        onClick={(event) => {
+          event.stopPropagation();
+          discard([entry.relative_path]);
+        }}
+      >
+        ↺
+      </span>
+      <span
         className="scm-act"
         title={staged ? "Unstage" : "Stage"}
         onClick={(event) => {
@@ -1138,8 +1258,10 @@ function SourceControlView({
       >
         {staged ? "−" : "+"}
       </span>
-    </button>
+    </div>
   );
+
+  const selectedPaths = [...selected];
 
   return (
     <div className="scm-view">
@@ -1157,7 +1279,7 @@ function SourceControlView({
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
               event.preventDefault();
-              if (canCommit) commit();
+              if (canCommit) doCommit();
             }
             event.stopPropagation();
           }}
@@ -1176,13 +1298,46 @@ function SourceControlView({
         </button>
         <button
           className="scm-commit-btn"
-          onClick={commit}
+          onClick={doCommit}
           disabled={!canCommit}
-          title="Ctrl+Enter"
+          title={
+            commitAll
+              ? "스테이징된 항목이 없어 전체 변경을 커밋합니다 (Ctrl+Enter)"
+              : "스테이징된 항목만 커밋합니다 (Ctrl+Enter)"
+          }
         >
-          Commit
+          {commitAll
+            ? `Commit All${
+                changes.unstaged.length > 0 ? ` (${changes.unstaged.length})` : ""
+              }`
+            : `Commit (${changes.staged.length})`}
         </button>
       </div>
+      {selectedPaths.length > 0 && (
+        <div className="scm-selbar">
+          <span className="scm-selbar-count">{selectedPaths.length}개 선택</span>
+          <button onClick={() => stage(selectedPaths)} disabled={busy}>
+            Stage
+          </button>
+          <button onClick={() => unstage(selectedPaths)} disabled={busy}>
+            Unstage
+          </button>
+          <button
+            className="scm-selbar-discard"
+            onClick={() => discard(selectedPaths)}
+            disabled={busy}
+          >
+            Discard
+          </button>
+          <button
+            className="scm-selbar-clear"
+            onClick={() => setSelected(new Set())}
+            title="선택 해제"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className="file-tree-body">
         <div className="scm-section">
           Staged <span className="scm-count">{changes.staged.length}</span>

@@ -8,7 +8,8 @@ export type RuntimeCommand =
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "read_text_file" | "git_status" | "git_changes" | "git_stage"
-  | "git_unstage" | "git_commit" | "resource_usage" | "set_titlebar_overlay"
+  | "git_unstage" | "git_discard" | "git_commit" | "resource_usage"
+  | "set_titlebar_overlay"
   | "list_ports" | "kill_port_process"
   | "create_file" | "create_directory"
   | "rename_path" | "duplicate_path" | "delete_path"
@@ -167,6 +168,10 @@ export type RuntimeCommandContract = {
     result: null;
   };
   git_unstage: {
+    args: { folder: string; paths: string[] };
+    result: null;
+  };
+  git_discard: {
     args: { folder: string; paths: string[] };
     result: null;
   };

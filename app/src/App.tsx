@@ -226,6 +226,8 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     aiToolId: agent.aiToolId,
     dangerous: agent.dangerous,
     useAltScreen: agent.useAltScreen || undefined,
+    pinned: agent.pinned || undefined,
+    tabColor: agent.tabColor || undefined,
     createdAt: agent.createdAt,
     lastSessionId: agent.lastSessionId,
   };
@@ -319,6 +321,8 @@ function agentFromStored(
     aiLabel: toolForId(aiToolId).label,
     dangerous: !!stored.dangerous,
     useAltScreen: stored.useAltScreen || undefined,
+    pinned: stored.pinned || undefined,
+    tabColor: stored.tabColor || undefined,
     createdAt: stored.createdAt || existing?.createdAt || Date.now(),
     lastSessionId:
       stored.lastSessionId ??
@@ -481,6 +485,10 @@ function loadAlwaysOnTop() {
 
 function isAbsoluteFsPath(path: string) {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+function joinFsPath(folder: string, relativePath: string) {
+  return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
 }
 
 // Returns the project-relative path when absolutePath is inside folder,
@@ -1878,6 +1886,66 @@ function App() {
     commitGroupState(result.state);
   }, [commitGroupState]);
 
+  // Tab context-menu batch closers. Compute the target tab ids from the leaf
+  // up front (so shifting indices don't matter), skip pinned tabs, then close
+  // each. Closing detaches the session to its own group (it is not killed).
+  const closeTabsInLeaf = useCallback(
+    (path: Path, keep: (agentId: string, index: number) => boolean) => {
+      const group = groupsRef.current.find(
+        (g) => g.id === activeGroupIdRef.current
+      );
+      const leaf = group ? getAt(group.layout, path) : null;
+      if (!leaf || leaf.type !== "leaf") return;
+      const pinnedIds = new Set(
+        agentsRef.current.filter((a) => a.pinned).map((a) => a.id)
+      );
+      const toClose = leaf.tabs.filter(
+        (id, index) => !keep(id, index) && !pinnedIds.has(id)
+      );
+      for (const id of toClose) closeTabRef.current?.(path, id);
+    },
+    []
+  );
+
+  const closeOtherTabs = useCallback(
+    (path: Path, agentId: string) =>
+      closeTabsInLeaf(path, (id) => id === agentId),
+    [closeTabsInLeaf]
+  );
+
+  const closeTabsToRight = useCallback(
+    (path: Path, agentId: string) => {
+      const group = groupsRef.current.find(
+        (g) => g.id === activeGroupIdRef.current
+      );
+      const leaf = group ? getAt(group.layout, path) : null;
+      if (!leaf || leaf.type !== "leaf") return;
+      const anchor = leaf.tabs.indexOf(agentId);
+      if (anchor < 0) return;
+      closeTabsInLeaf(path, (_id, index) => index <= anchor);
+    },
+    [closeTabsInLeaf]
+  );
+
+  const setAgentPinned = useCallback((agentId: string, pinned: boolean) => {
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.id === agentId ? { ...a, pinned: pinned || undefined } : a
+      )
+    );
+  }, []);
+
+  const setAgentTabColor = useCallback(
+    (agentId: string, color: string | null) => {
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === agentId ? { ...a, tabColor: color || undefined } : a
+        )
+      );
+    },
+    []
+  );
+
   const reopenClosedTab = useCallback(() => {
     while (recentlyClosedTabsRef.current.length > 0) {
       const closed = recentlyClosedTabsRef.current.pop()!;
@@ -2336,37 +2404,31 @@ function App() {
   const openDocTab = useCallback(
     (projectId: string, relativePath: string) => {
       const docId = makeDocTabId(projectId, relativePath);
-      const activeGroup = groupsRef.current.find(
-        (g) => g.id === activeGroupIdRef.current
-      );
-      if (!activeGroup || !activePathRef.current) {
-        pushToast(
-          "",
-          "문서",
-          "문서 탭을 열려면 먼저 세션 화면을 열어주세요."
-        );
-        return;
-      }
       applyGroupOp((s) => {
         const group = s.groups.find((g) => g.id === s.activeGroupId);
-        if (!group || !s.activePath) return s;
-        const existingPath = findLeafPath(group.layout, docId);
-        if (existingPath) {
-          const layout = setLeafActiveTab(group.layout, existingPath, docId);
-          return {
-            groups: updateGroup(s.groups, group.id, layout),
-            activeGroupId: s.activeGroupId,
-            activePath: existingPath,
-          };
+        // Already open in the active screen → just focus it.
+        if (group && s.activePath) {
+          const existingPath = findLeafPath(group.layout, docId);
+          if (existingPath) {
+            const layout = setLeafActiveTab(group.layout, existingPath, docId);
+            return {
+              groups: updateGroup(s.groups, group.id, layout),
+              activeGroupId: s.activeGroupId,
+              activePath: existingPath,
+            };
+          }
         }
+        // openAsTab appends to the active leaf, or — when no screen is open —
+        // creates a new solo group for the doc, so a document can open even
+        // before any terminal session exists.
         return groupOps.openAsTab(s, docId, projectId);
       });
     },
-    [applyGroupOp, pushToast]
+    [applyGroupOp]
   );
 
   const handleOpenMarkdownPath = useCallback(
-    async (agentId: string, path: string) => {
+    async (agentId: string, path: string, external = false) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
       const project = projectsRef.current.find(
         (candidate) => candidate.id === agent?.projectId
@@ -2378,6 +2440,15 @@ function App() {
           folder: project.folder,
           path,
         });
+        // Ctrl/Cmd+click → open with the OS default app (browser for .html)
+        // instead of the in-app doc tab.
+        if (external) {
+          const fullPath = isAbsoluteFsPath(relativePath)
+            ? relativePath
+            : joinFsPath(project.folder, relativePath);
+          await invoke("open_local_path", { path: fullPath });
+          return;
+        }
         // resolve_markdown_path returns an absolute path only for docs living
         // outside the project root — those still open externally.
         if (isAbsoluteFsPath(relativePath)) {
@@ -3130,16 +3201,35 @@ function App() {
       {tabContextMenu && (
         <TabContextMenu
           state={tabContextMenu}
+          pinned={
+            !!agents.find((a) => a.id === tabContextMenu.agentId)?.pinned
+          }
+          tabColor={
+            agents.find((a) => a.id === tabContextMenu.agentId)?.tabColor ?? null
+          }
           canReopen={recentlyClosedTabsRef.current.length > 0}
-          onClose={() => setTabContextMenu(null)}
-          onReopen={() => {
-            reopenClosedTab();
-            setTabContextMenu(null);
+          onDismiss={() => setTabContextMenu(null)}
+          onSplit={(direction) =>
+            splitWith(tabContextMenu.agentId, direction)
+          }
+          onTogglePin={() => {
+            const current = agents.find((a) => a.id === tabContextMenu.agentId);
+            setAgentPinned(tabContextMenu.agentId, !current?.pinned);
           }}
-          onCloseTab={() => {
-            closeTab(tabContextMenu.path, tabContextMenu.agentId);
-            setTabContextMenu(null);
-          }}
+          onReopen={reopenClosedTab}
+          onCloseTab={() =>
+            closeTab(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onCloseOthers={() =>
+            closeOtherTabs(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onCloseRight={() =>
+            closeTabsToRight(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onRename={() => setRenameSessionId(tabContextMenu.agentId)}
+          onSetColor={(color) =>
+            setAgentTabColor(tabContextMenu.agentId, color)
+          }
         />
       )}
     </div>

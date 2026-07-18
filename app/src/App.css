@@ -3210,8 +3210,26 @@ body.files-resizing .files-resizer::after {
   text-align: left;
   width: 100%;
   min-width: 0;
+  /* Shift+click selects a range of rows — never a text highlight. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .scm-row:hover { background: var(--docs-bg-soft); }
+.scm-row-selected { background: var(--docs-active-bg); }
+.scm-check {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--docs-accent);
+  cursor: pointer;
+}
+.scm-act-discard {
+  color: var(--git-m);
+}
+.scm-row:hover .scm-act-discard:hover {
+  background: var(--git-d);
+  color: #fff;
+  border-color: var(--git-d);
+}
 .scm-name {
   min-width: 0;
   overflow: hidden;
@@ -3261,6 +3279,55 @@ body.files-resizing .files-resizer::after {
   line-height: 1;
 }
 .scm-row:hover .scm-act { display: inline-flex; }
+/* Batch selection action bar */
+.scm-selbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--docs-border);
+  background: var(--docs-active-bg);
+  flex-shrink: 0;
+}
+.scm-selbar-count {
+  margin-right: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--docs-heading);
+}
+.scm-selbar button {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--docs-border);
+  background: var(--docs-button-bg);
+  color: var(--docs-text);
+  cursor: pointer;
+}
+.scm-selbar button:hover:not(:disabled) {
+  background: var(--docs-button-hover);
+}
+.scm-selbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.scm-selbar .scm-selbar-discard {
+  color: var(--git-d);
+  border-color: var(--git-d);
+}
+.scm-selbar .scm-selbar-discard:hover:not(:disabled) {
+  background: var(--git-d);
+  color: #fff;
+}
+.scm-selbar .scm-selbar-clear {
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  color: var(--docs-muted);
+}
+
 .scm-commits {
   border-top: 1px solid var(--docs-border);
   margin-top: 6px;
@@ -3343,6 +3410,11 @@ body.files-resizing .files-resizer::after {
 }
 .file-tree-row:hover {
   background: var(--docs-bg-soft);
+}
+.file-tree-row-selected,
+.file-tree-row-selected:hover {
+  background: var(--docs-active-bg);
+  box-shadow: inset 2px 0 0 var(--docs-accent);
 }
 
 .file-tree-caret {
@@ -3760,6 +3832,17 @@ body.files-resizing .files-resizer::after {
   background: var(--app-bg);
   color: var(--app-heading);
 }
+/* Custom tab color: top stripe wins over the active accent stripe. */
+.pane-tab[data-tab-colored] {
+  box-shadow: inset 0 2px 0 var(--tab-color);
+}
+
+.tab-pin {
+  font-size: 9px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: grayscale(0.2);
+}
 
 .tab-tool-icon {
   font-size: 12px;
@@ -3842,6 +3925,63 @@ body.files-resizing .files-resizer::after {
   cursor: pointer;
   border-radius: 4px;
   font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ctx-shortcut {
+  color: var(--app-soft-text);
+  font-size: 11px;
+  font-family: Consolas, ui-monospace, monospace;
+}
+.ctx-item:hover:not(:disabled) .ctx-shortcut {
+  color: var(--app-inverse-text);
+}
+
+/* Tab color picker in the tab context menu */
+.ctx-color-label {
+  padding: 6px 10px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--app-soft-text);
+}
+.ctx-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 10px 8px;
+  max-width: 200px;
+}
+.ctx-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  padding: 0;
+}
+.ctx-color-swatch:hover {
+  transform: scale(1.15);
+}
+.ctx-color-active {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+.ctx-color-none {
+  position: relative;
+  background: var(--app-button-bg);
+}
+.ctx-color-none::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-top: 1.5px solid var(--app-danger);
+  transform: rotate(45deg);
+  transform-origin: center;
+  top: 50%;
 }
 .ctx-item:hover:not(:disabled) {
   background: var(--app-accent-strong);

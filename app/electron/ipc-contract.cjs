@@ -29,6 +29,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "git_changes",
   "git_stage",
   "git_unstage",
+  "git_discard",
   "git_commit",
   "resource_usage",
   "set_titlebar_overlay",
@@ -200,6 +201,7 @@ function assertInvokeRequest(command, rawArgs) {
       break;
     case "git_stage":
     case "git_unstage":
+    case "git_discard":
       assertPathString(args.folder, "folder");
       if (
         !Array.isArray(args.paths) ||

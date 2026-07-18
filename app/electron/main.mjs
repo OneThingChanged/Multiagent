@@ -1625,6 +1625,58 @@ async function gitCommit(folder, message) {
   return null;
 }
 
+// Discard working-tree changes for the given paths (destructive; the renderer
+// confirms first). Classified from a fresh porcelain scan:
+//   untracked (??)         → move to the OS trash (recoverable)
+//   staged-new  (X === A)  → unstage, then trash the file
+//   tracked else           → git restore --source=HEAD --staged --worktree
+async function gitDiscard(folder, paths) {
+  const root = fs.realpathSync(asString(folder));
+  const requested = new Set(assertGitPaths(paths));
+  const statusOut = await runGit(root, ["status", "--porcelain", "-z"]);
+  const codeByPath = new Map();
+  const tokens = statusOut.split("\0");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.length < 4 || token[2] !== " ") continue;
+    const x = token[0];
+    const relative = token.slice(3).replace(/\\/g, "/");
+    if (x === "R" || x === "C") i += 1;
+    codeByPath.set(relative, token.slice(0, 2));
+  }
+
+  const toRestore = [];
+  const toTrash = [];
+  const toUnstageThenTrash = [];
+  for (const rel of requested) {
+    const code = codeByPath.get(rel);
+    if (!code) continue; // no longer changed
+    if (code[0] === "?") toTrash.push(rel);
+    else if (code[0] === "A") toUnstageThenTrash.push(rel);
+    else toRestore.push(rel);
+  }
+
+  if (toRestore.length) {
+    await runGit(
+      root,
+      ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...toRestore],
+      15000
+    );
+  }
+  if (toUnstageThenTrash.length) {
+    await runGit(root, ["restore", "--staged", "--", ...toUnstageThenTrash], 15000);
+    toTrash.push(...toUnstageThenTrash);
+  }
+  for (const rel of toTrash) {
+    const joined = path.join(root, rel);
+    if (!fs.existsSync(joined)) continue;
+    const resolved = fs.realpathSync(joined);
+    if (!isInside(root, resolved)) continue;
+    await shell.trashItem(resolved).catch(() => {});
+  }
+  return null;
+}
+
 // ---- File tree write operations (context menu). All sandboxed to the
 // project root; delete moves to the OS recycle bin instead of erasing.
 
@@ -1956,6 +2008,8 @@ async function invokeCommand(event, command, rawArgs) {
       return gitUnstage(args.folder, args.paths);
     case "git_commit":
       return gitCommit(args.folder, args.message);
+    case "git_discard":
+      return gitDiscard(args.folder, args.paths);
     case "create_file":
       return createFileEntry(args.folder, args.relativePath);
     case "create_directory":

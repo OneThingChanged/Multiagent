@@ -116,7 +116,11 @@ export function TerminalArea({
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onDropToEmpty: (agentId: string) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
-  onOpenMarkdownPath: (agentId: string, path: string) => void;
+  onOpenMarkdownPath: (
+    agentId: string,
+    path: string,
+    external?: boolean
+  ) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;

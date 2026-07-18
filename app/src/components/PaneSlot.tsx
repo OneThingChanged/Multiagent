@@ -1,4 +1,10 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { invoke } from "../platform/runtime";
 import { electronBridge, isElectronRuntime } from "../platform/electronBridge";
 import type {
@@ -27,6 +33,7 @@ import {
   parseDocTabId,
 } from "../lib/docTabs";
 import { DocViewer } from "./DocViewer";
+import { TerminalContextMenu } from "./Menus";
 import {
   clampTerminalFontSize,
   computeDropZone,
@@ -81,7 +88,11 @@ export type RenderCtx = {
   onDropTargetChange: (t: DropTargetState | null) => void;
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
-  onOpenMarkdownPath: (agentId: string, path: string) => void;
+  onOpenMarkdownPath: (
+    agentId: string,
+    path: string,
+    external?: boolean
+  ) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;
@@ -99,6 +110,11 @@ export function PaneSlot({
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
+  const [termMenu, setTermMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+  } | null>(null);
   const active = pathEq(path, ctx.activePath);
   const activeTabId = activeAgentInLeaf(leaf);
   const activeDocId = activeTabId && isDocTabId(activeTabId) ? activeTabId : null;
@@ -338,7 +354,9 @@ export function PaneSlot({
       return findTerminalLinkAtMouseEvent(targetEntry.term, event);
     };
 
-    const openTerminalLink = (link: TerminalMouseLink) => {
+    // external = Ctrl/Cmd held → open with the OS/web browser instead of the
+    // in-app doc tab (matches the HTML doc-tab Ctrl+click behavior).
+    const openTerminalLink = (link: TerminalMouseLink, external: boolean) => {
       const targetEntry = termsRef.current.get(agentId);
       targetEntry?.term.clearSelection();
       switch (link.kind) {
@@ -346,7 +364,7 @@ export function PaneSlot({
           openTerminalUrl(link.text);
           break;
         case "markdown":
-          ctx.onOpenMarkdownPath(agentId, link.text);
+          ctx.onOpenMarkdownPath(agentId, link.text, external);
           break;
         case "image":
           ctx.onOpenImagePath(agentId, link.text);
@@ -381,7 +399,7 @@ export function PaneSlot({
       pendingLinkClick = null;
       stopTerminalMouseEvent(event);
       if (sameTerminalLink(terminalLinkAt(event), pending)) {
-        openTerminalLink(pending);
+        openTerminalLink(pending, event.ctrlKey || event.metaKey);
       }
     };
 
@@ -533,6 +551,25 @@ export function PaneSlot({
     const raf = requestAnimationFrame(() => entry.term.focus());
     return () => cancelAnimationFrame(raf);
   }, [active, activeAgent?.id, termsRef]);
+
+  // Right-click on the terminal → copy/paste menu. Text selection still uses
+  // Shift+drag (xterm forces local selection while a mouse-tracking TUI like
+  // Claude is capturing plain drags); this menu just makes copy/paste
+  // discoverable once something is selected.
+  const onTerminalContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!activeAgentId) return;
+    const entry = termsRef.current.get(activeAgentId);
+    if (!entry) return;
+    // Let a right-click on a terminal link fall through to its own handler.
+    if (findTerminalLinkAtMouseEvent(entry.term, event.nativeEvent)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setTermMenu({
+      x: event.clientX,
+      y: event.clientY,
+      hasSelection: entry.term.hasSelection(),
+    });
+  };
 
   const dragFrom = ctx.dragState?.fromAgentId ?? null;
   const overlayZone =
@@ -758,6 +795,14 @@ export function PaneSlot({
               key={tabAgentId}
               className={`pane-tab ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
               draggable={false}
+              style={
+                tabAgent.tabColor
+                  ? ({
+                      ["--tab-color" as string]: tabAgent.tabColor,
+                    } as React.CSSProperties)
+                  : undefined
+              }
+              data-tab-colored={tabAgent.tabColor ? "" : undefined}
               onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
               onClick={(e) => {
                 e.stopPropagation();
@@ -775,6 +820,11 @@ export function PaneSlot({
               }}
               title={tabAgent.name}
             >
+              {tabAgent.pinned && (
+                <span className="tab-pin" title="고정된 탭">
+                  📌
+                </span>
+              )}
               <span
                 className="tab-tool-icon"
                 style={{ color: tool.iconColor }}
@@ -807,6 +857,7 @@ export function PaneSlot({
         ref={bodyRef}
         className="pane-body"
         style={activeDocId ? { display: "none" } : undefined}
+        onContextMenu={onTerminalContextMenu}
       />
       {activeDocId && (
         <DocViewer
@@ -821,6 +872,53 @@ export function PaneSlot({
       )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />
+      )}
+      {termMenu && (
+        <TerminalContextMenu
+          x={termMenu.x}
+          y={termMenu.y}
+          hasSelection={termMenu.hasSelection}
+          onClose={() => setTermMenu(null)}
+          onCopy={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            const text = entry?.term.hasSelection()
+              ? entry.term.getSelection()
+              : "";
+            setTermMenu(null);
+            if (!text) return;
+            const write = isElectronRuntime()
+              ? invoke("clipboard_write_text", { text })
+              : navigator.clipboard.writeText(text);
+            write.then(() => entry?.term.clearSelection()).catch(() => {});
+          }}
+          onPaste={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            setTermMenu(null);
+            if (!entry) return;
+            const read = isElectronRuntime()
+              ? invoke<string>("clipboard_read_text")
+              : navigator.clipboard.readText();
+            read
+              .then((text) => {
+                if (text) {
+                  entry.term.focus();
+                  entry.term.paste(text);
+                }
+              })
+              .catch(() => {});
+          }}
+          onSelectAll={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            setTermMenu(null);
+            entry?.term.selectAll();
+          }}
+        />
       )}
     </div>
   );

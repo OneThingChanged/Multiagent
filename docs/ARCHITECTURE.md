@@ -172,6 +172,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - 각 leaf는 한 패널. tabs 배열 = 그 패널의 탭 순서, activeIndex = 현재 보이는 탭
+- agent에는 tab 커스터마이즈 필드 `pinned`/`tabColor`가 있어 탭 우클릭 메뉴에서 설정하고 localStorage에 영구화된다. 고정 탭은 "다른 탭/오른쪽 탭 닫기"에서 제외된다. Codex 전용 `useAltScreen`도 세션 속성에서 토글(재시작 시 `--no-alt-screen` 생략 여부 결정)
 - tabs 항목은 보통 agent ID지만, **문서 탭**은 `doc:<projectId>:<relativePath>` prefix 문자열로 표현한다 (`src/lib/docTabs.ts`). layout/groupOps 연산은 문자열을 불투명하게 다루므로 그대로 동작하고, `validateLayout`은 doc id를 유효한 탭으로 유지해 재시작 후에도 복원된다. 문서 탭 닫기는 `closeDocTab`(solo 그룹 재배치 없음), remote/monitor 동기화 전에는 `stripDocTabs`로 제거된다
 - split 조작은 현재 Screen에 새 leaf를 추가한다. 같은 방향의 부모 split이면 형제로 추가하고, 다른 방향이면 대상 leaf를 새 split으로 감싸 중첩한다
 - 따라서 한 Screen은 `A+B+C` 같은 3개 이상 패널과 좌우·상하 중첩 레이아웃을 모두 지원한다
@@ -232,7 +233,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - **`read_text_file`** (Electron 전용): root 안의 임의 파일을 `{kind:"text",content} | {kind:"binary"} | {kind:"too_large",size}`로 반환 (2MB 상한, 앞 8KB NUL 스니핑으로 바이너리 판정, `isInside` 강제)
 - **`git_status`** (Electron 전용): `git status --porcelain -z` 실행(3s 타임아웃, 2,000 엔트리 상한) → `{is_repo, entries: {relative_path, status}[]}`. rename/copy 엔트리의 원본 경로 토큰을 건너뛰며 XY 코드를 단일 문자(`U`/`D`/`R`/`A`/`M`)로 축약. git 미설치·비저장소는 `is_repo:false`
 - **파일 작업 IPC** (Electron 전용, 전부 `isInside` 샌드박스 + 이름 유효성 검사): `create_file`(`wx` 플래그로 기존 파일 보호) / `create_directory` / `rename_path`(새 상대경로 반환) / `duplicate_path`(`name copy[ n]` 자동 명명, 폴더는 재귀 복사) / `delete_path`(`shell.trashItem` → 휴지통, 영구삭제 아님)
-- **Source Control IPC** (Electron 전용): `git_changes` — `status --porcelain -z`(staged=X열/unstaged=Y열 분리, `MM`은 양쪽) + `diff --numstat`/`--cached` 라인 수 + branch + `rev-list --left-right --count @{u}...HEAD` ahead/behind + `log -n 8`을 병렬 실행해 한 번에 반환. `git_stage`(`add --`) / `git_unstage`(`restore --staged --`) / `git_commit`(`-m`, execFile 인자 전달이라 셸 인젝션 없음). 경로 배열(1~500)·메시지는 contract 레이어에서 검증
+- **Source Control IPC** (Electron 전용): `git_changes` — `status --porcelain -z`(staged=X열/unstaged=Y열 분리, `MM`은 양쪽) + `diff --numstat`/`--cached` 라인 수 + branch + `rev-list --left-right --count @{u}...HEAD` ahead/behind + `log -n 8`을 병렬 실행해 한 번에 반환. `git_stage`(`add --`) / `git_unstage`(`restore --staged --`) / `git_discard` (porcelain으로 파일별 분류 → tracked=`restore --source=HEAD --staged --worktree`, untracked/staged-new=`shell.trashItem`) / `git_commit`(`-m`, execFile 인자 전달이라 셸 인젝션 없음). 경로 배열(1~500)·메시지는 contract 레이어에서 검증. UI Commit은 스테이징 0이면 전체 스테이징 후 커밋(Commit All)
 - **`resource_usage`** (Electron 전용): 전체 프로세스 스냅샷(Windows `Win32_Process` CIM ~100ms / POSIX `ps`)에서 ppid 트리를 만들어 각 로컬 PTY root의 하위 트리 CPU%/메모리/프로세스 수를 합산. CPU%는 두 샘플 간 User+Kernel 시간 델타(코어 수 정규화). 앱 자신의 트리 총합 + 세션별 내역 반환
 - **`set_titlebar_overlay`** (Electron 전용): 테마 변경 시 네이티브 창 버튼 오버레이 색(hex 검증)을 모든 앱 창에 적용
 - **Ports IPC** (Electron 전용): `list_ports {projects}` — `netstat -ano`(IPv6 전용 리스너를 숨기는 `-p tcp` 미사용) LISTENING 파싱 + `Win32_Process` 전체 쿼리(Name/CommandLine/ppid)로 귀속: ① 리스너 pid의 ppid 체인에 세션 PTY root가 있으면 `terminal_id` ② 커맨드라인에 프로젝트 폴더가 경계 토큰으로 포함되면 `project_id`(깊은 폴더 우선) ③ 아니면 external. 와일드카드 바인드→`localhost` 정규화, `host:port:pid` 중복 제거, 200개 캡. `kill_port_process {pid, port}` — kill 직전 netstat 재스캔으로 소유 재검증 + 자기 pid 거부. POSIX는 `lsof -iTCP -sTCP:LISTEN` + `ps`
