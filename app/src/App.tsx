@@ -2874,7 +2874,8 @@ function App() {
             title="Resize file tree"
           />
           <FileTreePanel
-            project={activeProject}
+            projects={projects}
+            activeProject={activeProject}
             width={filesWidth}
             theme={appTheme}
             onOpenFile={openDocTab}

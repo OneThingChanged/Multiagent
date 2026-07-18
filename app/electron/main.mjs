@@ -13,7 +13,7 @@ import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as nodePty from "node-pty";
 import electronUpdater from "electron-updater";
@@ -1006,6 +1006,143 @@ async function readTextFile(folder, relativePath) {
   return { kind: "text", content: data.toString("utf8") };
 }
 
+// Git status for the file tree (M/A/U/D/R badges). Non-repo folders and
+// missing git both resolve to { is_repo: false } instead of throwing.
+async function gitStatusForTree(folder) {
+  const root = fs.realpathSync(asString(folder));
+  const stdout = await new Promise((resolve) => {
+    execFile(
+      "git",
+      ["-c", "core.quotepath=false", "status", "--porcelain", "-z"],
+      { cwd: root, timeout: 3000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      (error, out) => resolve(error ? null : out)
+    );
+  });
+  if (stdout === null) return { is_repo: false, entries: [] };
+  const entries = [];
+  const tokens = stdout.split("\0");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.length < 4 || token[2] !== " ") continue;
+    const x = token[0];
+    const y = token[1];
+    const relative = token.slice(3).replace(/\\/g, "/");
+    // Rename/copy entries are followed by the original path as its own token.
+    if (x === "R" || x === "C") i += 1;
+    let status;
+    if (x === "?" || y === "?") status = "U";
+    else if (x === "D" || y === "D") status = "D";
+    else if (x === "R" || x === "C") status = "R";
+    else if (x === "A") status = "A";
+    else status = "M";
+    entries.push({ relative_path: relative, status });
+    if (entries.length >= 2000) break;
+  }
+  return { is_repo: true, entries };
+}
+
+// ---- File tree write operations (context menu). All sandboxed to the
+// project root; delete moves to the OS recycle bin instead of erasing.
+
+function assertValidEntryName(name) {
+  const trimmed = asString(name).trim();
+  if (
+    !trimmed ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    /[\\/:*?"<>|]/.test(trimmed) ||
+    trimmed.length > 255
+  ) {
+    throw new Error("사용할 수 없는 이름입니다.");
+  }
+  return trimmed;
+}
+
+function resolveTreeWriteTarget(folder, relativePath) {
+  const root = fs.realpathSync(asString(folder));
+  const requested = asString(relativePath).trim().replace(/^[\\/]+/, "");
+  if (!requested) throw new Error("경로가 비어 있습니다.");
+  const joined = path.join(root, requested);
+  const parent = path.dirname(joined);
+  if (!fs.existsSync(parent)) throw new Error("상위 폴더가 없습니다.");
+  const parentReal = fs.realpathSync(parent);
+  if (!isInside(root, parentReal)) {
+    throw new Error("프로젝트 폴더 밖은 사용할 수 없습니다.");
+  }
+  assertValidEntryName(path.basename(joined));
+  return path.join(parentReal, path.basename(joined));
+}
+
+function resolveTreeExistingTarget(folder, relativePath) {
+  const root = fs.realpathSync(asString(folder));
+  const requested = asString(relativePath).trim();
+  if (!requested) throw new Error("경로가 비어 있습니다.");
+  const joined = path.join(root, requested);
+  if (!fs.existsSync(joined)) {
+    throw new Error(`경로를 찾을 수 없습니다: ${requested}`);
+  }
+  const resolved = fs.realpathSync(joined);
+  if (!isInside(root, resolved) || resolved === root) {
+    throw new Error("프로젝트 폴더 밖은 사용할 수 없습니다.");
+  }
+  return { root, resolved };
+}
+
+function treeRelative(root, absolute) {
+  return path.relative(root, absolute).split(path.sep).join("/");
+}
+
+async function createFileEntry(folder, relativePath) {
+  const target = resolveTreeWriteTarget(folder, relativePath);
+  await fsPromises.writeFile(target, "", { flag: "wx" });
+  return null;
+}
+
+async function createDirectoryEntry(folder, relativePath) {
+  const target = resolveTreeWriteTarget(folder, relativePath);
+  await fsPromises.mkdir(target);
+  return null;
+}
+
+async function renamePathEntry(folder, relativePath, newName) {
+  const { root, resolved } = resolveTreeExistingTarget(folder, relativePath);
+  const name = assertValidEntryName(newName);
+  const target = path.join(path.dirname(resolved), name);
+  if (target === resolved) return treeRelative(root, resolved);
+  if (fs.existsSync(target)) throw new Error("같은 이름이 이미 있습니다.");
+  await fsPromises.rename(resolved, target);
+  return treeRelative(root, target);
+}
+
+async function duplicatePathEntry(folder, relativePath) {
+  const { root, resolved } = resolveTreeExistingTarget(folder, relativePath);
+  const stats = await fsPromises.stat(resolved);
+  const dir = path.dirname(resolved);
+  const base = path.basename(resolved);
+  const ext = stats.isDirectory() ? "" : path.extname(base);
+  const stem = base.slice(0, base.length - ext.length);
+  let target = null;
+  for (let n = 1; n < 100; n += 1) {
+    const candidate = path.join(
+      dir,
+      `${stem} copy${n > 1 ? ` ${n}` : ""}${ext}`
+    );
+    if (!fs.existsSync(candidate)) {
+      target = candidate;
+      break;
+    }
+  }
+  if (!target) throw new Error("복제본 이름을 만들 수 없습니다.");
+  await fsPromises.cp(resolved, target, { recursive: true });
+  return treeRelative(root, target);
+}
+
+async function deletePathEntry(folder, relativePath) {
+  const { resolved } = resolveTreeExistingTarget(folder, relativePath);
+  await shell.trashItem(resolved);
+  return null;
+}
+
 async function readImageDataUrl(requested, folder) {
   const resolved = resolveExistingPath(asString(folder), requested);
   const mime = IMAGE_MIME.get(path.extname(resolved).toLowerCase());
@@ -1203,6 +1340,18 @@ async function invokeCommand(event, command, rawArgs) {
       return listDirectory(args.folder, args.relative);
     case "read_text_file":
       return readTextFile(args.folder, args.relativePath);
+    case "git_status":
+      return gitStatusForTree(args.folder);
+    case "create_file":
+      return createFileEntry(args.folder, args.relativePath);
+    case "create_directory":
+      return createDirectoryEntry(args.folder, args.relativePath);
+    case "rename_path":
+      return renamePathEntry(args.folder, args.relativePath, args.newName);
+    case "duplicate_path":
+      return duplicatePathEntry(args.folder, args.relativePath);
+    case "delete_path":
+      return deletePathEntry(args.folder, args.relativePath);
     case "resolve_terminal_path":
       return resolveTerminalPath(asString(args.folder), asString(args.path));
     case "read_image_data_url":

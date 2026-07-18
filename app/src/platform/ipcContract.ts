@@ -7,7 +7,9 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
-  | "read_text_file" | "resolve_terminal_path"
+  | "read_text_file" | "git_status" | "create_file" | "create_directory"
+  | "rename_path" | "duplicate_path" | "delete_path"
+  | "resolve_terminal_path"
   | "read_image_data_url" | "play_system_sound" | "read_audio_file"
   | "clipboard_read_text" | "clipboard_write_text" | "show_native_notification"
   | "resolve_cli_session" | "relink_cli_session" | "sync_remote_agents"
@@ -79,6 +81,13 @@ export type TextFileResult =
   | { kind: "binary" }
   | { kind: "too_large"; size: number };
 
+export type GitStatusLetter = "M" | "A" | "U" | "D" | "R";
+
+export type GitStatusResult = {
+  is_repo: boolean;
+  entries: Array<{ relative_path: string; status: GitStatusLetter }>;
+};
+
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
   list_directory: {
@@ -88,6 +97,30 @@ export type RuntimeCommandContract = {
   read_text_file: {
     args: { folder: string; relativePath: string };
     result: TextFileResult;
+  };
+  git_status: {
+    args: { folder: string };
+    result: GitStatusResult;
+  };
+  create_file: {
+    args: { folder: string; relativePath: string };
+    result: null;
+  };
+  create_directory: {
+    args: { folder: string; relativePath: string };
+    result: null;
+  };
+  rename_path: {
+    args: { folder: string; relativePath: string; newName: string };
+    result: string; // new relative path
+  };
+  duplicate_path: {
+    args: { folder: string; relativePath: string };
+    result: string; // new relative path
+  };
+  delete_path: {
+    args: { folder: string; relativePath: string };
+    result: null;
   };
   attach_terminal: {
     args: { id: string; afterSequence: number };

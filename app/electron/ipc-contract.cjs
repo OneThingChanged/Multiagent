@@ -25,6 +25,12 @@ const INVOKE_COMMANDS = Object.freeze([
   "resolve_markdown_path",
   "list_directory",
   "read_text_file",
+  "git_status",
+  "create_file",
+  "create_directory",
+  "rename_path",
+  "duplicate_path",
+  "delete_path",
   "resolve_terminal_path",
   "read_image_data_url",
   "play_system_sound",
@@ -168,8 +174,20 @@ function assertInvokeRequest(command, rawArgs) {
       assertPathString(args.relative, "relative path", true);
       break;
     case "read_text_file":
+    case "create_file":
+    case "create_directory":
+    case "duplicate_path":
+    case "delete_path":
       assertPathString(args.folder, "folder");
       assertPathString(args.relativePath, "relative path");
+      break;
+    case "rename_path":
+      assertPathString(args.folder, "folder");
+      assertPathString(args.relativePath, "relative path");
+      assertPathString(args.newName, "new name");
+      break;
+    case "git_status":
+      assertPathString(args.folder, "folder");
       break;
   }
   return args;

@@ -228,13 +228,19 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 - **`list_directory`** (Electron 전용): 프로젝트 root 기준 한 디렉토리의 `{name, relative_path, is_dir}[]`를 반환 (dirs-first 정렬, 디렉토리당 2,000개 상한). `node_modules`/`.git`/`target`/`dist`/`build`/`.next`/`.cache`/`.venv`/`__pycache__`/`out` 제외. `isInside` 샌드박스로 root 밖 접근 차단
 - **`read_text_file`** (Electron 전용): root 안의 임의 파일을 `{kind:"text",content} | {kind:"binary"} | {kind:"too_large",size}`로 반환 (2MB 상한, 앞 8KB NUL 스니핑으로 바이너리 판정, `isInside` 강제)
+- **`git_status`** (Electron 전용): `git status --porcelain -z` 실행(3s 타임아웃, 2,000 엔트리 상한) → `{is_repo, entries: {relative_path, status}[]}`. rename/copy 엔트리의 원본 경로 토큰을 건너뛰며 XY 코드를 단일 문자(`U`/`D`/`R`/`A`/`M`)로 축약. git 미설치·비저장소는 `is_repo:false`
+- **파일 작업 IPC** (Electron 전용, 전부 `isInside` 샌드박스 + 이름 유효성 검사): `create_file`(`wx` 플래그로 기존 파일 보호) / `create_directory` / `rename_path`(새 상대경로 반환) / `duplicate_path`(`name copy[ n]` 자동 명명, 폴더는 재귀 복사) / `delete_path`(`shell.trashItem` → 휴지통, 영구삭제 아님)
 - `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path`는 문서 탭의 md/html 읽기와 QuickOpen 문서 검색에 계속 사용 (Tauri에서도 동작)
 - `resolve_markdown_path`는 `Docs/TODO.md`·상대경로·절대경로·`file.md:12` line suffix를 모두 처리하고, canonicalize 후 root 안 여부를 검사
 - Tauri 런타임에는 `list_directory`/`read_text_file`이 없어 파일 트리·텍스트 뷰는 빈 상태/에러로 강등된다 (Electron-first)
 
 ### 프론트
 
-- **`FileTreePanel.tsx`** — 우측 사이드바. `dirCache: Map<relativePath, entry[]>`에 디렉토리별 lazy 캐시, 펼친 폴더만 flat visible-row로 투영. Find files는 디바운스된 클라이언트 BFS(400 dirs/200 results 상한). 프로젝트 전환 시 리셋
+- **`FileTreePanel.tsx`** — 우측 사이드바. `dirCache: Map<relativePath, entry[]>`에 디렉토리별 lazy 캐시, 펼친 폴더만 flat visible-row로 투영. Find files는 디바운스된 클라이언트 BFS(400 dirs/200 results 상한)
+  - **프로젝트 선택**: 헤더 드롭박스로 표시 프로젝트 선택. 핀 OFF면 활성 프로젝트를 따라가고, 핀 ON이면 고정(`multiagent.fileTreePin.v1` 영구화, 프로젝트 삭제 시 자동 해제)
+  - **펼침 상태**: 프로젝트별로 `multiagent.fileTreeExpanded.v1`에 저장, 프로젝트 재진입 시 저장된 폴더들을 재로딩해 복원. 모두 펼치기는 BFS(400 dirs 상한)
+  - **git 뱃지**: `git_status` 결과를 파일 맵 + 폴더 전파 맵(D>M>A>U 랭크)으로 가공, 10초 폴링. 이름과 뱃지에 같은 색 적용
+  - **우클릭 메뉴 + 인라인 입력**: 파일/폴더/빈영역별 메뉴, 새 파일·새 폴더·이름 변경은 인라인 input 행으로 처리(Enter/Esc). 폴더 이름 변경 시 하위 펼침 경로도 새 prefix로 치환. 작업 후 해당 디렉토리 refresh + git 갱신
 - **`DocViewer.tsx`** — 문서 탭 pane 콘텐츠. 확장자로 분기: md→`react-markdown`+`remark-gfm`+`rehype-highlight`, html→`<iframe sandbox srcdoc>`(스크립트/동일출처 권한 없음), 이미지→`read_image_data_url`, 기타→`read_text_file` 결과를 fenced code block으로 하이라이트. 읽기 실패 시 Retry/Reveal 에러 패널
 - **`PaneSlot.tsx`** — leaf의 활성 탭이 doc id면 xterm 호스트(`.pane-body`)를 `display:none`으로 숨기고 DocViewer를 렌더. xterm DOM과 attach/detach 라이프사이클은 그대로 유지되어 터미널↔문서 전환 시 출력 무손상
 - `Open`/`Reveal`은 기본 앱 열기/탐색기 위치 표시
@@ -287,6 +293,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - `multiagent.appTheme.v1` — 전역 테마 (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장
 - `multiagent.filesWidth.v1` / `multiagent.filesOpen.v1` — 파일 트리 사이드바 폭·열림 상태 (옛 `multiagent.docsWidth.v1`은 미사용)
+- `multiagent.fileTreePin.v1` — 파일 트리 프로젝트 고정 `{ pinned, projectId }`
+- `multiagent.fileTreeExpanded.v1` — 파일 트리 펼침 상태 `{ [projectId]: relativePath[] }`
 - `multiagent.terminalFontSize.v1` — xterm 폰트 크기
 - `multiagent.notificationSound.v1` — 알림음 설정 (mode + customPath)
 - `multiagent.desktopPetEnabled.v1` — Desktop Pet 표시 여부 (기본 true)
