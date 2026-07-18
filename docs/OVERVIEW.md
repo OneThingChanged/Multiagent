@@ -81,13 +81,16 @@
 
 ### 사용량 대시보드 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 transcript JSONL을 파싱해 토큰 사용량을 SQLite에 적재, 별도 로컬 웹 대시보드(차트·요약·세션별)로 시각화.
-Electron 앱은 Codex(세션 transcript)·Claude(OAuth usage 엔드포인트)에서 관측한 기간별 계정 한도도 SQLite에 보존하고 하단 상태 바와 상세 팝오버로 표시한다.
+Electron 앱은 Codex(세션 transcript)·Claude(OAuth usage 엔드포인트)에서 관측한 기간별 계정 한도도 SQLite에 보존하고, 하단 상태 바에 **도구별 세그먼트**(게이지 + 클릭 시 도구별 팝오버)로 표시한다.
 
 ### 기타
 | 기능 | 설명 |
 |---|---|
+| 커스텀 탑바 | 네이티브 타이틀바/메뉴 제거(Electron). 좌/우 사이드바 토글·Quick Open·알림·핀·새 창·펫·설정 버튼 + 창 드래그 존. 네이티브 min/max/close 오버레이 유지(Snap Layouts 동작) |
+| Resource Manager | 상태 바 우측 ▦ — 앱 전체 메모리 총합 + 팝오버에서 프로젝트→세션별 프로세스 트리 CPU%/메모리 |
+| 좌측 사이드바 접기 | 탑바 ⫞ 토글, 상태 영구화 |
 | 자동 업데이트 | 설정 → About → Check, 서명 검증 후 다운로드·설치·재시작 ([RELEASE.md](RELEASE.md)) |
-| 멀티 윈도우 | 새 창 열기 |
-| 항상 위 | always-on-top 토글 |
+| 멀티 윈도우 | 새 창 열기 (탑바) |
+| 항상 위 | always-on-top 토글 (탑바 핀) |
 | 테마 | Soft / GitHub / Warm / Light (앱·터미널·Docs 공통) |
 | 영구화 | localStorage(projects/agents/groups/view/theme/…) + 로컬 JSON/SQLite(원격·사용량). groups는 현재 목록을 authoritative하게 저장하고 구버전 중복은 Screen 우선으로 자동 정규화 |

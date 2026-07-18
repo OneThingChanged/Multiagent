@@ -8,7 +8,8 @@ export type RuntimeCommand =
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "read_text_file" | "git_status" | "git_changes" | "git_stage"
-  | "git_unstage" | "git_commit" | "create_file" | "create_directory"
+  | "git_unstage" | "git_commit" | "resource_usage" | "set_titlebar_overlay"
+  | "create_file" | "create_directory"
   | "rename_path" | "duplicate_path" | "delete_path"
   | "resolve_terminal_path"
   | "read_image_data_url" | "play_system_sound" | "read_audio_file"
@@ -96,6 +97,24 @@ export type GitChangeEntry = {
   deletions: number;
 };
 
+export type ResourceSessionUsage = {
+  id: string;
+  pid: number;
+  cpu_percent: number;
+  memory_bytes: number;
+  process_count: number;
+};
+
+export type ResourceUsageResult = {
+  updated_at: number;
+  sampled: boolean;
+  total_cpu_percent: number;
+  total_memory_bytes: number;
+  total_process_count: number;
+  system_memory_bytes: number;
+  sessions: ResourceSessionUsage[];
+};
+
 export type GitChangesResult = {
   is_repo: boolean;
   branch: string;
@@ -135,6 +154,14 @@ export type RuntimeCommandContract = {
   };
   git_commit: {
     args: { folder: string; message: string };
+    result: null;
+  };
+  resource_usage: {
+    args: Record<string, never>;
+    result: ResourceUsageResult;
+  };
+  set_titlebar_overlay: {
+    args: { color: string; symbolColor: string };
     result: null;
   };
   create_file: {

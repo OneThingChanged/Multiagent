@@ -30,6 +30,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "git_stage",
   "git_unstage",
   "git_commit",
+  "resource_usage",
+  "set_titlebar_overlay",
   "create_file",
   "create_directory",
   "rename_path",
@@ -216,6 +218,17 @@ function assertInvokeRequest(command, rawArgs) {
         args.message.length > 5000
       ) {
         throw new TypeError("Electron git commit message must be a non-empty string");
+      }
+      break;
+    case "set_titlebar_overlay":
+      for (const key of ["color", "symbolColor"]) {
+        const value = args[key];
+        if (
+          value !== undefined &&
+          (typeof value !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(value))
+        ) {
+          throw new TypeError("Electron titlebar overlay colors must be hex strings");
+        }
       }
       break;
   }

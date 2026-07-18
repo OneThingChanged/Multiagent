@@ -41,8 +41,10 @@ K:\AI\MultiAgent\
    │  ├─ components/
    │  │  ├─ Sidebar.tsx        ← Screen 요약·프로젝트 트리·검색·1줄·드래그 재정렬
    │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
+   │  │  ├─ TopBar.tsx         ← 커스텀 타이틀바 (사이드바 토글·Quick Open·알림·핀·새 창·펫·설정)
    │  │  ├─ FileTreePanel.tsx  ← 우측 파일 트리 사이드바 (lazy 로딩·Find files)
    │  │  ├─ DocViewer.tsx      ← 문서 탭 뷰어 (md/html/이미지/텍스트)
+   │  │  ├─ ResourceMonitor.tsx ← 상태 바 우측 프로세스 트리 CPU/메모리 모니터
    │  │  ├─ ImageViewer.tsx    ← 터미널 이미지 경로 뷰어
    │  │  ├─ DesktopPetPage.tsx / DesktopPetPage.css ← 펫 마스코트·상태 애니메이션
    │  │  ├─ SettingsModal.tsx  ← General/Usage/Remote/About 탭
@@ -231,6 +233,9 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - **`git_status`** (Electron 전용): `git status --porcelain -z` 실행(3s 타임아웃, 2,000 엔트리 상한) → `{is_repo, entries: {relative_path, status}[]}`. rename/copy 엔트리의 원본 경로 토큰을 건너뛰며 XY 코드를 단일 문자(`U`/`D`/`R`/`A`/`M`)로 축약. git 미설치·비저장소는 `is_repo:false`
 - **파일 작업 IPC** (Electron 전용, 전부 `isInside` 샌드박스 + 이름 유효성 검사): `create_file`(`wx` 플래그로 기존 파일 보호) / `create_directory` / `rename_path`(새 상대경로 반환) / `duplicate_path`(`name copy[ n]` 자동 명명, 폴더는 재귀 복사) / `delete_path`(`shell.trashItem` → 휴지통, 영구삭제 아님)
 - **Source Control IPC** (Electron 전용): `git_changes` — `status --porcelain -z`(staged=X열/unstaged=Y열 분리, `MM`은 양쪽) + `diff --numstat`/`--cached` 라인 수 + branch + `rev-list --left-right --count @{u}...HEAD` ahead/behind + `log -n 8`을 병렬 실행해 한 번에 반환. `git_stage`(`add --`) / `git_unstage`(`restore --staged --`) / `git_commit`(`-m`, execFile 인자 전달이라 셸 인젝션 없음). 경로 배열(1~500)·메시지는 contract 레이어에서 검증
+- **`resource_usage`** (Electron 전용): 전체 프로세스 스냅샷(Windows `Win32_Process` CIM ~100ms / POSIX `ps`)에서 ppid 트리를 만들어 각 로컬 PTY root의 하위 트리 CPU%/메모리/프로세스 수를 합산. CPU%는 두 샘플 간 User+Kernel 시간 델타(코어 수 정규화). 앱 자신의 트리 총합 + 세션별 내역 반환
+- **`set_titlebar_overlay`** (Electron 전용): 테마 변경 시 네이티브 창 버튼 오버레이 색(hex 검증)을 모든 앱 창에 적용
+- **창 생성**: `titleBarStyle:'hidden'` + `titleBarOverlay`(36px) + `Menu.setApplicationMenu(null)` — 커스텀 탑바가 타이틀바를 대체하고 min/max/close는 OS 오버레이. DevTools(F12/Ctrl+Shift+I)·dev 리로드(Ctrl+Shift+R)는 `before-input-event`로 복원 (Ctrl+R은 의도적으로 미바인딩 — 터미널용)
 - `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path`는 문서 탭의 md/html 읽기와 QuickOpen 문서 검색에 계속 사용 (Tauri에서도 동작)
 - `resolve_markdown_path`는 `Docs/TODO.md`·상대경로·절대경로·`file.md:12` line suffix를 모두 처리하고, canonicalize 후 root 안 여부를 검사
 - Tauri 런타임에는 `list_directory`/`read_text_file`이 없어 파일 트리·텍스트 뷰는 빈 상태/에러로 강등된다 (Electron-first)
@@ -299,6 +304,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - `multiagent.filesWidth.v1` / `multiagent.filesOpen.v1` — 파일 트리 사이드바 폭·열림 상태 (옛 `multiagent.docsWidth.v1`은 미사용)
 - `multiagent.fileTreePin.v1` — 파일 트리 프로젝트 고정 `{ pinned, projectId }`
 - `multiagent.fileTreeExpanded.v1` — 파일 트리 펼침 상태 `{ [projectId]: relativePath[] }`
+- `multiagent.sidebarOpen.v1` — 좌측 사이드바 접힘 상태 (기본 열림)
 - `multiagent.terminalFontSize.v1` — xterm 폰트 크기
 - `multiagent.notificationSound.v1` — 알림음 설정 (mode + customPath)
 - `multiagent.desktopPetEnabled.v1` — Desktop Pet 표시 여부 (기본 true)

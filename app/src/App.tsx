@@ -126,6 +126,7 @@ import {
 } from "./lib/desktopPet";
 
 import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
@@ -146,6 +147,7 @@ import { UsageStatusBar } from "./components/UsageStatusBar";
 
 const LS_FILES_WIDTH = "multiagent.filesWidth.v1";
 const LS_FILES_OPEN = "multiagent.filesOpen.v1";
+const LS_SIDEBAR_OPEN = "multiagent.sidebarOpen.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
 const DEFAULT_FILES_WIDTH = 300;
 const MIN_FILES_WIDTH = 200;
@@ -459,6 +461,14 @@ function loadFilesOpen() {
   }
 }
 
+function loadSidebarOpen() {
+  try {
+    return localStorage.getItem(LS_SIDEBAR_OPEN) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 function loadAlwaysOnTop() {
   try {
     return localStorage.getItem(LS_ALWAYS_ON_TOP) === "true";
@@ -552,6 +562,7 @@ function App() {
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameProjectId, setRenameProjectId] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(loadFilesOpen);
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
@@ -999,6 +1010,28 @@ function App() {
       localStorage.setItem(LS_FILES_OPEN, String(filesOpen));
     } catch {}
   }, [filesOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_SIDEBAR_OPEN, String(sidebarOpen));
+    } catch {}
+  }, [sidebarOpen]);
+
+  // Keep the native window-control overlay colors in sync with the theme.
+  useEffect(() => {
+    if (!isElectronRuntime()) return;
+    const el = document.querySelector(".app");
+    if (!el) return;
+    const styles = getComputedStyle(el);
+    const hex = (name: string) => {
+      const value = styles.getPropertyValue(name).trim();
+      return /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : null;
+    };
+    invoke("set_titlebar_overlay", {
+      color: hex("--app-panel") ?? "#0b0f15",
+      symbolColor: hex("--app-muted") ?? "#8b949e",
+    }).catch(() => {});
+  }, [appTheme]);
 
   useEffect(() => {
     saveAttentionItems(attentionItems);
@@ -2795,8 +2828,30 @@ function App() {
     <div
       className={`app app-theme-${appTheme} ${
         isElectronRuntime() ? "app-with-usage-status" : ""
-      }`}
+      } ${!sidebarOpen ? "app-sidebar-collapsed" : ""}`}
     >
+      {isElectronRuntime() && (
+        <TopBar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          filesOpen={filesOpen}
+          onToggleFiles={() => setFilesOpen((open) => !open)}
+          desktopPetEnabled={desktopPetEnabled}
+          desktopPetAvailable={!isSecondaryWindow}
+          onToggleDesktopPet={() =>
+            handleDesktopPetEnabledChange(!desktopPetEnabled)
+          }
+          settingsOpen={settingsOpen}
+          onToggleSettings={() => setSettingsOpen((open) => !open)}
+          alwaysOnTop={alwaysOnTop}
+          onToggleAlwaysOnTop={toggleAlwaysOnTop}
+          onOpenNewWindow={openNewAppWindow}
+          onQuickOpen={() => setQuickOpen(true)}
+          quickOpenShortcut={commandShortcuts["quick-open"]}
+          onOpenAttention={() => setAttentionOpen(true)}
+          attentionUnreadCount={attentionUnreadCount}
+        />
+      )}
       <Sidebar
         projects={projects}
         agents={agents}
@@ -2812,23 +2867,10 @@ function App() {
         onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
         onNewProject={() => setShowProjectModal(true)}
-        onNewSession={() =>
-          activeProject ? setShowModal(true) : setShowProjectModal(true)
-        }
-        alwaysOnTop={alwaysOnTop}
-        onToggleAlwaysOnTop={toggleAlwaysOnTop}
-        desktopPetEnabled={desktopPetEnabled}
-        desktopPetAvailable={!isSecondaryWindow}
-        onToggleDesktopPet={() =>
-          handleDesktopPetEnabledChange(!desktopPetEnabled)
-        }
-        onOpenNewWindow={openNewAppWindow}
-        onOpenQuickOpen={() => setQuickOpen(true)}
-        quickOpenShortcut={commandShortcuts["quick-open"]}
-        onOpenAttention={() => setAttentionOpen(true)}
-        attentionUnreadCount={attentionUnreadCount}
-        settingsOpen={settingsOpen}
-        onToggleSettings={() => setSettingsOpen((open) => !open)}
+        onNewSessionForProject={(projectId) => {
+          selectProject(projectId);
+          setShowModal(true);
+        }}
         onRemove={removeAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -2864,15 +2906,6 @@ function App() {
         onOpenFolderPath={handleOpenFolderPath}
         onOpenTerminalPath={handleOpenTerminalPath}
       />
-      {!filesOpen && (
-        <button
-          className="files-open-btn"
-          onClick={() => setFilesOpen(true)}
-          title="파일 트리 열기 (Ctrl+Shift+D)"
-        >
-          🗀
-        </button>
-      )}
       {filesOpen && (
         <aside className="files-shell" style={{ width: filesWidth + 7 }}>
           <div
@@ -2890,7 +2923,9 @@ function App() {
           />
         </aside>
       )}
-      {isElectronRuntime() && <UsageStatusBar />}
+      {isElectronRuntime() && (
+        <UsageStatusBar agents={agents} projects={projects} />
+      )}
       {settingsOpen && (
         <SettingsModal
           theme={appTheme}

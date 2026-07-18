@@ -1,14 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { invoke } from "../platform/runtime";
+import type { Agent, Project } from "../types";
+import { ResourceMonitor } from "./ResourceMonitor";
 import {
   clampUsagePercent,
   formatResetRemaining,
+  formatResetShort,
   formatUpdatedAgo,
   formatUsagePercent,
   formatUsageWindow,
+  groupUsageProviders,
   primaryUsageWindow,
-  usageLimitLabel,
+  usageLimitShortName,
   usageTone,
+  type UsageProviderGroup,
   type UsageRateLimit,
   type UsageRateLimitSummary,
   type UsageRateLimitWindow,
@@ -16,11 +28,21 @@ import {
 
 const REFRESH_INTERVAL_MS = 60_000;
 const CLOCK_INTERVAL_MS = 30_000;
+const POPOVER_WIDTH = 300;
 
-function UsageProgress({ window }: { window: UsageRateLimitWindow }) {
+function UsageProgress({
+  window,
+  large,
+}: {
+  window: UsageRateLimitWindow;
+  large?: boolean;
+}) {
   const percent = clampUsagePercent(window.usedPercent);
   return (
-    <span className="usage-progress" aria-hidden="true">
+    <span
+      className={`usage-progress ${large ? "usage-progress-large" : ""}`}
+      aria-hidden="true"
+    >
       <span
         className={`usage-progress-fill usage-tone-${usageTone(percent)}`}
         style={{ width: `${percent}%` }}
@@ -30,44 +52,56 @@ function UsageProgress({ window }: { window: UsageRateLimitWindow }) {
 }
 
 function DetailWindow({
+  heading,
   window,
   now,
 }: {
+  heading: string;
   window: UsageRateLimitWindow;
   now: number;
 }) {
   return (
     <div className="usage-detail-window">
       <div className="usage-detail-window-heading">
-        <strong>{formatUsageWindow(window.windowMinutes)}</strong>
-        <span>{formatUsagePercent(window.usedPercent)} 사용</span>
+        <strong>{heading}</strong>
       </div>
-      <UsageProgress window={window} />
-      <div className="usage-detail-reset">
-        {formatResetRemaining(window.resetsAt, now)}
+      <UsageProgress window={window} large />
+      <div className="usage-detail-window-meta">
+        <span className={`usage-tone-${usageTone(window.usedPercent)}`}>
+          {formatUsagePercent(window.usedPercent)} 사용
+        </span>
+        <span>{formatResetRemaining(window.resetsAt, now)}</span>
       </div>
     </div>
   );
 }
 
-function UsageLimitDetails({
+function ProviderLimitDetails({
   limit,
+  providerLabel,
   now,
 }: {
   limit: UsageRateLimit;
+  providerLabel: string;
   now: number;
 }) {
+  const shortName = usageLimitShortName(limit, providerLabel);
   const windows = [limit.primary, limit.secondary].filter(
     (window): window is UsageRateLimitWindow => Boolean(window)
   );
   return (
     <section className="usage-detail-limit">
-      <div className="usage-detail-limit-heading">
-        <strong>{usageLimitLabel(limit)}</strong>
-        {limit.planType && <span>{limit.planType}</span>}
-      </div>
       {windows.map((window, index) => (
-        <DetailWindow key={`${window.windowMinutes ?? "unknown"}-${index}`} window={window} now={now} />
+        <DetailWindow
+          key={`${window.windowMinutes ?? "unknown"}-${index}`}
+          heading={
+            shortName ||
+            formatUsageWindow(window.windowMinutes) ||
+            "사용 한도"
+          }
+          window={window}
+          now={now}
+        />
       ))}
       {(limit.credits.unlimited || limit.credits.hasCredits) && (
         <div className="usage-detail-credit">
@@ -80,12 +114,74 @@ function UsageLimitDetails({
   );
 }
 
-export function UsageStatusBar() {
+function ProviderPopover({
+  provider,
+  summary,
+  now,
+  left,
+  onClose,
+}: {
+  provider: UsageProviderGroup;
+  summary: UsageRateLimitSummary | null;
+  now: number;
+  left: number;
+  onClose: () => void;
+}) {
+  const planType = provider.limits.find((limit) => limit.planType)?.planType;
+  return (
+    <div
+      className="usage-provider-popover"
+      style={{ left }}
+      role="dialog"
+      aria-label={`${provider.label} 사용량`}
+    >
+      <div className="usage-popover-heading">
+        <div>
+          <strong>
+            <span
+              className="usage-provider-icon"
+              style={{ color: provider.iconColor }}
+            >
+              {provider.icon}
+            </span>
+            {provider.label}
+            {planType && <em className="usage-provider-plan">{planType}</em>}
+          </strong>
+          <span>{formatUpdatedAgo(summary?.updatedAt ?? 0, now)}</span>
+        </div>
+        <button type="button" onClick={onClose}>
+          닫기
+        </button>
+      </div>
+      <div className="usage-popover-body">
+        {provider.limits.map((limit) => (
+          <ProviderLimitDetails
+            key={limit.limitId}
+            limit={limit}
+            providerLabel={provider.label}
+            now={now}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function UsageStatusBar({
+  agents,
+  projects,
+}: {
+  agents: Agent[];
+  projects: Project[];
+}) {
   const [summary, setSummary] = useState<UsageRateLimitSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [openPopover, setOpenPopover] = useState<{
+    provider: string;
+    left: number;
+  } | null>(null);
   const [now, setNow] = useState(Date.now());
   const rootRef = useRef<HTMLElement>(null);
 
@@ -117,12 +213,12 @@ export function UsageStatusBar() {
   }, [load]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!openPopover) return;
     const closeOnOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) setOpenPopover(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") setOpenPopover(null);
     };
     document.addEventListener("pointerdown", closeOnOutside, true);
     document.addEventListener("keydown", closeOnEscape);
@@ -130,10 +226,10 @@ export function UsageStatusBar() {
       document.removeEventListener("pointerdown", closeOnOutside, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [open]);
+  }, [openPopover]);
 
   const limits = summary?.limits ?? [];
-  const visibleLimits = useMemo(() => limits.slice(0, 3), [limits]);
+  const providers = useMemo(() => groupUsageProviders(limits), [limits]);
   const statusText = loading
     ? "사용량 불러오는 중"
     : error
@@ -142,34 +238,71 @@ export function UsageStatusBar() {
         ? "사용량 준비 중"
         : null;
 
+  const toggleProvider = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    key: string
+  ) => {
+    if (openPopover?.provider === key) {
+      setOpenPopover(null);
+      return;
+    }
+    const rootRect = rootRef.current?.getBoundingClientRect();
+    const segmentRect = event.currentTarget.getBoundingClientRect();
+    const rawLeft = rootRect ? segmentRect.left - rootRect.left : 8;
+    const maxLeft = Math.max(8, (rootRect?.width ?? POPOVER_WIDTH) - POPOVER_WIDTH - 8);
+    setOpenPopover({ provider: key, left: Math.min(Math.max(8, rawLeft), maxLeft) });
+  };
+
+  const openProvider = openPopover
+    ? providers.find((provider) => provider.key === openPopover.provider) ?? null
+    : null;
+
   return (
     <footer className="usage-status-bar" ref={rootRef}>
-      <button
-        type="button"
-        className="usage-status-summary"
-        aria-expanded={open}
-        aria-controls="usage-status-popover"
-        onClick={() => setOpen((value) => !value)}
-      >
+      <div className="usage-status-summary">
         {statusText ? (
           <span className="usage-status-empty">{statusText}</span>
         ) : (
-          visibleLimits.map((limit) => {
-            const window = primaryUsageWindow(limit);
-            if (!window) return null;
-            return (
-              <span className="usage-status-limit" key={limit.limitId}>
-                <strong>{usageLimitLabel(limit)}</strong>
-                <UsageProgress window={window} />
-                <b className={`usage-tone-${usageTone(window.usedPercent)}`}>
-                  {formatUsagePercent(window.usedPercent)}
-                </b>
-                <span>{formatResetRemaining(window.resetsAt, now)}</span>
+          providers.map((provider) => (
+            <button
+              type="button"
+              key={provider.key}
+              className={`usage-status-provider ${
+                openPopover?.provider === provider.key
+                  ? "usage-status-provider-open"
+                  : ""
+              }`}
+              onClick={(event) => toggleProvider(event, provider.key)}
+              title={`${provider.label} 사용량 상세`}
+            >
+              <span
+                className="usage-provider-icon"
+                style={{ color: provider.iconColor }}
+              >
+                {provider.icon}
               </span>
-            );
-          })
+              <strong>{provider.label}</strong>
+              {provider.limits.map((limit) => {
+                const window = primaryUsageWindow(limit);
+                if (!window) return null;
+                const shortName = usageLimitShortName(limit, provider.label);
+                return (
+                  <span className="usage-status-limit" key={limit.limitId}>
+                    <UsageProgress window={window} />
+                    <b className={`usage-tone-${usageTone(window.usedPercent)}`}>
+                      {formatUsagePercent(window.usedPercent)}
+                    </b>
+                    <span className="usage-status-limit-meta">
+                      {shortName || formatResetShort(window.resetsAt, now)}
+                    </span>
+                  </span>
+                );
+              })}
+            </button>
+          ))
         )}
-      </button>
+      </div>
+      <ResourceMonitor agents={agents} projects={projects} />
       <button
         type="button"
         className="usage-status-refresh"
@@ -178,30 +311,14 @@ export function UsageStatusBar() {
       >
         {refreshing ? "갱신 중" : "새로고침"}
       </button>
-      {open && (
-        <div className="usage-status-popover" id="usage-status-popover" role="dialog" aria-label="사용량 상세">
-          <div className="usage-popover-heading">
-            <div>
-              <strong>사용량</strong>
-              <span>{formatUpdatedAgo(summary?.updatedAt ?? 0, now)}</span>
-            </div>
-            <button type="button" onClick={() => setOpen(false)}>닫기</button>
-          </div>
-          <div className="usage-popover-body">
-            {error && <div className="usage-popover-message usage-popover-error">{error}</div>}
-            {!error && limits.length === 0 && (
-              <div className="usage-popover-message">
-                Codex·Claude에서 다음 응답을 받으면 사용량이 자동으로 표시됩니다.
-              </div>
-            )}
-            {limits.map((limit) => (
-              <UsageLimitDetails key={limit.limitId} limit={limit} now={now} />
-            ))}
-          </div>
-          <div className="usage-popover-footer">
-            세션 활동에서 자동 갱신되며, 새로고침하면 최근 세션을 다시 확인합니다.
-          </div>
-        </div>
+      {openProvider && openPopover && (
+        <ProviderPopover
+          provider={openProvider}
+          summary={summary}
+          now={now}
+          left={openPopover.left}
+          onClose={() => setOpenPopover(null)}
+        />
       )}
     </footer>
   );

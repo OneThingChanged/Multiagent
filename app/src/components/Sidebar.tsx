@@ -129,19 +129,7 @@ export function Sidebar({
   onRenameSession,
   onContextMenu,
   onNewProject,
-  onNewSession,
-  alwaysOnTop,
-  onToggleAlwaysOnTop,
-  desktopPetEnabled,
-  desktopPetAvailable,
-  onToggleDesktopPet,
-  onOpenNewWindow,
-  onOpenQuickOpen,
-  quickOpenShortcut,
-  onOpenAttention,
-  attentionUnreadCount,
-  settingsOpen,
-  onToggleSettings,
+  onNewSessionForProject,
   onRemove,
   onDragStart,
   onDragEnd,
@@ -162,19 +150,7 @@ export function Sidebar({
   onRenameSession: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
-  onNewSession: () => void;
-  alwaysOnTop: boolean;
-  onToggleAlwaysOnTop: () => void;
-  desktopPetEnabled: boolean;
-  desktopPetAvailable: boolean;
-  onToggleDesktopPet: () => void;
-  onOpenNewWindow: () => void;
-  onOpenQuickOpen: () => void;
-  quickOpenShortcut: string;
-  onOpenAttention: () => void;
-  attentionUnreadCount: number;
-  settingsOpen: boolean;
-  onToggleSettings: () => void;
+  onNewSessionForProject: (projectId: string) => void;
   onRemove: (id: string) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
@@ -748,6 +724,16 @@ export function Sidebar({
               <span className="project-ssh-badge">SSH</span>
             )}
           </button>
+          <button
+            className="project-add-session-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewSessionForProject(project.id);
+            }}
+            title={`${project.name}에 새 세션`}
+          >
+            +
+          </button>
         </div>
         {expanded && (
           <ul className="project-session-list">
@@ -767,7 +753,7 @@ export function Sidebar({
             ))}
             {sessionCount === 0 && (
               <li className="empty-hint project-empty-hint">
-                Select project, then click + to start a session
+                프로젝트 행의 + 버튼으로 세션을 시작하세요
               </li>
             )}
           </ul>
@@ -778,83 +764,6 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <div className="sidebar-actions">
-          <button
-            className={`always-on-top-btn ${
-              alwaysOnTop ? "always-on-top-active" : ""
-            }`}
-            onClick={onToggleAlwaysOnTop}
-            title={alwaysOnTop ? "상시 최상단 해제" : "상시 최상단 활성화"}
-            aria-pressed={alwaysOnTop}
-          >
-            <span className="always-on-top-icon" aria-hidden="true" />
-          </button>
-          <button
-            className={`desktop-pet-toggle-btn ${
-              desktopPetEnabled ? "desktop-pet-toggle-active" : ""
-            }`}
-            onClick={onToggleDesktopPet}
-            disabled={!desktopPetAvailable}
-            title={
-              desktopPetAvailable
-                ? desktopPetEnabled
-                  ? "Desktop Pet 숨기기"
-                  : "Desktop Pet 보기"
-                : "Desktop Pet은 주 창에서만 사용할 수 있습니다"
-            }
-            aria-label="Desktop Pet"
-            aria-pressed={desktopPetEnabled}
-          >
-            <span className="desktop-pet-toggle-icon" aria-hidden="true" />
-          </button>
-          <button
-            className="new-window-btn"
-            onClick={onOpenNewWindow}
-            title="새 창 열기"
-          >
-            <span className="new-window-icon" aria-hidden="true" />
-          </button>
-          <button
-            className={`settings-toggle-btn ${
-              settingsOpen ? "settings-toggle-active" : ""
-            }`}
-            onClick={onToggleSettings}
-            title="Settings"
-          >
-            설정
-          </button>
-          <button
-            className="new-btn"
-            onClick={onNewSession}
-            title={activeProjectId ? "New session" : "New project"}
-          >
-            +
-          </button>
-        </div>
-      </div>
-      <div className="sidebar-p2-actions">
-        <button
-          className="quick-open-launch"
-          onClick={onOpenQuickOpen}
-          title={`Quick Open${quickOpenShortcut ? ` (${quickOpenShortcut})` : ""}`}
-        >
-          <span aria-hidden="true">⌕</span>
-          <span>Quick Open</span>
-          {quickOpenShortcut && <kbd>{quickOpenShortcut}</kbd>}
-        </button>
-        <button
-          className={`attention-launch ${attentionUnreadCount > 0 ? "attention-launch-unread" : ""}`}
-          onClick={onOpenAttention}
-          title="Attention Center"
-          aria-label={`Attention Center, 읽지 않음 ${attentionUnreadCount}개`}
-        >
-          <span aria-hidden="true">!</span>
-          {attentionUnreadCount > 0 && (
-            <b>{attentionUnreadCount > 99 ? "99+" : attentionUnreadCount}</b>
-          )}
-        </button>
-      </div>
       <div className="project-tree">
         <div className="sidebar-section-heading">
           <div className="sidebar-section-title">Projects</div>

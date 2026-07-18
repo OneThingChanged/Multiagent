@@ -4,6 +4,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
   Notification,
   safeStorage,
   screen,
@@ -512,6 +513,13 @@ async function loadRenderer(win, query = {}) {
   await win.loadFile(path.join(appRoot, "dist", "index.html"), { query });
 }
 
+const TITLEBAR_HEIGHT = 36;
+const DEFAULT_TITLEBAR_OVERLAY = {
+  color: "#0b0f15",
+  symbolColor: "#8b949e",
+  height: TITLEBAR_HEIGHT,
+};
+
 function createAppWindow({ secondary = false, openAgentId = null } = {}) {
   const win = new BrowserWindow({
     title: secondary ? "MultiAgent — Window" : "MultiAgent Electron",
@@ -522,6 +530,10 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     show: false,
     backgroundColor: "#0d1117",
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    // Custom in-app top bar; the OS still draws min/max/close as an overlay
+    // so Win11 Snap Layouts and the close-confirm flow keep working.
+    titleBarStyle: "hidden",
+    titleBarOverlay: { ...DEFAULT_TITLEBAR_OVERLAY },
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -539,6 +551,20 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     ready: false,
   });
   installNavigationPolicy(win);
+  // The application menu is removed, which also drops its accelerators.
+  // Restore the developer ones here (Ctrl+R is intentionally NOT rebound —
+  // terminals use it, and the old menu hijacking it was a bug).
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const key = (input.key || "").toLowerCase();
+    if (input.key === "F12" || (input.control && input.shift && key === "i")) {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+    } else if (devUrl && input.control && input.shift && key === "r") {
+      event.preventDefault();
+      win.webContents.reload();
+    }
+  });
   const webContentsId = win.webContents.id;
   win.webContents.on("destroyed", () => {
     terminalSessions.detachView(webContentsId);
@@ -1041,6 +1067,145 @@ async function gitStatusForTree(folder) {
   return { is_repo: true, entries };
 }
 
+// ---- Resource monitor: per-session process-tree CPU/memory ----
+
+// One snapshot of every process: pid → { ppid, cpuPercent, memoryBytes }.
+// Windows uses a cheap Win32_Process CIM query (~100ms; the PerfProc class
+// with formatted CPU% takes seconds). CPU% is derived from the delta of
+// User+Kernel time (100ns units) between two polls, normalized by core
+// count — the first sample reports 0%. POSIX falls back to `ps`.
+let lastCpuSample = null; // { at: epochMs, times: Map<pid, cpuTime100ns> }
+
+async function snapshotProcessStats() {
+  const stats = new Map();
+  if (process.platform === "win32") {
+    const script =
+      "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,PrivatePageCount,UserModeTime,KernelModeTime | " +
+      "Select-Object ProcessId,ParentProcessId,PrivatePageCount,UserModeTime,KernelModeTime | " +
+      "ConvertTo-Json -Compress";
+    const stdout = await new Promise((resolve) => {
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        { timeout: 8000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
+        (error, out) => resolve(error ? null : out)
+      );
+    });
+    if (!stdout) return stats;
+    let rows;
+    try {
+      rows = JSON.parse(stdout);
+    } catch {
+      return stats;
+    }
+    const now = Date.now();
+    const cpuCount = Math.max(1, os.cpus().length);
+    const previous = lastCpuSample;
+    const times = new Map();
+    const elapsed100ns = previous ? (now - previous.at) * 10_000 : 0;
+    for (const row of Array.isArray(rows) ? rows : [rows]) {
+      const pid = Number(row?.ProcessId);
+      if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+      const cpuTime =
+        (Number(row?.UserModeTime) || 0) + (Number(row?.KernelModeTime) || 0);
+      times.set(pid, cpuTime);
+      let cpuPercent = 0;
+      if (previous && elapsed100ns > 0) {
+        const before = previous.times.get(pid);
+        if (typeof before === "number" && cpuTime >= before) {
+          cpuPercent = ((cpuTime - before) / elapsed100ns) * (100 / cpuCount);
+        }
+      }
+      stats.set(pid, {
+        ppid: Number(row?.ParentProcessId) || 0,
+        cpuPercent,
+        memoryBytes: Number(row?.PrivatePageCount) || 0,
+      });
+    }
+    lastCpuSample = { at: now, times };
+    return stats;
+  }
+  const stdout = await new Promise((resolve) => {
+    execFile(
+      "ps",
+      ["-eo", "pid=,ppid=,pcpu=,rss="],
+      { timeout: 5000, maxBuffer: 16 * 1024 * 1024 },
+      (error, out) => resolve(error ? null : out)
+    );
+  });
+  if (!stdout) return stats;
+  for (const line of stdout.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 4) continue;
+    const pid = Number(parts[0]);
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    stats.set(pid, {
+      ppid: Number(parts[1]) || 0,
+      cpuPercent: Number(parts[2]) || 0,
+      memoryBytes: (Number(parts[3]) || 0) * 1024,
+    });
+  }
+  return stats;
+}
+
+function sumProcessTree(rootPid, stats, childrenByPpid) {
+  let cpuPercent = 0;
+  let memoryBytes = 0;
+  let processCount = 0;
+  const queue = [rootPid];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    const stat = stats.get(pid);
+    if (stat) {
+      cpuPercent += stat.cpuPercent;
+      memoryBytes += stat.memoryBytes;
+      processCount += 1;
+    }
+    for (const child of childrenByPpid.get(pid) ?? []) queue.push(child);
+  }
+  return { cpuPercent, memoryBytes, processCount };
+}
+
+async function resourceUsage() {
+  const stats = await snapshotProcessStats();
+  const childrenByPpid = new Map();
+  for (const [pid, stat] of stats) {
+    if (!stat.ppid) continue;
+    const list = childrenByPpid.get(stat.ppid);
+    if (list) list.push(pid);
+    else childrenByPpid.set(stat.ppid, [pid]);
+  }
+
+  const sessions = [];
+  for (const entry of ptys.values()) {
+    const pid = entry.process?.pid;
+    if (!pid || entry.ssh) continue;
+    const usage = sumProcessTree(pid, stats, childrenByPpid);
+    sessions.push({
+      id: entry.id,
+      pid,
+      cpu_percent: Math.round(usage.cpuPercent * 10) / 10,
+      memory_bytes: usage.memoryBytes,
+      process_count: usage.processCount,
+    });
+  }
+
+  // The whole app tree (main + renderer/GPU + every local session).
+  const appUsage = sumProcessTree(process.pid, stats, childrenByPpid);
+  return {
+    updated_at: Date.now(),
+    sampled: stats.size > 0,
+    total_cpu_percent: Math.round(appUsage.cpuPercent * 10) / 10,
+    total_memory_bytes: appUsage.memoryBytes,
+    total_process_count: appUsage.processCount,
+    system_memory_bytes: os.totalmem(),
+    sessions,
+  };
+}
+
 // ---- Source control view: aggregated repo state + stage/commit ----
 
 function runGit(root, args, timeout = 3000) {
@@ -1524,6 +1689,24 @@ async function invokeCommand(event, command, rawArgs) {
       return gitStatusForTree(args.folder);
     case "git_changes":
       return gitChanges(args.folder);
+    case "resource_usage":
+      return resourceUsage();
+    case "set_titlebar_overlay": {
+      // Keep the native window-control overlay in sync with the app theme.
+      const overlay = {
+        color: asString(args.color) || DEFAULT_TITLEBAR_OVERLAY.color,
+        symbolColor:
+          asString(args.symbolColor) || DEFAULT_TITLEBAR_OVERLAY.symbolColor,
+        height: TITLEBAR_HEIGHT,
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win === petWindow) continue;
+        try {
+          win.setTitleBarOverlay(overlay);
+        } catch {}
+      }
+      return null;
+    }
     case "git_stage":
       return gitStage(args.folder, args.paths);
     case "git_unstage":
@@ -1784,6 +1967,8 @@ console.log(
 );
 void app.whenReady().then(async () => {
   console.log("[electron] ready");
+  // Custom top bar replaces the native File/Edit/View/Window menu.
+  Menu.setApplicationMenu(null);
   hookReady = hookService.start().catch((error) => {
     console.error("[electron] hook service failed to start", error);
     throw error;
