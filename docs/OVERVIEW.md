@@ -88,6 +88,7 @@ Electron 앱은 Codex(세션 transcript)·Claude(OAuth usage 엔드포인트)에
 |---|---|
 | 커스텀 탑바 | 네이티브 타이틀바/메뉴 제거(Electron). 좌/우 사이드바 토글·Quick Open·알림·핀·새 창·펫·설정 버튼 + 창 드래그 존. 네이티브 min/max/close 오버레이 유지(Snap Layouts 동작) |
 | Resource Manager | 상태 바 우측 ▦ — 앱 전체 메모리 총합 + 팝오버에서 프로젝트→세션별 프로세스 트리 CPU%/메모리 |
+| Ports 모니터 | 상태 바 우측 🔌 — 열린 TCP 포트를 프로젝트별 귀속(세션 하위 프로세스/커맨드라인 경로)해 표시, 브라우저 열기·주소 복사·프로세스 종료, External 접힘 섹션 |
 | 좌측 사이드바 접기 | 탑바 ⫞ 토글, 상태 영구화 |
 | 자동 업데이트 | 설정 → About → Check, 서명 검증 후 다운로드·설치·재시작 ([RELEASE.md](RELEASE.md)) |
 | 멀티 윈도우 | 새 창 열기 (탑바) |

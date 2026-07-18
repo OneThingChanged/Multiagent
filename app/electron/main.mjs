@@ -1206,6 +1206,245 @@ async function resourceUsage() {
   };
 }
 
+// ---- Ports monitor: listening TCP ports attributed to projects ----
+
+const MAX_PORTS = 200;
+
+function normalizeConnectHost(bindHost) {
+  const host = (bindHost || "").trim();
+  if (!host || host === "*" || host === "0.0.0.0" || host === "::" || host === "[::]") {
+    return "localhost";
+  }
+  return host.replace(/^\[|\]$/g, "");
+}
+
+// Parse `netstat -ano -p tcp` LISTENING rows → [{ bindHost, port, pid }].
+function parseNetstatListening(stdout) {
+  const rows = [];
+  for (const line of stdout.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5 || parts[0].toUpperCase() !== "TCP") continue;
+    if (!/LISTEN/i.test(parts[3])) continue;
+    const local = parts[1];
+    const pid = Number(parts[4]);
+    const sep = local.lastIndexOf(":");
+    if (sep <= 0 || !Number.isSafeInteger(pid) || pid <= 0) continue;
+    const port = Number(local.slice(sep + 1));
+    if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+    rows.push({ bindHost: local.slice(0, sep), port, pid });
+  }
+  return rows;
+}
+
+// Parse `lsof -nP -iTCP -sTCP:LISTEN -F pcn` field output (POSIX).
+function parseLsofListening(stdout) {
+  const rows = [];
+  let pid = 0;
+  let name = "";
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1)) || 0;
+    else if (line.startsWith("c")) name = line.slice(1);
+    else if (line.startsWith("n") && pid > 0) {
+      const address = line.slice(1);
+      const sep = address.lastIndexOf(":");
+      if (sep <= 0) continue;
+      const port = Number(address.slice(sep + 1));
+      if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+      rows.push({ bindHost: address.slice(0, sep), port, pid, processName: name });
+    }
+  }
+  return rows;
+}
+
+function runCommand(command, commandArgs, timeout = 5000) {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      commandArgs,
+      { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      (error, out) => resolve(error ? null : out)
+    );
+  });
+}
+
+// A project path appears in a command line as a whole token (bounded by
+// whitespace/quotes before and whitespace/quote/separator after) — mirrors
+// Orca's includesPathBoundary to avoid substring false positives.
+function commandLineMatchesFolder(commandLineLower, folderLower) {
+  let index = 0;
+  while (index < commandLineLower.length) {
+    const found = commandLineLower.indexOf(folderLower, index);
+    if (found < 0) return false;
+    const before = found === 0 ? " " : commandLineLower[found - 1];
+    const afterIndex = found + folderLower.length;
+    const after =
+      afterIndex >= commandLineLower.length
+        ? " "
+        : commandLineLower[afterIndex];
+    if (
+      /[\s"'=]/.test(before) &&
+      /[\s"'\\/:,;)]/.test(after)
+    ) {
+      return true;
+    }
+    index = found + 1;
+  }
+  return false;
+}
+
+async function listPorts(rawProjects) {
+  const projects = (Array.isArray(rawProjects) ? rawProjects : [])
+    .filter((p) => p && typeof p.id === "string" && typeof p.folder === "string" && p.folder.trim())
+    .map((p) => ({
+      id: p.id,
+      folderLower: p.folder.trim().replace(/[\\/]+$/, "").toLowerCase().replace(/\//g, "\\"),
+      folderLowerPosix: p.folder.trim().replace(/[\\/]+$/, "").toLowerCase().replace(/\\/g, "/"),
+    }))
+    // Deepest folder wins when projects nest.
+    .sort((a, b) => b.folderLower.length - a.folderLower.length);
+
+  let listeners = [];
+  let processInfo = new Map(); // pid → { name, commandLineLower, ppid }
+
+  if (process.platform === "win32") {
+    // No "-p tcp": that flag hides IPv6-only listeners ([::] binds); the
+    // parser keeps TCP rows (v4+v6) and drops UDP by the first column.
+    const netstatOut = await runCommand("netstat.exe", ["-ano"]);
+    if (netstatOut === null) return { updated_at: Date.now(), sampled: false, ports: [] };
+    listeners = parseNetstatListening(netstatOut);
+    // One full Win32_Process query: names + command lines for display and
+    // attribution, plus ppids so listener pids can be walked up to a
+    // session's PTY root.
+    const script =
+      "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CommandLine | " +
+      "Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
+    const cimOut = await runCommand(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      8000
+    );
+    if (cimOut) {
+      try {
+        const rows = JSON.parse(cimOut);
+        for (const row of Array.isArray(rows) ? rows : [rows]) {
+          const pid = Number(row?.ProcessId);
+          if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+          processInfo.set(pid, {
+            name: typeof row?.Name === "string" ? row.Name : "",
+            commandLineLower:
+              typeof row?.CommandLine === "string"
+                ? row.CommandLine.toLowerCase()
+                : "",
+            ppid: Number(row?.ParentProcessId) || 0,
+          });
+        }
+      } catch {}
+    }
+  } else {
+    const lsofOut = await runCommand("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]);
+    if (lsofOut === null) return { updated_at: Date.now(), sampled: false, ports: [] };
+    listeners = parseLsofListening(lsofOut);
+    const psOut = await runCommand("ps", ["-eo", "pid=,ppid=,args="]);
+    if (psOut) {
+      for (const line of psOut.split("\n")) {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+        if (!match) continue;
+        processInfo.set(Number(match[1]), {
+          name: "",
+          commandLineLower: match[3].toLowerCase(),
+          ppid: Number(match[2]) || 0,
+        });
+      }
+    }
+  }
+
+  // Session PTY roots → agent id (local sessions only).
+  const sessionRootByPid = new Map();
+  for (const entry of ptys.values()) {
+    const pid = entry.process?.pid;
+    if (pid && !entry.ssh) sessionRootByPid.set(pid, entry.id);
+  }
+
+  const findSessionAncestor = (pid) => {
+    let current = pid;
+    for (let depth = 0; depth < 32; depth += 1) {
+      if (sessionRootByPid.has(current)) return sessionRootByPid.get(current);
+      const info = processInfo.get(current);
+      if (!info || !info.ppid || info.ppid === current) return null;
+      current = info.ppid;
+    }
+    return null;
+  };
+
+  const matchProjectByCommandLine = (commandLineLower) => {
+    if (!commandLineLower) return null;
+    const posix = commandLineLower.replace(/\\/g, "/");
+    for (const project of projects) {
+      if (
+        commandLineMatchesFolder(commandLineLower, project.folderLower) ||
+        commandLineMatchesFolder(posix, project.folderLowerPosix)
+      ) {
+        return project.id;
+      }
+    }
+    return null;
+  };
+
+  const seen = new Set();
+  const ports = [];
+  for (const listener of listeners) {
+    const connectHost = normalizeConnectHost(listener.bindHost);
+    const key = `${connectHost}:${listener.port}:${listener.pid}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const info = processInfo.get(listener.pid);
+    const terminalId = findSessionAncestor(listener.pid);
+    const projectId = terminalId
+      ? null
+      : matchProjectByCommandLine(info?.commandLineLower ?? "");
+    ports.push({
+      port: listener.port,
+      pid: listener.pid,
+      connect_host: connectHost,
+      process_name:
+        info?.name || listener.processName || "",
+      kind: terminalId || projectId ? "workspace" : "external",
+      terminal_id: terminalId,
+      project_id: projectId,
+      own_app: listener.pid === process.pid,
+    });
+    if (ports.length >= MAX_PORTS) break;
+  }
+
+  ports.sort((a, b) => {
+    const rank = (p) => (p.kind === "workspace" ? 0 : 1);
+    return rank(a) - rank(b) || a.port - b.port;
+  });
+
+  return { updated_at: Date.now(), sampled: true, ports };
+}
+
+async function killPortProcess(pid, port) {
+  const targetPid = Number(pid);
+  const targetPort = Number(port);
+  if (!Number.isSafeInteger(targetPid) || targetPid <= 0) {
+    throw new Error("잘못된 프로세스입니다.");
+  }
+  if (targetPid === process.pid) {
+    throw new Error("앱 자신의 프로세스는 종료할 수 없습니다.");
+  }
+  // Re-verify: the pid must still own a LISTENING socket on that port.
+  const current = await listPorts([]);
+  const stillOwns = current.ports.some(
+    (entry) => entry.pid === targetPid && entry.port === targetPort
+  );
+  if (!stillOwns) {
+    throw new Error("해당 포트를 사용하는 프로세스를 찾을 수 없습니다.");
+  }
+  process.kill(targetPid);
+  return null;
+}
+
 // ---- Source control view: aggregated repo state + stage/commit ----
 
 function runGit(root, args, timeout = 3000) {
@@ -1691,6 +1930,10 @@ async function invokeCommand(event, command, rawArgs) {
       return gitChanges(args.folder);
     case "resource_usage":
       return resourceUsage();
+    case "list_ports":
+      return listPorts(args.projects);
+    case "kill_port_process":
+      return killPortProcess(args.pid, args.port);
     case "set_titlebar_overlay": {
       // Keep the native window-control overlay in sync with the app theme.
       const overlay = {

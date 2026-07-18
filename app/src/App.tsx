@@ -2924,7 +2924,11 @@ function App() {
         </aside>
       )}
       {isElectronRuntime() && (
-        <UsageStatusBar agents={agents} projects={projects} />
+        <UsageStatusBar
+          agents={agents}
+          projects={projects}
+          onSelectProject={selectProject}
+        />
       )}
       {settingsOpen && (
         <SettingsModal

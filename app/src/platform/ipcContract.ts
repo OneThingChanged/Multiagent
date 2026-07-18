@@ -9,6 +9,7 @@ export type RuntimeCommand =
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "read_text_file" | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_commit" | "resource_usage" | "set_titlebar_overlay"
+  | "list_ports" | "kill_port_process"
   | "create_file" | "create_directory"
   | "rename_path" | "duplicate_path" | "delete_path"
   | "resolve_terminal_path"
@@ -115,6 +116,23 @@ export type ResourceUsageResult = {
   sessions: ResourceSessionUsage[];
 };
 
+export type PortEntry = {
+  port: number;
+  pid: number;
+  connect_host: string;
+  process_name: string;
+  kind: "workspace" | "external";
+  terminal_id: string | null;
+  project_id: string | null;
+  own_app: boolean;
+};
+
+export type PortsResult = {
+  updated_at: number;
+  sampled: boolean;
+  ports: PortEntry[];
+};
+
 export type GitChangesResult = {
   is_repo: boolean;
   branch: string;
@@ -162,6 +180,14 @@ export type RuntimeCommandContract = {
   };
   set_titlebar_overlay: {
     args: { color: string; symbolColor: string };
+    result: null;
+  };
+  list_ports: {
+    args: { projects: Array<{ id: string; folder: string }> };
+    result: PortsResult;
+  };
+  kill_port_process: {
+    args: { pid: number; port: number };
     result: null;
   };
   create_file: {

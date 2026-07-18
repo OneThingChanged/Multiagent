@@ -8,6 +8,7 @@ import {
 } from "react";
 import { invoke } from "../platform/runtime";
 import type { Agent, Project } from "../types";
+import { PortsMonitor } from "./PortsMonitor";
 import { ResourceMonitor } from "./ResourceMonitor";
 import {
   clampUsagePercent,
@@ -170,9 +171,11 @@ function ProviderPopover({
 export function UsageStatusBar({
   agents,
   projects,
+  onSelectProject,
 }: {
   agents: Agent[];
   projects: Project[];
+  onSelectProject: (projectId: string) => void;
 }) {
   const [summary, setSummary] = useState<UsageRateLimitSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -303,6 +306,11 @@ export function UsageStatusBar({
         )}
       </div>
       <ResourceMonitor agents={agents} projects={projects} />
+      <PortsMonitor
+        agents={agents}
+        projects={projects}
+        onSelectProject={onSelectProject}
+      />
       <button
         type="button"
         className="usage-status-refresh"

@@ -32,6 +32,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "git_commit",
   "resource_usage",
   "set_titlebar_overlay",
+  "list_ports",
+  "kill_port_process",
   "create_file",
   "create_directory",
   "rename_path",
@@ -218,6 +220,35 @@ function assertInvokeRequest(command, rawArgs) {
         args.message.length > 5000
       ) {
         throw new TypeError("Electron git commit message must be a non-empty string");
+      }
+      break;
+    case "list_ports":
+      if (args.projects !== undefined) {
+        if (
+          !Array.isArray(args.projects) ||
+          args.projects.length > 200 ||
+          args.projects.some(
+            (p) =>
+              !p ||
+              typeof p.id !== "string" ||
+              typeof p.folder !== "string" ||
+              p.folder.length > 4096
+          )
+        ) {
+          throw new TypeError("Electron ports projects list is invalid");
+        }
+      }
+      break;
+    case "kill_port_process":
+      if (
+        !Number.isInteger(args.pid) ||
+        args.pid < 1 ||
+        args.pid > 2 ** 31 ||
+        !Number.isInteger(args.port) ||
+        args.port < 1 ||
+        args.port > 65535
+      ) {
+        throw new TypeError("Electron kill_port_process arguments are invalid");
       }
       break;
     case "set_titlebar_overlay":
