@@ -71,4 +71,13 @@ describe("addTerminalCompatibilityArgs", () => {
     ).toBe("codex --no-alt-screen");
     expect(addTerminalCompatibilityArgs("claude", "claude")).toBe("claude");
   });
+
+  it("skips the flag when the session opts into alt-screen", () => {
+    expect(addTerminalCompatibilityArgs("codex", "codex.cmd", true)).toBe(
+      "codex.cmd"
+    );
+    expect(
+      addTerminalCompatibilityArgs("codex", "codex resume session-123", true)
+    ).toBe("codex resume session-123");
+  });
 });

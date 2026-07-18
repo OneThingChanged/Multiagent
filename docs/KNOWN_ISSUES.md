@@ -29,6 +29,8 @@
 - v0.5.26부터 Codex는 자동으로 `--no-alt-screen`을 사용하며, PTY 출력에서 Codex의 `CSI 3J`(scrollback purge)만 스트리밍 필터로 제거한다. `CSI 2J`와 다른 ANSI 제어는 TUI 렌더링을 위해 그대로 전달한다.
 - ANSI 시퀀스가 여러 PTY read로 나뉘어도 필터 상태를 유지한다. Claude와 일반 Shell 출력에는 적용하지 않는다.
 - 이미 실행 중인 Codex에는 소급 적용되지 않으므로 업데이트 후 세션을 다시 열어야 한다. 이 조치는 xterm 화면 보존을 위한 호환성 완화이며 Codex의 JSONL 대화 원본이나 resume 데이터는 변경하지 않는다.
+- **알려진 한계 — 재렌더 잘림**: `CSI 2J`는 그대로 전달되는데, xterm.js의 2J는 (Windows Terminal과 달리) 지워지는 viewport 내용을 스크롤백으로 밀지 않고 삭제한다(xterm.js#5745). Codex가 화면을 재구성(리사이즈·긴 작업 후 등)하면서 transcript 꼬리만 다시 그리면, 그 순간 화면에 있던 일부 줄이 스크롤백에서 빠져 **중간이 잘린 것처럼** 보일 수 있다. 대화 원본(JSONL·`ctrl+t` transcript)은 무손실이다.
+- **세션별 우회**: 세션 속성 → **Alt-screen 모드**를 켜면 그 Codex는 `--no-alt-screen` 없이 alternate screen에서 실행된다(Orca와 같은 방식). 잘림·스크롤백 이슈가 원천적으로 사라지는 대신 대화가 xterm 스크롤백(Ctrl+F 검색·드래그 복사)에 남지 않고, 히스토리는 Codex 내부 스크롤·`ctrl+t`로 본다. 재시작부터 적용.
 
 ### 머신마다 휠 동작이 다른 이유 (일반 스크롤 vs PageUp/Down)
 - 같은 앱·같은 코드라도 그 PC에서 도는 **claude/codex CLI 버전·모드**에 따라 인터랙티브 화면이 normal 버퍼로 그려질 수도, alternate 버퍼로 그려질 수도 있다. v0.5.26 이후 앱이 시작하는 Codex는 위 호환성 완화를 위해 normal buffer를 강제한다. Claude와 사용자가 직접 실행한 다른 TUI는 기존처럼 각 프로그램의 버퍼 선택을 따른다.

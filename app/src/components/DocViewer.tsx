@@ -34,6 +34,17 @@ function fencedSource(content: string, language: string) {
   return `${fence}${language}\n${content}\n${fence}`;
 }
 
+// Injected into HTML doc tabs so http(s) links respond: Ctrl/Cmd+click (or
+// middle-click) opens the OS browser via window.open → the main process's
+// window-open handler (shell.openExternal); plain clicks are swallowed so a
+// stray click can't navigate the sandboxed frame. The document's OWN scripts
+// stay blocked — the app CSP only whitelists this exact text by hash
+// (index.html script-src 'sha256-…'). If you change ANY character here,
+// recompute the hash: node -e "console.log(require('crypto').createHash(
+// 'sha256').update(SCRIPT,'utf8').digest('base64'))"
+const DOC_LINK_SCRIPT =
+  'document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();if(e.ctrlKey||e.metaKey)window.open(h,"_blank","noopener")}else if(!/^#/.test(a.getAttribute("href")||""))e.preventDefault()},!0);document.addEventListener("auxclick",function(e){if(1!==e.button)return;var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();window.open(h,"_blank","noopener")}},!0);';
+
 type DocViewerState =
   | { phase: "loading" }
   | { phase: "markdown"; content: string }
@@ -185,9 +196,9 @@ export function DocViewer({
         {state.phase === "html" && (
           <iframe
             className="doc-html-frame"
-            sandbox=""
-            srcDoc={state.content}
-            title={relativePath}
+            sandbox="allow-scripts allow-popups"
+            srcDoc={`${state.content}\n<script>${DOC_LINK_SCRIPT}</script>`}
+            title={`${relativePath} — 링크는 Ctrl+클릭으로 브라우저에서 열립니다`}
           />
         )}
         {state.phase === "image" && (

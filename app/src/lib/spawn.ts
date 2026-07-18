@@ -21,8 +21,12 @@ export type SpawnArgs = {
 
 export function addTerminalCompatibilityArgs(
   aiToolId: string,
-  command: string
+  command: string,
+  useAltScreen = false
 ): string {
+  // Per-session opt-out (세션 속성 → Alt-screen): let Codex run on the
+  // alternate screen instead of forcing the scrollback-preserving mode.
+  if (useAltScreen) return command;
   if (
     aiToolId === "codex" &&
     !/(?:^|\s)--no-alt-screen(?:\s|$)/.test(command)
@@ -134,7 +138,11 @@ export async function buildSpawnArgs(
         }
       }
     }
-    cmd = addTerminalCompatibilityArgs(agent.aiToolId, cmd);
+    cmd = addTerminalCompatibilityArgs(
+      agent.aiToolId,
+      cmd,
+      agent.useAltScreen === true
+    );
     if (agent.dangerous && tool.dangerousFlag) {
       cmd = `${cmd} ${tool.dangerousFlag}`;
     }

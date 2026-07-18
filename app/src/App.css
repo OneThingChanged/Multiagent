@@ -2111,6 +2111,49 @@ body,
   gap: 2px;
   margin: 4px 0 8px;
 }
+
+/* Editable toggles (dangerous / alt-screen) below the read-only table */
+.session-props-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-panel-soft);
+}
+.session-props-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+.session-props-toggle input {
+  margin-top: 2px;
+  accent-color: var(--app-accent);
+  cursor: pointer;
+}
+.session-props-toggle-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.session-props-toggle-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-heading);
+}
+.session-props-toggle-desc {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-muted);
+}
+.session-props-toggle-note {
+  font-size: 10px;
+  color: var(--app-soft-text);
+}
 .session-props-row {
   display: flex;
   gap: 12px;

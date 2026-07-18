@@ -225,6 +225,7 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     folder: agent.folder,
     aiToolId: agent.aiToolId,
     dangerous: agent.dangerous,
+    useAltScreen: agent.useAltScreen || undefined,
     createdAt: agent.createdAt,
     lastSessionId: agent.lastSessionId,
   };
@@ -317,6 +318,7 @@ function agentFromStored(
     aiToolId,
     aiLabel: toolForId(aiToolId).label,
     dangerous: !!stored.dangerous,
+    useAltScreen: stored.useAltScreen || undefined,
     createdAt: stored.createdAt || existing?.createdAt || Date.now(),
     lastSessionId:
       stored.lastSessionId ??
@@ -3038,6 +3040,11 @@ function App() {
               agent={target}
               project={
                 projects.find((p) => p.id === target.projectId) ?? null
+              }
+              onUpdateAgent={(id, patch) =>
+                setAgents((prev) =>
+                  prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+                )
               }
               onClose={() => setPropertiesAgentId(null)}
             />

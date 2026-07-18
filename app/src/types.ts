@@ -119,6 +119,9 @@ export type Agent = {
   aiToolId: string;
   aiLabel: string;
   dangerous: boolean;
+  // Codex only: skip the forced --no-alt-screen so the TUI runs on the
+  // alternate screen (its own internal scrolling). Applies from next spawn.
+  useAltScreen?: boolean;
   status: AgentStatus;
   runtimeStatus?: AgentRuntimeStatus;
   activity?: AgentActivity;
@@ -136,6 +139,7 @@ export type StoredAgent = {
   folder: string;
   aiToolId: string;
   dangerous?: boolean;
+  useAltScreen?: boolean;
   createdAt: number;
   lastSessionId?: string;
   // Legacy fields kept for one-time migration on load.

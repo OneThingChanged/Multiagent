@@ -26,10 +26,15 @@ const STATUS_LABEL: Record<string, string> = {
 export function SessionPropertiesModal({
   agent,
   project,
+  onUpdateAgent,
   onClose,
 }: {
   agent: Agent;
   project: Project | null;
+  onUpdateAgent: (
+    id: string,
+    patch: Partial<Pick<Agent, "dangerous" | "useAltScreen">>
+  ) => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -90,12 +95,11 @@ export function SessionPropertiesModal({
             mono: true,
           },
         ]),
-    {
-      label: "Dangerous 모드",
-      value: agent.dangerous ? "켜짐" : "꺼짐",
-    },
     { label: "Agent ID", value: agent.id, mono: true },
   ];
+
+  const supportsDangerous = !!tool.dangerousFlag;
+  const supportsAltScreen = agent.aiToolId === "codex";
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -126,6 +130,55 @@ export function SessionPropertiesModal({
             </div>
           ))}
         </div>
+        {(supportsDangerous || supportsAltScreen) && (
+          <div className="session-props-toggles">
+            {supportsDangerous && (
+              <label className="session-props-toggle">
+                <input
+                  type="checkbox"
+                  checked={agent.dangerous}
+                  onChange={(e) =>
+                    onUpdateAgent(agent.id, { dangerous: e.target.checked })
+                  }
+                />
+                <span className="session-props-toggle-body">
+                  <span className="session-props-toggle-title">
+                    Dangerous 모드
+                  </span>
+                  <span className="session-props-toggle-desc">
+                    {tool.dangerousFlag} 플래그로 실행 (권한 확인 생략)
+                  </span>
+                </span>
+              </label>
+            )}
+            {supportsAltScreen && (
+              <label className="session-props-toggle">
+                <input
+                  type="checkbox"
+                  checked={agent.useAltScreen === true}
+                  onChange={(e) =>
+                    onUpdateAgent(agent.id, {
+                      useAltScreen: e.target.checked || undefined,
+                    })
+                  }
+                />
+                <span className="session-props-toggle-body">
+                  <span className="session-props-toggle-title">
+                    Alt-screen 모드
+                  </span>
+                  <span className="session-props-toggle-desc">
+                    켜면 Codex가 alternate screen에서 실행됨 — 재렌더 잘림이
+                    사라지지만 대화가 터미널 스크롤백(Ctrl+F 검색·드래그
+                    복사)에 남지 않음. 끄면 기존 --no-alt-screen 방식
+                  </span>
+                </span>
+              </label>
+            )}
+            <div className="session-props-toggle-note">
+              변경은 세션을 재시작하면 적용됩니다 (우클릭 → 세션 재시작)
+            </div>
+          </div>
+        )}
         <div className="modal-actions">
           <button className="btn-primary" onClick={onClose}>
             닫기
