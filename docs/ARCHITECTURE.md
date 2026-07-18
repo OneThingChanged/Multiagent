@@ -230,6 +230,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - **`read_text_file`** (Electron 전용): root 안의 임의 파일을 `{kind:"text",content} | {kind:"binary"} | {kind:"too_large",size}`로 반환 (2MB 상한, 앞 8KB NUL 스니핑으로 바이너리 판정, `isInside` 강제)
 - **`git_status`** (Electron 전용): `git status --porcelain -z` 실행(3s 타임아웃, 2,000 엔트리 상한) → `{is_repo, entries: {relative_path, status}[]}`. rename/copy 엔트리의 원본 경로 토큰을 건너뛰며 XY 코드를 단일 문자(`U`/`D`/`R`/`A`/`M`)로 축약. git 미설치·비저장소는 `is_repo:false`
 - **파일 작업 IPC** (Electron 전용, 전부 `isInside` 샌드박스 + 이름 유효성 검사): `create_file`(`wx` 플래그로 기존 파일 보호) / `create_directory` / `rename_path`(새 상대경로 반환) / `duplicate_path`(`name copy[ n]` 자동 명명, 폴더는 재귀 복사) / `delete_path`(`shell.trashItem` → 휴지통, 영구삭제 아님)
+- **Source Control IPC** (Electron 전용): `git_changes` — `status --porcelain -z`(staged=X열/unstaged=Y열 분리, `MM`은 양쪽) + `diff --numstat`/`--cached` 라인 수 + branch + `rev-list --left-right --count @{u}...HEAD` ahead/behind + `log -n 8`을 병렬 실행해 한 번에 반환. `git_stage`(`add --`) / `git_unstage`(`restore --staged --`) / `git_commit`(`-m`, execFile 인자 전달이라 셸 인젝션 없음). 경로 배열(1~500)·메시지는 contract 레이어에서 검증
 - `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path`는 문서 탭의 md/html 읽기와 QuickOpen 문서 검색에 계속 사용 (Tauri에서도 동작)
 - `resolve_markdown_path`는 `Docs/TODO.md`·상대경로·절대경로·`file.md:12` line suffix를 모두 처리하고, canonicalize 후 root 안 여부를 검사
 - Tauri 런타임에는 `list_directory`/`read_text_file`이 없어 파일 트리·텍스트 뷰는 빈 상태/에러로 강등된다 (Electron-first)
@@ -241,6 +242,9 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
   - **펼침 상태**: 프로젝트별로 `multiagent.fileTreeExpanded.v1`에 저장, 프로젝트 재진입 시 저장된 폴더들을 재로딩해 복원. 모두 펼치기는 BFS(400 dirs 상한)
   - **git 뱃지**: `git_status` 결과를 파일 맵 + 폴더 전파 맵(D>M>A>U 랭크)으로 가공, 10초 폴링. 이름과 뱃지에 같은 색 적용
   - **우클릭 메뉴 + 인라인 입력**: 파일/폴더/빈영역별 메뉴, 새 파일·새 폴더·이름 변경은 인라인 input 행으로 처리(Enter/Esc). 폴더 이름 변경 시 하위 펼침 경로도 새 prefix로 치환. 작업 후 해당 디렉토리 refresh + git 갱신
+  - **뷰 탭**: 패널 최상단 🗀 Files / ⎇ Source Control 전환. ⎇ 뱃지 수는 Files 뷰의 `git_status` 폴링(gitFiles.size)을 재사용
+  - **SourceControlView**: `git_changes`를 뷰 진입 시 + 10초 폴링으로 로드. stage/unstage/commit은 busy 가드로 직렬화하고 완료 후 즉시 재로드 + 트리 뱃지 갱신. 행 클릭 → 문서 탭
+  - 파일 트리 열기 버튼은 좌측 사이드바가 아닌 **창 우측 상단 플로팅 버튼**(`.files-open-btn`, 패널 닫힘 시에만 렌더)
 - **`DocViewer.tsx`** — 문서 탭 pane 콘텐츠. 확장자로 분기: md→`react-markdown`+`remark-gfm`+`rehype-highlight`, html→`<iframe sandbox srcdoc>`(스크립트/동일출처 권한 없음), 이미지→`read_image_data_url`, 기타→`read_text_file` 결과를 fenced code block으로 하이라이트. 읽기 실패 시 Retry/Reveal 에러 패널
 - **`PaneSlot.tsx`** — leaf의 활성 탭이 doc id면 xterm 호스트(`.pane-body`)를 `display:none`으로 숨기고 DocViewer를 렌더. xterm DOM과 attach/detach 라이프사이클은 그대로 유지되어 터미널↔문서 전환 시 출력 무손상
 - `Open`/`Reveal`은 기본 앱 열기/탐색기 위치 표시

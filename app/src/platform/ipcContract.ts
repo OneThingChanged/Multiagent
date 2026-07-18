@@ -7,7 +7,8 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
-  | "read_text_file" | "git_status" | "create_file" | "create_directory"
+  | "read_text_file" | "git_status" | "git_changes" | "git_stage"
+  | "git_unstage" | "git_commit" | "create_file" | "create_directory"
   | "rename_path" | "duplicate_path" | "delete_path"
   | "resolve_terminal_path"
   | "read_image_data_url" | "play_system_sound" | "read_audio_file"
@@ -88,6 +89,24 @@ export type GitStatusResult = {
   entries: Array<{ relative_path: string; status: GitStatusLetter }>;
 };
 
+export type GitChangeEntry = {
+  relative_path: string;
+  status: GitStatusLetter;
+  additions: number;
+  deletions: number;
+};
+
+export type GitChangesResult = {
+  is_repo: boolean;
+  branch: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  staged: GitChangeEntry[];
+  unstaged: GitChangeEntry[];
+  commits: Array<{ hash: string; subject: string }>;
+};
+
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
   list_directory: {
@@ -101,6 +120,22 @@ export type RuntimeCommandContract = {
   git_status: {
     args: { folder: string };
     result: GitStatusResult;
+  };
+  git_changes: {
+    args: { folder: string };
+    result: GitChangesResult;
+  };
+  git_stage: {
+    args: { folder: string; paths: string[] };
+    result: null;
+  };
+  git_unstage: {
+    args: { folder: string; paths: string[] };
+    result: null;
+  };
+  git_commit: {
+    args: { folder: string; message: string };
+    result: null;
   };
   create_file: {
     args: { folder: string; relativePath: string };

@@ -2815,8 +2815,6 @@ function App() {
         onNewSession={() =>
           activeProject ? setShowModal(true) : setShowProjectModal(true)
         }
-        docsOpen={filesOpen}
-        onToggleDocs={() => setFilesOpen((open) => !open)}
         alwaysOnTop={alwaysOnTop}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
         desktopPetEnabled={desktopPetEnabled}
@@ -2866,6 +2864,15 @@ function App() {
         onOpenFolderPath={handleOpenFolderPath}
         onOpenTerminalPath={handleOpenTerminalPath}
       />
+      {!filesOpen && (
+        <button
+          className="files-open-btn"
+          onClick={() => setFilesOpen(true)}
+          title="파일 트리 열기 (Ctrl+Shift+D)"
+        >
+          🗀
+        </button>
+      )}
       {filesOpen && (
         <aside className="files-shell" style={{ width: filesWidth + 7 }}>
           <div

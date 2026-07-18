@@ -130,8 +130,6 @@ export function Sidebar({
   onContextMenu,
   onNewProject,
   onNewSession,
-  docsOpen,
-  onToggleDocs,
   alwaysOnTop,
   onToggleAlwaysOnTop,
   desktopPetEnabled,
@@ -165,8 +163,6 @@ export function Sidebar({
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
   onNewSession: () => void;
-  docsOpen: boolean;
-  onToggleDocs: () => void;
   alwaysOnTop: boolean;
   onToggleAlwaysOnTop: () => void;
   desktopPetEnabled: boolean;
@@ -784,13 +780,6 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-header">
         <div className="sidebar-actions">
-          <button
-            className={`docs-toggle-btn ${docsOpen ? "docs-toggle-active" : ""}`}
-            onClick={onToggleDocs}
-            title="Toggle file tree"
-          >
-            Files
-          </button>
           <button
             className={`always-on-top-btn ${
               alwaysOnTop ? "always-on-top-active" : ""

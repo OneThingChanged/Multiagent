@@ -1041,6 +1041,186 @@ async function gitStatusForTree(folder) {
   return { is_repo: true, entries };
 }
 
+// ---- Source control view: aggregated repo state + stage/commit ----
+
+function runGit(root, args, timeout = 3000) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "git",
+      ["-c", "core.quotepath=false", ...args],
+      { cwd: root, timeout, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(String(stderr || error.message).trim()));
+        } else {
+          resolve(stdout);
+        }
+      }
+    );
+  });
+}
+
+function gitLetterFromCode(code) {
+  if (code === "A") return "A";
+  if (code === "D") return "D";
+  if (code === "R" || code === "C") return "R";
+  return "M";
+}
+
+// Parse `status --porcelain -z` into separate staged (index) and unstaged
+// (worktree) entry lists. A file with "MM" appears in both.
+function parseGitStatusZ(stdout) {
+  const staged = [];
+  const unstaged = [];
+  const tokens = stdout.split("\0");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.length < 4 || token[2] !== " ") continue;
+    const x = token[0];
+    const y = token[1];
+    const relative = token.slice(3).replace(/\\/g, "/");
+    if (x === "R" || x === "C") i += 1; // skip original-path token
+    if (x === "?" && y === "?") {
+      unstaged.push({ relative_path: relative, status: "U" });
+      continue;
+    }
+    if (x !== " " && x !== "?") {
+      staged.push({ relative_path: relative, status: gitLetterFromCode(x) });
+    }
+    if (y !== " ") {
+      unstaged.push({ relative_path: relative, status: gitLetterFromCode(y) });
+    }
+    if (staged.length + unstaged.length >= 2000) break;
+  }
+  return { staged, unstaged };
+}
+
+function parseNumstat(stdout) {
+  const stats = new Map();
+  for (const line of stdout.split("\n")) {
+    const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+    if (!match) continue;
+    // Binary files report "-"; rename lines keep git's "old => new" form and
+    // simply won't match a plain path lookup — acceptable for stats.
+    stats.set(match[3].replace(/\\/g, "/"), {
+      additions: match[1] === "-" ? 0 : Number(match[1]),
+      deletions: match[2] === "-" ? 0 : Number(match[2]),
+    });
+  }
+  return stats;
+}
+
+async function gitChanges(folder) {
+  const root = fs.realpathSync(asString(folder));
+  let statusOut;
+  try {
+    statusOut = await runGit(root, ["status", "--porcelain", "-z"]);
+  } catch {
+    return {
+      is_repo: false,
+      branch: "",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      staged: [],
+      unstaged: [],
+      commits: [],
+    };
+  }
+  const { staged, unstaged } = parseGitStatusZ(statusOut);
+
+  const [stagedStatsOut, unstagedStatsOut, branchOut, logOut] =
+    await Promise.all([
+      runGit(root, ["diff", "--numstat", "--cached"]).catch(() => ""),
+      runGit(root, ["diff", "--numstat"]).catch(() => ""),
+      runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => ""),
+      runGit(root, ["log", "-n", "8", "--pretty=format:%h%x00%s"]).catch(
+        () => ""
+      ),
+    ]);
+  const stagedStats = parseNumstat(stagedStatsOut);
+  const unstagedStats = parseNumstat(unstagedStatsOut);
+  const attach = (entries, stats) =>
+    entries.map((entry) => ({
+      ...entry,
+      additions: stats.get(entry.relative_path)?.additions ?? 0,
+      deletions: stats.get(entry.relative_path)?.deletions ?? 0,
+    }));
+
+  let upstream = null;
+  let ahead = 0;
+  let behind = 0;
+  try {
+    upstream = (
+      await runGit(root, [
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{u}",
+      ])
+    ).trim();
+    const counts = (
+      await runGit(root, ["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+    )
+      .trim()
+      .split(/\s+/);
+    behind = Number(counts[0]) || 0;
+    ahead = Number(counts[1]) || 0;
+  } catch {
+    upstream = null;
+  }
+
+  const commits = [];
+  for (const line of logOut.split("\n")) {
+    const sep = line.indexOf("\0");
+    if (sep <= 0) continue;
+    commits.push({ hash: line.slice(0, sep), subject: line.slice(sep + 1) });
+  }
+
+  return {
+    is_repo: true,
+    branch: branchOut.trim(),
+    upstream,
+    ahead,
+    behind,
+    staged: attach(staged, stagedStats),
+    unstaged: attach(unstaged, unstagedStats),
+    commits,
+  };
+}
+
+function assertGitPaths(paths) {
+  if (!Array.isArray(paths) || paths.length < 1 || paths.length > 500) {
+    throw new Error("경로 목록이 잘못되었습니다.");
+  }
+  for (const p of paths) {
+    if (typeof p !== "string" || !p.trim() || p.length > 4096) {
+      throw new Error("경로 목록이 잘못되었습니다.");
+    }
+  }
+  return paths;
+}
+
+async function gitStage(folder, paths) {
+  const root = fs.realpathSync(asString(folder));
+  await runGit(root, ["add", "--", ...assertGitPaths(paths)], 10000);
+  return null;
+}
+
+async function gitUnstage(folder, paths) {
+  const root = fs.realpathSync(asString(folder));
+  await runGit(root, ["restore", "--staged", "--", ...assertGitPaths(paths)], 10000);
+  return null;
+}
+
+async function gitCommit(folder, message) {
+  const root = fs.realpathSync(asString(folder));
+  const trimmed = asString(message).trim();
+  if (!trimmed) throw new Error("커밋 메시지가 비어 있습니다.");
+  await runGit(root, ["commit", "-m", trimmed], 20000);
+  return null;
+}
+
 // ---- File tree write operations (context menu). All sandboxed to the
 // project root; delete moves to the OS recycle bin instead of erasing.
 
@@ -1342,6 +1522,14 @@ async function invokeCommand(event, command, rawArgs) {
       return readTextFile(args.folder, args.relativePath);
     case "git_status":
       return gitStatusForTree(args.folder);
+    case "git_changes":
+      return gitChanges(args.folder);
+    case "git_stage":
+      return gitStage(args.folder, args.paths);
+    case "git_unstage":
+      return gitUnstage(args.folder, args.paths);
+    case "git_commit":
+      return gitCommit(args.folder, args.message);
     case "create_file":
       return createFileEntry(args.folder, args.relativePath);
     case "create_directory":

@@ -13,6 +13,8 @@ import type { Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
 import type {
   DirectoryEntry,
+  GitChangeEntry,
+  GitChangesResult,
   GitStatusLetter,
   GitStatusResult,
 } from "../platform/ipcContract";
@@ -249,6 +251,9 @@ export function FileTreePanel({
   // ---- Context menu & inline editing ----
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [editing, setEditing] = useState<TreeEditing | null>(null);
+
+  // ---- View tab: Files / Source Control ----
+  const [view, setView] = useState<"files" | "scm">("files");
 
   const showOpError = useCallback((err: unknown) => {
     setOpError(String(err));
@@ -754,8 +759,33 @@ export function FileTreePanel({
     return items;
   };
 
+  const changedCount = gitFiles.size;
+
   return (
     <div className={`file-tree-panel docs-theme-${theme}`} style={{ width }}>
+      <div className="file-tree-tabs">
+        <button
+          className={`file-tree-tab ${view === "files" ? "file-tree-tab-active" : ""}`}
+          onClick={() => setView("files")}
+          title="Files"
+        >
+          🗀
+        </button>
+        <button
+          className={`file-tree-tab ${view === "scm" ? "file-tree-tab-active" : ""}`}
+          onClick={() => setView("scm")}
+          title="Source Control"
+        >
+          <span className="file-tree-tab-icon">
+            ⎇
+            {changedCount > 0 && (
+              <span className="file-tree-tab-count">
+                {changedCount > 99 ? "99+" : changedCount}
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
       <div className="file-tree-header">
         <div
           className="file-tree-project"
@@ -804,52 +834,70 @@ export function FileTreePanel({
         </button>
       </div>
 
-      <div className="file-tree-search">
-        <input
-          type="text"
-          value={filter}
-          placeholder="Find files"
-          onChange={(event) => setFilter(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && filter) {
-              event.preventDefault();
-              event.stopPropagation();
-              setFilter("");
-            }
-          }}
-        />
-      </div>
+      {view === "files" && (
+        <div className="file-tree-search">
+          <input
+            type="text"
+            value={filter}
+            placeholder="Find files"
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && filter) {
+                event.preventDefault();
+                event.stopPropagation();
+                setFilter("");
+              }
+            }}
+          />
+        </div>
+      )}
 
-      <div className="file-tree-toolbar">
-        <span className="file-tree-toolbar-label">Files</span>
-        <button
-          className="docs-icon-btn"
-          onClick={() => void expandAll()}
-          title="모두 펼치기"
-          disabled={!folder || expandingAll}
-        >
-          ⊞
-        </button>
-        <button
-          className="docs-icon-btn"
-          onClick={collapseAll}
-          title="모두 접기"
-          disabled={!folder}
-        >
-          ⊟
-        </button>
-        <button
-          className="docs-icon-btn"
-          onClick={refresh}
-          title="새로고침"
-          disabled={!folder || rootLoading}
-        >
-          ⟳
-        </button>
-      </div>
+      {view === "files" && (
+        <div className="file-tree-toolbar">
+          <span className="file-tree-toolbar-label">Files</span>
+          <button
+            className="docs-icon-btn"
+            onClick={() => void expandAll()}
+            title="모두 펼치기"
+            disabled={!folder || expandingAll}
+          >
+            ⊞
+          </button>
+          <button
+            className="docs-icon-btn"
+            onClick={collapseAll}
+            title="모두 접기"
+            disabled={!folder}
+          >
+            ⊟
+          </button>
+          <button
+            className="docs-icon-btn"
+            onClick={refresh}
+            title="새로고침"
+            disabled={!folder || rootLoading}
+          >
+            ⟳
+          </button>
+        </div>
+      )}
 
       {opError && <div className="file-tree-op-error">{opError}</div>}
 
+      {view === "scm" && (
+        <SourceControlView
+          folder={folder}
+          sshProject={!!shownProject?.sshHostId}
+          onOpenFile={(rel) => {
+            if (projectId) onOpenFile(projectId, rel);
+          }}
+          onMutated={() => void refreshGit()}
+          onError={showOpError}
+        />
+      )}
+
+      {view === "files" && (
+      <>
       <div
         className="file-tree-body"
         onContextMenu={(event) => {
@@ -923,6 +971,8 @@ export function FileTreePanel({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {ctxMenu && folder && (
         <FileTreeContextMenu
@@ -958,6 +1008,223 @@ export function FileTreePanel({
           onNewDir={(parent) => startCreate("new-dir", parent)}
         />
       )}
+    </div>
+  );
+}
+
+function SourceControlView({
+  folder,
+  sshProject,
+  onOpenFile,
+  onMutated,
+  onError,
+}: {
+  folder: string;
+  sshProject: boolean;
+  onOpenFile: (relativePath: string) => void;
+  onMutated: () => void;
+  onError: (err: unknown) => void;
+}) {
+  const [changes, setChanges] = useState<GitChangesResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    if (!folder) {
+      setChanges(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await invoke<GitChangesResult>("git_changes", { folder });
+      setChanges(result);
+    } catch (err) {
+      onError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [folder, onError]);
+
+  useEffect(() => {
+    void load();
+    if (!folder) return;
+    const timer = window.setInterval(() => void load(), GIT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [folder, load]);
+
+  const runGitOp = useCallback(
+    async (op: () => Promise<unknown>) => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        await op();
+        await load();
+        onMutated();
+      } catch (err) {
+        onError(err);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load, onError, onMutated]
+  );
+
+  const stage = (paths: string[]) =>
+    void runGitOp(() => invoke("git_stage", { folder, paths }));
+  const unstage = (paths: string[]) =>
+    void runGitOp(() => invoke("git_unstage", { folder, paths }));
+  const commit = () =>
+    void runGitOp(async () => {
+      await invoke("git_commit", { folder, message: message.trim() });
+      setMessage("");
+    });
+
+  if (!folder) {
+    return (
+      <div className="file-tree-body">
+        <div className="docs-empty">
+          {sshProject
+            ? "SSH 프로젝트는 Source Control을 지원하지 않습니다."
+            : "프로젝트를 선택하면 변경사항을 볼 수 있습니다."}
+        </div>
+      </div>
+    );
+  }
+  if (!changes) {
+    return (
+      <div className="file-tree-body">
+        <div className="docs-empty">{loading ? "Loading..." : ""}</div>
+      </div>
+    );
+  }
+  if (!changes.is_repo) {
+    return (
+      <div className="file-tree-body">
+        <div className="docs-empty">git 저장소가 아닙니다.</div>
+      </div>
+    );
+  }
+
+  const canCommit = changes.staged.length > 0 && !!message.trim() && !busy;
+
+  const changeRow = (entry: GitChangeEntry, staged: boolean) => (
+    <button
+      key={`${staged ? "s" : "u"}:${entry.relative_path}`}
+      className={`scm-row git-${entry.status}`}
+      onClick={() => onOpenFile(entry.relative_path)}
+      title={entry.relative_path}
+    >
+      <span className={`file-tree-icon ${fileIconClass(baseName(entry.relative_path))}`} />
+      <span className="scm-name">{baseName(entry.relative_path)}</span>
+      <span className="scm-dir">{parentPath(entry.relative_path)}</span>
+      <span className="scm-stats">
+        {entry.additions > 0 && (
+          <span className="scm-plus">+{entry.additions}</span>
+        )}
+        {entry.deletions > 0 && (
+          <span className="scm-minus">-{entry.deletions}</span>
+        )}
+        <span className="scm-letter">{entry.status}</span>
+      </span>
+      <span
+        className="scm-act"
+        title={staged ? "Unstage" : "Stage"}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (staged) unstage([entry.relative_path]);
+          else stage([entry.relative_path]);
+        }}
+      >
+        {staged ? "−" : "+"}
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="scm-view">
+      <div className="scm-branchrow" title={changes.upstream ?? undefined}>
+        <span className="scm-branch">⎇ {changes.branch || "(no branch)"}</span>
+        {changes.ahead > 0 && <span className="scm-ahead">↑{changes.ahead}</span>}
+        {changes.behind > 0 && <span className="scm-behind">↓{changes.behind}</span>}
+        {changes.upstream && <span className="scm-upstream">vs {changes.upstream}</span>}
+      </div>
+      <div className="scm-msg">
+        <textarea
+          value={message}
+          placeholder="Message (커밋 메시지)"
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+              event.preventDefault();
+              if (canCommit) commit();
+            }
+            event.stopPropagation();
+          }}
+          disabled={busy}
+          spellCheck={false}
+        />
+      </div>
+      <div className="scm-actions">
+        <button
+          onClick={() =>
+            stage(changes.unstaged.map((entry) => entry.relative_path))
+          }
+          disabled={busy || changes.unstaged.length === 0}
+        >
+          + Stage All
+        </button>
+        <button
+          className="scm-commit-btn"
+          onClick={commit}
+          disabled={!canCommit}
+          title="Ctrl+Enter"
+        >
+          Commit
+        </button>
+      </div>
+      <div className="file-tree-body">
+        <div className="scm-section">
+          Staged <span className="scm-count">{changes.staged.length}</span>
+          {changes.staged.length > 0 && (
+            <span
+              className="scm-section-act"
+              title="모두 언스테이지"
+              onClick={() =>
+                unstage(changes.staged.map((entry) => entry.relative_path))
+              }
+            >
+              −
+            </span>
+          )}
+        </div>
+        <div className="scm-list">
+          {changes.staged.map((entry) => changeRow(entry, true))}
+          {changes.staged.length === 0 && (
+            <div className="scm-empty">스테이징된 변경 없음</div>
+          )}
+        </div>
+        <div className="scm-section">
+          Changes <span className="scm-count">{changes.unstaged.length}</span>
+        </div>
+        <div className="scm-list">
+          {changes.unstaged.map((entry) => changeRow(entry, false))}
+          {changes.unstaged.length === 0 && (
+            <div className="scm-empty">변경 없음</div>
+          )}
+        </div>
+        <div className="scm-commits">
+          <div className="scm-section">Commits</div>
+          {changes.commits.map((commitEntry) => (
+            <div className="scm-commit" key={commitEntry.hash}>
+              <span className="scm-hash">{commitEntry.hash}</span>
+              <span className="scm-subject" title={commitEntry.subject}>
+                {commitEntry.subject}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

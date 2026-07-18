@@ -26,6 +26,10 @@ const INVOKE_COMMANDS = Object.freeze([
   "list_directory",
   "read_text_file",
   "git_status",
+  "git_changes",
+  "git_stage",
+  "git_unstage",
+  "git_commit",
   "create_file",
   "create_directory",
   "rename_path",
@@ -187,7 +191,32 @@ function assertInvokeRequest(command, rawArgs) {
       assertPathString(args.newName, "new name");
       break;
     case "git_status":
+    case "git_changes":
       assertPathString(args.folder, "folder");
+      break;
+    case "git_stage":
+    case "git_unstage":
+      assertPathString(args.folder, "folder");
+      if (
+        !Array.isArray(args.paths) ||
+        args.paths.length < 1 ||
+        args.paths.length > 500 ||
+        args.paths.some(
+          (p) => typeof p !== "string" || !p.trim() || p.length > 4096
+        )
+      ) {
+        throw new TypeError("Electron git paths must be 1-500 non-empty strings");
+      }
+      break;
+    case "git_commit":
+      assertPathString(args.folder, "folder");
+      if (
+        typeof args.message !== "string" ||
+        !args.message.trim() ||
+        args.message.length > 5000
+      ) {
+        throw new TypeError("Electron git commit message must be a non-empty string");
+      }
       break;
   }
   return args;

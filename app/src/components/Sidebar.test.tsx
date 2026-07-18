@@ -26,8 +26,6 @@ function renderSidebar(
       onContextMenu={() => {}}
       onNewProject={() => {}}
       onNewSession={() => {}}
-      docsOpen={false}
-      onToggleDocs={() => {}}
       alwaysOnTop={false}
       onToggleAlwaysOnTop={() => {}}
       desktopPetEnabled={true}
