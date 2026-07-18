@@ -45,8 +45,10 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, and `electron-dist` —
+      // watching electron-builder output kills the dev watcher with EBUSY
+      // when a release build runs while electron:dev is open.
+      ignored: ["**/src-tauri/**", "**/electron-dist/**"],
     },
   },
 }));
