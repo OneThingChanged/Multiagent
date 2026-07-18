@@ -41,7 +41,8 @@ K:\AI\MultiAgent\
    │  ├─ components/
    │  │  ├─ Sidebar.tsx        ← Screen 요약·프로젝트 트리·검색·1줄·드래그 재정렬
    │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
-   │  │  ├─ DocsPanel.tsx      ← Markdown/HTML 목록·트리·뷰어
+   │  │  ├─ FileTreePanel.tsx  ← 우측 파일 트리 사이드바 (lazy 로딩·Find files)
+   │  │  ├─ DocViewer.tsx      ← 문서 탭 뷰어 (md/html/이미지/텍스트)
    │  │  ├─ ImageViewer.tsx    ← 터미널 이미지 경로 뷰어
    │  │  ├─ DesktopPetPage.tsx / DesktopPetPage.css ← 펫 마스코트·상태 애니메이션
    │  │  ├─ SettingsModal.tsx  ← General/Usage/Remote/About 탭
@@ -156,9 +157,9 @@ groups: Group[]                    // 각 그룹 = layout 트리 + 선택적 기
 activeProjectId: string | null     // 현재 사이드바/Docs 기준 프로젝트
 activeGroupId: string | null       // 현재 표시 중인 그룹
 activePath: Path | null            // 그 그룹 내의 활성 leaf 경로 (number[])
-docsOpen/docsWidth/docsRequest      // Docs 패널 열림, 폭, 터미널 링크 요청
+filesOpen/filesWidth                // 파일 트리 사이드바 열림·폭 (둘 다 영구화)
 appTheme: AppThemeId                // Soft/GitHub/Warm/Light 전역 테마
-projects/agents/groups/view/theme/docsWidth/terminalFontSize 모두 localStorage 영구화
+projects/agents/groups/view/theme/filesOpen/filesWidth/terminalFontSize 모두 localStorage 영구화
 ```
 
 ### 레이아웃 트리 (`LayoutNode`)
@@ -169,6 +170,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - 각 leaf는 한 패널. tabs 배열 = 그 패널의 탭 순서, activeIndex = 현재 보이는 탭
+- tabs 항목은 보통 agent ID지만, **문서 탭**은 `doc:<projectId>:<relativePath>` prefix 문자열로 표현한다 (`src/lib/docTabs.ts`). layout/groupOps 연산은 문자열을 불투명하게 다루므로 그대로 동작하고, `validateLayout`은 doc id를 유효한 탭으로 유지해 재시작 후에도 복원된다. 문서 탭 닫기는 `closeDocTab`(solo 그룹 재배치 없음), remote/monitor 동기화 전에는 `stripDocTabs`로 제거된다
 - split 조작은 현재 Screen에 새 leaf를 추가한다. 같은 방향의 부모 split이면 형제로 추가하고, 다른 방향이면 대상 leaf를 새 split으로 감싸 중첩한다
 - 따라서 한 Screen은 `A+B+C` 같은 3개 이상 패널과 좌우·상하 중첩 레이아웃을 모두 지원한다
 - `sizes`는 자식 비율 합 = 1
@@ -212,7 +214,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - 휠 이벤트는 capture 단계 핸들러에서 가로채 **버퍼 종류로 분기**한다. **일반 버퍼**에선 xterm buffer scroll 상태를 즉시 갱신하는 `scrollTerminalLinesImmediately()`로 scrollback을 직접 굴린다(TUI mouse tracking 무시). xterm public `scrollLines()`는 viewport scrollTop을 먼저 갱신한 뒤 비동기 scroll 이벤트에서 `ydisp`/`isUserScrolling`을 맞추므로, streaming 출력 중에는 "사용자가 위를 보고 있음" 상태가 늦게 반영되어 최하단으로 튈 수 있어 직접 buffer scroll 경로를 사용한다. **alternate 버퍼**(전체화면 TUI)에선 scrollback이 없어 viewport를 굴리지 않고, TUI가 마우스 리포팅을 켰으면 네이티브 SGR 휠 이벤트(`\x1b[<64/65;col;rowM`), 아니면 `PageUp/PageDown`을 PTY로 보내 TUI 자체 스크롤을 움직인다 ([KNOWN_ISSUES.md](KNOWN_ISSUES.md))
 - Ctrl+휠은 모든 터미널의 `fontSize`를 함께 변경하고 `multiagent.terminalFontSize.v1`에 저장
 - 전역 테마가 바뀌면 모든 살아있는 xterm 인스턴스의 `term.options.theme`을 갱신
-- `registerLinkProvider`가 `.md/.markdown` 경로를 링크로 노출. xterm의 1-based buffer 좌표에 맞춰 range를 만들고, 클릭 시 `resolve_markdown_path` 후 Docs 패널을 엶
+- `registerLinkProvider`가 `.md/.markdown` 경로를 링크로 노출. xterm의 1-based buffer 좌표에 맞춰 range를 만들고, 클릭 시 `resolve_markdown_path` 후 메인 워크스페이스에 문서 탭으로 엶 (프로젝트 폴더 밖 절대경로는 OS 기본 앱)
 
 ## 자동 업데이트
 
@@ -220,27 +222,22 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - variant별 updater endpoint(`latest.json` / `latest-company.json`)를 조회 → 새 버전이면 **서명 검증** 후 다운로드·설치·재시작
 - pubkey는 `tauri.conf.json`에 박혀 있고, 빌드 시 private key로 `.sig` 생성. 빌드·서명·게시 전 과정은 [RELEASE.md](RELEASE.md)
 
-## Docs / Markdown 뷰어
+## 파일 트리 & 문서 탭
 
-### 백엔드 스캔
+### 백엔드
 
-- `list_markdown_files`는 활성 프로젝트의 folder를 root로 보고 `*.md`, `*.markdown` 파일을 재귀 수집
-- `.git`, `.hg`, `.svn`, `.claude`, `.codex`, `node_modules`, `target`, `dist`, `build`, `.next`, `.venv`, `vendor`는 스캔 제외
-- 최대 파일 수는 500개, 읽기 가능한 단일 Markdown 파일 최대 크기는 2MB
-- `resolve_markdown_path`는 다음 형태를 모두 처리:
-  - `Docs/TODO.md`, `Docs\TODO.md`
-  - `TODO.md`처럼 Docs 폴더 내부 상대경로
-  - 절대경로
-  - `file.md:12` 같은 line suffix
-- 모든 경로는 canonicalize 후 root 안에 있는 Markdown 파일인지 검사
+- **`list_directory`** (Electron 전용): 프로젝트 root 기준 한 디렉토리의 `{name, relative_path, is_dir}[]`를 반환 (dirs-first 정렬, 디렉토리당 2,000개 상한). `node_modules`/`.git`/`target`/`dist`/`build`/`.next`/`.cache`/`.venv`/`__pycache__`/`out` 제외. `isInside` 샌드박스로 root 밖 접근 차단
+- **`read_text_file`** (Electron 전용): root 안의 임의 파일을 `{kind:"text",content} | {kind:"binary"} | {kind:"too_large",size}`로 반환 (2MB 상한, 앞 8KB NUL 스니핑으로 바이너리 판정, `isInside` 강제)
+- `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path`는 문서 탭의 md/html 읽기와 QuickOpen 문서 검색에 계속 사용 (Tauri에서도 동작)
+- `resolve_markdown_path`는 `Docs/TODO.md`·상대경로·절대경로·`file.md:12` line suffix를 모두 처리하고, canonicalize 후 root 안 여부를 검사
+- Tauri 런타임에는 `list_directory`/`read_text_file`이 없어 파일 트리·텍스트 뷰는 빈 상태/에러로 강등된다 (Electron-first)
 
-### 프론트 렌더링
+### 프론트
 
-- `DocsPanel.tsx`가 Markdown 파일 목록, 트리 탐색, 렌더링을 담당
-- 탐색 모드는 `list → tree → hidden` 순환
-- Tree 모드는 경로 segment를 폴더 노드로 묶고, 선택 파일의 상위 폴더는 자동으로 펼침
-- Markdown 렌더링은 `react-markdown` + `remark-gfm` + `rehype-highlight`
-- `Open`/`Reveal`은 `tauri-plugin-opener`로 기본 앱 열기/탐색기 위치 표시
+- **`FileTreePanel.tsx`** — 우측 사이드바. `dirCache: Map<relativePath, entry[]>`에 디렉토리별 lazy 캐시, 펼친 폴더만 flat visible-row로 투영. Find files는 디바운스된 클라이언트 BFS(400 dirs/200 results 상한). 프로젝트 전환 시 리셋
+- **`DocViewer.tsx`** — 문서 탭 pane 콘텐츠. 확장자로 분기: md→`react-markdown`+`remark-gfm`+`rehype-highlight`, html→`<iframe sandbox srcdoc>`(스크립트/동일출처 권한 없음), 이미지→`read_image_data_url`, 기타→`read_text_file` 결과를 fenced code block으로 하이라이트. 읽기 실패 시 Retry/Reveal 에러 패널
+- **`PaneSlot.tsx`** — leaf의 활성 탭이 doc id면 xterm 호스트(`.pane-body`)를 `display:none`으로 숨기고 DocViewer를 렌더. xterm DOM과 attach/detach 라이프사이클은 그대로 유지되어 터미널↔문서 전환 시 출력 무손상
+- `Open`/`Reveal`은 기본 앱 열기/탐색기 위치 표시
 
 ### 드롭 존 계산
 
@@ -289,7 +286,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - `multiagent.view.v1` — `{ activeProjectId, activeGroupId, activePath }`
 - `multiagent.appTheme.v1` — 전역 테마 (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — 옛 Docs 전용 테마 키. 새 키로 읽고 쓰는 동안 호환용으로 같이 저장
-- `multiagent.docsWidth.v1` — Docs 패널 폭
+- `multiagent.filesWidth.v1` / `multiagent.filesOpen.v1` — 파일 트리 사이드바 폭·열림 상태 (옛 `multiagent.docsWidth.v1`은 미사용)
 - `multiagent.terminalFontSize.v1` — xterm 폰트 크기
 - `multiagent.notificationSound.v1` — 알림음 설정 (mode + customPath)
 - `multiagent.desktopPetEnabled.v1` — Desktop Pet 표시 여부 (기본 true)

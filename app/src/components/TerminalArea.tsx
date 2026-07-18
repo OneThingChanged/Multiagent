@@ -8,8 +8,10 @@ import type {
   DropZone,
   LayoutNode,
   Path,
+  Project,
   TerminalEntry,
 } from "../types";
+import type { AppThemeId } from "../lib/appTheme";
 import { formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import { computeDropZone } from "../lib/terminal";
 import { PaneSlot } from "./PaneSlot";
@@ -68,6 +70,8 @@ function isOverEmptyState(clientX: number, clientY: number) {
 
 export function TerminalArea({
   agents,
+  projects,
+  theme,
   layout,
   sessionPins,
   activePath,
@@ -92,6 +96,8 @@ export function TerminalArea({
   onOpenTerminalPath,
 }: {
   agents: Agent[];
+  projects: Project[];
+  theme: AppThemeId;
   layout: LayoutNode | null;
   sessionPins: Record<string, string> | null;
   activePath: Path | null;
@@ -217,6 +223,8 @@ export function TerminalArea({
 
   const ctx: RenderCtx = {
     agents,
+    projects,
+    theme,
     sessionPins,
     activePath,
     dragState,

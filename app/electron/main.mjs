@@ -100,6 +100,13 @@ const SKIPPED_DOC_DIRS = new Set([
   ".next",
   ".cache",
 ]);
+const SKIPPED_TREE_DIRS = new Set([
+  ...SKIPPED_DOC_DIRS,
+  ".venv",
+  "__pycache__",
+  "out",
+]);
+const MAX_TREE_ENTRIES_PER_DIR = 2000;
 const { assertAllowed, assertInvokeRequest, emittedSet } = ipcContract;
 const COMPANY_DISABLED_COMMANDS = new Set([
   "sync_remote_agents",
@@ -937,6 +944,68 @@ async function readMarkdownFile(folder, requested) {
   return fsPromises.readFile(resolved, "utf8");
 }
 
+// File-tree browsing for the right sidebar. Unlike readMarkdownFile this is
+// strictly sandboxed to the project root via isInside.
+async function listDirectory(folder, relative) {
+  const root = fs.realpathSync(asString(folder));
+  const requested = asString(relative ?? "").trim();
+  const joined = requested ? path.join(root, requested) : root;
+  if (!fs.existsSync(joined)) {
+    throw new Error(`폴더를 찾을 수 없습니다: ${requested || "."}`);
+  }
+  const resolved = fs.realpathSync(joined);
+  if (!isInside(root, resolved)) {
+    throw new Error("프로젝트 폴더 밖은 조회할 수 없습니다.");
+  }
+  const entries = await fsPromises.readdir(resolved, { withFileTypes: true });
+  const dirs = [];
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (SKIPPED_TREE_DIRS.has(entry.name.toLowerCase())) continue;
+      dirs.push(entry.name);
+    } else if (entry.isFile() || entry.isSymbolicLink()) {
+      files.push(entry.name);
+    }
+    if (dirs.length + files.length >= MAX_TREE_ENTRIES_PER_DIR) break;
+  }
+  dirs.sort((a, b) => a.localeCompare(b));
+  files.sort((a, b) => a.localeCompare(b));
+  const toEntry = (name, isDir) => ({
+    name,
+    relative_path: (requested ? `${requested.split(path.sep).join("/")}/${name}` : name)
+      .replace(/\\/g, "/"),
+    is_dir: isDir,
+  });
+  return [
+    ...dirs.map((name) => toEntry(name, true)),
+    ...files.map((name) => toEntry(name, false)),
+  ];
+}
+
+async function readTextFile(folder, relativePath) {
+  const root = fs.realpathSync(asString(folder));
+  const requested = asString(relativePath).trim();
+  if (!requested) throw new Error("파일 경로가 비어 있습니다.");
+  const joined = path.join(root, requested);
+  if (!fs.existsSync(joined)) {
+    throw new Error(`파일을 찾을 수 없습니다: ${requested}`);
+  }
+  const resolved = fs.realpathSync(joined);
+  if (!isInside(root, resolved)) {
+    throw new Error("프로젝트 폴더 밖은 읽을 수 없습니다.");
+  }
+  const stats = await fsPromises.stat(resolved);
+  if (!stats.isFile()) throw new Error("파일이 아닙니다.");
+  if (stats.size > MAX_DOC_BYTES) {
+    return { kind: "too_large", size: stats.size };
+  }
+  const data = await fsPromises.readFile(resolved);
+  const probe = data.subarray(0, 8192);
+  if (probe.includes(0)) return { kind: "binary" };
+  return { kind: "text", content: data.toString("utf8") };
+}
+
 async function readImageDataUrl(requested, folder) {
   const resolved = resolveExistingPath(asString(folder), requested);
   const mime = IMAGE_MIME.get(path.extname(resolved).toLowerCase());
@@ -1130,6 +1199,10 @@ async function invokeCommand(event, command, rawArgs) {
       return readMarkdownFile(args.folder, args.relativePath);
     case "resolve_markdown_path":
       return resolveDocPath(args.folder, args.path);
+    case "list_directory":
+      return listDirectory(args.folder, args.relative);
+    case "read_text_file":
+      return readTextFile(args.folder, args.relativePath);
     case "resolve_terminal_path":
       return resolveTerminalPath(asString(args.folder), asString(args.path));
     case "read_image_data_url":

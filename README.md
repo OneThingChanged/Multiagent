@@ -12,7 +12,7 @@ OneThingChanged MultiAgent is a Tauri desktop app for running and organizing mul
 
 OneThingChanged MultiAgent는 Codex, Claude, Shell 같은 여러 터미널 기반 에이전트를 프로젝트 단위로 묶어 하나의 데스크톱 앱에서 관리하기 위한 도구입니다.
 
-프로젝트를 먼저 선택하고 그 안에 별명 있는 세션을 여러 개 만들어 작업합니다. 터미널 창을 계속 바꾸지 않아도 되도록 사이드바, 탭, 분할 화면, Markdown 문서 뷰어를 한 화면에 모아 둔 앱입니다.
+프로젝트를 먼저 선택하고 그 안에 별명 있는 세션을 여러 개 만들어 작업합니다. 터미널 창을 계속 바꾸지 않아도 되도록 사이드바, 탭, 분할 화면, 파일 트리, 문서 뷰어를 한 화면에 모아 둔 앱입니다.
 
 ### 주요 기능
 
@@ -26,19 +26,19 @@ OneThingChanged MultiAgent는 Codex, Claude, Shell 같은 여러 터미널 기�
 - 드래그 앤 드롭으로 탭과 패널 위치 조정
 - `Ctrl+C`는 선택 영역 복사, `Ctrl+V`는 붙여넣기
 - `Ctrl + 마우스 휠`로 터미널 글자 크기 확대/축소
-- 오른쪽 Markdown 문서 패널 제공
-- 문서 목록을 `List`, `Tree`, `Hide` 모드로 전환
-- 터미널에 출력된 `.md` 경로를 클릭해서 문서 패널에서 열기
-- 문서 패널과 터미널 영역 사이의 크기 조절
+- 오른쪽 파일 트리 사이드바 (전체 프로젝트 파일, lazy 로딩, 파일명 검색)
+- 파일 클릭 시 메인 워크스페이스에 문서 탭으로 렌더 (Markdown/HTML/이미지/텍스트)
+- 터미널에 출력된 `.md` 경로를 클릭해서 문서 탭으로 열기
+- 파일 트리와 터미널 영역 사이의 크기 조절
 - 그룹을 현재 Codex/Claude 세션 ID에 고정
 - GitHub Releases 기반 수동 업데이트 확인
 - 앱 전체 테마 설정: Soft, GitHub, Warm, Light
 
 ### 화면 구성
 
-- **왼쪽 사이드바**: 접이식 프로젝트/세션 트리, Markdown 패널 토글, 설정, 새 세션 추가
-- **가운데 작업 영역**: 탭/분할 터미널
-- **오른쪽 Docs 패널**: 프로젝트 Markdown 문서 목록과 미리보기
+- **왼쪽 사이드바**: 접이식 프로젝트/세션 트리, 파일 트리 토글, 설정, 새 세션 추가
+- **가운데 작업 영역**: 탭/분할 터미널 + 문서 탭
+- **오른쪽 파일 트리**: 프로젝트 파일 탐색 (클릭하면 가운데에 문서 탭으로 열림)
 
 ### 실행 환경
 
@@ -111,7 +111,7 @@ app/src-tauri/target/release/bundle/msi/
 
 OneThingChanged MultiAgent is a desktop app for managing multiple terminal-based AI agents such as Codex, Claude, and Shell sessions by project.
 
-It is designed for workflows where you choose a project first, then run named sessions inside that project. Instead of switching between many terminal windows, the app provides a sidebar, tabs, split panes, and a Markdown documentation viewer in one interface.
+It is designed for workflows where you choose a project first, then run named sessions inside that project. Instead of switching between many terminal windows, the app provides a sidebar, tabs, split panes, a file tree, and a document viewer in one interface.
 
 ### Features
 
@@ -125,19 +125,19 @@ It is designed for workflows where you choose a project first, then run named se
 - Reorganize tabs and panes with drag and drop
 - `Ctrl+C` copies the selected terminal text, `Ctrl+V` pastes
 - `Ctrl + mouse wheel` zooms terminal text in and out
-- Right-side Markdown documentation panel
-- Documentation navigation modes: `List`, `Tree`, and `Hide`
-- Click `.md` paths printed in the terminal to open them in the Docs panel
-- Resizable boundary between the terminal workspace and the Docs panel
+- Right-side file tree sidebar (full project files, lazy loading, name filter)
+- Click a file to open it as a document tab in the main workspace (Markdown / HTML / image / text)
+- Click `.md` paths printed in the terminal to open them as document tabs
+- Resizable boundary between the terminal workspace and the file tree
 - Pin a group to the current Codex/Claude session IDs
 - Manual update check from GitHub Releases
 - Global app themes: Soft, GitHub, Warm, and Light
 
 ### Layout
 
-- **Left sidebar**: collapsible project/session tree, Markdown panel toggle, settings, and new-session button
-- **Center workspace**: tabbed and split terminal panes
-- **Right Docs panel**: Markdown file navigation and rendered preview
+- **Left sidebar**: collapsible project/session tree, file tree toggle, settings, and new-session button
+- **Center workspace**: tabbed and split terminal panes plus document tabs
+- **Right file tree**: project file explorer (click a file to open it as a document tab)
 
 ### Requirements
 

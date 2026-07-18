@@ -6,7 +6,8 @@ export type RuntimeCommand =
   | "update_desktop_pet" | "desktop_pet_snapshot" | "reset_desktop_pet_position"
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
-  | "read_markdown_file" | "resolve_markdown_path" | "resolve_terminal_path"
+  | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
+  | "read_text_file" | "resolve_terminal_path"
   | "read_image_data_url" | "play_system_sound" | "read_audio_file"
   | "clipboard_read_text" | "clipboard_write_text" | "show_native_notification"
   | "resolve_cli_session" | "relink_cli_session" | "sync_remote_agents"
@@ -67,8 +68,27 @@ export type SpawnTerminalArgs = {
   rows: number;
 };
 
+export type DirectoryEntry = {
+  name: string;
+  relative_path: string;
+  is_dir: boolean;
+};
+
+export type TextFileResult =
+  | { kind: "text"; content: string }
+  | { kind: "binary" }
+  | { kind: "too_large"; size: number };
+
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
+  list_directory: {
+    args: { folder: string; relative: string };
+    result: DirectoryEntry[];
+  };
+  read_text_file: {
+    args: { folder: string; relativePath: string };
+    result: TextFileResult;
+  };
   attach_terminal: {
     args: { id: string; afterSequence: number };
     result: TerminalReplay;

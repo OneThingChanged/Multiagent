@@ -518,3 +518,95 @@ describe("performDrop", () => {
     }
   });
 });
+
+describe("doc tabs", () => {
+  const DOC = "doc:project-1:docs/README.md";
+
+  it("openAsTab appends a doc id to the active leaf", () => {
+    const s = leafState(["a"]);
+    const next = ops.openAsTab(s, DOC, "project-1");
+    const leaf = leafAt(next, "g-a", []);
+    expect(leaf?.type).toBe("leaf");
+    if (leaf?.type === "leaf") {
+      expect(leaf.tabs).toEqual(["a", DOC]);
+      expect(leaf.activeIndex).toBe(1);
+    }
+    // no extra group is created
+    expect(next.groups).toHaveLength(1);
+  });
+
+  it("openAsTab moves a doc tab from another group instead of duplicating", () => {
+    let s = leafState(["a", "b"]);
+    s = ops.openAsTab(s, DOC, "project-1"); // doc lands in g-a
+    s = ops.selectAgent(s, "b");
+    const next = ops.openAsTab(s, DOC, "project-1"); // now active group is g-b
+    const own = next.groups.filter((g) =>
+      collectAgentIds(g.layout).has(DOC)
+    );
+    expect(own).toHaveLength(1);
+    expect(own[0].id).toBe("g-b");
+    const oldLeaf = leafAt(next, "g-a", []);
+    if (oldLeaf?.type === "leaf") expect(oldLeaf.tabs).toEqual(["a"]);
+  });
+
+  it("closeDocTab removes the doc without creating a detached solo group", () => {
+    let s = leafState(["a"]);
+    s = ops.openAsTab(s, DOC, "project-1");
+    const before = s.groups.length;
+    const next = ops.closeDocTab(s, [], DOC);
+    expect(next.groups).toHaveLength(before);
+    expect(
+      next.groups.some((g) => collectAgentIds(g.layout).has(DOC))
+    ).toBe(false);
+    const leaf = leafAt(next, "g-a", []);
+    if (leaf?.type === "leaf") expect(leaf.tabs).toEqual(["a"]);
+  });
+
+  it("closeDocTab collapses a doc-only leaf and clears active state", () => {
+    // build a group whose only tab is the doc
+    const s: ops.GroupState = {
+      groups: [
+        {
+          id: "g-doc",
+          layout: { type: "leaf", id: "l1", tabs: [DOC], activeIndex: 0 },
+        },
+      ],
+      activeGroupId: "g-doc",
+      activePath: [],
+    };
+    const next = ops.closeDocTab(s, [], DOC);
+    expect(next.groups).toHaveLength(0);
+    expect(next.activeGroupId).toBeNull();
+    expect(next.activePath).toBeNull();
+  });
+
+  it("closeDocTab collapses a split pane and falls back to the surviving leaf", () => {
+    let s = leafState(["a", "b"]);
+    s = ops.splitWith(s, "b", "h"); // g-a: split [a | b], active path [1]
+    s = ops.openAsTab(s, DOC, "project-1"); // doc joins b's leaf
+    // move doc to its own pane: drop on right edge of b's leaf
+    const group = s.groups.find((g) => g.id === s.activeGroupId)!;
+    const bLeafPath = findLeafPath(group.layout, DOC)!;
+    const bLeaf = getAt(group.layout, bLeafPath)!;
+    if (bLeaf.type !== "leaf") throw new Error("expected leaf");
+    s = ops.performDrop(s, DOC, bLeaf.id, "right");
+    const g = s.groups.find((gr) => gr.id === s.activeGroupId)!;
+    const docPath = findLeafPath(g.layout, DOC)!;
+    const next = ops.closeDocTab(s, docPath, DOC);
+    const gAfter = next.groups.find((gr) => gr.id === next.activeGroupId)!;
+    expect(collectAgentIds(gAfter.layout).has(DOC)).toBe(false);
+    expect(next.activePath).toBeTruthy();
+    const activeLeaf = getAt(gAfter.layout, next.activePath!);
+    expect(activeLeaf?.type).toBe("leaf");
+  });
+
+  it("performDrop works with doc ids (edge split)", () => {
+    let s = leafState(["a"]);
+    s = ops.openAsTab(s, DOC, "project-1");
+    const leaf = leafAt(s, "g-a", []) as { id: string };
+    const next = ops.performDrop(s, DOC, leaf.id, "right");
+    const g = next.groups.find((gr) => gr.id === "g-a")!;
+    expect(g.layout.type).toBe("split");
+    expect(findLeafPath(g.layout, DOC)).toEqual([1]);
+  });
+});

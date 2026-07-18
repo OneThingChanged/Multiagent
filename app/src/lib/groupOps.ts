@@ -301,6 +301,56 @@ export function closeTab(
   };
 }
 
+// Close a doc tab (doc:<projectId>:<path>). Same collapse + active-path
+// fallback as closeTab, but doc tabs are simply discarded — no detached solo
+// group is created (that would surface phantom Screens in the sidebar).
+export function closeDocTab(
+  state: GroupState,
+  path: Path,
+  docId: string
+): GroupState {
+  const activeGroup = state.groups.find((g) => g.id === state.activeGroupId);
+  if (!activeGroup) return state;
+  const leaf = getAt(activeGroup.layout, path);
+  if (!leaf || leaf.type !== "leaf") return state;
+  if (!leaf.tabs.includes(docId)) return state;
+
+  const idx = leaf.tabs.indexOf(docId);
+  const newTabs = leaf.tabs.filter((t) => t !== docId);
+  let newLayout: LayoutNode | null;
+  if (newTabs.length === 0) {
+    newLayout = setAt(activeGroup.layout, path, null);
+  } else {
+    let newActive = leaf.activeIndex;
+    if (idx < newActive) newActive -= 1;
+    if (newActive >= newTabs.length) newActive = newTabs.length - 1;
+    if (newActive < 0) newActive = 0;
+    newLayout = setAt(activeGroup.layout, path, {
+      ...leaf,
+      tabs: newTabs,
+      activeIndex: newActive,
+    });
+  }
+
+  const nextGroups = updateGroup(state.groups, state.activeGroupId!, newLayout);
+
+  if (!newLayout) {
+    return { groups: nextGroups, activeGroupId: null, activePath: null };
+  }
+  if (state.activePath && getAt(newLayout, state.activePath)) {
+    return {
+      groups: nextGroups,
+      activeGroupId: state.activeGroupId,
+      activePath: state.activePath,
+    };
+  }
+  return {
+    groups: nextGroups,
+    activeGroupId: state.activeGroupId,
+    activePath: firstLeafPath(newLayout),
+  };
+}
+
 export function closeTabWithHistory(
   state: GroupState,
   path: Path,

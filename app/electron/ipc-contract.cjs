@@ -23,6 +23,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "list_markdown_files",
   "read_markdown_file",
   "resolve_markdown_path",
+  "list_directory",
+  "read_text_file",
   "resolve_terminal_path",
   "read_image_data_url",
   "play_system_sound",
@@ -161,8 +163,25 @@ function assertInvokeRequest(command, rawArgs) {
       assertPositiveInteger(args.cols, "terminal cols");
       assertPositiveInteger(args.rows, "terminal rows");
       break;
+    case "list_directory":
+      assertPathString(args.folder, "folder");
+      assertPathString(args.relative, "relative path", true);
+      break;
+    case "read_text_file":
+      assertPathString(args.folder, "folder");
+      assertPathString(args.relativePath, "relative path");
+      break;
   }
   return args;
+}
+
+function assertPathString(value, name, allowEmpty = false) {
+  if (typeof value !== "string" || value.length > 4096) {
+    throw new TypeError(`Electron ${name} must be a string up to 4096 chars`);
+  }
+  if (!allowEmpty && value.trim().length < 1) {
+    throw new TypeError(`Electron ${name} must be a non-empty string`);
+  }
 }
 
 module.exports = {

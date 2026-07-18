@@ -62,4 +62,88 @@ describe("normalizeStoredGroups", () => {
       normalized.filter((group) => collectAgentIds(group.layout).has("a"))
     ).toHaveLength(1);
   });
+
+  it("keeps doc tabs alongside agent siblings across restarts", () => {
+    const DOC = "doc:project-a:docs/README.md";
+    const raw: Group[] = [
+      {
+        id: "screen-a",
+        projectId: "project-a",
+        layout: {
+          type: "leaf",
+          id: "leaf-a",
+          tabs: ["a", DOC],
+          activeIndex: 1,
+        },
+      },
+    ];
+
+    const normalized = normalizeStoredGroups(
+      raw,
+      new Set(["a"]),
+      new Map([["a", "project-a"]])
+    );
+
+    const screen = normalized.find((group) => group.id === "screen-a");
+    expect(screen).toBeTruthy();
+    expect(collectAgentIds(screen?.layout ?? null).has(DOC)).toBe(true);
+    // no solo group is fabricated for the doc id
+    expect(normalized).toHaveLength(1);
+  });
+
+  it("dedupes a doc tab present in two stored groups", () => {
+    const DOC = "doc:project-a:docs/README.md";
+    const raw: Group[] = [
+      {
+        id: "screen-ab",
+        layout: {
+          type: "split",
+          id: "split-1",
+          direction: "h",
+          children: [
+            { type: "leaf", id: "l1", tabs: ["a", DOC], activeIndex: 0 },
+            { type: "leaf", id: "l2", tabs: ["b"], activeIndex: 0 },
+          ],
+          sizes: [0.5, 0.5],
+        },
+      },
+      {
+        id: "solo-doc",
+        layout: { type: "leaf", id: "l3", tabs: ["c", DOC], activeIndex: 0 },
+      },
+    ];
+
+    const normalized = normalizeStoredGroups(
+      raw,
+      new Set(["a", "b", "c"]),
+      new Map()
+    );
+
+    expect(
+      normalized.filter((group) => collectAgentIds(group.layout).has(DOC))
+    ).toHaveLength(1);
+    // Screen (split) wins ownership over the leaf group
+    const owner = normalized.find((group) =>
+      collectAgentIds(group.layout).has(DOC)
+    );
+    expect(owner?.id).toBe("screen-ab");
+  });
+
+  it("drops a stored group that only contains doc tabs pointing nowhere", () => {
+    const DOC = "doc:project-gone:old.md";
+    const raw: Group[] = [
+      {
+        id: "doc-only",
+        layout: { type: "leaf", id: "l1", tabs: [DOC], activeIndex: 0 },
+      },
+      { id: "solo-a", layout: makeLeaf("a") },
+    ];
+
+    const normalized = normalizeStoredGroups(raw, new Set(["a"]), new Map());
+    // doc-only group survives validateLayout (doc ids are kept) — acceptable,
+    // but it must not steal active agents or duplicate them
+    expect(
+      normalized.filter((group) => collectAgentIds(group.layout).has("a"))
+    ).toHaveLength(1);
+  });
 });

@@ -15,9 +15,18 @@ import type {
   DropZone,
   LeafNode,
   Path,
+  Project,
   TerminalEntry,
 } from "../types";
+import type { AppThemeId } from "../lib/appTheme";
 import { activeAgentInLeaf, pathEq } from "../lib/layout";
+import {
+  docFileExtension,
+  docTabBasename,
+  isDocTabId,
+  parseDocTabId,
+} from "../lib/docTabs";
+import { DocViewer } from "./DocViewer";
 import {
   clampTerminalFontSize,
   computeDropZone,
@@ -54,6 +63,8 @@ type PendingTabDrag = {
 
 export type RenderCtx = {
   agents: Agent[];
+  projects: Project[];
+  theme: AppThemeId;
   sessionPins: Record<string, string> | null;
   activePath: Path | null;
   dragState: DragState | null;
@@ -89,7 +100,9 @@ export function PaneSlot({
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
   const active = pathEq(path, ctx.activePath);
-  const activeAgentId = activeAgentInLeaf(leaf);
+  const activeTabId = activeAgentInLeaf(leaf);
+  const activeDocId = activeTabId && isDocTabId(activeTabId) ? activeTabId : null;
+  const activeAgentId = activeDocId ? null : activeTabId;
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
@@ -690,6 +703,51 @@ export function PaneSlot({
     >
       <div className="pane-tabs">
         {leaf.tabs.map((tabAgentId) => {
+          if (isDocTabId(tabAgentId)) {
+            const isActive = tabAgentId === activeTabId;
+            const isDragging = dragFrom === tabAgentId;
+            const relativePath =
+              parseDocTabId(tabAgentId)?.relativePath ?? tabAgentId;
+            const ext = docFileExtension(tabAgentId);
+            return (
+              <div
+                key={tabAgentId}
+                className={`pane-tab pane-tab-doc ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
+                draggable={false}
+                onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressNextTabClickRef.current) {
+                    suppressNextTabClickRef.current = false;
+                    e.preventDefault();
+                    return;
+                  }
+                  ctx.onSelectTab(path, tabAgentId);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
+                }}
+                title={relativePath}
+              >
+                <span className={`tab-doc-icon tab-doc-icon-${ext || "file"}`}>
+                  {ext ? ext.toUpperCase().slice(0, 4) : "FILE"}
+                </span>
+                <span className="tab-name">{docTabBasename(tabAgentId)}</span>
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.onCloseTab(path, tabAgentId);
+                  }}
+                  title="Close tab"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
           const tabAgent = ctx.agents.find((a) => a.id === tabAgentId);
           if (!tabAgent) return null;
           const isActive = tabAgentId === activeAgentId;
@@ -743,7 +801,24 @@ export function PaneSlot({
           );
         })}
       </div>
-      <div ref={bodyRef} className="pane-body" />
+      {/* Keep the xterm host mounted even while a doc tab is active so the
+          terminal attach/detach lifecycle and buffered DOM stay intact. */}
+      <div
+        ref={bodyRef}
+        className="pane-body"
+        style={activeDocId ? { display: "none" } : undefined}
+      />
+      {activeDocId && (
+        <DocViewer
+          docId={activeDocId}
+          project={
+            ctx.projects.find(
+              (p) => p.id === parseDocTabId(activeDocId)?.projectId
+            ) ?? null
+          }
+          theme={ctx.theme}
+        />
+      )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />
       )}

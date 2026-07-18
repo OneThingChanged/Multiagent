@@ -51,8 +51,16 @@ import {
   firstLeafPath,
   getAt,
   groupOf,
+  setLeafActiveTab,
+  updateGroup,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
+import {
+  isDocTabId,
+  makeDocTabId,
+  parseDocTabId,
+  stripDocTabs,
+} from "./lib/docTabs";
 import {
   loadBootstrap,
   loadStoredView,
@@ -123,7 +131,7 @@ import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { ToastContainer } from "./components/Toast";
 import { ContextMenu, ProjectContextMenu, TabContextMenu } from "./components/Menus";
-import { DocsPanel } from "./components/DocsPanel";
+import { FileTreePanel } from "./components/FileTreePanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
@@ -136,19 +144,13 @@ import { QuickOpen } from "./components/QuickOpen";
 import { AttentionCenter } from "./components/AttentionCenter";
 import { UsageStatusBar } from "./components/UsageStatusBar";
 
-const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
+const LS_FILES_WIDTH = "multiagent.filesWidth.v1";
+const LS_FILES_OPEN = "multiagent.filesOpen.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
-const DEFAULT_DOCS_WIDTH = 640;
-const MIN_DOCS_WIDTH = 360;
+const DEFAULT_FILES_WIDTH = 300;
+const MIN_FILES_WIDTH = 200;
 const MIN_WORKSPACE_WIDTH = 260;
 const MAX_RECENTLY_CLOSED_TABS = 20;
-
-type DocsRequest = {
-  projectId: string;
-  agentId: string | null;
-  relativePath: string;
-  key: number;
-};
 
 type QuickDocument = {
   projectId: string;
@@ -431,21 +433,29 @@ function reconcileGroupSelection(
   };
 }
 
-function clampDocsWidth(width: number) {
+function clampFilesWidth(width: number) {
   const viewportMax =
     typeof window === "undefined"
-      ? DEFAULT_DOCS_WIDTH
-      : Math.max(MIN_DOCS_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
-  if (!Number.isFinite(width)) return DEFAULT_DOCS_WIDTH;
-  return Math.min(viewportMax, Math.max(MIN_DOCS_WIDTH, Math.round(width)));
+      ? DEFAULT_FILES_WIDTH
+      : Math.max(MIN_FILES_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
+  if (!Number.isFinite(width)) return DEFAULT_FILES_WIDTH;
+  return Math.min(viewportMax, Math.max(MIN_FILES_WIDTH, Math.round(width)));
 }
 
-function loadDocsWidth() {
+function loadFilesWidth() {
   try {
-    const raw = localStorage.getItem(LS_DOCS_WIDTH);
-    return raw ? clampDocsWidth(Number(raw)) : DEFAULT_DOCS_WIDTH;
+    const raw = localStorage.getItem(LS_FILES_WIDTH);
+    return raw ? clampFilesWidth(Number(raw)) : DEFAULT_FILES_WIDTH;
   } catch {
-    return DEFAULT_DOCS_WIDTH;
+    return DEFAULT_FILES_WIDTH;
+  }
+}
+
+function loadFilesOpen() {
+  try {
+    return localStorage.getItem(LS_FILES_OPEN) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -457,16 +467,23 @@ function loadAlwaysOnTop() {
   }
 }
 
-function isHtmlDocumentPath(path: string) {
-  return /\.(?:html|htm)$/i.test(path.trim());
-}
-
 function isAbsoluteFsPath(path: string) {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
 
-function joinFsPath(folder: string, relativePath: string) {
-  return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
+// Returns the project-relative path when absolutePath is inside folder,
+// otherwise null. Case-insensitive to match Windows path semantics.
+function relativeIfInside(folder: string, absolutePath: string): string | null {
+  const normFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normPath = absolutePath.replace(/\\/g, "/");
+  if (!normFolder) return null;
+  if (
+    normPath.toLowerCase().startsWith(`${normFolder.toLowerCase()}/`) &&
+    normPath.length > normFolder.length + 1
+  ) {
+    return normPath.slice(normFolder.length + 1);
+  }
+  return null;
 }
 
 // Startup reopen prompt: the previously-active group (with sessions) is restored
@@ -534,7 +551,7 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameProjectId, setRenameProjectId] = useState<string | null>(null);
-  const [docsOpen, setDocsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(loadFilesOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
@@ -547,8 +564,7 @@ function App() {
   const [desktopPetQuestions, setDesktopPetQuestions] = useState<
     Record<string, string>
   >({});
-  const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
-  const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
+  const [filesWidth, setFilesWidth] = useState(loadFilesWidth);
   const [imageViewer, setImageViewer] = useState<{
     path: string;
     folder: string | null;
@@ -809,11 +825,12 @@ function App() {
         status: a.status,
         aiToolId: a.aiToolId,
       })),
-      groups: groups.map((group) => ({
-        id: group.id,
-        projectId: group.projectId,
-        layout: group.layout,
-      })),
+      groups: groups.flatMap((group) => {
+        // Remote clients only understand agent ids — hide doc tabs.
+        const layout = stripDocTabs(group.layout);
+        if (!layout) return [];
+        return [{ id: group.id, projectId: group.projectId, layout }];
+      }),
       activeGroupId,
     };
     const view = JSON.stringify(payload);
@@ -871,7 +888,12 @@ function App() {
         lastSessionId: a.lastSessionId ?? null,
         sshHostId: a.sshHostId ?? null,
       })),
-      groups,
+      // Monitor clients only understand agent ids — hide doc tabs.
+      groups: groups.flatMap((group) => {
+        const layout = stripDocTabs(group.layout);
+        if (!layout) return [];
+        return [{ ...group, layout }];
+      }),
       view: {
         activeProjectId,
         activeGroupId,
@@ -968,9 +990,15 @@ function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_DOCS_WIDTH, String(docsWidth));
+      localStorage.setItem(LS_FILES_WIDTH, String(filesWidth));
     } catch {}
-  }, [docsWidth]);
+  }, [filesWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_FILES_OPEN, String(filesOpen));
+    } catch {}
+  }, [filesOpen]);
 
   useEffect(() => {
     saveAttentionItems(attentionItems);
@@ -1055,11 +1083,6 @@ function App() {
         setAttentionOpen(false);
         return;
       }
-      if (event.key === "Escape" && docsOpen && !settingsOpen) {
-        event.preventDefault();
-        setDocsOpen(false);
-        return;
-      }
       const commandId = commandForKeyboardEvent(event, commandShortcuts);
       if (
         commandId &&
@@ -1089,7 +1112,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [attentionOpen, commandShortcuts, docsOpen, quickOpen, searchOpen, settingsOpen]);
+  }, [attentionOpen, commandShortcuts, quickOpen, searchOpen, settingsOpen]);
 
   const handleThemeChange = useCallback((theme: AppThemeId) => {
     setAppTheme(theme);
@@ -1098,7 +1121,7 @@ function App() {
 
   useEffect(() => {
     const handleResize = () => {
-      setDocsWidth((width) => clampDocsWidth(width));
+      setFilesWidth((width) => clampFilesWidth(width));
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -1787,6 +1810,21 @@ function App() {
   );
 
   const closeTab = useCallback((path: Path, agentId: string) => {
+    if (isDocTabId(agentId)) {
+      // Doc tabs are simply discarded (no detached solo group, no reopen
+      // history in v1).
+      const next = groupOps.closeDocTab(
+        {
+          groups: groupsRef.current,
+          activeGroupId: activeGroupIdRef.current,
+          activePath: activePathRef.current,
+        },
+        path,
+        agentId
+      );
+      commitGroupState(next);
+      return;
+    }
     const result = groupOps.closeTabWithHistory(
       {
         groups: groupsRef.current,
@@ -1932,6 +1970,21 @@ function App() {
       for (const id of memberIds) {
         applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
       }
+      // Also prune this project's doc tabs from every layout.
+      applyGroupOp((s) => {
+        let state = s;
+        for (const group of s.groups) {
+          for (const tabId of collectAgentIds(group.layout)) {
+            if (
+              isDocTabId(tabId) &&
+              parseDocTabId(tabId)?.projectId === projectId
+            ) {
+              state = groupOps.removeAgentFromLayout(state, tabId);
+            }
+          }
+        }
+        return state;
+      });
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       if (activeProjectIdRef.current === projectId) {
         setActiveProjectId(null);
@@ -2219,17 +2272,17 @@ function App() {
     setDropTarget(null);
   }, []);
 
-  const handleDocsResizeStart = useCallback(
+  const handleFilesResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      document.body.classList.add("docs-resizing");
+      document.body.classList.add("files-resizing");
 
       const handleMove = (moveEvent: PointerEvent) => {
-        setDocsWidth(clampDocsWidth(window.innerWidth - moveEvent.clientX));
+        setFilesWidth(clampFilesWidth(window.innerWidth - moveEvent.clientX));
       };
       const handleEnd = () => {
-        document.body.classList.remove("docs-resizing");
+        document.body.classList.remove("files-resizing");
         window.removeEventListener("pointermove", handleMove);
         window.removeEventListener("pointerup", handleEnd);
         window.removeEventListener("pointercancel", handleEnd);
@@ -2240,6 +2293,41 @@ function App() {
       window.addEventListener("pointercancel", handleEnd);
     },
     []
+  );
+
+  // Open a project file as a document tab in the main workspace.
+  // Re-clicking an already-open file focuses its existing tab: first in the
+  // active Screen, otherwise openAsTab moves it here from any other group.
+  const openDocTab = useCallback(
+    (projectId: string, relativePath: string) => {
+      const docId = makeDocTabId(projectId, relativePath);
+      const activeGroup = groupsRef.current.find(
+        (g) => g.id === activeGroupIdRef.current
+      );
+      if (!activeGroup || !activePathRef.current) {
+        pushToast(
+          "",
+          "문서",
+          "문서 탭을 열려면 먼저 세션 화면을 열어주세요."
+        );
+        return;
+      }
+      applyGroupOp((s) => {
+        const group = s.groups.find((g) => g.id === s.activeGroupId);
+        if (!group || !s.activePath) return s;
+        const existingPath = findLeafPath(group.layout, docId);
+        if (existingPath) {
+          const layout = setLeafActiveTab(group.layout, existingPath, docId);
+          return {
+            groups: updateGroup(s.groups, group.id, layout),
+            activeGroupId: s.activeGroupId,
+            activePath: existingPath,
+          };
+        }
+        return groupOps.openAsTab(s, docId, projectId);
+      });
+    },
+    [applyGroupOp, pushToast]
   );
 
   const handleOpenMarkdownPath = useCallback(
@@ -2255,25 +2343,23 @@ function App() {
           folder: project.folder,
           path,
         });
-        if (isHtmlDocumentPath(relativePath)) {
-          const fullPath = isAbsoluteFsPath(relativePath)
-            ? relativePath
-            : joinFsPath(project.folder, relativePath);
-          await invoke("open_local_path", { path: fullPath });
+        // resolve_markdown_path returns an absolute path only for docs living
+        // outside the project root — those still open externally.
+        if (isAbsoluteFsPath(relativePath)) {
+          const inside = relativeIfInside(project.folder, relativePath);
+          if (inside) {
+            openDocTab(project.id, inside);
+          } else {
+            await invoke("open_local_path", { path: relativePath });
+          }
           return;
         }
-        setDocsOpen(true);
-        setDocsRequest({
-          projectId: project.id,
-          agentId,
-          relativePath,
-          key: Date.now(),
-        });
+        openDocTab(project.id, relativePath);
       } catch {
         pushToast(agentId, agent.name, "문서 파일을 열 수 없습니다.");
       }
     },
-    [pushToast]
+    [openDocTab, pushToast]
   );
 
   const handleOpenImagePath = useCallback((agentId: string, path: string) => {
@@ -2324,7 +2410,12 @@ function App() {
         }
 
         if (resolved.kind === "html") {
-          await invoke("open_local_path", { path: resolved.path });
+          const inside = relativeIfInside(project.folder, resolved.path);
+          if (inside) {
+            openDocTab(project.id, inside);
+          } else {
+            await invoke("open_local_path", { path: resolved.path });
+          }
           return;
         }
 
@@ -2333,13 +2424,13 @@ function App() {
             folder: project.folder,
             path: resolved.path,
           });
-          setDocsOpen(true);
-          setDocsRequest({
-            projectId: project.id,
-            agentId,
-            relativePath,
-            key: Date.now(),
-          });
+          if (isAbsoluteFsPath(relativePath)) {
+            const inside = relativeIfInside(project.folder, relativePath);
+            if (inside) openDocTab(project.id, inside);
+            else await invoke("open_local_path", { path: relativePath });
+          } else {
+            openDocTab(project.id, relativePath);
+          }
           return;
         }
 
@@ -2353,7 +2444,7 @@ function App() {
         pushToast(agentId, agent.name, `경로를 열 수 없습니다: ${String(error)}`);
       }
     },
-    [pushToast]
+    [openDocTab, pushToast]
   );
 
   // Spawn an agent's PTY without it being the visible pane — used to reopen
@@ -2526,10 +2617,7 @@ function App() {
         reopenClosedTab();
         break;
       case "toggle-docs":
-        setDocsOpen((open) => {
-          if (!open) setDocsRequest(null);
-          return !open;
-        });
+        setFilesOpen((open) => !open);
         break;
       case "toggle-pet":
         handleDesktopPetEnabledChange(!desktopPetEnabled);
@@ -2570,7 +2658,9 @@ function App() {
       agentId: agent.id,
     }));
     const screenItems: QuickOpenItem[] = groups.flatMap((group, index) => {
-      const memberIds = [...collectAgentIds(group.layout)];
+      const memberIds = [...collectAgentIds(group.layout)].filter(
+        (id) => !isDocTabId(id)
+      );
       const memberNames = memberIds
         .map((id) => agents.find((agent) => agent.id === id)?.name)
         .filter(Boolean) as string[];
@@ -2616,17 +2706,11 @@ function App() {
       selectScreen(item.groupId, item.agentId);
     } else if (item.kind === "document" && item.projectId && item.relativePath) {
       setActiveProjectId(item.projectId);
-      setDocsRequest({
-        projectId: item.projectId,
-        agentId: null,
-        relativePath: item.relativePath,
-        key: Date.now(),
-      });
-      setDocsOpen(true);
+      openDocTab(item.projectId, item.relativePath);
     } else if (item.kind === "command" && item.commandId) {
       executeCommand(item.commandId as CommandId);
     }
-  }, [executeCommand, selectAgent, selectProject, selectScreen]);
+  }, [executeCommand, openDocTab, selectAgent, selectProject, selectScreen]);
 
   const handleAttentionSelect = useCallback((item: AttentionItem) => {
     setAttentionItems((items) => markAttentionRead(items, new Set([item.id])));
@@ -2697,37 +2781,6 @@ function App() {
     return leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
   }, [activeGroupLayout, activePath]);
 
-  const activeAgent = useMemo(
-    () =>
-      activeAgentId
-        ? agents.find((a) => a.id === activeAgentId) ?? null
-        : null,
-    [activeAgentId, agents]
-  );
-  const activeSessionProject = useMemo(
-    () =>
-      activeAgent
-        ? projects.find((project) => project.id === activeAgent.projectId) ??
-          activeProject
-        : activeProject,
-    [activeAgent, activeProject, projects]
-  );
-  const docsProject = useMemo(
-    () =>
-      docsRequest
-        ? projects.find((project) => project.id === docsRequest.projectId) ??
-          activeSessionProject
-        : activeSessionProject,
-    [activeSessionProject, docsRequest, projects]
-  );
-  const docsSession = useMemo(
-    () =>
-      docsRequest?.agentId
-        ? agents.find((agent) => agent.id === docsRequest.agentId) ??
-          activeAgent
-        : activeAgent,
-    [activeAgent, agents, docsRequest]
-  );
   const renameSession = useMemo(
     () =>
       renameSessionId
@@ -2762,13 +2815,8 @@ function App() {
         onNewSession={() =>
           activeProject ? setShowModal(true) : setShowProjectModal(true)
         }
-        docsOpen={docsOpen}
-        onToggleDocs={() =>
-          setDocsOpen((open) => {
-            if (!open) setDocsRequest(null);
-            return !open;
-          })
-        }
+        docsOpen={filesOpen}
+        onToggleDocs={() => setFilesOpen((open) => !open)}
         alwaysOnTop={alwaysOnTop}
         onToggleAlwaysOnTop={toggleAlwaysOnTop}
         desktopPetEnabled={desktopPetEnabled}
@@ -2791,6 +2839,8 @@ function App() {
       />
       <TerminalArea
         agents={agents}
+        projects={projects}
+        theme={appTheme}
         layout={activeGroupLayout}
         sessionPins={activeGroup?.sessionPins ?? null}
         activePath={activePath}
@@ -2816,32 +2866,23 @@ function App() {
         onOpenFolderPath={handleOpenFolderPath}
         onOpenTerminalPath={handleOpenTerminalPath}
       />
-      {isElectronRuntime() && <UsageStatusBar />}
-      {docsOpen && (
-        <div className="docs-overlay">
-          <div className="docs-drawer-shell" style={{ width: docsWidth + 7 }}>
-            <div
-              className="docs-resizer"
-              onPointerDown={handleDocsResizeStart}
-              title="Resize docs"
-            />
-            <DocsPanel
-              open={docsOpen}
-              activeProject={docsProject}
-              activeSession={docsSession}
-              width={docsWidth}
-              requestedPath={
-                docsRequest && docsRequest.projectId === docsProject?.id
-                  ? docsRequest.relativePath
-                  : null
-              }
-              requestKey={docsRequest?.key ?? 0}
-              theme={appTheme}
-              onClose={() => setDocsOpen(false)}
-            />
-          </div>
-        </div>
+      {filesOpen && (
+        <aside className="files-shell" style={{ width: filesWidth + 7 }}>
+          <div
+            className="files-resizer"
+            onPointerDown={handleFilesResizeStart}
+            title="Resize file tree"
+          />
+          <FileTreePanel
+            project={activeProject}
+            width={filesWidth}
+            theme={appTheme}
+            onOpenFile={openDocTab}
+            onClose={() => setFilesOpen(false)}
+          />
+        </aside>
       )}
+      {isElectronRuntime() && <UsageStatusBar />}
       {settingsOpen && (
         <SettingsModal
           theme={appTheme}

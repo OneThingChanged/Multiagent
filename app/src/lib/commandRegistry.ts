@@ -52,9 +52,9 @@ export const COMMAND_DEFINITIONS = [
   },
   {
     id: "toggle-docs",
-    title: "Docs 열기/닫기",
-    description: "현재 프로젝트 문서 패널 전환",
-    keywords: "markdown html documentation",
+    title: "파일 트리 열기/닫기",
+    description: "현재 프로젝트 파일 트리 사이드바 전환",
+    keywords: "files tree explorer markdown html documentation",
     defaultShortcut: "Ctrl+Shift+D",
   },
   {

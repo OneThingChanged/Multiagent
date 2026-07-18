@@ -787,9 +787,9 @@ export function Sidebar({
           <button
             className={`docs-toggle-btn ${docsOpen ? "docs-toggle-active" : ""}`}
             onClick={onToggleDocs}
-            title="Toggle docs"
+            title="Toggle file tree"
           >
-            MD
+            Files
           </button>
           <button
             className={`always-on-top-btn ${
