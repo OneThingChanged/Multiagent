@@ -339,7 +339,15 @@ export class RemoteDashboardService {
       response.writeHead(302, { location: redirect.href }).end();
       return true;
     }
-    if (url.pathname !== "/auth/github/callback") return false;
+    // Accept both the documented path and the shorter /auth/callback, since
+    // GitHub uses the OAuth App's registered callback URL (we don't send an
+    // explicit redirect_uri) and users often register the shorter form.
+    if (
+      url.pathname !== "/auth/github/callback" &&
+      url.pathname !== "/auth/callback"
+    ) {
+      return false;
+    }
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const expires = state ? this.states.get(state) : null;

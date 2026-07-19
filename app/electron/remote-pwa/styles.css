@@ -65,7 +65,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .text-button { min-height: 34px; padding: 0 12px; color: #bfd0dc; font-size: 11px; }
 .small-button { min-height: 30px; padding: 0 10px; color: #b9cbd7; font-size: 11px; }
 
-.monitor-strip { max-width: 1560px; margin: 0 auto; padding: 22px 22px 16px; }
+.monitor-strip { max-width: none; margin: 0; padding: 22px 26px 16px; }
 .monitor-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 .monitor-heading h1, .view-head h2 { margin: 4px 0 0; letter-spacing: -0.04em; }
 .monitor-heading h1 { font-size: 24px; }
@@ -98,9 +98,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .workspace {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr);
-  max-width: 1560px;
+  max-width: none;
   min-height: calc(100vh - 201px);
-  margin: 0 auto 30px;
+  margin: 0 26px 30px;
   border: 1px solid var(--line);
   border-radius: 16px;
   overflow: hidden;
@@ -366,3 +366,104 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* ---- Login page (redesigned) ---- */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+  background:
+    radial-gradient(1100px 620px at 50% -12%, rgba(80, 223, 208, 0.10), transparent 60%),
+    radial-gradient(760px 520px at 92% 8%, rgba(91, 188, 255, 0.07), transparent 55%),
+    var(--bg);
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: linear-gradient(180deg, rgba(14, 27, 40, 0.92), rgba(9, 18, 27, 0.92));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 30px 26px 24px;
+}
+.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+.login-brand .brand-mark { width: 38px; height: 38px; border-radius: 11px; font-size: 17px; }
+.login-brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.login-brand-text b { font-size: 14px; font-weight: 700; color: var(--text); }
+.login-card h1 { font-size: 21px; line-height: 1.32; margin: 0 0 10px; letter-spacing: -0.01em; }
+.login-copy { margin: 0 0 22px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+
+.login-github-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--cyan);
+  color: #06131a;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.08s ease, filter 0.15s ease;
+}
+.login-github-button:hover:not(:disabled) { filter: brightness(1.06); }
+.login-github-button:active:not(:disabled) { transform: translateY(1px); }
+.login-github-button:disabled { opacity: 0.55; cursor: progress; }
+.login-github-button svg { width: 18px; height: 18px; }
+
+.device-panel { display: flex; flex-direction: column; }
+.device-label {
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 8px;
+}
+.device-code {
+  display: block;
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 30px; font-weight: 800; letter-spacing: 0.22em;
+  color: var(--text); background: #06121c;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  padding: 14px 8px; text-align: center; margin-bottom: 14px;
+}
+.device-panel p { margin: 0 0 14px; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.device-actions { display: flex; gap: 8px; }
+.device-link {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; border-radius: 10px;
+  background: var(--cyan); color: #06131a;
+  font-weight: 800; font-size: 13px; text-decoration: none;
+}
+.device-link svg { width: 16px; height: 16px; }
+.device-copy {
+  min-height: 44px; padding: 0 16px;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  background: var(--panel); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.device-copy:hover { border-color: var(--cyan); }
+
+.login-progress {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; font-size: 12px; color: var(--muted);
+}
+.login-spin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--line-strong); border-top-color: var(--cyan);
+  animation: login-spin 0.8s linear infinite;
+}
+@keyframes login-spin { to { transform: rotate(360deg); } }
+
+.login-error {
+  margin-top: 14px;
+  border: 1px solid rgba(255, 125, 125, 0.35);
+  background: rgba(255, 125, 125, 0.08);
+  color: #ffb4b4; border-radius: 11px;
+  padding: 12px 14px; font-size: 12.5px; line-height: 1.5;
+}
+.login-foot { margin: 18px 0 0; font-size: 11px; line-height: 1.55; color: var(--muted); }

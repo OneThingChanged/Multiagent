@@ -112,7 +112,12 @@ describe("Electron dashboard server", () => {
     expect(externalRoot.status).toBe(302);
     expect(externalRoot.headers.get("location")).toBe("/login");
     expect(externalLogin.status).toBe(200);
-    expect(await externalLogin.text()).toContain("GitHub 계정으로");
+    const loginBody = await externalLogin.text();
+    // The heading text is set at runtime by login.js per auth mode; assert on
+    // stable markup instead (brand + the elements login.js drives).
+    expect(loginBody).toContain("MultiAgent Remote");
+    expect(loginBody).toContain('id="startLogin"');
+    expect(loginBody).toContain('id="deviceCode"');
   });
 
   it("accepts same-origin JSON input and blocks cross-origin commands", async () => {

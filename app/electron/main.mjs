@@ -38,6 +38,7 @@ import {
   testSshConnection,
 } from "./services/ssh-service.mjs";
 import { resolveTerminalPath } from "./services/terminal-path-service.mjs";
+import { sanitizeTerminalOutput } from "./services/terminal-sanitize.mjs";
 import {
   LocalDashboardService,
   RemoteDashboardService,
@@ -243,7 +244,9 @@ async function repairActiveHooks() {
 function liveOutputForAgents(agents, maxOutput = 80_000) {
   return (Array.isArray(agents) ? agents : []).map((agent) => ({
     ...agent,
-    output: ptys.get(agent.id)?.buffer.snapshot().slice(-maxOutput) ?? "",
+    output: sanitizeTerminalOutput(
+      ptys.get(agent.id)?.buffer.snapshot().slice(-maxOutput) ?? ""
+    ),
     hook: monitorHooks.get(agent.id) ?? null,
   }));
 }
