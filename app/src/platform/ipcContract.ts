@@ -9,7 +9,8 @@ export type RuntimeCommand =
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "read_text_file" | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
-  | "git_branches" | "git_checkout" | "git_diff_tool" | "resource_usage"
+  | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"
+  | "resource_usage"
   | "set_titlebar_overlay"
   | "list_ports" | "kill_port_process"
   | "create_file" | "create_directory"
@@ -135,6 +136,13 @@ export type PortsResult = {
   ports: PortEntry[];
 };
 
+export type GitFileCommit = {
+  hash: string;
+  subject: string;
+  date: string;
+  author: string;
+};
+
 export type GitChangesResult = {
   is_repo: boolean;
   branch: string;
@@ -177,7 +185,7 @@ export type RuntimeCommandContract = {
     result: null;
   };
   git_commit: {
-    args: { folder: string; message: string };
+    args: { folder: string; message: string; paths?: string[] };
     result: null;
   };
   git_branches: {
@@ -189,8 +197,18 @@ export type RuntimeCommandContract = {
     result: null;
   };
   git_diff_tool: {
-    args: { folder: string; relativePath: string; staged: boolean; command: string };
+    args: {
+      folder: string;
+      relativePath: string;
+      staged: boolean;
+      command: string;
+      ref?: string;
+    };
     result: null;
+  };
+  git_file_history: {
+    args: { folder: string; relativePath: string };
+    result: { commits: GitFileCommit[] };
   };
   resource_usage: {
     args: Record<string, never>;

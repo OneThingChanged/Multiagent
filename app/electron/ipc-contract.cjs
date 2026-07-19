@@ -34,6 +34,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "git_branches",
   "git_checkout",
   "git_diff_tool",
+  "git_file_history",
   "resource_usage",
   "set_titlebar_overlay",
   "list_ports",
@@ -226,6 +227,14 @@ function assertInvokeRequest(command, rawArgs) {
       ) {
         throw new TypeError("Electron git commit message must be a non-empty string");
       }
+      if (
+        args.paths !== undefined &&
+        (!Array.isArray(args.paths) ||
+          args.paths.length > 500 ||
+          args.paths.some((p) => typeof p !== "string" || !p.trim() || p.length > 4096))
+      ) {
+        throw new TypeError("Electron git commit paths must be strings");
+      }
       break;
     case "git_branches":
       assertPathString(args.folder, "folder");
@@ -242,6 +251,13 @@ function assertInvokeRequest(command, rawArgs) {
       if (typeof args.command !== "string" || args.command.length > 4096) {
         throw new TypeError("Electron diff tool command must be a string");
       }
+      if (args.ref !== undefined && (typeof args.ref !== "string" || args.ref.length > 255)) {
+        throw new TypeError("Electron diff tool ref must be a string");
+      }
+      break;
+    case "git_file_history":
+      assertPathString(args.folder, "folder");
+      assertPathString(args.relativePath, "relative path");
       break;
     case "list_ports":
       if (args.projects !== undefined) {

@@ -1628,11 +1628,17 @@ async function gitUnstage(folder, paths) {
   return null;
 }
 
-async function gitCommit(folder, message) {
+async function gitCommit(folder, message, paths) {
   const root = fs.realpathSync(asString(folder));
   const trimmed = asString(message).trim();
   if (!trimmed) throw new Error("커밋 메시지가 비어 있습니다.");
-  await runGit(root, ["commit", "-m", trimmed], 20000);
+  const args = ["commit", "-m", trimmed];
+  // Path-limited commit ("commit this file"): commits only the given paths'
+  // current content, leaving any other staged changes untouched.
+  if (Array.isArray(paths) && paths.length > 0) {
+    args.push("--", ...assertGitPaths(paths));
+  }
+  await runGit(root, args, 20000);
   return null;
 }
 
@@ -1729,13 +1735,17 @@ async function gitCheckout(folder, branch) {
 // "before" side is materialized to a temp file so the tool has two real paths.
 // $LOCAL / $REMOTE in the command are substituted; if neither is present the
 // two paths are appended. Spawned detached so a GUI tool never blocks the app.
-async function gitDiffTool(folder, relativePath, staged, command) {
+async function gitDiffTool(folder, relativePath, staged, command, ref) {
   const root = fs.realpathSync(asString(folder));
   const rel = asString(relativePath).trim().replace(/^[\\/]+/, "");
   if (!rel || rel.length > 4096) throw new Error("경로가 잘못되었습니다.");
   const cmd = asString(command).trim();
   if (!cmd) {
     throw new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.");
+  }
+  const refStr = asString(ref).trim();
+  if (refStr && !/^[\w./~^@{}-]{1,255}$/.test(refStr)) {
+    throw new Error("잘못된 커밋 참조입니다.");
   }
 
   const gitPath = rel.split(path.sep).join("/");
@@ -1746,24 +1756,37 @@ async function gitDiffTool(folder, relativePath, staged, command) {
   await fsPromises.mkdir(tmpDir, { recursive: true });
   const stamp = Date.now();
   const writeTemp = async (label, content) => {
-    const target = path.join(tmpDir, `${base}~${label}~${stamp}${ext}`);
+    const safe = String(label).replace(/[^\w.-]/g, "").slice(0, 16) || "ref";
+    const target = path.join(tmpDir, `${base}~${safe}~${stamp}${ext}`);
     await fsPromises.writeFile(target, content ?? "");
     return target;
   };
 
-  const headContent = await runGit(root, ["show", `HEAD:${gitPath}`]).catch(() => "");
-  const localPath = await writeTemp("HEAD", headContent);
+  const workingSide = async () => {
+    if (fs.existsSync(workingAbs)) {
+      const resolved = fs.realpathSync(workingAbs);
+      if (!isInside(root, resolved)) throw new Error("경로가 프로젝트 밖입니다.");
+      return resolved;
+    }
+    return writeTemp("working", "");
+  };
 
+  let localPath;
   let remotePath;
-  if (staged) {
-    const indexContent = await runGit(root, ["show", `:${gitPath}`]).catch(() => "");
-    remotePath = await writeTemp("staged", indexContent);
-  } else if (fs.existsSync(workingAbs)) {
-    remotePath = fs.realpathSync(workingAbs);
-    if (!isInside(root, remotePath)) throw new Error("경로가 프로젝트 밖입니다.");
+  if (refStr) {
+    // File History: compare the file at <ref> against the working tree.
+    const refContent = await runGit(root, ["show", `${refStr}:${gitPath}`]).catch(() => "");
+    localPath = await writeTemp(refStr.slice(0, 12), refContent);
+    remotePath = await workingSide();
   } else {
-    // Deleted in the working tree: compare against an empty file.
-    remotePath = await writeTemp("deleted", "");
+    const headContent = await runGit(root, ["show", `HEAD:${gitPath}`]).catch(() => "");
+    localPath = await writeTemp("HEAD", headContent);
+    if (staged) {
+      const indexContent = await runGit(root, ["show", `:${gitPath}`]).catch(() => "");
+      remotePath = await writeTemp("staged", indexContent);
+    } else {
+      remotePath = await workingSide();
+    }
   }
 
   const quote = (p) =>
@@ -1787,6 +1810,39 @@ async function gitDiffTool(folder, relativePath, staged, command) {
   child.on("error", () => {});
   child.unref();
   return null;
+}
+
+// Commit history for a single file (follows renames), for the row's File
+// History submenu. Each commit can then be diffed against the working tree.
+async function gitFileHistory(folder, relativePath) {
+  const root = fs.realpathSync(asString(folder));
+  const rel = asString(relativePath).trim().replace(/^[\\/]+/, "");
+  if (!rel || rel.length > 4096) throw new Error("경로가 잘못되었습니다.");
+  const gitPath = rel.split(path.sep).join("/");
+  let out = "";
+  try {
+    out = await runGit(
+      root,
+      ["log", "--follow", "-n", "80", "--format=%H%x1f%s%x1f%cr%x1f%an", "--", gitPath],
+      10000
+    );
+  } catch {
+    out = "";
+  }
+  const commits = [];
+  for (const line of out.split("\n")) {
+    if (!line.trim()) continue;
+    const [hash, subject, date, author] = line.split("\x1f");
+    if (hash) {
+      commits.push({
+        hash,
+        subject: subject || "",
+        date: date || "",
+        author: author || "",
+      });
+    }
+  }
+  return { commits };
 }
 
 // ---- File tree write operations (context menu). All sandboxed to the
@@ -2119,7 +2175,7 @@ async function invokeCommand(event, command, rawArgs) {
     case "git_unstage":
       return gitUnstage(args.folder, args.paths);
     case "git_commit":
-      return gitCommit(args.folder, args.message);
+      return gitCommit(args.folder, args.message, args.paths);
     case "git_discard":
       return gitDiscard(args.folder, args.paths);
     case "git_branches":
@@ -2127,7 +2183,9 @@ async function invokeCommand(event, command, rawArgs) {
     case "git_checkout":
       return gitCheckout(args.folder, args.branch);
     case "git_diff_tool":
-      return gitDiffTool(args.folder, args.relativePath, args.staged, args.command);
+      return gitDiffTool(args.folder, args.relativePath, args.staged, args.command, args.ref);
+    case "git_file_history":
+      return gitFileHistory(args.folder, args.relativePath);
     case "create_file":
       return createFileEntry(args.folder, args.relativePath);
     case "create_directory":

@@ -3158,6 +3158,46 @@ body.files-resizing .files-resizer::after {
 .scm-branch-item-current { color: var(--app-accent); font-weight: 700; }
 .scm-branch-dot { width: 8px; flex: 0 0 auto; color: var(--app-accent); }
 .scm-branch-empty { padding: 8px; color: var(--docs-muted); font-size: 11px; }
+.scm-history { min-width: 280px; max-width: 320px; max-height: 300px; overflow-y: auto; }
+.scm-history-head {
+  padding: 5px 8px 7px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--docs-muted);
+  border-bottom: 1px solid var(--app-border);
+}
+.scm-history-empty { padding: 10px 8px; font-size: 11px; color: var(--docs-muted); }
+.scm-history .scm-history-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.scm-history .scm-history-item:hover { background: var(--app-button-bg); }
+.scm-history-hash {
+  flex: 0 0 auto;
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--app-accent);
+}
+.scm-history-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.scm-history-date { flex: 0 0 auto; font-size: 10px; color: var(--docs-muted); }
 .scm-ahead { color: var(--git-u); font-weight: 700; flex: 0 0 auto; }
 .scm-behind { color: var(--git-m); font-weight: 700; flex: 0 0 auto; }
 .scm-upstream {

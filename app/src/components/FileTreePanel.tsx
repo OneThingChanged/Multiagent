@@ -15,6 +15,7 @@ import type {
   DirectoryEntry,
   GitChangeEntry,
   GitChangesResult,
+  GitFileCommit,
   GitStatusLetter,
   GitStatusResult,
 } from "../platform/ipcContract";
@@ -1055,6 +1056,12 @@ function SourceControlView({
   const [branchList, setBranchList] = useState<
     { current: string; branches: string[] } | null
   >(null);
+  const [ctx, setCtx] = useState<
+    { x: number; y: number; entry: GitChangeEntry; staged: boolean } | null
+  >(null);
+  const [history, setHistory] = useState<
+    { x: number; y: number; entry: GitChangeEntry; commits: GitFileCommit[] | null } | null
+  >(null);
 
   const load = useCallback(async () => {
     if (!folder) {
@@ -1160,6 +1167,78 @@ function SourceControlView({
     if (branchList && branch === branchList.current) return;
     void runGitOp(() => invoke("git_checkout", { folder, branch }));
   };
+
+  const commitFile = (relativePath: string) => {
+    const msg = message.trim();
+    if (!msg) {
+      onError(new Error("커밋 메시지를 먼저 입력하세요."));
+      return;
+    }
+    void runGitOp(async () => {
+      // Stage (covers untracked), then path-limited commit so only this file
+      // lands even if other files are already staged.
+      await invoke("git_stage", { folder, paths: [relativePath] });
+      await invoke("git_commit", { folder, message: msg, paths: [relativePath] });
+      setMessage("");
+    });
+  };
+
+  const openHistory = async (
+    entry: GitChangeEntry,
+    at: { x: number; y: number }
+  ) => {
+    setCtx(null);
+    setHistory({ x: at.x, y: at.y, entry, commits: null });
+    try {
+      const result = await invoke("git_file_history", {
+        folder,
+        relativePath: entry.relative_path,
+      });
+      setHistory((current) =>
+        current && current.entry === entry
+          ? { ...current, commits: result.commits }
+          : current
+      );
+    } catch (err) {
+      onError(err);
+      setHistory(null);
+    }
+  };
+
+  const diffCommit = (entry: GitChangeEntry, ref: string) => {
+    setHistory(null);
+    const command = loadDiffToolCommand().trim();
+    if (!command) {
+      onError(
+        new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.")
+      );
+      return;
+    }
+    invoke("git_diff_tool", {
+      folder,
+      relativePath: entry.relative_path,
+      staged: false,
+      command,
+      ref,
+    }).catch(onError);
+  };
+
+  useEffect(() => {
+    if (!ctx && !history) return;
+    const close = () => {
+      setCtx(null);
+      setHistory(null);
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctx, history]);
   // VS Code behavior: with nothing staged, Commit stages every change first
   // (commit-all), so the button isn't a dead end when the user just types a
   // message. With staged files, it commits only those (selective).
@@ -1254,7 +1333,13 @@ function SourceControlView({
       }`}
       onClick={(event) => handleRowClick(event, entry.relative_path)}
       onDoubleClick={() => onOpenFile(entry.relative_path)}
-      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: 열기)`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setHistory(null);
+        setCtx({ x: event.clientX, y: event.clientY, entry, staged });
+      }}
+      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: 열기 · 우클릭: 메뉴)`}
     >
       <input
         type="checkbox"
@@ -1465,6 +1550,80 @@ function SourceControlView({
           ))}
         </div>
       </div>
+      {ctx && (
+        <div
+          className="file-tree-ctx scm-ctx"
+          style={{
+            left: Math.min(ctx.x, window.innerWidth - 210),
+            top: Math.min(ctx.y, window.innerHeight - 240),
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button onClick={() => { onOpenFile(ctx.entry.relative_path); setCtx(null); }}>
+            열기
+          </button>
+          <button onClick={() => { openDiff(ctx.entry.relative_path, ctx.staged); setCtx(null); }}>
+            Diff (외부 프로그램)
+          </button>
+          <hr />
+          <button
+            onClick={() => {
+              if (ctx.staged) unstage([ctx.entry.relative_path]);
+              else stage([ctx.entry.relative_path]);
+              setCtx(null);
+            }}
+          >
+            {ctx.staged ? "Unstage" : "Stage"}
+          </button>
+          <button onClick={() => { commitFile(ctx.entry.relative_path); setCtx(null); }}>
+            커밋 (이 파일만)
+          </button>
+          <button
+            className="file-tree-ctx-danger"
+            onClick={() => { discard([ctx.entry.relative_path]); setCtx(null); }}
+          >
+            Discard (변경 되돌리기)
+          </button>
+          <hr />
+          <button onClick={() => void openHistory(ctx.entry, { x: ctx.x, y: ctx.y })}>
+            File History…
+          </button>
+        </div>
+      )}
+      {history && (
+        <div
+          className="file-tree-ctx scm-history"
+          style={{
+            left: Math.min(history.x, window.innerWidth - 320),
+            top: Math.min(history.y, window.innerHeight - 320),
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <div className="scm-history-head">
+            이력 · {baseName(history.entry.relative_path)}
+          </div>
+          {history.commits === null && (
+            <div className="scm-history-empty">불러오는 중…</div>
+          )}
+          {history.commits?.length === 0 && (
+            <div className="scm-history-empty">커밋 이력 없음</div>
+          )}
+          {history.commits?.map((commitEntry) => (
+            <button
+              key={commitEntry.hash}
+              className="scm-history-item"
+              title={`${commitEntry.subject}\n${commitEntry.author} · ${commitEntry.date}\n(클릭: 이 시점과 외부 diff)`}
+              onClick={() => diffCommit(history.entry, commitEntry.hash)}
+            >
+              <span className="scm-history-hash">{commitEntry.hash.slice(0, 7)}</span>
+              <span className="scm-history-subject">{commitEntry.subject}</span>
+              <span className="scm-history-date">{commitEntry.date}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
