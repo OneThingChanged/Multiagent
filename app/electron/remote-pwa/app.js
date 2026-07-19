@@ -514,9 +514,17 @@ function renderLayoutNode(node, screen) {
   const question = make("p", "terminal-question", questionOf(activeAgent));
   question.dataset.role = "question";
   question.hidden = !questionOf(activeAgent);
-  const output = make("pre", "terminal-output", recentOutput(activeAgent, 70) || "출력 대기 중…");
-  output.dataset.role = "output";
-  body.append(meta, question, output);
+  body.append(meta, question);
+  if (terminalSupported) {
+    // syncTerminal() attaches a live xterm to this mount after render.
+    const mount = make("div", "screen-terminal-mount");
+    mount.dataset.terminalMount = activeAgent.id;
+    body.append(mount);
+  } else {
+    const output = make("pre", "terminal-output", recentOutput(activeAgent, 70) || "출력 대기 중…");
+    output.dataset.role = "output";
+    body.append(output);
+  }
 
   const form = make("form", "screen-composer");
   const input = document.createElement("input");
@@ -564,11 +572,13 @@ function updateScreenLive(screen) {
     question.textContent = questionOf(agent);
     question.hidden = !questionOf(agent);
     const output = panel.querySelector('[data-role="output"]');
-    const nextOutput = recentOutput(agent, 70) || "출력 대기 중…";
-    if (output.textContent !== nextOutput) {
-      const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 42;
-      output.textContent = nextOutput;
-      if (nearBottom) requestAnimationFrame(() => { output.scrollTop = output.scrollHeight; });
+    if (output) {
+      const nextOutput = recentOutput(agent, 70) || "출력 대기 중…";
+      if (output.textContent !== nextOutput) {
+        const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 42;
+        output.textContent = nextOutput;
+        if (nearBottom) requestAnimationFrame(() => { output.scrollTop = output.scrollHeight; });
+      }
     }
   }
   for (const tab of ui.screenLayout.querySelectorAll("[data-tab-agent]")) {
@@ -676,6 +686,7 @@ function selectMonitor(filter = activeFilter) {
 }
 
 function selectScreen(id) {
+  if (isMobile()) { selectMonitor(); return; } // Screen mode is PC-only
   if (!screenGroups().some((screen) => screen.id === id)) return;
   selection = { type: "screen", id };
   returnScreenId = id;
@@ -756,38 +767,89 @@ async function sendSelectedMessage() {
   ui.sendButton.disabled = false;
 }
 
-// ---- Live terminal (xterm) for the focused session ----
-// Mirrors the desktop terminal: raw PTY output streams in over SSE and every
-// keystroke goes straight back to the PTY. The PTY size is authoritative — we
-// never resize it from here because the desktop views the same session.
+// ---- Live terminals (xterm) ----
+// Each visible pane gets its own xterm mirroring the desktop terminal: raw PTY
+// output streams in over SSE and every keystroke goes straight back to the PTY.
+// The PTY size is authoritative — we never resize it, since the desktop views
+// the same session. The single session view has one terminal; PC Screen mode
+// runs one per pane. Mobile keeps Screen mode disabled (one stream at a time).
 const terminalSupported = typeof window.Terminal === "function";
-let term = null;
-let termAgentId = null;
-let termStream = null;
-// Show the live terminal when xterm is available; otherwise keep the plain
-// text fallback so old browsers still see (sanitized) output.
+const mobileMedia = window.matchMedia("(max-width: 800px)");
+const isMobile = () => mobileMedia.matches;
+// container element -> { term, stream, agentId }
+const terminals = new Map();
+
+// Show the live terminal when xterm is available; otherwise keep the plain text
+// fallback so old browsers still see (sanitized) output.
 if (ui.outputText) ui.outputText.hidden = terminalSupported;
 if (ui.terminalMount) ui.terminalMount.hidden = !terminalSupported;
 
-function ensureTerminal() {
-  if (!terminalSupported) return null;
-  if (term) return term;
-  term = new window.Terminal({
+function buildTerminal(container, fontSize) {
+  const term = new window.Terminal({
     cursorBlink: true,
     fontFamily: '"Cascadia Mono", "Consolas", ui-monospace, monospace',
-    fontSize: 13,
+    fontSize,
     scrollback: 6000,
     convertEol: false,
     theme: { background: "#050d14", foreground: "#cbd8e2", cursor: "#50dfd0" },
   });
-  term.open(ui.terminalMount);
-  term.onData((data) => { if (termAgentId) void sendRaw(termAgentId, data); });
-  return term;
+  term.open(container);
+  const instance = { term, stream: null, agentId: null };
+  term.onData((data) => { if (instance.agentId) void sendRaw(instance.agentId, data); });
+  terminals.set(container, instance);
+  return instance;
 }
 
-function terminalBufferText() {
-  if (!term) return "";
-  const buffer = term.buffer.active;
+function closeStream(instance) {
+  if (instance.stream) { instance.stream.close(); instance.stream = null; }
+  instance.agentId = null;
+}
+
+function attachTerminal(container, agentId, fontSize = 13) {
+  if (!terminalSupported || !container || !agentId) return null;
+  const instance = terminals.get(container) || buildTerminal(container, fontSize);
+  if (instance.agentId === agentId && instance.stream && instance.stream.readyState !== EventSource.CLOSED) {
+    return instance;
+  }
+  closeStream(instance);
+  instance.agentId = agentId;
+  const stream = new EventSource(`/api/stream?id=${encodeURIComponent(agentId)}`);
+  instance.stream = stream;
+  stream.addEventListener("reset", (event) => {
+    if (instance.stream !== stream) return;
+    const payload = JSON.parse(event.data);
+    instance.term.reset();
+    if (payload.cols && payload.rows) {
+      try { instance.term.resize(payload.cols, payload.rows); } catch { /* keep default size */ }
+    }
+    if (payload.data) instance.term.write(payload.data);
+    requestAnimationFrame(() => refitTerminal(instance, container));
+  });
+  stream.onmessage = (event) => {
+    if (instance.stream !== stream) return;
+    const payload = JSON.parse(event.data);
+    if (payload.data) instance.term.write(payload.data);
+  };
+  stream.addEventListener("exit", () => {
+    if (instance.stream !== stream) return;
+    instance.term.write("\r\n\x1b[2m— 세션이 종료되었습니다 —\x1b[0m\r\n");
+  });
+  // EventSource auto-reconnects on transient errors; the server replays a fresh
+  // reset on each new connection, so the terminal re-syncs without extra code.
+  return instance;
+}
+
+function releaseTerminal(container) {
+  const instance = terminals.get(container);
+  if (!instance) return;
+  closeStream(instance);
+  try { instance.term.dispose(); } catch { /* already disposed */ }
+  terminals.delete(container);
+}
+
+function terminalBufferText(instance) {
+  if (!instance?.term) return "";
+  const buffer = instance.term.buffer.active;
   const lines = [];
   for (let i = 0; i < buffer.length; i += 1) {
     lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
@@ -795,51 +857,63 @@ function terminalBufferText() {
   return lines.join("\n").replace(/\s+$/, "");
 }
 
-function connectTerminal(agentId) {
-  if (!ensureTerminal()) return;
-  if (termAgentId === agentId && termStream && termStream.readyState !== EventSource.CLOSED) return;
-  disconnectTerminal();
-  termAgentId = agentId;
-  if (ui.terminalLive) ui.terminalLive.hidden = false;
-  const stream = new EventSource(`/api/stream?id=${encodeURIComponent(agentId)}`);
-  termStream = stream;
-  stream.addEventListener("reset", (event) => {
-    if (termStream !== stream) return;
-    const payload = JSON.parse(event.data);
-    term.reset();
-    if (payload.cols && payload.rows) {
-      try { term.resize(payload.cols, payload.rows); } catch { /* keep default size */ }
-    }
-    if (payload.data) term.write(payload.data);
-  });
-  stream.onmessage = (event) => {
-    if (termStream !== stream) return;
-    const payload = JSON.parse(event.data);
-    if (payload.data) term.write(payload.data);
-  };
-  stream.addEventListener("exit", () => {
-    if (termStream !== stream) return;
-    term.write("\r\n\x1b[2m— 세션이 종료되었습니다 —\x1b[0m\r\n");
-  });
-  // EventSource auto-reconnects on transient errors; the server replays a fresh
-  // reset on each new connection, so the terminal re-syncs without extra code.
+// The terminal mirrors the desktop PTY's column count, which is far wider than
+// a phone. Scale the xterm element down so the whole width fits the container
+// (a phone shows the full layout instead of a clipped sliver; pinch to zoom for
+// detail). PC panes wide enough for the PTY render at natural 1:1 size.
+function refitTerminal(instance, container) {
+  const element = instance?.term?.element;
+  if (!element || !container) return;
+  element.style.transformOrigin = "top left";
+  element.style.transform = "";
+  container.style.height = "";
+  const natural = element.offsetWidth;
+  const available = container.clientWidth;
+  if (!natural || !available) return;
+  const scale = Math.min(1, available / natural);
+  if (scale < 1) {
+    element.style.transform = `scale(${scale})`;
+    container.style.height = `${Math.ceil(element.offsetHeight * scale)}px`;
+  }
 }
 
-function disconnectTerminal() {
-  if (termStream) { termStream.close(); termStream = null; }
-  termAgentId = null;
-  if (ui.terminalLive) ui.terminalLive.hidden = true;
+function refitAllTerminals() {
+  for (const [container, instance] of terminals) {
+    requestAnimationFrame(() => refitTerminal(instance, container));
+  }
 }
 
+// Attach terminals to exactly the mounts of the active view; release the rest.
+// Called after every render, so switching views or rebuilding a Screen layout
+// tears down the terminals (and their SSE streams) that are no longer visible.
 function syncTerminal() {
   if (!terminalSupported) return;
+  const keep = new Set();
   if (selection.type === "session") {
     const agent = selectedAgent();
-    if (agent) connectTerminal(agent.id);
-    else disconnectTerminal();
-  } else {
-    disconnectTerminal();
+    if (agent && ui.terminalMount) {
+      attachTerminal(ui.terminalMount, agent.id);
+      keep.add(ui.terminalMount);
+    }
+    if (ui.terminalLive) ui.terminalLive.hidden = !agent;
+  } else if (selection.type === "screen" && !isMobile()) {
+    for (const mount of ui.screenLayout.querySelectorAll("[data-terminal-mount]")) {
+      const agentId = mount.dataset.terminalMount;
+      if (agentId) { attachTerminal(mount, agentId, 12); keep.add(mount); }
+    }
   }
+  for (const container of [...terminals.keys()]) {
+    if (!keep.has(container)) releaseTerminal(container);
+  }
+}
+
+// Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
+// and bounce any active Screen selection back to the Monitor.
+function applyScreenAvailability() {
+  const mobile = isMobile();
+  if (ui.screensSection) ui.screensSection.hidden = mobile;
+  if (ui.mobileScreensButton) ui.mobileScreensButton.hidden = mobile;
+  if (mobile && selection.type === "screen") selectMonitor();
 }
 
 async function showNotification(title, body, tag, agentId) {
@@ -974,8 +1048,13 @@ ui.searchInput.addEventListener("input", () => {
   if (selection.type === "monitor") renderMonitor();
 });
 ui.sidebarToggle.addEventListener("click", () => {
-  if (ui.navigationPane.classList.contains("open")) closeSidebar();
-  else openSidebar();
+  // Mobile: open/close the drawer. Tablet/desktop: collapse the fixed sidebar.
+  if (isMobile()) {
+    if (ui.navigationPane.classList.contains("open")) closeSidebar();
+    else openSidebar();
+  } else {
+    toggleNavCollapsed();
+  }
 });
 ui.sidebarBackdrop.addEventListener("click", closeSidebar);
 ui.screenOpenSession.addEventListener("click", () => {
@@ -1003,8 +1082,9 @@ ui.messageInput.addEventListener("keydown", (event) => {
   }
 });
 ui.copyOutputButton.addEventListener("click", async () => {
-  const content = terminalSupported && term
-    ? (term.getSelection() || terminalBufferText())
+  const instance = terminals.get(ui.terminalMount);
+  const content = terminalSupported && instance
+    ? (instance.term.getSelection() || terminalBufferText(instance))
     : (ui.outputText.textContent || "");
   try {
     await navigator.clipboard.writeText(content);
@@ -1035,10 +1115,38 @@ navigator.serviceWorker?.addEventListener("message", (event) => {
   if (event.data?.type === "open-agent" && event.data.agentId) selectSession(event.data.agentId);
 });
 
+// Collapsible sidebar (tablet/desktop) — persisted across sessions.
+const NAV_COLLAPSE_KEY = "multiagent.remote.navCollapsed";
+const appShell = document.querySelector(".app-shell");
+function applyNavCollapsed(collapsed) {
+  appShell?.classList.toggle("nav-collapsed", collapsed);
+  requestAnimationFrame(refitAllTerminals);
+}
+function toggleNavCollapsed() {
+  const collapsed = !appShell?.classList.contains("nav-collapsed");
+  localStorage.setItem(NAV_COLLAPSE_KEY, collapsed ? "1" : "0");
+  applyNavCollapsed(collapsed);
+}
+
+// React to viewport changes: enable/disable Screen mode and re-fit terminals.
+mobileMedia.addEventListener("change", () => {
+  applyScreenAvailability();
+  renderNavigation();
+  syncTerminal();
+  refitAllTerminals();
+});
+let resizeTimer = null;
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(refitAllTerminals, 150);
+});
+
 if (localStorage.getItem("multiagent.remote.notifications") === "on" && window.Notification?.permission === "granted") {
   ui.notifyButton.classList.add("enabled");
   ui.notifyButton.title = "알림 켜짐";
 }
+applyNavCollapsed(localStorage.getItem(NAV_COLLAPSE_KEY) === "1");
+applyScreenAvailability();
 setActiveFilter(activeFilter);
 void registerServiceWorker();
 void fetchState();
