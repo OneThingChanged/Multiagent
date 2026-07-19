@@ -244,7 +244,16 @@ body,
   color: #cc785c;
   font-size: 13px;
 }
+.topbar-logo-img {
+  width: 17px;
+  height: 17px;
+  display: block;
+  object-fit: contain;
+}
 
+.topbar-icon {
+  display: block;
+}
 .topbar-btn {
   width: 30px;
   height: 26px;

@@ -42,7 +42,7 @@ export function TopBar({
     <header className="app-topbar">
       <div className="topbar-inner">
         <span className="topbar-logo" aria-hidden="true">
-          <span className="topbar-logo-mark">✻</span>
+          <img className="topbar-logo-img" src="/app-icon.png" alt="" />
           MultiAgent
         </span>
         <button
@@ -50,8 +50,12 @@ export function TopBar({
           className={`topbar-btn ${sidebarOpen ? "topbar-btn-active" : ""}`}
           onClick={onToggleSidebar}
           title={sidebarOpen ? "사이드바 접기" : "사이드바 펼치기"}
+          aria-label="왼쪽 사이드바 토글"
         >
-          ⫞
+          <svg className="topbar-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.7" />
+            <rect x="3.9" y="5.4" width="4.8" height="13.2" rx="1.4" fill="currentColor" />
+          </svg>
         </button>
         <div className="topbar-drag">
           <button
@@ -124,8 +128,12 @@ export function TopBar({
           className={`topbar-btn ${filesOpen ? "topbar-btn-active" : ""}`}
           onClick={onToggleFiles}
           title={filesOpen ? "파일 트리 접기" : "파일 트리 펼치기"}
+          aria-label="오른쪽 파일 사이드바 토글"
         >
-          ⫟
+          <svg className="topbar-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.7" />
+            <rect x="15.3" y="5.4" width="4.8" height="13.2" rx="1.4" fill="currentColor" />
+          </svg>
         </button>
       </div>
     </header>
