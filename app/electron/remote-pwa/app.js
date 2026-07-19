@@ -46,6 +46,7 @@ const ui = {
   outputText: $("#outputText"),
   copyOutputButton: $("#copyOutputButton"),
   composerForm: $("#composerForm"),
+  composerKeys: $("#composerKeys"),
   messageInput: $("#messageInput"),
   sendButton: $("#sendButton"),
   refreshButton: $("#refreshButton"),
@@ -709,6 +710,36 @@ async function sendInput(agentId, message) {
   }
 }
 
+// Special-key sequences for prompts the composer text field can't express:
+// a bare Enter ("Press enter to continue"), arrow-key menu navigation, Esc,
+// and Ctrl+C. Sent raw (no trailing \r, no trim) so control bytes reach the PTY.
+const KEY_SEQUENCES = {
+  enter: "\r",
+  up: "\x1b[A",
+  down: "\x1b[B",
+  esc: "\x1b",
+  ctrlc: "\x03",
+};
+
+async function sendRaw(agentId, data) {
+  if (!agentId || !data) return false;
+  try {
+    const response = await fetch("/api/input", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agentId, data }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    setTimeout(() => fetchState({ quiet: true }), 250);
+    return true;
+  } catch (error) {
+    showToast(`전송 실패: ${error.message}`);
+    return false;
+  }
+}
+
 async function sendSelectedMessage() {
   const agent = selectedAgent();
   const message = ui.messageInput.value.trim();
@@ -864,6 +895,14 @@ ui.backToScreenButton.addEventListener("click", () => {
 ui.refreshButton.addEventListener("click", () => fetchState());
 ui.focusAnswerButton.addEventListener("click", () => ui.messageInput.focus());
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
+ui.composerKeys?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-key]");
+  if (!button) return;
+  const agent = selectedAgent();
+  if (!agent) { showToast("세션을 먼저 선택하세요."); return; }
+  const sequence = KEY_SEQUENCES[button.dataset.key];
+  if (sequence) void sendRaw(agent.id, sequence);
+});
 ui.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();

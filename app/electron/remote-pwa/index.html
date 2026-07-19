@@ -151,7 +151,14 @@
 
             <form class="composer" id="composerForm">
               <label for="messageInput">추가 지시 또는 질문 답변</label>
-              <textarea id="messageInput" rows="3" maxlength="4000" placeholder="PC의 활성 세션으로 전송됩니다"></textarea>
+              <textarea id="messageInput" rows="3" maxlength="4000" placeholder="이 세션으로 전송됩니다"></textarea>
+              <div class="composer-keys" id="composerKeys" aria-label="특수 키 전송">
+                <button type="button" data-key="enter" title="Enter 전송 (계속/확인)">⏎ Enter</button>
+                <button type="button" data-key="up" title="위 화살표">↑</button>
+                <button type="button" data-key="down" title="아래 화살표">↓</button>
+                <button type="button" data-key="esc" title="Esc">Esc</button>
+                <button type="button" data-key="ctrlc" title="Ctrl+C (중단)">Ctrl+C</button>
+              </div>
               <div class="composer-foot"><span>Ctrl/⌘ + Enter로 전송</span><button class="send-button" id="sendButton" type="submit">전송</button></div>
             </form>
           </div>
