@@ -5,10 +5,12 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   Notification,
   safeStorage,
   screen,
   shell,
+  Tray,
 } from "electron";
 import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
@@ -135,6 +137,8 @@ const preloadContractArguments = [
 let mainWindow = null;
 /** @type {BrowserWindow | null} */
 let petWindow = null;
+/** @type {import('electron').Tray | null} */
+let tray = null;
 let forceClosing = false;
 let closeFallback = null;
 let closeSmokeStartedAt = null;
@@ -584,17 +588,19 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
   if (!bridgeSmoke) win.once("ready-to-show", () => win.show());
 
   if (!secondary) {
+    // Closing the main window hides it to the system tray instead of quitting;
+    // the app keeps running (sessions stay alive) and is fully closed only via
+    // the tray's "종료" item (which sets forceClosing → closeEverything).
     win.on("close", (event) => {
       if (forceClosing) return;
       event.preventDefault();
-      const runtime = runtimeByWebContents.get(win.webContents.id);
-      if (!runtime?.ready) {
+      // Lifecycle smoke drives a real close via mainWindow.close(); honor it.
+      if (closeSmokeStartedAt !== null) {
         closeEverything();
         return;
       }
-      sendEvent(win, "app:close-requested");
-      if (closeFallback) clearTimeout(closeFallback);
-      closeFallback = setTimeout(() => closeEverything(), 5000);
+      win.hide();
+      if (process.platform === "win32") win.setSkipTaskbar(true);
     });
   }
 
@@ -675,8 +681,33 @@ function ensurePetWindow() {
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
+  if (process.platform === "win32") mainWindow.setSkipTaskbar(false);
   mainWindow.show();
   mainWindow.focus();
+}
+
+// System tray: keeps the app resident after the window is closed. Left-click
+// reopens the window; right-click → "종료" fully quits.
+function createTray() {
+  if (tray && !tray.isDestroyed()) return tray;
+  let image;
+  try {
+    image = nativeImage.createFromPath(iconPath);
+  } catch {
+    image = null;
+  }
+  tray = new Tray(image && !image.isEmpty() ? image : iconPath);
+  tray.setToolTip(runtimeVariant.displayName || "MultiAgent");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "MultiAgent 열기", click: () => showMainWindow() },
+      { type: "separator" },
+      { label: "종료", click: () => closeEverything() },
+    ])
+  );
+  tray.on("click", () => showMainWindow());
+  tray.on("double-click", () => showMainWindow());
+  return tray;
 }
 
 function closePty(id) {
@@ -2409,6 +2440,10 @@ ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
 
 app.on("before-quit", () => {
   forceClosing = true;
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
   updaterLifecycle.clearInstallWatchdog();
   if (hookMaintenanceTimer) {
     clearInterval(hookMaintenanceTimer);
@@ -2442,6 +2477,9 @@ void app.whenReady().then(async () => {
   console.log("[electron] ready");
   // Custom top bar replaces the native File/Edit/View/Window menu.
   Menu.setApplicationMenu(null);
+  if (!bridgeSmoke) {
+    try { createTray(); } catch (error) { console.warn("[electron] tray init failed", error); }
+  }
   hookReady = hookService.start().catch((error) => {
     console.error("[electron] hook service failed to start", error);
     throw error;
