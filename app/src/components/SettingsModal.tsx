@@ -24,6 +24,7 @@ import {
   type NotificationSoundMode,
 } from "../lib/notificationSound";
 import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
+import { loadDiffToolCommand, saveDiffToolCommand } from "../lib/diffTool";
 import { SshSetupGuide } from "./SshSetupGuide";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import type { CommandShortcuts } from "../lib/commandRegistry";
@@ -134,6 +135,7 @@ type SettingsCategory =
   | "hooks"
   | "dashboard"
   | "remote"
+  | "vcs"
   | "ssh"
   | "about";
 
@@ -168,6 +170,9 @@ const IconServer = () => (
 const IconInfo = () => (
   <svg {...svgProps}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><line x1="12" y1="7.6" x2="12" y2="7.6" /></svg>
 );
+const IconBranch = () => (
+  <svg {...svgProps}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="9" r="2.5" /><path d="M6 8.5v7" /><path d="M18 11.5v1a4 4 0 0 1-4 4H6" /></svg>
+);
 
 type NavEntry = {
   id: SettingsCategory;
@@ -185,6 +190,7 @@ const ALL_NAV_ENTRIES: NavEntry[] = [
   { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
   { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
   { id: "remote", group: "Services", label: "Remote", title: "Remote", sub: "모바일 PWA · 터널 · 접근 승인", keywords: "remote pwa tunnel cloudflare github oauth 모바일 mobile access", icon: <IconGlobe /> },
+  { id: "vcs", group: "Services", label: "Version Control", title: "Version Control", sub: "외부 diff 프로그램", keywords: "version control git diff 비교 프로그램 tool difftool 소스", icon: <IconBranch /> },
   { id: "ssh", group: "Services", label: "SSH Hosts", title: "SSH Hosts", sub: "원격 실행 호스트", keywords: "ssh host server 원격", icon: <IconServer /> },
   { id: "about", group: "Info", label: "About", title: "About", sub: "버전 · 업데이트 · 진단", keywords: "about version 버전 update 업데이트 diagnostics 진단 creator", icon: <IconInfo /> },
 ];
@@ -237,6 +243,14 @@ export function SettingsModal({
 }) {
   const [tab, setTab] = useState<SettingsCategory>("general");
   const [search, setSearch] = useState("");
+  const [diffTool, setDiffTool] = useState<string>(() => loadDiffToolCommand());
+  const [diffToolSaved, setDiffToolSaved] = useState(false);
+
+  const handleSaveDiffTool = () => {
+    saveDiffToolCommand(diffTool.trim());
+    setDiffToolSaved(true);
+    setTimeout(() => setDiffToolSaved(false), 1500);
+  };
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -1374,6 +1388,36 @@ export function SettingsModal({
                 외부 사용자가 GitHub로 로그인하면 여기에 승인 요청이 표시됩니다.
               </div>
             )}
+          </div>
+        </div>
+        )}
+
+        {tab === "vcs" && (
+        <div className="app-settings-section">
+          <div className="field-label">External diff program</div>
+          <div className="app-about-card">
+            <div className="app-update-message">
+              Source Control에서 파일의 diff 아이콘(⇄)을 누르면 아래 프로그램으로 변경 전/후를 비교합니다.
+              <code> $LOCAL</code>(HEAD·스테이지 버전)과 <code> $REMOTE</code>(작업 트리 파일)가 파일 경로로 치환됩니다.
+              둘 다 없으면 경로 두 개가 뒤에 추가됩니다. GUI 편집기는 창이 열리기 전 임시 파일이 지워지지 않도록 대기 옵션(예: <code>--wait</code>)을 권장합니다.
+            </div>
+            <label className="field app-remote-field">
+              <span className="field-label">Diff command</span>
+              <input
+                value={diffTool}
+                placeholder={`code --wait --diff "$LOCAL" "$REMOTE"`}
+                onChange={(e) => setDiffTool(e.target.value)}
+                spellCheck={false}
+              />
+            </label>
+            <div className="app-update-message">
+              예시 · VS Code: <code>code --wait --diff "$LOCAL" "$REMOTE"</code> · Beyond Compare: <code>bcomp "$LOCAL" "$REMOTE"</code> · WinMerge: <code>WinMergeU "$LOCAL" "$REMOTE"</code>
+            </div>
+            <div className="app-update-actions">
+              <button className="btn-secondary app-update-btn" onClick={handleSaveDiffTool}>
+                {diffToolSaved ? "Saved!" : "Save"}
+              </button>
+            </div>
           </div>
         </div>
         )}

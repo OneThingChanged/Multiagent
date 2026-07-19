@@ -14,7 +14,7 @@ import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFile, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as nodePty from "node-pty";
 import electronUpdater from "electron-updater";
@@ -1688,6 +1688,107 @@ async function gitDiscard(folder, paths) {
   return null;
 }
 
+// Local branches (most-recent first) plus the current branch, for the Source
+// Control branch switcher.
+async function gitBranches(folder) {
+  const root = fs.realpathSync(asString(folder));
+  let current = "";
+  try {
+    current = (await runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+  } catch {
+    current = "";
+  }
+  let branches = [];
+  try {
+    const out = await runGit(root, [
+      "for-each-ref",
+      "--format=%(refname:short)",
+      "--sort=-committerdate",
+      "refs/heads",
+    ]);
+    branches = out.split("\n").map((line) => line.trim()).filter(Boolean);
+  } catch {
+    branches = [];
+  }
+  return { current, branches };
+}
+
+async function gitCheckout(folder, branch) {
+  const root = fs.realpathSync(asString(folder));
+  const name = asString(branch).trim();
+  // Names come from the switcher (real refs), but validate defensively.
+  if (!name || name.length > 255 || /[\s~^:?*[\\]/.test(name)) {
+    throw new Error("잘못된 브랜치 이름입니다.");
+  }
+  await runGit(root, ["checkout", name], 30000);
+  return null;
+}
+
+// Launch the user-configured external diff program comparing the file's HEAD
+// (and, for staged rows, index) version against the working-tree version. The
+// "before" side is materialized to a temp file so the tool has two real paths.
+// $LOCAL / $REMOTE in the command are substituted; if neither is present the
+// two paths are appended. Spawned detached so a GUI tool never blocks the app.
+async function gitDiffTool(folder, relativePath, staged, command) {
+  const root = fs.realpathSync(asString(folder));
+  const rel = asString(relativePath).trim().replace(/^[\\/]+/, "");
+  if (!rel || rel.length > 4096) throw new Error("경로가 잘못되었습니다.");
+  const cmd = asString(command).trim();
+  if (!cmd) {
+    throw new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.");
+  }
+
+  const gitPath = rel.split(path.sep).join("/");
+  const workingAbs = path.join(root, rel);
+  const ext = path.extname(rel);
+  const base = path.basename(rel, ext) || "file";
+  const tmpDir = path.join(os.tmpdir(), "multiagent-diff");
+  await fsPromises.mkdir(tmpDir, { recursive: true });
+  const stamp = Date.now();
+  const writeTemp = async (label, content) => {
+    const target = path.join(tmpDir, `${base}~${label}~${stamp}${ext}`);
+    await fsPromises.writeFile(target, content ?? "");
+    return target;
+  };
+
+  const headContent = await runGit(root, ["show", `HEAD:${gitPath}`]).catch(() => "");
+  const localPath = await writeTemp("HEAD", headContent);
+
+  let remotePath;
+  if (staged) {
+    const indexContent = await runGit(root, ["show", `:${gitPath}`]).catch(() => "");
+    remotePath = await writeTemp("staged", indexContent);
+  } else if (fs.existsSync(workingAbs)) {
+    remotePath = fs.realpathSync(workingAbs);
+    if (!isInside(root, remotePath)) throw new Error("경로가 프로젝트 밖입니다.");
+  } else {
+    // Deleted in the working tree: compare against an empty file.
+    remotePath = await writeTemp("deleted", "");
+  }
+
+  const quote = (p) =>
+    process.platform === "win32" ? `"${p}"` : `'${String(p).replace(/'/g, "'\\''")}'`;
+  const hasLocal = /\$\{?LOCAL\}?/.test(cmd);
+  const hasRemote = /\$\{?REMOTE\}?/.test(cmd);
+  let finalCmd = cmd
+    .replace(/\$\{?LOCAL\}?/g, quote(localPath))
+    .replace(/\$\{?REMOTE\}?/g, quote(remotePath));
+  if (!hasLocal && !hasRemote) {
+    finalCmd = `${finalCmd} ${quote(localPath)} ${quote(remotePath)}`;
+  }
+
+  const child = spawn(finalCmd, {
+    cwd: root,
+    shell: true,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  });
+  child.on("error", () => {});
+  child.unref();
+  return null;
+}
+
 // ---- File tree write operations (context menu). All sandboxed to the
 // project root; delete moves to the OS recycle bin instead of erasing.
 
@@ -2021,6 +2122,12 @@ async function invokeCommand(event, command, rawArgs) {
       return gitCommit(args.folder, args.message);
     case "git_discard":
       return gitDiscard(args.folder, args.paths);
+    case "git_branches":
+      return gitBranches(args.folder);
+    case "git_checkout":
+      return gitCheckout(args.folder, args.branch);
+    case "git_diff_tool":
+      return gitDiffTool(args.folder, args.relativePath, args.staged, args.command);
     case "create_file":
       return createFileEntry(args.folder, args.relativePath);
     case "create_directory":

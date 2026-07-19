@@ -18,6 +18,7 @@ import type {
   GitStatusLetter,
   GitStatusResult,
 } from "../platform/ipcContract";
+import { loadDiffToolCommand } from "../lib/diffTool";
 
 // Orca-style lazy file explorer: one list_directory call per expanded folder,
 // cached in dirCache (key "" = project root). Expanded state persists per
@@ -1050,6 +1051,10 @@ function SourceControlView({
   // Multi-select for batch stage/unstage/discard (keyed by relative_path).
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const lastClickedRef = useRef<string | null>(null);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchList, setBranchList] = useState<
+    { current: string; branches: string[] } | null
+  >(null);
 
   const load = useCallback(async () => {
     if (!folder) {
@@ -1121,6 +1126,39 @@ function SourceControlView({
       await invoke("git_discard", { folder, paths });
       setSelected(new Set());
     });
+  };
+
+  const openDiff = (relativePath: string, staged: boolean) => {
+    const command = loadDiffToolCommand().trim();
+    if (!command) {
+      onError(
+        new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.")
+      );
+      return;
+    }
+    invoke("git_diff_tool", { folder, relativePath, staged, command }).catch(onError);
+  };
+
+  const toggleBranchMenu = async () => {
+    if (branchOpen) {
+      setBranchOpen(false);
+      return;
+    }
+    setBranchOpen(true);
+    setBranchList(null);
+    try {
+      const result = await invoke("git_branches", { folder });
+      setBranchList(result);
+    } catch (err) {
+      onError(err);
+      setBranchOpen(false);
+    }
+  };
+
+  const switchBranch = (branch: string) => {
+    setBranchOpen(false);
+    if (branchList && branch === branchList.current) return;
+    void runGitOp(() => invoke("git_checkout", { folder, branch }));
   };
   // VS Code behavior: with nothing staged, Commit stages every change first
   // (commit-all), so the button isn't a dead end when the user just types a
@@ -1238,6 +1276,16 @@ function SourceControlView({
         <span className="scm-letter">{entry.status}</span>
       </span>
       <span
+        className="scm-act scm-act-diff"
+        title="외부 diff 프로그램으로 비교"
+        onClick={(event) => {
+          event.stopPropagation();
+          openDiff(entry.relative_path, staged);
+        }}
+      >
+        ⇄
+      </span>
+      <span
         className="scm-act scm-act-discard"
         title="변경 되돌리기 (Discard)"
         onClick={(event) => {
@@ -1266,10 +1314,47 @@ function SourceControlView({
   return (
     <div className="scm-view">
       <div className="scm-branchrow" title={changes.upstream ?? undefined}>
-        <span className="scm-branch">⎇ {changes.branch || "(no branch)"}</span>
+        <button
+          className="scm-branch"
+          onClick={toggleBranchMenu}
+          disabled={busy || sshProject}
+          title="브랜치 전환"
+        >
+          ⎇ {changes.branch || "(no branch)"} <span className="scm-branch-caret">▾</span>
+        </button>
         {changes.ahead > 0 && <span className="scm-ahead">↑{changes.ahead}</span>}
         {changes.behind > 0 && <span className="scm-behind">↓{changes.behind}</span>}
         {changes.upstream && <span className="scm-upstream">vs {changes.upstream}</span>}
+        {branchOpen && (
+          <div
+            className="scm-branch-backdrop"
+            onClick={() => setBranchOpen(false)}
+          />
+        )}
+        {branchOpen && (
+          <div className="scm-branch-menu">
+            {branchList === null && (
+              <div className="scm-branch-empty">불러오는 중…</div>
+            )}
+            {branchList?.branches.map((name) => (
+              <button
+                key={name}
+                className={`scm-branch-item ${
+                  name === branchList.current ? "scm-branch-item-current" : ""
+                }`}
+                onClick={() => switchBranch(name)}
+              >
+                <span className="scm-branch-dot">
+                  {name === branchList.current ? "●" : ""}
+                </span>
+                {name}
+              </button>
+            ))}
+            {branchList && branchList.branches.length === 0 && (
+              <div className="scm-branch-empty">브랜치 없음</div>
+            )}
+          </div>
+        )}
       </div>
       <div className="scm-msg">
         <textarea

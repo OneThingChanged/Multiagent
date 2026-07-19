@@ -8,7 +8,8 @@ export type RuntimeCommand =
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "read_text_file" | "git_status" | "git_changes" | "git_stage"
-  | "git_unstage" | "git_discard" | "git_commit" | "resource_usage"
+  | "git_unstage" | "git_discard" | "git_commit"
+  | "git_branches" | "git_checkout" | "git_diff_tool" | "resource_usage"
   | "set_titlebar_overlay"
   | "list_ports" | "kill_port_process"
   | "create_file" | "create_directory"
@@ -177,6 +178,18 @@ export type RuntimeCommandContract = {
   };
   git_commit: {
     args: { folder: string; message: string };
+    result: null;
+  };
+  git_branches: {
+    args: { folder: string };
+    result: { current: string; branches: string[] };
+  };
+  git_checkout: {
+    args: { folder: string; branch: string };
+    result: null;
+  };
+  git_diff_tool: {
+    args: { folder: string; relativePath: string; staged: boolean; command: string };
     result: null;
   };
   resource_usage: {
