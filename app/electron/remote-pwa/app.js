@@ -709,23 +709,16 @@ function selectSession(id, fromScreenId = null) {
 }
 
 async function sendInput(agentId, message) {
-  if (!agentId || !message.trim()) return false;
-  try {
-    const response = await fetch("/api/input", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: agentId, data: `${message.trim()}\r` }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    showToast("PC의 세션으로 전송했습니다.");
-    setTimeout(() => fetchState({ quiet: true }), 350);
-    return true;
-  } catch (error) {
-    showToast(`전송 실패: ${error.message}`);
-    return false;
-  }
+  const text = message.trim();
+  if (!agentId || !text) return false;
+  // Type the text, then send Enter as a SEPARATE write. Claude/Codex TUIs treat
+  // a "text\r" arriving in one chunk as a multi-line paste (newline inserted,
+  // not submitted); a discrete \r a beat later registers as the Enter keypress.
+  if (!(await sendRaw(agentId, text))) return false;
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await sendRaw(agentId, "\r");
+  showToast("전송했습니다.");
+  return true;
 }
 
 // Special-key sequences for prompts the composer text field can't express:
