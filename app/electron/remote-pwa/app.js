@@ -44,6 +44,8 @@ const ui = {
   promptPanel: $("#promptPanel"),
   promptText: $("#promptText"),
   outputText: $("#outputText"),
+  terminalMount: $("#terminalMount"),
+  terminalLive: $("#terminalLive"),
   copyOutputButton: $("#copyOutputButton"),
   composerForm: $("#composerForm"),
   composerKeys: $("#composerKeys"),
@@ -605,8 +607,6 @@ function renderSession() {
   const status = statusOf(agent);
   const question = questionDetails(agent);
   const prompt = text(agent.hook?.prompt);
-  const output = recentOutput(agent) || "출력 대기 중…";
-  const nearBottom = ui.outputText.scrollHeight - ui.outputText.scrollTop - ui.outputText.clientHeight < 48;
   ui.detailStatus.className = `status-chip ${status}`;
   ui.detailStatus.textContent = STATUS[status].label;
   ui.detailName.textContent = text(agent.name || agent.id);
@@ -626,9 +626,15 @@ function renderSession() {
   ui.questionOptions.replaceChildren(optionFragment);
   ui.promptPanel.hidden = !prompt;
   ui.promptText.textContent = prompt;
-  if (ui.outputText.textContent !== output) {
-    ui.outputText.textContent = output;
-    if (nearBottom) requestAnimationFrame(() => { ui.outputText.scrollTop = ui.outputText.scrollHeight; });
+  // The live xterm owns the terminal area; only feed the fallback <pre> when
+  // xterm is unavailable (very old browser).
+  if (!terminalSupported) {
+    const output = recentOutput(agent) || "출력 대기 중…";
+    const nearBottom = ui.outputText.scrollHeight - ui.outputText.scrollTop - ui.outputText.clientHeight < 48;
+    if (ui.outputText.textContent !== output) {
+      ui.outputText.textContent = output;
+      if (nearBottom) requestAnimationFrame(() => { ui.outputText.scrollTop = ui.outputText.scrollHeight; });
+    }
   }
   const canReturn = returnScreenId && screenGroups().some((screen) => screen.id === returnScreenId);
   ui.backToScreenButton.hidden = !canReturn;
@@ -641,6 +647,7 @@ function renderSelection() {
   if (selection.type === "monitor") renderMonitor();
   if (selection.type === "screen") renderScreen();
   if (selection.type === "session") renderSession();
+  syncTerminal();
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor" && activeFilter !== "attention");
   ui.mobileScreensButton.classList.toggle("active", selection.type === "screen");
@@ -747,6 +754,92 @@ async function sendSelectedMessage() {
   ui.sendButton.disabled = true;
   if (await sendInput(agent.id, message)) ui.messageInput.value = "";
   ui.sendButton.disabled = false;
+}
+
+// ---- Live terminal (xterm) for the focused session ----
+// Mirrors the desktop terminal: raw PTY output streams in over SSE and every
+// keystroke goes straight back to the PTY. The PTY size is authoritative — we
+// never resize it from here because the desktop views the same session.
+const terminalSupported = typeof window.Terminal === "function";
+let term = null;
+let termAgentId = null;
+let termStream = null;
+// Show the live terminal when xterm is available; otherwise keep the plain
+// text fallback so old browsers still see (sanitized) output.
+if (ui.outputText) ui.outputText.hidden = terminalSupported;
+if (ui.terminalMount) ui.terminalMount.hidden = !terminalSupported;
+
+function ensureTerminal() {
+  if (!terminalSupported) return null;
+  if (term) return term;
+  term = new window.Terminal({
+    cursorBlink: true,
+    fontFamily: '"Cascadia Mono", "Consolas", ui-monospace, monospace',
+    fontSize: 13,
+    scrollback: 6000,
+    convertEol: false,
+    theme: { background: "#050d14", foreground: "#cbd8e2", cursor: "#50dfd0" },
+  });
+  term.open(ui.terminalMount);
+  term.onData((data) => { if (termAgentId) void sendRaw(termAgentId, data); });
+  return term;
+}
+
+function terminalBufferText() {
+  if (!term) return "";
+  const buffer = term.buffer.active;
+  const lines = [];
+  for (let i = 0; i < buffer.length; i += 1) {
+    lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+  }
+  return lines.join("\n").replace(/\s+$/, "");
+}
+
+function connectTerminal(agentId) {
+  if (!ensureTerminal()) return;
+  if (termAgentId === agentId && termStream && termStream.readyState !== EventSource.CLOSED) return;
+  disconnectTerminal();
+  termAgentId = agentId;
+  if (ui.terminalLive) ui.terminalLive.hidden = false;
+  const stream = new EventSource(`/api/stream?id=${encodeURIComponent(agentId)}`);
+  termStream = stream;
+  stream.addEventListener("reset", (event) => {
+    if (termStream !== stream) return;
+    const payload = JSON.parse(event.data);
+    term.reset();
+    if (payload.cols && payload.rows) {
+      try { term.resize(payload.cols, payload.rows); } catch { /* keep default size */ }
+    }
+    if (payload.data) term.write(payload.data);
+  });
+  stream.onmessage = (event) => {
+    if (termStream !== stream) return;
+    const payload = JSON.parse(event.data);
+    if (payload.data) term.write(payload.data);
+  };
+  stream.addEventListener("exit", () => {
+    if (termStream !== stream) return;
+    term.write("\r\n\x1b[2m— 세션이 종료되었습니다 —\x1b[0m\r\n");
+  });
+  // EventSource auto-reconnects on transient errors; the server replays a fresh
+  // reset on each new connection, so the terminal re-syncs without extra code.
+}
+
+function disconnectTerminal() {
+  if (termStream) { termStream.close(); termStream = null; }
+  termAgentId = null;
+  if (ui.terminalLive) ui.terminalLive.hidden = true;
+}
+
+function syncTerminal() {
+  if (!terminalSupported) return;
+  if (selection.type === "session") {
+    const agent = selectedAgent();
+    if (agent) connectTerminal(agent.id);
+    else disconnectTerminal();
+  } else {
+    disconnectTerminal();
+  }
 }
 
 async function showNotification(title, body, tag, agentId) {
@@ -910,10 +1003,13 @@ ui.messageInput.addEventListener("keydown", (event) => {
   }
 });
 ui.copyOutputButton.addEventListener("click", async () => {
+  const content = terminalSupported && term
+    ? (term.getSelection() || terminalBufferText())
+    : (ui.outputText.textContent || "");
   try {
-    await navigator.clipboard.writeText(ui.outputText.textContent || "");
-    showToast("최근 출력을 복사했습니다.");
-  } catch { showToast("출력을 복사하지 못했습니다."); }
+    await navigator.clipboard.writeText(content);
+    showToast("터미널 내용을 복사했습니다.");
+  } catch { showToast("복사하지 못했습니다."); }
 });
 ui.notifyButton.addEventListener("click", enableNotifications);
 ui.installButton.addEventListener("click", installPwa);

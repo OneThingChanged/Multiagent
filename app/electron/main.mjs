@@ -285,6 +285,14 @@ remoteService = new RemoteDashboardService({
     entry.process.write(data);
     return true;
   },
+  // Live raw-terminal streaming for the Remote xterm view. Read the snapshot
+  // and subscribe with no await between so backfill meets the live stream.
+  terminalSnapshot: (id, afterSequence) => terminalSessions.snapshotSince(id, afterSequence),
+  subscribeTerminal: (id, listener) => terminalSessions.subscribeData(id, listener),
+  terminalSize: (id) => {
+    const entry = ptys.get(id);
+    return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
+  },
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
   },

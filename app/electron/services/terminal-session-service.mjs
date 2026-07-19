@@ -42,6 +42,7 @@ export class TerminalSessionService {
     const entry = rawEntry;
     entry.buffer = rawEntry.buffer ?? new SequencedTerminalBuffer();
     entry.subscribers = new Set();
+    entry.dataListeners = new Set();
     entry.released = false;
 
     if (this.generations.get(id) !== generation || this.sessions.has(id)) {
@@ -60,10 +61,31 @@ export class TerminalSessionService {
       if (this.sessions.get(id) !== entry) return;
       this.#publish(entry, entry.filter.finish());
       this.sessions.delete(id);
+      for (const listener of entry.dataListeners) {
+        try { listener.onExit?.({ id, exitCode }); } catch { /* listener errors must not break teardown */ }
+      }
       this.#release(entry, false);
       this.broadcastExit({ id, exitCode, reason: "natural" });
     });
     return true;
+  }
+
+  /**
+   * Subscribe a non-view consumer (e.g. the Remote SSE stream) to raw filtered
+   * output segments. Returns an unsubscribe function. Callers should read the
+   * current snapshot immediately BEFORE calling this (with no await between) so
+   * the backfill and the live stream meet exactly with no gap or overlap.
+   */
+  subscribeData(id, listener) {
+    const entry = this.sessions.get(id);
+    if (!entry) return null;
+    entry.dataListeners.add(listener);
+    return () => entry.dataListeners.delete(listener);
+  }
+
+  snapshotSince(id, afterSequence = 0) {
+    const entry = this.sessions.get(id);
+    return entry ? entry.buffer.readSince(afterSequence) : null;
   }
 
   attach(id, viewId, afterSequence = 0) {
@@ -129,6 +151,9 @@ export class TerminalSessionService {
     const segment = entry.buffer.append(data);
     for (const viewId of entry.subscribers) {
       this.sendDataToView(viewId, { id: entry.id, ...segment });
+    }
+    for (const listener of entry.dataListeners) {
+      try { listener.onData?.({ id: entry.id, ...segment }); } catch { /* keep publishing */ }
     }
   }
 

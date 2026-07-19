@@ -8,8 +8,10 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/pwa/xterm.css">
   <link rel="stylesheet" href="/pwa/styles.css">
   <title>MultiAgent Remote</title>
+  <script src="/pwa/xterm.js" defer></script>
   <script src="/pwa/app.js" defer></script>
 </head>
 <body>
@@ -145,7 +147,8 @@
             </section>
 
             <section class="output-panel">
-              <div class="output-head"><strong>최근 터미널</strong><button class="small-button" id="copyOutputButton" type="button">복사</button></div>
+              <div class="output-head"><strong>터미널</strong><span class="terminal-live" id="terminalLive" hidden>● LIVE</span><button class="small-button" id="copyOutputButton" type="button">복사</button></div>
+              <div class="terminal-mount" id="terminalMount"></div>
               <pre id="outputText" tabindex="0">출력 대기 중…</pre>
             </section>
 

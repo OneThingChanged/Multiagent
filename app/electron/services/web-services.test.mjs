@@ -152,6 +152,60 @@ describe("Electron dashboard server", () => {
     expect(blocked.status).toBe(403);
   });
 
+  it("streams raw terminal output over SSE with backfill, live deltas, and exit", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-stream-"));
+    roots.push(root);
+    let listener = null;
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => true,
+      terminalSnapshot: (id) => (id === "agent-1" ? { data: "backfill\r\n", sequenceEnd: 10 } : null),
+      subscribeTerminal: (id, candidate) => {
+        if (id !== "agent-1") return null;
+        listener = candidate;
+        return () => { listener = null; };
+      },
+      terminalSize: () => ({ cols: 100, rows: 24 }),
+    });
+    services.push(service);
+    service.config.server_port = 0;
+    const status = await service.start();
+
+    const missing = await fetch(`${status.url}/api/stream?id=ghost`);
+    expect(missing.status).toBe(404);
+
+    const controller = new AbortController();
+    const streamed = await fetch(`${status.url}/api/stream?id=agent-1`, { signal: controller.signal });
+    expect(streamed.status).toBe(200);
+    expect(streamed.headers.get("content-type")).toContain("text/event-stream");
+
+    const reader = streamed.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const readUntil = async (predicate) => {
+      for (let attempt = 0; attempt < 30 && !predicate(buffer); attempt += 1) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) break;
+      }
+      if (!predicate(buffer)) throw new Error(`SSE timeout; got: ${buffer}`);
+    };
+
+    await readUntil((text) => text.includes('"cols":100'));
+    expect(buffer).toContain("event: reset");
+    expect(buffer).toContain("backfill");
+    expect(typeof listener?.onData).toBe("function");
+
+    listener.onData({ id: "agent-1", data: "live-delta\r\n" });
+    await readUntil((text) => text.includes("live-delta"));
+
+    listener.onExit({ id: "agent-1", exitCode: 0 });
+    await readUntil((text) => text.includes("event: exit"));
+
+    controller.abort();
+  });
+
   it("supports an ephemeral Remote port and clears the login cookie on logout", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-port-"));
     roots.push(root);

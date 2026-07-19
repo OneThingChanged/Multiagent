@@ -26,6 +26,8 @@ const REMOTE_PWA_ASSETS = new Map([
   ["/pwa/styles.css", { file: "styles.css", type: "text/css; charset=utf-8", cache: "no-cache" }],
   ["/pwa/app.js", { file: "app.js", type: "text/javascript; charset=utf-8", cache: "no-cache" }],
   ["/pwa/login.js", { file: "login.js", type: "text/javascript; charset=utf-8", cache: "no-cache" }],
+  ["/pwa/xterm.js", { file: "vendor/xterm.js", type: "text/javascript; charset=utf-8", cache: "public, max-age=86400" }],
+  ["/pwa/xterm.css", { file: "vendor/xterm.css", type: "text/css; charset=utf-8", cache: "public, max-age=86400" }],
   ["/manifest.webmanifest", { file: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8", cache: "no-cache" }],
   ["/sw.js", { file: "sw.js", type: "text/javascript; charset=utf-8", cache: "no-cache", serviceWorker: true }],
   ["/icon.svg", { file: "icon.svg", type: "image/svg+xml; charset=utf-8", cache: "public, max-age=86400" }],
@@ -43,7 +45,9 @@ const REMOTE_CSP = [
   "manifest-src 'self'",
   "object-src 'none'",
   "script-src 'self'",
-  "style-src 'self'",
+  // xterm.js applies per-cell/cursor inline styles at runtime; needed for the
+  // live terminal. script-src stays strict, which is the XSS-relevant control.
+  "style-src 'self' 'unsafe-inline'",
   "worker-src 'self'",
 ].join("; ");
 
@@ -201,7 +205,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -209,6 +213,9 @@ export class RemoteDashboardService {
     this.writePty = writePty;
     this.requestAccess = requestAccess;
     this.fetchImpl = fetchImpl;
+    this.terminalSnapshot = terminalSnapshot ?? (() => null);
+    this.subscribeTerminal = subscribeTerminal ?? (() => null);
+    this.terminalSize = terminalSize ?? (() => null);
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -437,6 +444,61 @@ export class RemoteDashboardService {
     return true;
   }
 
+  // Server-Sent Events stream of raw filtered PTY output for the Remote xterm
+  // view. First message resets the client terminal and replays the buffer;
+  // subsequent messages are live deltas. Input flows back over POST /api/input.
+  streamTerminal(request, response, id) {
+    const snapshot = this.terminalSnapshot?.(id, 0);
+    if (!snapshot) {
+      sendJson(response, 404, { error: "session is not active" });
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+      "x-content-type-options": "nosniff",
+    });
+
+    const send = (event, payload) => {
+      if (response.writableEnded) return;
+      if (event) response.write(`event: ${event}\n`);
+      response.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+    let closed = false;
+    let unsubscribe = null;
+    let heartbeat = null;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      try { unsubscribe?.(); } catch { /* already gone */ }
+      if (!response.writableEnded) response.end();
+    };
+
+    // Reset + backfill, then subscribe with no await between so the event loop
+    // cannot deliver PTY output in the gap (no dropped or duplicated bytes).
+    // The client mirrors the PTY's real size — it never resizes the shared PTY,
+    // which would reflow the desktop terminal viewing the same session.
+    const size = this.terminalSize?.(id) || null;
+    send("reset", { data: snapshot.data, cols: size?.cols || null, rows: size?.rows || null });
+    unsubscribe = this.subscribeTerminal?.(id, {
+      onData: (segment) => send(null, { data: segment.data }),
+      onExit: (info) => { send("exit", { code: info?.exitCode ?? null }); cleanup(); },
+    });
+    if (!unsubscribe) {
+      send("exit", { code: null });
+      cleanup();
+      return;
+    }
+    heartbeat = setInterval(() => {
+      if (!response.writableEnded) response.write(": ping\n\n");
+    }, 15_000);
+    request.on("close", cleanup);
+    request.on("error", cleanup);
+  }
+
   async start() {
     if (this.server?.listening) return this.status();
     this.server = http.createServer(async (request, response) => {
@@ -514,6 +576,10 @@ export class RemoteDashboardService {
           sendJson(response, 200, { ok: true });
           return;
         }
+        if (request.method === "GET" && url.pathname === "/api/stream") {
+          this.streamTerminal(request, response, String(url.searchParams.get("id") || "").trim());
+          return;
+        }
         if (request.method === "GET" && sendRemoteAsset(response, url.pathname)) return;
         response.writeHead(404).end();
       } catch (error) {
@@ -528,7 +594,12 @@ export class RemoteDashboardService {
 
   async stop() {
     const server = this.server; this.server = null; this.port = null;
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) {
+      // Long-lived SSE terminal streams keep connections open; force them shut
+      // so shutdown (and app quit) never blocks on server.close().
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    }
     return this.status();
   }
 }

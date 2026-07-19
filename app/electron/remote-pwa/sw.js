@@ -1,8 +1,10 @@
-const CACHE_NAME = "multiagent-remote-v2";
+const CACHE_NAME = "multiagent-remote-v3";
 const STATIC_ASSETS = [
   "/",
   "/pwa/styles.css",
   "/pwa/app.js",
+  "/pwa/xterm.js",
+  "/pwa/xterm.css",
   "/manifest.webmanifest",
   "/icon.svg",
   "/icons/icon-192.png",
