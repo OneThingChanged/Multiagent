@@ -251,6 +251,26 @@ export function SettingsModal({
     setDiffToolSaved(true);
     setTimeout(() => setDiffToolSaved(false), 1500);
   };
+
+  const handlePickDiffProgram = async () => {
+    try {
+      const selected = await openDialog({
+        directory: false,
+        multiple: false,
+        filters:
+          navigator.userAgent.includes("Windows")
+            ? [{ name: "Programs", extensions: ["exe", "cmd", "bat"] }]
+            : undefined,
+      });
+      if (typeof selected === "string" && selected) {
+        // Quote the program path if it contains spaces so the two file-path
+        // arguments we append stay separate.
+        setDiffTool(/\s/.test(selected) ? `"${selected}"` : selected);
+      }
+    } catch {
+      // Dialog cancelled or unavailable — leave the field unchanged.
+    }
+  };
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -1397,21 +1417,33 @@ export function SettingsModal({
           <div className="field-label">External diff program</div>
           <div className="app-about-card">
             <div className="app-update-message">
-              Source Control에서 파일의 diff 아이콘(⇄)을 누르면 아래 프로그램으로 변경 전/후를 비교합니다.
-              <code> $LOCAL</code>(HEAD·스테이지 버전)과 <code> $REMOTE</code>(작업 트리 파일)가 파일 경로로 치환됩니다.
-              둘 다 없으면 경로 두 개가 뒤에 추가됩니다. GUI 편집기는 창이 열리기 전 임시 파일이 지워지지 않도록 대기 옵션(예: <code>--wait</code>)을 권장합니다.
+              Source Control에서 파일의 diff 아이콘(⇄)이나 우클릭 메뉴를 누르면 이 프로그램에 비교할
+              파일 두 개(변경 전 · 작업 트리)를 인자로 넘겨 실행합니다. 대부분의 diff 프로그램은 경로 두
+              개만 주면 됩니다.
             </div>
             <label className="field app-remote-field">
-              <span className="field-label">Diff command</span>
-              <input
-                value={diffTool}
-                placeholder={`code --wait --diff "$LOCAL" "$REMOTE"`}
-                onChange={(e) => setDiffTool(e.target.value)}
-                spellCheck={false}
-              />
+              <span className="field-label">Diff program</span>
+              <div className="folder-row">
+                <input
+                  value={diffTool}
+                  placeholder={`예: "C:\\Program Files\\Beyond Compare 4\\BComp.exe"`}
+                  onChange={(e) => setDiffTool(e.target.value)}
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="browse-btn"
+                  onClick={handlePickDiffProgram}
+                >
+                  Browse...
+                </button>
+              </div>
             </label>
             <div className="app-update-message">
-              예시 · VS Code: <code>code --wait --diff "$LOCAL" "$REMOTE"</code> · Beyond Compare: <code>bcomp "$LOCAL" "$REMOTE"</code> · WinMerge: <code>WinMergeU "$LOCAL" "$REMOTE"</code>
+              프로그램만 지정하면 <code>프로그램 "변경전" "작업트리"</code> 형태로 실행됩니다. 인자 순서를
+              직접 정하려면 <code>$LOCAL</code>(변경 전)·<code>$REMOTE</code>(작업 트리)를 쓰세요.
+              예 · Beyond Compare: <code>BComp.exe</code> · WinMerge: <code>WinMergeU.exe</code> ·
+              VS Code(플래그 필요): <code>code --wait --diff "$LOCAL" "$REMOTE"</code>
             </div>
             <div className="app-update-actions">
               <button className="btn-secondary app-update-btn" onClick={handleSaveDiffTool}>
