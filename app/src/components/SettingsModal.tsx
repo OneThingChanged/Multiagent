@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "../platform/runtime";
 import {
   check,
@@ -128,18 +128,70 @@ type DiagnosticExportState =
   | { status: "cancelled" }
   | { status: "error"; message: string };
 
-type SettingsTab = "general" | "dashboard" | "remote" | "ssh" | "about";
+type SettingsCategory =
+  | "general"
+  | "shortcuts"
+  | "hooks"
+  | "dashboard"
+  | "remote"
+  | "ssh"
+  | "about";
 
-const ALL_SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "dashboard", label: "Dashboard" },
-  { id: "remote", label: "Remote" },
-  { id: "ssh", label: "SSH Hosts" },
-  { id: "about", label: "About" },
-];
-const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(
-  (tab) => !IS_COMPANY_BUILD || tab.id !== "remote"
+const svgProps = {
+  width: 16,
+  height: 16,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+const IconSliders = () => (
+  <svg {...svgProps}><line x1="4" y1="8" x2="20" y2="8" /><circle cx="9" cy="8" r="2.4" /><line x1="4" y1="16" x2="20" y2="16" /><circle cx="15" cy="16" r="2.4" /></svg>
 );
+const IconKeyboard = () => (
+  <svg {...svgProps}><rect x="3" y="6" width="18" height="12" rx="2" /><line x1="7" y1="10" x2="7" y2="10" /><line x1="11" y1="10" x2="11" y2="10" /><line x1="15" y1="10" x2="15" y2="10" /><line x1="8" y1="14" x2="16" y2="14" /></svg>
+);
+const IconActivity = () => (
+  <svg {...svgProps}><polyline points="3,13 8,13 10,7 14,17 16,13 21,13" /></svg>
+);
+const IconGrid = () => (
+  <svg {...svgProps}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
+);
+const IconGlobe = () => (
+  <svg {...svgProps}><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><line x1="3" y1="12" x2="21" y2="12" /></svg>
+);
+const IconServer = () => (
+  <svg {...svgProps}><rect x="3" y="4" width="18" height="7" rx="1.6" /><rect x="3" y="13" width="18" height="7" rx="1.6" /><line x1="7" y1="7.5" x2="7" y2="7.5" /><line x1="7" y1="16.5" x2="7" y2="16.5" /></svg>
+);
+const IconInfo = () => (
+  <svg {...svgProps}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><line x1="12" y1="7.6" x2="12" y2="7.6" /></svg>
+);
+
+type NavEntry = {
+  id: SettingsCategory;
+  group: string;
+  label: string;
+  title: string;
+  sub: string;
+  keywords: string;
+  icon: ReactNode;
+};
+
+const ALL_NAV_ENTRIES: NavEntry[] = [
+  { id: "general", group: "Workspace", label: "General", title: "General", sub: "테마 · 알림음 · 데스크톱 펫", keywords: "theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
+  { id: "shortcuts", group: "Workspace", label: "Shortcuts", title: "Shortcuts", sub: "명령별 키보드 단축키", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
+  { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
+  { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
+  { id: "remote", group: "Services", label: "Remote", title: "Remote", sub: "모바일 PWA · 터널 · 접근 승인", keywords: "remote pwa tunnel cloudflare github oauth 모바일 mobile access", icon: <IconGlobe /> },
+  { id: "ssh", group: "Services", label: "SSH Hosts", title: "SSH Hosts", sub: "원격 실행 호스트", keywords: "ssh host server 원격", icon: <IconServer /> },
+  { id: "about", group: "Info", label: "About", title: "About", sub: "버전 · 업데이트 · 진단", keywords: "about version 버전 update 업데이트 diagnostics 진단 creator", icon: <IconInfo /> },
+];
+const NAV_ENTRIES = ALL_NAV_ENTRIES.filter(
+  (entry) => !IS_COMPANY_BUILD || entry.id !== "remote"
+);
+const NAV_GROUPS = [...new Set(NAV_ENTRIES.map((entry) => entry.group))];
 
 function emptySshDraft(): SshHost {
   return {
@@ -183,7 +235,8 @@ export function SettingsModal({
   onCommandShortcutsChange: (shortcuts: CommandShortcuts) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<SettingsTab>("general");
+  const [tab, setTab] = useState<SettingsCategory>("general");
+  const [search, setSearch] = useState("");
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -694,6 +747,26 @@ export function SettingsModal({
     install.status === "downloading" ||
     install.status === "installing";
 
+  const query = search.trim().toLowerCase();
+  const matchesSearch = (entry: NavEntry) =>
+    !query ||
+    entry.label.toLowerCase().includes(query) ||
+    entry.keywords.toLowerCase().includes(query);
+  const activeEntry =
+    NAV_ENTRIES.find((entry) => entry.id === tab) ?? NAV_ENTRIES[0];
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    const next = value.trim().toLowerCase();
+    if (!next) return;
+    const firstHit = NAV_ENTRIES.find(
+      (entry) =>
+        entry.label.toLowerCase().includes(next) ||
+        entry.keywords.toLowerCase().includes(next)
+    );
+    if (firstHit) setTab(firstHit.id);
+  };
+
   return (
     <>
     {sshGuideOpen && <SshSetupGuide onClose={() => setSshGuideOpen(false)} />}
@@ -705,27 +778,60 @@ export function SettingsModal({
         aria-labelledby="app-settings-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="app-settings-header">
-          <h2 id="app-settings-title" className="modal-title">
-            Settings
-          </h2>
+        <aside className="app-settings-side">
+          <div className="app-settings-side-head">
+            <span className="app-settings-brand">M</span>
+            <h2 id="app-settings-title" className="modal-title">Settings</h2>
+          </div>
+          <label className="app-settings-search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+            <input
+              type="search"
+              value={search}
+              placeholder="설정 검색…"
+              onChange={(e) => handleSearch(e.target.value)}
+            />
+          </label>
+          <nav className="app-settings-nav">
+            {NAV_GROUPS.map((group) => {
+              const entries = NAV_ENTRIES.filter(
+                (entry) => entry.group === group && matchesSearch(entry)
+              );
+              if (entries.length === 0) return null;
+              return (
+                <div className="app-settings-nav-group" key={group}>
+                  <div className="app-settings-nav-label">{group}</div>
+                  {entries.map((entry) => (
+                    <button
+                      key={entry.id}
+                      className={`app-settings-nav-item ${
+                        tab === entry.id ? "app-settings-nav-item-active" : ""
+                      }`}
+                      onClick={() => setTab(entry.id)}
+                    >
+                      <span className="app-settings-nav-icon">{entry.icon}</span>
+                      {entry.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </nav>
+          <div className="app-settings-side-foot">
+            <span className="app-settings-ver">v{APP_VERSION}</span>
+            <button className="btn-primary" onClick={onClose}>Done</button>
+          </div>
+        </aside>
+
+        <div className="app-settings-main">
+        <div className="app-settings-content-head">
+          <div>
+            <h2 className="modal-title">{activeEntry.title}</h2>
+            <div className="app-settings-content-sub">{activeEntry.sub}</div>
+          </div>
           <button className="app-icon-btn" onClick={onClose} title="Close">
             ×
           </button>
-        </div>
-
-        <div className="app-settings-tabs">
-          {SETTINGS_TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`app-settings-tab ${
-                tab === t.id ? "app-settings-tab-active" : ""
-              }`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
         </div>
 
         <div className="app-settings-body">
@@ -745,19 +851,6 @@ export function SettingsModal({
                 {option.label}
               </button>
             ))}
-          </div>
-        </div>
-
-        <div className="app-settings-section">
-          <div className="field-label">Keyboard shortcuts</div>
-          <div className="app-about-card">
-            <div className="app-update-message">
-              버튼을 누른 뒤 새 단축키를 입력하세요. Backspace로 해제하고 Esc로 취소할 수 있습니다.
-            </div>
-            <KeyboardShortcuts
-              shortcuts={commandShortcuts}
-              onChange={onCommandShortcutsChange}
-            />
           </div>
         </div>
 
@@ -836,6 +929,25 @@ export function SettingsModal({
           </div>
         </div>
 
+        </>
+        )}
+
+        {tab === "shortcuts" && (
+        <div className="app-settings-section">
+          <div className="field-label">Keyboard shortcuts</div>
+          <div className="app-about-card">
+            <div className="app-update-message">
+              버튼을 누른 뒤 새 단축키를 입력하세요. Backspace로 해제하고 Esc로 취소할 수 있습니다.
+            </div>
+            <KeyboardShortcuts
+              shortcuts={commandShortcuts}
+              onChange={onCommandShortcutsChange}
+            />
+          </div>
+        </div>
+        )}
+
+        {tab === "hooks" && (
         <div className="app-settings-section">
           <div className="field-label">Agent Hooks</div>
           <div className="app-about-card">
@@ -877,7 +989,6 @@ export function SettingsModal({
             </div>
           </div>
         </div>
-        </>
         )}
 
         {tab === "dashboard" && (
@@ -1639,11 +1750,6 @@ export function SettingsModal({
         </>
         )}
         </div>
-
-        <div className="modal-actions">
-          <button className="btn-primary" onClick={onClose}>
-            Done
-          </button>
         </div>
       </div>
     </div>
