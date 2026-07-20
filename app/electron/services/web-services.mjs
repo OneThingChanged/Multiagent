@@ -71,6 +71,54 @@ function sendRemoteAsset(response, pathname) {
   return true;
 }
 
+// SSE stream of raw filtered PTY output for an xterm client. Shared by the
+// Remote server and the local Dashboard so both mirror the desktop terminal.
+function streamTerminalResponse(request, response, id, providers) {
+  const snapshot = providers.terminalSnapshot?.(id, 0);
+  if (!snapshot) {
+    sendJson(response, 404, { error: "session is not active" });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+    "x-content-type-options": "nosniff",
+  });
+  const send = (event, payload) => {
+    if (response.writableEnded) return;
+    if (event) response.write(`event: ${event}\n`);
+    response.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+  let closed = false;
+  let unsubscribe = null;
+  let heartbeat = null;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeat) clearInterval(heartbeat);
+    try { unsubscribe?.(); } catch { /* already gone */ }
+    if (!response.writableEnded) response.end();
+  };
+  const size = providers.terminalSize?.(id) || null;
+  send("reset", { data: snapshot.data, cols: size?.cols || null, rows: size?.rows || null });
+  unsubscribe = providers.subscribeTerminal?.(id, {
+    onData: (segment) => send(null, { data: segment.data }),
+    onExit: (info) => { send("exit", { code: info?.exitCode ?? null }); cleanup(); },
+  });
+  if (!unsubscribe) {
+    send("exit", { code: null });
+    cleanup();
+    return;
+  }
+  heartbeat = setInterval(() => {
+    if (!response.writableEnded) response.write(": ping\n\n");
+  }, 15_000);
+  request.on("close", cleanup);
+  request.on("error", cleanup);
+}
+
 function sendJson(response, status, value, headers = {}) {
   const body = Buffer.from(JSON.stringify(value));
   response.writeHead(status, {
@@ -122,17 +170,25 @@ async function listen(server, desiredPort, host = "127.0.0.1") {
 }
 
 export class LocalDashboardService {
-  constructor({ title, defaultPort, baseDir, configName, stateProvider }) {
+  constructor({ title, defaultPort, baseDir, configName, stateProvider, providers = null }) {
     this.title = title;
     this.defaultPort = defaultPort;
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, configName);
     this.stateProvider = stateProvider;
+    // When provided, the dashboard serves the full Remote PWA (chat/terminal/
+    // input) on loopback instead of the minimal card grid.
+    this.providers = providers;
     this.state = {};
     this.server = null;
     this.port = null;
     this.config = { enabled: false, serverPort: defaultPort };
     this.loadConfig();
+  }
+
+  isLocalOrigin(request) {
+    const origin = request.headers.origin;
+    return !origin || origin.includes("127.0.0.1") || origin.includes("localhost");
   }
 
   loadConfig() {
@@ -174,22 +230,63 @@ export class LocalDashboardService {
 
   async start() {
     if (this.server?.listening) return this.status();
-    this.server = http.createServer((request, response) => {
-      const url = new URL(request.url || "/", "http://127.0.0.1");
-      if (request.method === "GET" && url.pathname === "/api/state") {
-        sendJson(response, 200, this.snapshot());
-        return;
+    const p = this.providers;
+    this.server = http.createServer(async (request, response) => {
+      try {
+        const url = new URL(request.url || "/", "http://127.0.0.1");
+        if (request.method === "GET" && url.pathname === "/api/state") {
+          sendJson(response, 200, this.snapshot());
+          return;
+        }
+        if (p) {
+          // Full Remote PWA on loopback (no login needed locally).
+          if (request.method === "POST" && url.pathname === "/api/input") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            const body = await readJson(request);
+            const id = String(body.id || "").trim();
+            const data = String(body.data || "");
+            if (!id || !data || data.length > 8 * 1024) { sendJson(response, 400, { error: "invalid input" }); return; }
+            sendJson(response, p.writePty?.(id, data) === false ? 409 : 200, { ok: true });
+            return;
+          }
+          if (request.method === "POST" && url.pathname === "/api/session/restart") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            const body = await readJson(request);
+            const id = String(body.id || "").trim();
+            if (!id) { sendJson(response, 400, { error: "invalid session id" }); return; }
+            p.restartSession?.(id);
+            sendJson(response, 200, { ok: true });
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/chat") {
+            const id = String(url.searchParams.get("id") || "").trim();
+            try {
+              sendJson(response, 200, (await p.chatProvider?.(id)) ?? { blocks: [], missing: true });
+            } catch (error) {
+              sendJson(response, 500, { error: error.message, blocks: [] });
+            }
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/stream") {
+            streamTerminalResponse(request, response, String(url.searchParams.get("id") || "").trim(), p);
+            return;
+          }
+          // The PWA shell + assets (index at "/", app.js, xterm, styles, sw…).
+          if (request.method === "GET" && sendRemoteAsset(response, url.pathname)) return;
+        }
+        if (request.method === "GET" && url.pathname === "/") {
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
+            "cache-control": "no-store",
+          });
+          response.end(DASHBOARD_HTML);
+          return;
+        }
+        response.writeHead(404).end();
+      } catch (error) {
+        sendJson(response, 500, { error: error.message });
       }
-      if (request.method === "GET" && url.pathname === "/") {
-        response.writeHead(200, {
-          "content-type": "text/html; charset=utf-8",
-          "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
-          "cache-control": "no-store",
-        });
-        response.end(DASHBOARD_HTML);
-        return;
-      }
-      response.writeHead(404).end();
     });
     this.port = await listen(this.server, this.config.serverPort);
     return this.status();
@@ -199,7 +296,10 @@ export class LocalDashboardService {
     const server = this.server;
     this.server = null;
     this.port = null;
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    }
     return this.status();
   }
 }
@@ -450,55 +550,11 @@ export class RemoteDashboardService {
   // view. First message resets the client terminal and replays the buffer;
   // subsequent messages are live deltas. Input flows back over POST /api/input.
   streamTerminal(request, response, id) {
-    const snapshot = this.terminalSnapshot?.(id, 0);
-    if (!snapshot) {
-      sendJson(response, 404, { error: "session is not active" });
-      return;
-    }
-    response.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "x-accel-buffering": "no",
-      "x-content-type-options": "nosniff",
+    streamTerminalResponse(request, response, id, {
+      terminalSnapshot: this.terminalSnapshot,
+      subscribeTerminal: this.subscribeTerminal,
+      terminalSize: this.terminalSize,
     });
-
-    const send = (event, payload) => {
-      if (response.writableEnded) return;
-      if (event) response.write(`event: ${event}\n`);
-      response.write(`data: ${JSON.stringify(payload)}\n\n`);
-    };
-    let closed = false;
-    let unsubscribe = null;
-    let heartbeat = null;
-    const cleanup = () => {
-      if (closed) return;
-      closed = true;
-      if (heartbeat) clearInterval(heartbeat);
-      try { unsubscribe?.(); } catch { /* already gone */ }
-      if (!response.writableEnded) response.end();
-    };
-
-    // Reset + backfill, then subscribe with no await between so the event loop
-    // cannot deliver PTY output in the gap (no dropped or duplicated bytes).
-    // The client mirrors the PTY's real size — it never resizes the shared PTY,
-    // which would reflow the desktop terminal viewing the same session.
-    const size = this.terminalSize?.(id) || null;
-    send("reset", { data: snapshot.data, cols: size?.cols || null, rows: size?.rows || null });
-    unsubscribe = this.subscribeTerminal?.(id, {
-      onData: (segment) => send(null, { data: segment.data }),
-      onExit: (info) => { send("exit", { code: info?.exitCode ?? null }); cleanup(); },
-    });
-    if (!unsubscribe) {
-      send("exit", { code: null });
-      cleanup();
-      return;
-    }
-    heartbeat = setInterval(() => {
-      if (!response.writableEnded) response.write(": ping\n\n");
-    }, 15_000);
-    request.on("close", cleanup);
-    request.on("error", cleanup);
   }
 
   async start() {

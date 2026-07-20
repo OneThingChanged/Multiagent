@@ -152,6 +152,43 @@ describe("Electron dashboard server", () => {
     expect(blocked.status).toBe(403);
   });
 
+  it("serves the full Remote PWA + chat/input from the local Dashboard when providers are given", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-dash-pwa-"));
+    roots.push(root);
+    const writes = [];
+    const service = new LocalDashboardService({
+      title: "Monitor",
+      defaultPort: 0,
+      baseDir: root,
+      configName: "monitor.json",
+      stateProvider: () => ({ pwa: true, agents: [], view: { projects: [], agents: [], groups: [] } }),
+      providers: {
+        writePty: (id, data) => { writes.push({ id, data }); return true; },
+        chatProvider: (id) => ({ blocks: [{ role: "user", kind: "text", text: `hi ${id}` }], missing: false }),
+        terminalSnapshot: () => null,
+        subscribeTerminal: () => null,
+        terminalSize: () => null,
+        restartSession: () => true,
+      },
+    });
+    services.push(service);
+    const status = await service.start();
+
+    const page = await fetch(status.url).then((r) => r.text());
+    expect(page).toContain("Remote Monitor");
+    const state = await fetch(`${status.url}/api/state`).then((r) => r.json());
+    expect(state.pwa).toBe(true);
+    const chat = await fetch(`${status.url}/api/chat?id=agent-9`).then((r) => r.json());
+    expect(chat.blocks[0].text).toBe("hi agent-9");
+    const input = await fetch(`${status.url}/api/input`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-9", data: "go\r" }),
+    });
+    expect(input.status).toBe(200);
+    expect(writes).toEqual([{ id: "agent-9", data: "go\r" }]);
+  });
+
   it("streams raw terminal output over SSE with backfill, live deltas, and exit", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-stream-"));
     roots.push(root);

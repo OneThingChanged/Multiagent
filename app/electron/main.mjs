@@ -274,16 +274,57 @@ function liveOutputForAgents(agents, maxOutput = 80_000) {
 }
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
+
+// Session capabilities shared by every web surface (Remote + local Dashboard):
+// send input, stream the live terminal, read the chat transcript, restart.
+const sessionProviders = {
+  writePty(id, data) {
+    const entry = ptys.get(id);
+    if (!entry || data.length > 8 * 1024) return false;
+    entry.process.write(data);
+    return true;
+  },
+  terminalSnapshot: (id, afterSequence) => terminalSessions.snapshotSince(id, afterSequence),
+  subscribeTerminal: (id, listener) => terminalSessions.subscribeData(id, listener),
+  terminalSize: (id) => {
+    const entry = ptys.get(id);
+    return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
+  },
+  chatProvider: (id) => chatBlocksForAgent(id),
+  restartSession: (id) => {
+    sendEventToAll("remote:restart-session", { id: asString(id) });
+    return ptys.has(asString(id));
+  },
+};
+
+// Build the Remote-PWA-shaped state from the monitor's synced snapshot so the
+// Dashboard can serve the same UI (chat/terminal) as the Remote client.
+function dashboardPwaState() {
+  const s = monitorService.state || {};
+  const agents = Array.isArray(s.agents) ? s.agents : [];
+  return {
+    pwa: true,
+    remote: true,
+    agents: liveOutputForAgents(agents),
+    view: {
+      projects: s.projects ?? [],
+      agents: agents.map((a) => ({ id: a.id, projectId: a.projectId })),
+      groups: s.groups ?? [],
+      activeGroupId: s.view?.activeGroupId ?? null,
+      activeProjectId: s.view?.activeProjectId ?? null,
+    },
+    usage: usageIndex.dashboardSummary(),
+  };
+}
+
 let monitorService;
 monitorService = new LocalDashboardService({
   title: "MultiAgent Monitor",
   defaultPort: 4421,
   baseDir: hookBaseDir,
   configName: "monitor-config.json",
-  stateProvider: () => ({
-    agents: liveOutputForAgents(monitorService.state.agents),
-    usage: usageIndex.dashboardSummary(),
-  }),
+  stateProvider: dashboardPwaState,
+  providers: sessionProviders,
 });
 let usageDashboard;
 usageDashboard = new LocalDashboardService({
@@ -300,27 +341,7 @@ let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
   stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
-  writePty(id, data) {
-    if (!id || data.length > 8 * 1024) return false;
-    const entry = ptys.get(id);
-    if (!entry) return false;
-    entry.process.write(data);
-    return true;
-  },
-  // Live raw-terminal streaming for the Remote xterm view. Read the snapshot
-  // and subscribe with no await between so backfill meets the live stream.
-  terminalSnapshot: (id, afterSequence) => terminalSessions.snapshotSince(id, afterSequence),
-  subscribeTerminal: (id, listener) => terminalSessions.subscribeData(id, listener),
-  terminalSize: (id) => {
-    const entry = ptys.get(id);
-    return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
-  },
-  chatProvider: (id) => chatBlocksForAgent(id),
-  restartSession(id) {
-    // Ask the renderer to respawn this session (it owns the spawn config).
-    sendEventToAll("remote:restart-session", { id: asString(id) });
-    return ptys.has(asString(id));
-  },
+  ...sessionProviders,
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
   },
