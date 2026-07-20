@@ -173,6 +173,7 @@ let desktopPetUpdate = {
 const monitorHooks = new Map();
 /** agentId -> latest hook-reported transcript path / session id (for the chat view). */
 const agentTranscripts = new Map();
+const agentTranscriptTool = new Map(); // agentId -> tool the resolved transcript belongs to
 const agentSessionIds = new Map();
 /** agentId -> epoch ms until which transcript resolution is known to fail
  *  (avoids rescanning the session dir every poll for sessions with no file). */
@@ -1124,40 +1125,70 @@ function findTranscriptBySessionId(root, tool, sessionId) {
 }
 
 // Resolve + decode the current transcript for an agent (for the chat view).
-async function chatBlocksForAgent(agentId) {
+// Locate a transcript for an agent, trying the preferred tool first (by session
+// id, then by working folder) and then the other tool by folder — so a session
+// whose tool is mislabeled, or has no session id (e.g. after a restart), or
+// whose only transcript lives under the other CLI still resolves. Returns the
+// matched transcript path AND the tool it belongs to (so we decode correctly).
+async function resolveChatTranscript({ preferredTool, sessionId, folder }) {
+  const other = preferredTool === "codex" ? "claude" : "codex";
+  const tools = preferredTool ? [preferredTool, other] : ["claude", "codex"];
+  for (const tool of tools) {
+    if (sessionId) {
+      const bySid = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
+      if (bySid) return { path: bySid, tool };
+    }
+    if (folder) {
+      const byFolder = await sessionService
+        .resolveTranscript({ aiToolId: tool, folder, preferredSessionId: sessionId })
+        .catch(() => null);
+      if (byFolder) return { path: byFolder, tool };
+    }
+  }
+  return null;
+}
+
+async function chatBlocksForAgent(agentId, folderArg) {
   const id = asString(agentId).trim();
   // Prefer the live PTY, but fall back to the synced catalog so idle/restored
   // sessions (no live PTY, no fresh hook) still resolve their tool + session.
   const catalogAgent = usageIndex.catalog.agents.find((agent) => agent.id === id);
-  const tool = ptys.get(id)?.aiToolId || catalogAgent?.aiToolId || null;
-  if (tool !== "codex" && tool !== "claude") {
-    return { blocks: [], truncated: false, missing: true, unsupported: true };
-  }
+  const declaredTool = ptys.get(id)?.aiToolId || catalogAgent?.aiToolId || null;
+  // The frontend passes the session's project folder — the most reliable cwd —
+  // ahead of the live pty cwd / catalog folder.
+  const folder =
+    asString(folderArg).trim() ||
+    ptys.get(id)?.cwd ||
+    catalogAgent?.folder ||
+    catalogAgent?.cwd ||
+    null;
   const sessionId = agentSessionIds.get(id) || catalogAgent?.lastSessionId || null;
+
   let transcriptPath = agentTranscripts.get(id);
+  let tool = agentTranscriptTool.get(id) || declaredTool;
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    // findTranscriptBySessionId does a recursive dir scan; don't repeat it every
-    // poll when the transcript can't be found — back off for a while.
+    // The resolver does recursive dir scans; don't repeat every poll on a miss.
     if ((transcriptMissUntil.get(id) ?? 0) > Date.now()) {
-      return { blocks: [], truncated: false, missing: true, tool };
+      return { blocks: [], truncated: false, missing: true, tool: declaredTool ?? undefined };
     }
-    transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
-    if (!transcriptPath) {
-      // No session id (e.g. after a restart, or a session with no hook) — fall
-      // back to the most recent transcript for this session's working folder.
-      const folder = ptys.get(id)?.cwd || catalogAgent?.folder || catalogAgent?.cwd || null;
-      transcriptPath = await sessionService
-        .resolveTranscript({ aiToolId: tool, folder, preferredSessionId: sessionId })
-        .catch(() => null);
-    }
-    if (transcriptPath) {
-      agentTranscripts.set(id, transcriptPath); // cache the resolve
+    const resolved = await resolveChatTranscript({ preferredTool: declaredTool, sessionId, folder });
+    if (resolved) {
+      transcriptPath = resolved.path;
+      tool = resolved.tool;
+      agentTranscripts.set(id, transcriptPath);
+      agentTranscriptTool.set(id, tool);
       transcriptMissUntil.delete(id);
     } else {
       transcriptMissUntil.set(id, Date.now() + 15_000);
     }
   }
-  if (!transcriptPath) return { blocks: [], truncated: false, missing: true, tool };
+  if (!transcriptPath) {
+    // Nothing found. Report unsupported only when we truly can't name a CLI.
+    if (declaredTool !== "codex" && declaredTool !== "claude") {
+      return { blocks: [], truncated: false, missing: true, unsupported: true };
+    }
+    return { blocks: [], truncated: false, missing: true, tool: declaredTool };
+  }
   const result = await readChatTranscript(tool, transcriptPath);
   return { ...result, tool };
 }
@@ -2359,7 +2390,7 @@ async function invokeCommand(event, command, rawArgs) {
     case "read_chat_transcript":
       return readChatTranscript(args.tool, args.path);
     case "chat_blocks":
-      return chatBlocksForAgent(args.id);
+      return chatBlocksForAgent(args.id, args.folder);
     case "git_status":
       return gitStatusForTree(args.folder);
     case "git_changes":

@@ -170,11 +170,13 @@ export function ChatView({
   agentId,
   active,
   agentStatus,
+  folder,
 }: {
   agentId: string;
   active: boolean;
   theme: AppThemeId;
   agentStatus: AgentStatus;
+  folder?: string;
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
@@ -211,7 +213,7 @@ export function ChatView({
     let cancelled = false;
     const fetchBlocks = async () => {
       try {
-        const result = await invoke("chat_blocks", { id: agentId });
+        const result = await invoke("chat_blocks", { id: agentId, folder });
         if (cancelled) return;
         if (result.unsupported) {
           setStatus("unsupported");
@@ -257,7 +259,7 @@ export function ChatView({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [agentId, active]);
+  }, [agentId, active, folder]);
 
   // Group blocks into turns as [start, end) ranges. A new turn begins at a user
   // *text* block; everything else — assistant text/reasoning/tools and user

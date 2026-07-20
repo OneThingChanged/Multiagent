@@ -182,7 +182,7 @@ export type RuntimeCommandContract = {
     result: { blocks: ChatBlock[]; truncated: boolean; missing: boolean };
   };
   chat_blocks: {
-    args: { id: string };
+    args: { id: string; folder?: string };
     result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string };
   };
   git_status: {
