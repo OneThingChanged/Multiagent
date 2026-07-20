@@ -109,6 +109,7 @@ const DELIVERED_EVENTS = Object.freeze([
   "desktop-pet:close-requested",
   "remote:access-request",
   "remote:restart-session",
+  "chat:changed",
   "app:close-requested",
   "agent:hook-event",
   "native-notification:clicked",

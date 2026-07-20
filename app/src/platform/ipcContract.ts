@@ -41,6 +41,7 @@ export type RuntimeEventName =
   | "desktop-pet:position-reset" | "desktop-pet:activate"
   | "desktop-pet:close-requested" | "remote:access-request"
   | "remote:restart-session"
+  | "chat:changed"
   | "app:close-requested" | "agent:hook-event"
   | "native-notification:clicked" | "update:progress";
 

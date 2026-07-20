@@ -1041,6 +1041,43 @@ async function listMarkdownFiles(folder) {
   return output;
 }
 
+// Live-watch resolved transcript files: on change, bust the parse cache and
+// tell renderers to refetch immediately (instead of waiting for the 3s poll).
+// Bounded LRU of watchers so long-lived sessions don't leak fs handles.
+const chatWatchers = new Map(); // resolvedPath -> { watcher, timer }
+const MAX_CHAT_WATCHERS = 12;
+function ensureChatWatch(transcriptPath) {
+  let resolved;
+  try {
+    resolved = fs.realpathSync(transcriptPath);
+  } catch {
+    return;
+  }
+  if (chatWatchers.has(resolved)) return;
+  let watcher;
+  try {
+    watcher = fs.watch(resolved, { persistent: false }, () => {
+      const entry = chatWatchers.get(resolved);
+      if (!entry) return;
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => {
+        chatTranscriptCache.delete(resolved);
+        sendEventToAll("chat:changed", { path: resolved });
+      }, 180);
+    });
+  } catch {
+    return; // file vanished / unwatchable — the poll still covers it
+  }
+  chatWatchers.set(resolved, { watcher, timer: null });
+  while (chatWatchers.size > MAX_CHAT_WATCHERS) {
+    const oldestKey = chatWatchers.keys().next().value;
+    const oldest = chatWatchers.get(oldestKey);
+    try { oldest?.watcher.close(); } catch { /* already closed */ }
+    clearTimeout(oldest?.timer);
+    chatWatchers.delete(oldestKey);
+  }
+}
+
 // Root directory holding an agent's own JSONL session transcripts.
 function chatSessionRoot(tool) {
   if (tool === "codex") return path.join(os.homedir(), ".codex", "sessions");
@@ -1183,6 +1220,7 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
     }
     return { blocks: [], truncated: false, missing: true, tool: declaredTool };
   }
+  ensureChatWatch(transcriptPath); // push a refresh when the file changes
   const result = await readChatTranscript(tool, transcriptPath);
   return { ...result, tool };
 }

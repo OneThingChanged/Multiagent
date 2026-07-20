@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { invoke } from "../platform/runtime";
+import { invoke, listen } from "../platform/runtime";
 import { electronBridge } from "../platform/electronBridge";
 import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import { parseChatPrompt } from "../lib/chatPrompt";
@@ -311,6 +311,22 @@ export function ChatView({
       window.clearInterval(timer);
     };
   }, [agentId, active, sessionId]);
+
+  // Instant refresh when the transcript file changes on disk (fs.watch push),
+  // instead of waiting for the 3s poll. Only the focused pane subscribes.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    let unlisten = () => {};
+    void listen("chat:changed", () => fetchRef.current()).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, [active]);
 
   // Group blocks into turns as [start, end) ranges. A new turn begins at a user
   // *text* block; everything else — assistant text/reasoning/tools and user
