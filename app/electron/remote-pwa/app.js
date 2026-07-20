@@ -44,6 +44,8 @@ const ui = {
   promptPanel: $("#promptPanel"),
   promptText: $("#promptText"),
   outputText: $("#outputText"),
+  sessionOffline: $("#sessionOffline"),
+  restartSessionButton: $("#restartSessionButton"),
   sessionMode: $("#sessionMode"),
   chatView: $("#chatView"),
   outputPanel: $("#outputPanel"),
@@ -624,6 +626,7 @@ function renderSession() {
   ui.detailStatus.textContent = STATUS[status].label;
   ui.detailName.textContent = text(agent.name || agent.id);
   ui.detailMeta.textContent = `${projectName(agent)} · ${toolName(agent)}`;
+  if (ui.sessionOffline) ui.sessionOffline.hidden = status !== "offline";
   ui.questionPanel.hidden = !question.text;
   ui.questionText.textContent = question.text;
   const optionFragment = document.createDocumentFragment();
@@ -1342,6 +1345,26 @@ ui.backToScreenButton.addEventListener("click", () => {
 });
 ui.refreshButton.addEventListener("click", () => fetchState());
 ui.focusAnswerButton.addEventListener("click", () => ui.messageInput.focus());
+ui.restartSessionButton?.addEventListener("click", async () => {
+  const agent = selectedAgent();
+  if (!agent) return;
+  ui.restartSessionButton.disabled = true;
+  try {
+    const response = await fetch("/api/session/restart", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agent.id }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    showToast("세션을 다시 시작했습니다.");
+    setTimeout(() => fetchState({ quiet: true }), 600);
+  } catch (error) {
+    showToast(`다시 시작 실패: ${error.message}`);
+  } finally {
+    ui.restartSessionButton.disabled = false;
+  }
+});
 ui.sessionMode?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-mode]");
   if (!button) return;

@@ -205,7 +205,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -217,6 +217,7 @@ export class RemoteDashboardService {
     this.subscribeTerminal = subscribeTerminal ?? (() => null);
     this.terminalSize = terminalSize ?? (() => null);
     this.chatProvider = chatProvider ?? (() => null);
+    this.restartSession = restartSession ?? (() => false);
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -579,6 +580,21 @@ export class RemoteDashboardService {
         }
         if (request.method === "GET" && url.pathname === "/api/stream") {
           this.streamTerminal(request, response, String(url.searchParams.get("id") || "").trim());
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/session/restart") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          const body = await readJson(request);
+          const id = String(body.id || "").trim();
+          if (!id) {
+            sendJson(response, 400, { error: "invalid session id" });
+            return;
+          }
+          this.restartSession?.(id);
+          sendJson(response, 200, { ok: true });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/chat") {

@@ -2634,6 +2634,24 @@ function App() {
     ]
   );
 
+  // Remote "restart session" (비활성 → 다시 시작): the mobile/site client asks
+  // the desktop to respawn an offline session by id, reusing the same spawn path.
+  useEffect(() => {
+    if (!remoteEnabled) return;
+    let cancelled = false;
+    let unlisten = () => {};
+    listen<{ id: string }>("remote:restart-session", (event) => {
+      if (!cancelled && event.payload?.id) void spawnAgentInBackground(event.payload.id);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, [remoteEnabled, spawnAgentInBackground]);
+
   // Startup reopen prompt answers.
   const confirmReopen = useCallback(() => {
     const pending = pendingReopen;

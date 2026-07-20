@@ -313,6 +313,11 @@ remoteService = new RemoteDashboardService({
     return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
   },
   chatProvider: (id) => chatBlocksForAgent(id),
+  restartSession(id) {
+    // Ask the renderer to respawn this session (it owns the spawn config).
+    sendEventToAll("remote:restart-session", { id: asString(id) });
+    return ptys.has(asString(id));
+  },
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
   },
