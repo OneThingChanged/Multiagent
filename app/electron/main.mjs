@@ -41,6 +41,7 @@ import {
 } from "./services/ssh-service.mjs";
 import { resolveTerminalPath } from "./services/terminal-path-service.mjs";
 import { sanitizeTerminalOutput } from "./services/terminal-sanitize.mjs";
+import { parseChatTranscript } from "./services/chat-transcript.mjs";
 import {
   LocalDashboardService,
   RemoteDashboardService,
@@ -979,6 +980,47 @@ async function listMarkdownFiles(folder) {
   const output = [];
   await collectDocs(root, root, output);
   return output;
+}
+
+// Root directory holding an agent's own JSONL session transcripts.
+function chatSessionRoot(tool) {
+  if (tool === "codex") return path.join(os.homedir(), ".codex", "sessions");
+  if (tool === "claude") return path.join(os.homedir(), ".claude", "projects");
+  return null;
+}
+
+// Read an agent transcript and decode it into chat blocks for the conversation
+// view. Sandboxed to the tool's session directory. Very large transcripts are
+// read from the tail so a long session doesn't block the UI.
+const MAX_CHAT_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+async function readChatTranscript(tool, transcriptPath) {
+  const toolId = asString(tool);
+  const root = chatSessionRoot(toolId);
+  if (!root) throw new Error("지원하지 않는 도구입니다.");
+  const requested = asString(transcriptPath).trim();
+  if (!requested || !fs.existsSync(requested)) {
+    return { blocks: [], truncated: false, missing: true };
+  }
+  const resolved = fs.realpathSync(requested);
+  const rootReal = fs.existsSync(root) ? fs.realpathSync(root) : root;
+  if (!isInside(rootReal, resolved)) throw new Error("허용되지 않은 트랜스크립트 경로입니다.");
+  const stat = await fsPromises.stat(resolved);
+  if (stat.size > MAX_CHAT_TRANSCRIPT_BYTES) {
+    const start = stat.size - MAX_CHAT_TRANSCRIPT_BYTES;
+    const handle = await fsPromises.open(resolved, "r");
+    try {
+      const buffer = Buffer.alloc(stat.size - start);
+      await handle.read(buffer, 0, buffer.length, start);
+      let text = buffer.toString("utf8");
+      const newline = text.indexOf("\n"); // drop the partial first line
+      if (newline >= 0) text = text.slice(newline + 1);
+      return { blocks: parseChatTranscript(text, toolId), truncated: true, missing: false };
+    } finally {
+      await handle.close();
+    }
+  }
+  const text = await fsPromises.readFile(resolved, "utf8");
+  return { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
 }
 
 function resolveDocPath(folder, requested) {
@@ -2175,6 +2217,8 @@ async function invokeCommand(event, command, rawArgs) {
       return listDirectory(args.folder, args.relative);
     case "read_text_file":
       return readTextFile(args.folder, args.relativePath);
+    case "read_chat_transcript":
+      return readChatTranscript(args.tool, args.path);
     case "git_status":
       return gitStatusForTree(args.folder);
     case "git_changes":

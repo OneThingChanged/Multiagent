@@ -7,7 +7,8 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
-  | "read_text_file" | "git_status" | "git_changes" | "git_stage"
+  | "read_text_file" | "read_chat_transcript"
+  | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
   | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"
   | "resource_usage"
@@ -136,6 +137,16 @@ export type PortsResult = {
   ports: PortEntry[];
 };
 
+export type ChatBlock = {
+  role: "user" | "assistant" | "tool";
+  kind: "text" | "reasoning" | "tool-call" | "tool-result" | "image";
+  text?: string;
+  name?: string;
+  input?: unknown;
+  output?: string;
+  isError?: boolean;
+};
+
 export type GitFileCommit = {
   hash: string;
   subject: string;
@@ -163,6 +174,10 @@ export type RuntimeCommandContract = {
   read_text_file: {
     args: { folder: string; relativePath: string };
     result: TextFileResult;
+  };
+  read_chat_transcript: {
+    args: { tool: string; path: string };
+    result: { blocks: ChatBlock[]; truncated: boolean; missing: boolean };
   };
   git_status: {
     args: { folder: string };

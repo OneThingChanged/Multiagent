@@ -25,6 +25,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "resolve_markdown_path",
   "list_directory",
   "read_text_file",
+  "read_chat_transcript",
   "git_status",
   "git_changes",
   "git_stage",
@@ -198,6 +199,12 @@ function assertInvokeRequest(command, rawArgs) {
       assertPathString(args.folder, "folder");
       assertPathString(args.relativePath, "relative path");
       assertPathString(args.newName, "new name");
+      break;
+    case "read_chat_transcript":
+      if (typeof args.tool !== "string" || !args.tool.trim()) {
+        throw new TypeError("Electron chat transcript tool must be a string");
+      }
+      assertPathString(args.path, "transcript path");
       break;
     case "git_status":
     case "git_changes":
