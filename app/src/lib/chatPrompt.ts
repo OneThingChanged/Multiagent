@@ -85,13 +85,16 @@ export function parseChatPrompt(
   question?: string | null,
   assistantMessage?: string | null
 ): ChatPrompt | null {
+  // Only while the agent is actually paused for input — otherwise a stale
+  // interactive_question would keep the card up after it was answered.
+  const waiting = status === "waiting" || status === "blocked";
+  if (!waiting) return null;
   // Structured AskUserQuestion JSON (Claude) → option buttons by index.
   if (question && question.trim().startsWith("{")) {
     const structured = parseStructured(question);
     if (structured) return structured;
   }
-  const waiting = status === "waiting" || status === "blocked";
-  const src = (question?.trim() || (waiting ? assistantMessage?.trim() : "") || "").trim();
+  const src = (question?.trim() || assistantMessage?.trim() || "").trim();
   if (!src) return null;
 
   const lower = src.toLowerCase();

@@ -159,6 +159,8 @@ function promptOptionLines(t) {
 // Inline prompt (question options / permission) for the chat card.
 function promptFor(agent) {
   if (!agent) return null;
+  // Only while the agent is actually waiting for input (avoids a stale card).
+  if (statusOf(agent) !== "attention") return null;
   const details = questionDetails(agent);
   if (details.options && details.options.length) {
     return {
