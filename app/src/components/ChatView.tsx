@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -190,18 +190,69 @@ export function ChatView({
   );
 
   return (
-    <div className="chat-view" ref={scrollRef}>
-      {status === "unsupported" && (
-        <div className="chat-empty">대화 보기를 지원하지 않는 세션입니다 (codex/claude).</div>
-      )}
-      {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
-      {status === "empty" && <div className="chat-empty">아직 대화 기록이 없습니다.</div>}
-      {status === "ready" && hidden > 0 && (
-        <button type="button" className="chat-more" onClick={() => setVisible((v) => v + CHAT_PAGE * 2)}>
-          ▲ 이전 대화 더 보기 ({hidden})
-        </button>
-      )}
-      {status === "ready" && visibleTurns}
+    <div className="chat-view">
+      <div className="chat-scroll" ref={scrollRef}>
+        {status === "unsupported" && (
+          <div className="chat-empty">대화 보기를 지원하지 않는 세션입니다 (codex/claude).</div>
+        )}
+        {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
+        {status === "empty" && <div className="chat-empty">아직 대화 기록이 없습니다.</div>}
+        {status === "ready" && hidden > 0 && (
+          <button type="button" className="chat-more" onClick={() => setVisible((v) => v + CHAT_PAGE * 2)}>
+            ▲ 이전 대화 더 보기 ({hidden})
+          </button>
+        )}
+        {status === "ready" && visibleTurns}
+      </div>
+      {status !== "unsupported" && <ChatComposer agentId={agentId} />}
+    </div>
+  );
+}
+
+// Send additional instructions straight to the session's PTY from the chat
+// view (so you don't have to switch to the terminal tab). Text and the Enter
+// keystroke MUST be written separately — a single "text\r" is treated as a
+// multiline paste by Codex/Claude and won't submit.
+function ChatComposer({ agentId }: { agentId: string }) {
+  const [text, setText] = useState("");
+
+  const send = () => {
+    const value = text.trim();
+    if (!value) return;
+    void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
+    window.setTimeout(() => {
+      void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
+    }, 80);
+    setText("");
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter is a newline. Ignore Enter mid-IME-composition
+    // (Korean/Japanese) so a committing keystroke doesn't submit early.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  return (
+    <div className="chat-composer">
+      <textarea
+        className="chat-composer-input"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
+        rows={1}
+      />
+      <button
+        type="button"
+        className="chat-composer-send"
+        onClick={send}
+        disabled={!text.trim()}
+      >
+        전송
+      </button>
     </div>
   );
 }
