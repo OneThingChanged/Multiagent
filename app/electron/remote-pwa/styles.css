@@ -212,11 +212,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .status-lane[data-status="offline"] .lane-title i { background: var(--red); }
 .lane-head b { color: var(--muted); font-size: 9px; }
 .lane-cards { display: grid; gap: 7px; }
-.monitor-card { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 9px; text-align: left; background: var(--panel-2); }
+.monitor-card { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 9px; text-align: left; background: var(--panel-2); overflow: hidden; }
 .monitor-card:hover { border-color: var(--line-strong); background: var(--panel-3); }
 .monitor-card strong { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .monitor-card span { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
-.monitor-card p { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #b7c7d3; font-size: 9px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.monitor-card p { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #b7c7d3; font-size: 9px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; word-break: break-word; }
 .lane-empty { margin: 30px 0; color: #52697a; text-align: center; font-size: 9px; }
 
 .screen-layout { display: flex; min-height: 530px; gap: 8px; overflow: auto; }

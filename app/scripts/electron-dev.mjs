@@ -65,6 +65,11 @@ try {
     env: {
       ...process.env,
       MULTIAGENT_DEV_URL: devUrl,
+      // Distinct server ports so the dev app never collides with an installed
+      // (tray-resident) instance holding the defaults — connect to these in dev.
+      MULTIAGENT_REMOTE_PORT: process.env.MULTIAGENT_REMOTE_PORT || "18900",
+      MULTIAGENT_MONITOR_PORT: process.env.MULTIAGENT_MONITOR_PORT || "4521",
+      MULTIAGENT_USAGE_PORT: process.env.MULTIAGENT_USAGE_PORT || "3241",
     },
     windowsHide: true,
   });

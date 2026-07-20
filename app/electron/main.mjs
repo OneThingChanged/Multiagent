@@ -346,6 +346,20 @@ remoteService = new RemoteDashboardService({
     sendEventToAll("remote:access-request", { login });
   },
 });
+// Dev/multi-instance port overrides: let a dev build bind different ports than
+// an installed (tray-resident) instance holding the defaults. In-memory only —
+// not persisted to the shared config files.
+const portOverride = (value) => {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 ? port : null;
+};
+const remotePortOverride = portOverride(process.env.MULTIAGENT_REMOTE_PORT);
+if (remotePortOverride) remoteService.config.server_port = remotePortOverride;
+const monitorPortOverride = portOverride(process.env.MULTIAGENT_MONITOR_PORT);
+if (monitorPortOverride) monitorService.config.serverPort = monitorPortOverride;
+const usagePortOverride = portOverride(process.env.MULTIAGENT_USAGE_PORT);
+if (usagePortOverride) usageDashboard.config.serverPort = usagePortOverride;
+
 const tunnelService = new TunnelService({
   baseDir: hookBaseDir,
   getConfig: () => remoteService.config,
