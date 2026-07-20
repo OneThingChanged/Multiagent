@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.51",
+  "version": "0.5.52",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
