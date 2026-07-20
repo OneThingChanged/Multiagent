@@ -564,14 +564,25 @@ function ChatComposer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Esc-to-cancel is handled by a window listener in ChatView so it works
-    // regardless of focus; nothing to do here for Escape.
-    // Enter sends; Shift+Enter is a newline. Ignore Enter mid-IME-composition
-    // (Korean/Japanese) so a committing keystroke doesn't submit early.
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // Esc-to-cancel is handled by a window listener in ChatView.
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd+Enter inserts a newline at the cursor (a textarea has no
+      // default newline for this combo, so do it manually).
       e.preventDefault();
-      send();
+      const el = e.currentTarget;
+      const start = el.selectionStart ?? text.length;
+      const end = el.selectionEnd ?? text.length;
+      const next = `${text.slice(0, start)}\n${text.slice(end)}`;
+      updateText(next);
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = start + 1;
+      });
+      return;
     }
+    // Plain Enter sends.
+    e.preventDefault();
+    send();
   };
 
   const canSend = Boolean(text.trim() || attachments.length);
@@ -610,8 +621,8 @@ function ChatComposer({
           onDrop={onDrop}
           placeholder={
             busy
-              ? "작업 중 — Enter로 예약(대기열에 추가)"
-              : "이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
+              ? "작업 중 — Enter로 예약(대기열에 추가) · Ctrl+Enter 줄바꿈"
+              : "이 세션으로 전송…  (Enter 전송 · Ctrl+Enter 줄바꿈)"
           }
           rows={1}
         />
