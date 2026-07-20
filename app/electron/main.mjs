@@ -1057,13 +1057,17 @@ function findTranscriptBySessionId(root, tool, sessionId) {
 // Resolve + decode the current transcript for an agent (for the chat view).
 async function chatBlocksForAgent(agentId) {
   const id = asString(agentId).trim();
-  const tool = ptys.get(id)?.aiToolId;
+  // Prefer the live PTY, but fall back to the synced catalog so idle/restored
+  // sessions (no live PTY, no fresh hook) still resolve their tool + session.
+  const catalogAgent = usageIndex.catalog.agents.find((agent) => agent.id === id);
+  const tool = ptys.get(id)?.aiToolId || catalogAgent?.aiToolId || null;
   if (tool !== "codex" && tool !== "claude") {
     return { blocks: [], truncated: false, missing: true, unsupported: true };
   }
+  const sessionId = agentSessionIds.get(id) || catalogAgent?.lastSessionId || null;
   let transcriptPath = agentTranscripts.get(id);
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, agentSessionIds.get(id));
+    transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
     if (transcriptPath) agentTranscripts.set(id, transcriptPath); // cache the resolve
   }
   if (!transcriptPath) return { blocks: [], truncated: false, missing: true, tool };
