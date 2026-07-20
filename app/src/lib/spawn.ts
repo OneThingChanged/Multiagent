@@ -51,6 +51,7 @@ export function resolveRemoteToolCommand(
 
   if (aiToolId === "codex" && command === "codex") return "codex.cmd";
   if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  if (aiToolId === "qwen" && command === "qwen") return "qwen.cmd";
   return command;
 }
 
@@ -70,6 +71,7 @@ export function resolveLocalToolCommand(
   // the blocked .ps1 first on restricted PCs, while the .cmd shim is safe.
   if (aiToolId === "codex" && command === "codex") return "codex.cmd";
   if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  if (aiToolId === "qwen" && command === "qwen") return "qwen.cmd";
   return command;
 }
 

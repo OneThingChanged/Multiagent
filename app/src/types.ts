@@ -73,6 +73,14 @@ export const AI_TOOLS: AiTool[] = [
     dangerousFlag: "--dangerously-bypass-approvals-and-sandbox",
   },
   {
+    id: "qwen",
+    label: "Qwen",
+    icon: "◆",
+    iconColor: "#615ced",
+    command: "qwen",
+    dangerousFlag: "--yolo",
+  },
+  {
     id: "none",
     label: "Shell only",
     icon: "$",
@@ -82,7 +90,11 @@ export const AI_TOOLS: AiTool[] = [
 ];
 
 export function toolForId(id: string): AiTool {
-  return AI_TOOLS.find((t) => t.id === id) ?? AI_TOOLS[2];
+  return (
+    AI_TOOLS.find((t) => t.id === id) ??
+    AI_TOOLS.find((t) => t.id === "none") ??
+    AI_TOOLS[AI_TOOLS.length - 1]
+  );
 }
 
 // A reusable SSH connection target. Stored in its own localStorage registry
