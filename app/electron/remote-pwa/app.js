@@ -1270,6 +1270,17 @@ function renderChat(data) {
       }
     }
   }
+  // "작업 중…" indicator while the selected agent is working (like Codex's 생각 중).
+  if (!data?.unsupported) {
+    const agent = selectedAgent();
+    if (agent && statusOf(agent) === "working") {
+      const think = make("div", "chat-thinking");
+      const dots = make("span", "chat-thinking-dots");
+      dots.append(make("i", ""), make("i", ""), make("i", ""));
+      think.append(dots, document.createTextNode("작업 중…"));
+      frag.appendChild(think);
+    }
+  }
   el.replaceChildren(frag);
   if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
 }
@@ -1322,8 +1333,16 @@ function syncSessionView() {
       lastChatFetch = { id: agent.id, at: now };
       fetchChat(agent.id);
     }
+    // Toggle the "작업 중…" indicator promptly when the busy state flips, even
+    // if the transcript itself didn't change this poll.
+    const busy = statusOf(agent) === "working";
+    if (busy !== lastChatBusy) {
+      lastChatBusy = busy;
+      if (lastChatData) renderChat(lastChatData);
+    }
   }
 }
+let lastChatBusy = false;
 
 // Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
 // and bounce any active Screen selection back to the Monitor.

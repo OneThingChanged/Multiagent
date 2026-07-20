@@ -323,6 +323,16 @@ export function ChatView({
             <div className="chat-user">{t}</div>
           </div>
         ))}
+        {busy && status !== "unsupported" && status !== "loading" && (
+          <div className="chat-thinking" aria-live="polite">
+            <span className="chat-thinking-dots">
+              <i />
+              <i />
+              <i />
+            </span>
+            작업 중…
+          </div>
+        )}
       </div>
       {queue.length > 0 && (
         <div className="chat-queue">
