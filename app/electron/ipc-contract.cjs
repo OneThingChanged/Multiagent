@@ -26,6 +26,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "list_directory",
   "read_text_file",
   "read_chat_transcript",
+  "chat_blocks",
   "git_status",
   "git_changes",
   "git_stage",
@@ -206,6 +207,11 @@ function assertInvokeRequest(command, rawArgs) {
         throw new TypeError("Electron chat transcript tool must be a string");
       }
       assertPathString(args.path, "transcript path");
+      break;
+    case "chat_blocks":
+      if (typeof args.id !== "string" || !args.id.trim()) {
+        throw new TypeError("Electron chat_blocks id must be a string");
+      }
       break;
     case "git_status":
     case "git_changes":

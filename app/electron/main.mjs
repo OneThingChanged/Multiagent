@@ -2329,6 +2329,8 @@ async function invokeCommand(event, command, rawArgs) {
       return readTextFile(args.folder, args.relativePath);
     case "read_chat_transcript":
       return readChatTranscript(args.tool, args.path);
+    case "chat_blocks":
+      return chatBlocksForAgent(args.id);
     case "git_status":
       return gitStatusForTree(args.folder);
     case "git_changes":

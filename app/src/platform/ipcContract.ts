@@ -7,7 +7,7 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
-  | "read_text_file" | "read_chat_transcript"
+  | "read_text_file" | "read_chat_transcript" | "chat_blocks"
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
   | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"
@@ -179,6 +179,10 @@ export type RuntimeCommandContract = {
   read_chat_transcript: {
     args: { tool: string; path: string };
     result: { blocks: ChatBlock[]; truncated: boolean; missing: boolean };
+  };
+  chat_blocks: {
+    args: { id: string };
+    result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string };
   };
   git_status: {
     args: { folder: string };

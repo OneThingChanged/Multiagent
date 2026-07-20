@@ -33,6 +33,7 @@ import {
   parseDocTabId,
 } from "../lib/docTabs";
 import { DocViewer } from "./DocViewer";
+import { ChatView } from "./ChatView";
 import { TerminalContextMenu } from "./Menus";
 import {
   clampTerminalFontSize,
@@ -108,6 +109,7 @@ export function PaneSlot({
   ctx: RenderCtx;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const [chatMode, setChatMode] = useState(false);
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
   const [termMenu, setTermMenu] = useState<{
@@ -850,13 +852,25 @@ export function PaneSlot({
             </div>
           );
         })}
+        {activeAgentId && (
+          <button
+            className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setChatMode((v) => !v);
+            }}
+            title={chatMode ? "터미널 보기" : "대화 보기"}
+          >
+            {chatMode ? "⌗" : "💬"}
+          </button>
+        )}
       </div>
-      {/* Keep the xterm host mounted even while a doc tab is active so the
-          terminal attach/detach lifecycle and buffered DOM stay intact. */}
+      {/* Keep the xterm host mounted even while a doc tab or chat view is active
+          so the terminal attach/detach lifecycle and buffered DOM stay intact. */}
       <div
         ref={bodyRef}
         className="pane-body"
-        style={activeDocId ? { display: "none" } : undefined}
+        style={activeDocId || (chatMode && activeAgentId) ? { display: "none" } : undefined}
         onContextMenu={onTerminalContextMenu}
       />
       {activeDocId && (
@@ -869,6 +883,9 @@ export function PaneSlot({
           }
           theme={ctx.theme}
         />
+      )}
+      {chatMode && activeAgentId && !activeDocId && (
+        <ChatView agentId={activeAgentId} active={active} theme={ctx.theme} />
       )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />
