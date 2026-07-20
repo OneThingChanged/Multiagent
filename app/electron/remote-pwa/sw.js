@@ -35,6 +35,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // App shell (our own code) changes on every release — go network-first so a
+  // new build lands immediately instead of being pinned to a stale cache.
+  // Vendor/static assets (xterm, icons) stay cache-first for speed.
+  const isAppShell = url.pathname === "/pwa/app.js" || url.pathname === "/pwa/styles.css";
+  if (isAppShell) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       const fresh = fetch(request)
