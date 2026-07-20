@@ -130,6 +130,28 @@ export function PaneSlot({
   const chatMode = activeAgentId ? ctx.chatModeAgents.has(activeAgentId) : false;
   const { termsRef, setAgentStatus, setAgentSessionId } = ctx;
 
+  // When the terminal becomes visible again (chat/doc → terminal), xterm's
+  // viewport can end up at the top after the re-show/refit — snap it back to
+  // the bottom (latest output), which is what a terminal should show.
+  useEffect(() => {
+    if (chatMode || activeDocId || !activeAgentId) return;
+    const entry = termsRef.current.get(activeAgentId);
+    if (!entry) return;
+    const scroll = () => {
+      try {
+        entry.term.scrollToBottom();
+      } catch {
+        /* terminal disposed */
+      }
+    };
+    const raf = requestAnimationFrame(scroll);
+    const timer = window.setTimeout(scroll, 60);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [chatMode, activeDocId, activeAgentId, termsRef]);
+
   // Latest-agent ref read inside the spawn effect; lets that effect depend
   // only on agent.id (not on status, which flips often).
   const activeAgentRef = useRef<Agent | null>(activeAgent);

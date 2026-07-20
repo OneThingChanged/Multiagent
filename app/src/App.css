@@ -4124,11 +4124,42 @@ body.files-resizing .files-resizer::after {
 .chat-composer {
   flex: 0 0 auto;
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: flex-end;
   padding: 10px 12px;
   border-top: 1px solid var(--app-border);
   background: var(--app-panel, var(--app-bg));
+}
+.chat-composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.chat-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-attachment {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+.chat-attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-attachment-file { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-size: 24px; }
+.chat-attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
 }
 .chat-composer-input {
   flex: 1;

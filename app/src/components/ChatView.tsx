@@ -19,6 +19,11 @@ const QUEUE_COOLDOWN_MS = 1200;
 // Reserved (queued) messages, kept per session outside the component so they
 // survive the ChatView unmount/remount when toggling terminal ↔ chat.
 const queueStore = new Map<string, string[]>();
+// The in-progress composer draft + image attachments, likewise kept per session
+// so switching to the terminal and back doesn't lose them.
+const draftStore = new Map<string, string>();
+type Attachment = { path: string; dataUrl: string };
+const attachStore = new Map<string, Attachment[]>();
 
 // Desktop conversation view: renders an agent's own transcript (Codex/Claude)
 // as a chat, the same shape the Remote client shows. Polls chat_blocks while
@@ -393,41 +398,77 @@ export function ChatView({
         </div>
       )}
       {status !== "unsupported" && (
-        <ChatComposer onSend={sendMessage} busy={busy} onInterrupt={interrupt} />
+        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} onInterrupt={interrupt} />
       )}
     </div>
   );
 }
 
 // Composer for sending additional instructions to the session from the chat
-// view (so you don't have to switch to the terminal tab). The actual send +
-// optimistic echo live in the parent; this just captures input.
+// view. The draft text and image attachments are persisted per session (module
+// stores) so switching to the terminal and back keeps them. On send, attachment
+// paths are appended to the message so Codex/Claude can read the images.
 function ChatComposer({
+  agentId,
   onSend,
   busy,
   onInterrupt,
 }: {
+  agentId: string;
   onSend: (text: string) => void;
   busy: boolean;
   onInterrupt: () => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => draftStore.get(agentId) ?? "");
+  const [attachments, setAttachments] = useState<Attachment[]>(
+    () => attachStore.get(agentId) ?? []
+  );
+
+  // Restore the persisted draft/attachments when the session changes.
+  useEffect(() => {
+    setText(draftStore.get(agentId) ?? "");
+    setAttachments(attachStore.get(agentId) ?? []);
+  }, [agentId]);
+
+  const updateText = (value: string) => {
+    setText(value);
+    if (value) draftStore.set(agentId, value);
+    else draftStore.delete(agentId);
+  };
+  const updateAttachments = (fn: (a: Attachment[]) => Attachment[]) => {
+    setAttachments((prev) => {
+      const next = fn(prev);
+      if (next.length) attachStore.set(agentId, next);
+      else attachStore.delete(agentId);
+      return next;
+    });
+  };
 
   const send = () => {
-    const value = text.trim();
+    const paths = attachments.map((a) => formatDroppedPathForTerminal(a.path)).filter(Boolean);
+    const value = [text.trim(), ...paths].filter(Boolean).join(" ").trim();
     if (!value) return;
     onSend(value);
-    setText("");
+    updateText("");
+    updateAttachments(() => []);
   };
 
-  // Append a file path to the input (like dropping/pasting into the terminal),
-  // keeping a trailing space so typing can continue.
+  const addImage = (filePath: string) => {
+    void invoke<{ dataUrl?: string } | string | null>("read_image_data_url", { path: filePath })
+      .then((res) => {
+        const dataUrl = typeof res === "string" ? res : res?.dataUrl ?? "";
+        updateAttachments((a) => [...a, { path: filePath, dataUrl }]);
+      })
+      .catch(() => updateAttachments((a) => [...a, { path: filePath, dataUrl: "" }]));
+  };
+
+  // Append a file path to the input (like dropping into the terminal).
   const insertSnippet = (snippet: string) => {
     if (!snippet) return;
-    setText((t) => (t.trim() ? `${t.replace(/\s*$/, "")} ${snippet} ` : `${snippet} `));
+    updateText(text.trim() ? `${text.replace(/\s*$/, "")} ${snippet} ` : `${snippet} `);
   };
 
-  // Ctrl+V of a clipboard image → save it to a temp file and insert the path.
+  // Ctrl+V of a clipboard image → save it to a temp file, show it as a chip.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     const hasImage = items && Array.from(items).some((it) => it.type.startsWith("image/"));
@@ -435,7 +476,7 @@ function ChatComposer({
     e.preventDefault();
     void invoke<string | null>("save_clipboard_image")
       .then((filePath) => {
-        if (filePath) insertSnippet(formatDroppedPathForTerminal(filePath));
+        if (filePath) addImage(filePath);
       })
       .catch(() => {});
   };
@@ -475,31 +516,56 @@ function ChatComposer({
     }
   };
 
+  const canSend = Boolean(text.trim() || attachments.length);
+
   return (
     <div className="chat-composer">
-      <textarea
-        className="chat-composer-input"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        placeholder={
-          busy
-            ? "작업 중 — Enter로 예약(대기열에 추가)"
-            : "이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
-        }
-        rows={1}
-      />
-      <button
-        type="button"
-        className="chat-composer-send"
-        onClick={send}
-        disabled={!text.trim()}
-      >
-        {busy ? "예약" : "전송"}
-      </button>
+      {attachments.length > 0 && (
+        <div className="chat-attachments">
+          {attachments.map((a, i) => (
+            <div key={`${a.path}-${i}`} className="chat-attachment" title={a.path}>
+              {a.dataUrl ? (
+                <img src={a.dataUrl} alt="첨부 이미지" />
+              ) : (
+                <span className="chat-attachment-file">🖼</span>
+              )}
+              <button
+                type="button"
+                className="chat-attachment-remove"
+                title="첨부 제거"
+                onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="chat-composer-row">
+        <textarea
+          className="chat-composer-input"
+          value={text}
+          onChange={(e) => updateText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          placeholder={
+            busy
+              ? "작업 중 — Enter로 예약(대기열에 추가)"
+              : "이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
+          }
+          rows={1}
+        />
+        <button
+          type="button"
+          className="chat-composer-send"
+          onClick={send}
+          disabled={!canSend}
+        >
+          {busy ? "예약" : "전송"}
+        </button>
+      </div>
     </div>
   );
 }
