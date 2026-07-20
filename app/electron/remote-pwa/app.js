@@ -1122,7 +1122,7 @@ function renderAssistantTurn(run) {
   return turn;
 }
 
-const CHAT_PAGE = 80;
+const CHAT_PAGE = 40;
 let chatVisible = CHAT_PAGE;
 let lastChatData = null;
 
