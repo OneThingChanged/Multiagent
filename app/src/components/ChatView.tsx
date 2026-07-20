@@ -15,7 +15,7 @@ type Status = "loading" | "unsupported" | "empty" | "ready";
 
 // Render only the most recent N turns so a long transcript paints fast;
 // older turns are revealed on demand.
-const CHAT_PAGE = 40;
+const CHAT_PAGE = 10;
 
 function toolLabel(block: { name?: string; input?: unknown }): string {
   const input = block.input;
