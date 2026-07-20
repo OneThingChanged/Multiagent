@@ -22,8 +22,16 @@ const queueStore = new Map<string, string[]>();
 // The in-progress composer draft + image attachments, likewise kept per session
 // so switching to the terminal and back doesn't lose them.
 const draftStore = new Map<string, string>();
-type Attachment = { path: string; dataUrl: string };
+// Composer attachments: a pasted/dropped image (path + preview), or a large
+// pasted text block collapsed to a chip (like a terminal's pasted-text token).
+type Attachment =
+  | { kind: "image"; path: string; dataUrl: string }
+  | { kind: "text"; text: string };
 const attachStore = new Map<string, Attachment[]>();
+// A text paste at/above this size collapses into a chip instead of filling the
+// input inline.
+const PASTE_COLLAPSE_CHARS = 300;
+const PASTE_COLLAPSE_LINES = 5;
 
 // Desktop conversation view: renders an agent's own transcript (Codex/Claude)
 // as a chat, the same shape the Remote client shows. Polls chat_blocks while
@@ -519,8 +527,14 @@ function ChatComposer({
   };
 
   const send = () => {
-    const paths = attachments.map((a) => formatDroppedPathForTerminal(a.path)).filter(Boolean);
-    const value = [text.trim(), ...paths].filter(Boolean).join(" ").trim();
+    // Expand attachments on send: pasted-text blocks and image paths join the
+    // typed text so the agent receives everything.
+    const texts = attachments.filter((a) => a.kind === "text").map((a) => a.text);
+    const paths = attachments
+      .filter((a) => a.kind === "image")
+      .map((a) => formatDroppedPathForTerminal((a as { path: string }).path))
+      .filter(Boolean);
+    const value = [text.trim(), ...texts, ...paths].filter(Boolean).join("\n").trim();
     if (!value) return;
     onSend(value);
     updateText("");
@@ -531,9 +545,9 @@ function ChatComposer({
     void invoke<{ dataUrl?: string } | string | null>("read_image_data_url", { path: filePath })
       .then((res) => {
         const dataUrl = typeof res === "string" ? res : res?.dataUrl ?? "";
-        updateAttachments((a) => [...a, { path: filePath, dataUrl }]);
+        updateAttachments((a) => [...a, { kind: "image", path: filePath, dataUrl }]);
       })
-      .catch(() => updateAttachments((a) => [...a, { path: filePath, dataUrl: "" }]));
+      .catch(() => updateAttachments((a) => [...a, { kind: "image", path: filePath, dataUrl: "" }]));
   };
 
   // Append a file path to the input (like dropping into the terminal).
@@ -542,17 +556,28 @@ function ChatComposer({
     updateText(text.trim() ? `${text.replace(/\s*$/, "")} ${snippet} ` : `${snippet} `);
   };
 
-  // Ctrl+V of a clipboard image → save it to a temp file, show it as a chip.
+  // Ctrl+V: a clipboard image saves to a temp file and shows as a chip; a large
+  // text paste collapses into a "pasted text" chip (like a terminal) instead of
+  // flooding the input; small text pastes go inline as normal.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     const hasImage = items && Array.from(items).some((it) => it.type.startsWith("image/"));
-    if (!hasImage) return; // let normal text paste through
-    e.preventDefault();
-    void invoke<string | null>("save_clipboard_image")
-      .then((filePath) => {
-        if (filePath) addImage(filePath);
-      })
-      .catch(() => {});
+    if (hasImage) {
+      e.preventDefault();
+      void invoke<string | null>("save_clipboard_image")
+        .then((filePath) => {
+          if (filePath) addImage(filePath);
+        })
+        .catch(() => {});
+      return;
+    }
+    const pasted = e.clipboardData?.getData("text") ?? "";
+    const lines = pasted.split(/\r?\n/).length;
+    if (pasted.length > PASTE_COLLAPSE_CHARS || lines > PASTE_COLLAPSE_LINES) {
+      e.preventDefault();
+      updateAttachments((a) => [...a, { kind: "text", text: pasted }]);
+    }
+    // else: let the small paste insert inline.
   };
 
   // Drag & drop a file/image → insert its path (Electron resolves the real path).
@@ -603,23 +628,42 @@ function ChatComposer({
     <div className="chat-composer">
       {attachments.length > 0 && (
         <div className="chat-attachments">
-          {attachments.map((a, i) => (
-            <div key={`${a.path}-${i}`} className="chat-attachment" title={a.path}>
-              {a.dataUrl ? (
-                <img src={a.dataUrl} alt="첨부 이미지" />
-              ) : (
-                <span className="chat-attachment-file">🖼</span>
-              )}
-              <button
-                type="button"
-                className="chat-attachment-remove"
-                title="첨부 제거"
-                onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
+          {attachments.map((a, i) =>
+            a.kind === "image" ? (
+              <div key={`img-${i}`} className="chat-attachment" title={a.path}>
+                {a.dataUrl ? (
+                  <img src={a.dataUrl} alt="첨부 이미지" />
+                ) : (
+                  <span className="chat-attachment-file">🖼</span>
+                )}
+                <button
+                  type="button"
+                  className="chat-attachment-remove"
+                  title="첨부 제거"
+                  onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+              <div
+                key={`txt-${i}`}
+                className="chat-attachment-textchip"
+                title={a.text.slice(0, 2000)}
               >
-                ×
-              </button>
-            </div>
-          ))}
+                <span className="chat-attachment-texticon">📄</span>
+                붙여넣은 텍스트 · {a.text.length.toLocaleString()}자
+                <button
+                  type="button"
+                  className="chat-attachment-textremove"
+                  title="첨부 제거"
+                  onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          )}
         </div>
       )}
       <div className="chat-composer-row">
