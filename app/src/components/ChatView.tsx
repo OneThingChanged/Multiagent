@@ -14,6 +14,10 @@ const BUSY_STATUSES: AgentStatus[] = ["working", "starting"];
 const DEAD_STATUSES: AgentStatus[] = ["exited", "unreachable"];
 const QUEUE_COOLDOWN_MS = 1200;
 
+// Reserved (queued) messages, kept per session outside the component so they
+// survive the ChatView unmount/remount when toggling terminal ↔ chat.
+const queueStore = new Map<string, string[]>();
+
 // Desktop conversation view: renders an agent's own transcript (Codex/Claude)
 // as a chat, the same shape the Remote client shows. Polls chat_blocks while
 // visible and skips re-render when nothing changed so open tool details stay
@@ -119,7 +123,9 @@ export function ChatView({
   const [status, setStatus] = useState<Status>("loading");
   const [visible, setVisible] = useState(CHAT_PAGE);
   // Reserved (queued) messages waiting to be sent while the agent is working.
-  const [queue, setQueue] = useState<string[]>([]);
+  // Restored from the module store so switching to the terminal and back keeps
+  // them; every mutation writes back through mutateQueue.
+  const [queue, setQueue] = useState<string[]>(() => queueStore.get(agentId) ?? []);
   const lastDispatchRef = useRef(0);
   // Messages just sent from the composer, echoed instantly so the chat updates
   // without waiting for the next poll; dropped once the transcript includes them.
@@ -140,7 +146,7 @@ export function ChatView({
     setBlocks([]);
     setVisible(CHAT_PAGE);
     setPending([]);
-    setQueue([]);
+    setQueue(queueStore.get(agentId) ?? []); // restore this session's reservations
     firstLoadRef.current = true;
   }, [agentId]);
 
@@ -285,6 +291,20 @@ export function ChatView({
     [agentId]
   );
 
+  // Mutate the queue and mirror it into the module store so it survives the
+  // ChatView unmount/remount on a terminal ↔ chat switch.
+  const mutateQueue = useCallback(
+    (fn: (q: string[]) => string[]) => {
+      setQueue((prev) => {
+        const next = fn(prev);
+        if (next.length) queueStore.set(agentId, next);
+        else queueStore.delete(agentId);
+        return next;
+      });
+    },
+    [agentId]
+  );
+
   // Composer submit: send now if the agent is ready and nothing is queued;
   // otherwise reserve it in the queue to be drained when the agent frees up.
   const sendMessage = (raw: string) => {
@@ -292,7 +312,7 @@ export function ChatView({
     if (!value) return;
     const cooled = Date.now() - lastDispatchRef.current >= QUEUE_COOLDOWN_MS;
     if (alive && !busy && queue.length === 0 && cooled) dispatch(value);
-    else setQueue((q) => [...q, value]);
+    else mutateQueue((q) => [...q, value]);
   };
 
   // Drain the queue one message per cooldown while the agent is ready.
@@ -301,13 +321,13 @@ export function ChatView({
     const wait = Math.max(0, QUEUE_COOLDOWN_MS - (Date.now() - lastDispatchRef.current));
     const timer = window.setTimeout(() => {
       dispatch(queue[0]);
-      setQueue((q) => q.slice(1));
+      mutateQueue((q) => q.slice(1));
     }, wait);
     return () => window.clearTimeout(timer);
-  }, [busy, alive, queue, dispatch]);
+  }, [busy, alive, queue, dispatch, mutateQueue]);
 
   const cancelQueued = (index: number) =>
-    setQueue((q) => q.filter((_, i) => i !== index));
+    mutateQueue((q) => q.filter((_, i) => i !== index));
 
   return (
     <div className="chat-view">
