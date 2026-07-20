@@ -1142,6 +1142,14 @@ async function chatBlocksForAgent(agentId) {
       return { blocks: [], truncated: false, missing: true, tool };
     }
     transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
+    if (!transcriptPath) {
+      // No session id (e.g. after a restart, or a session with no hook) — fall
+      // back to the most recent transcript for this session's working folder.
+      const folder = ptys.get(id)?.cwd || catalogAgent?.folder || catalogAgent?.cwd || null;
+      transcriptPath = await sessionService
+        .resolveTranscript({ aiToolId: tool, folder, preferredSessionId: sessionId })
+        .catch(() => null);
+    }
     if (transcriptPath) {
       agentTranscripts.set(id, transcriptPath); // cache the resolve
       transcriptMissUntil.delete(id);

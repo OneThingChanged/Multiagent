@@ -168,6 +168,26 @@ export class SessionService {
     return latest?.sessionId ?? null;
   }
 
+  // Resolve the transcript file path for a session by preferred id or, failing
+  // that, the most recent transcript for the given working folder. Used by the
+  // chat view when no hook reported the transcript path (e.g. after a restart).
+  async resolveTranscript({ aiToolId, folder, preferredSessionId }) {
+    const tool = String(aiToolId || "").toLowerCase();
+    if (tool !== "codex" && tool !== "claude") return null;
+    const entries = await this.scan(tool);
+    const preferred = String(preferredSessionId || "").trim().toLowerCase();
+    if (preferred) {
+      const exact = entries.find(
+        (entry) => entry.transcriptPath && entry.sessionId?.toLowerCase() === preferred
+      );
+      if (exact) return exact.transcriptPath;
+    }
+    const byFolder = entries.find(
+      (entry) => entry.transcriptPath && folder && sameFolder(entry.cwd, folder)
+    );
+    return byFolder?.transcriptPath ?? null;
+  }
+
   async ingest(aiToolId = null) {
     const tools = aiToolId ? [aiToolId] : ["codex", "claude"];
     const errors = [];
