@@ -257,6 +257,13 @@ export function ChatView({
   const busy = BUSY_STATUSES.includes(agentStatus);
   const alive = !DEAD_STATUSES.includes(agentStatus);
 
+  // Cancel the in-progress turn by sending Esc to the PTY — same as pressing
+  // Esc in the Codex/Claude TUI. Re-poll so the transcript updates promptly.
+  const interrupt = useCallback(() => {
+    void invoke("write_pty", { id: agentId, data: "\x1b" }).catch(() => {});
+    window.setTimeout(() => fetchRef.current(), 500);
+  }, [agentId]);
+
   // Actually write a message to the PTY + echo it instantly. Text and Enter go
   // as separate writes (80ms apart) so Codex/Claude don't treat "text\r" as a
   // multiline paste.
@@ -331,6 +338,14 @@ export function ChatView({
               <i />
             </span>
             작업 중…
+            <button
+              type="button"
+              className="chat-stop"
+              onClick={interrupt}
+              title="진행 취소 (Esc)"
+            >
+              ■ 중단
+            </button>
           </div>
         )}
       </div>
@@ -355,7 +370,9 @@ export function ChatView({
           ))}
         </div>
       )}
-      {status !== "unsupported" && <ChatComposer onSend={sendMessage} busy={busy} />}
+      {status !== "unsupported" && (
+        <ChatComposer onSend={sendMessage} busy={busy} onInterrupt={interrupt} />
+      )}
     </div>
   );
 }
@@ -366,9 +383,11 @@ export function ChatView({
 function ChatComposer({
   onSend,
   busy,
+  onInterrupt,
 }: {
   onSend: (text: string) => void;
   busy: boolean;
+  onInterrupt: () => void;
 }) {
   const [text, setText] = useState("");
 
@@ -380,6 +399,12 @@ function ChatComposer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Esc cancels the in-progress turn while the agent is working.
+    if (e.key === "Escape" && busy) {
+      e.preventDefault();
+      onInterrupt();
+      return;
+    }
     // Enter sends; Shift+Enter is a newline. Ignore Enter mid-IME-composition
     // (Korean/Japanese) so a committing keystroke doesn't submit early.
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

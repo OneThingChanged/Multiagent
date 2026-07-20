@@ -4048,6 +4048,17 @@ body.files-resizing .files-resizer::after {
   color: var(--app-muted);
   font-size: 12.5px;
 }
+.chat-stop {
+  margin-left: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--app-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.chat-stop:hover { color: var(--app-text); border-color: var(--app-danger, #f85149); }
 .chat-thinking-dots { display: inline-flex; gap: 3px; }
 .chat-thinking-dots i {
   width: 5px;

@@ -1278,6 +1278,11 @@ function renderChat(data) {
       const dots = make("span", "chat-thinking-dots");
       dots.append(make("i", ""), make("i", ""), make("i", ""));
       think.append(dots, document.createTextNode("작업 중…"));
+      const stop = make("button", "chat-stop", "■ 중단");
+      stop.type = "button";
+      stop.title = "진행 취소 (Esc)";
+      stop.addEventListener("click", () => { void sendRaw(agent.id, "\x1b"); });
+      think.appendChild(stop);
       frag.appendChild(think);
     }
   }
@@ -1546,6 +1551,15 @@ ui.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     void sendSelectedMessage();
+    return;
+  }
+  // Esc cancels the in-progress turn while the agent is working.
+  if (event.key === "Escape") {
+    const agent = selectedAgent();
+    if (agent && statusOf(agent) === "working") {
+      event.preventDefault();
+      void sendRaw(agent.id, "\x1b");
+    }
   }
 });
 ui.copyOutputButton.addEventListener("click", async () => {

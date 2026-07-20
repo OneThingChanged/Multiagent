@@ -275,6 +275,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .session-offline .send-button { flex: 0 0 auto; }
 .chat-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 26px 0; }
 .chat-thinking { display: flex; align-items: center; gap: 8px; padding: 4px 2px; color: var(--muted); font-size: 12.5px; }
+.chat-stop { margin-left: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.chat-stop:hover { color: #eaf3fa; border-color: #f0616d; }
 .chat-thinking-dots { display: inline-flex; gap: 3px; }
 .chat-thinking-dots i { width: 5px; height: 5px; border-radius: 50%; background: #50dfd0; animation: chat-thinking-bounce 1.2s infinite ease-in-out both; }
 .chat-thinking-dots i:nth-child(1) { animation-delay: -0.24s; }
