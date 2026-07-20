@@ -922,6 +922,8 @@ export function PaneSlot({
           sessionId={
             activeAgent?.activity?.providerSessionId ?? activeAgent?.lastSessionId ?? undefined
           }
+          question={activeAgent?.activity?.interactiveQuestion ?? null}
+          assistantMessage={activeAgent?.activity?.lastAssistantMessage ?? null}
         />
       )}
       {overlayZone && (

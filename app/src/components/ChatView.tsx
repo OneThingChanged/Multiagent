@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import { invoke } from "../platform/runtime";
 import { electronBridge } from "../platform/electronBridge";
 import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
+import { parseChatPrompt } from "../lib/chatPrompt";
 import type { AppThemeId } from "../lib/appTheme";
 import type { ChatBlock, ChatDiffLine } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
@@ -206,12 +207,16 @@ export function ChatView({
   active,
   agentStatus,
   sessionId,
+  question,
+  assistantMessage,
 }: {
   agentId: string;
   active: boolean;
   theme: AppThemeId;
   agentStatus: AgentStatus;
   sessionId?: string;
+  question?: string | null;
+  assistantMessage?: string | null;
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
@@ -364,6 +369,20 @@ export function ChatView({
     window.setTimeout(() => fetchRef.current(), 500);
   }, [agentId]);
 
+  // Inline prompt (question options / permission Allow-Deny) parsed from the
+  // agent's waiting-status text; answered by writing the choice to the PTY.
+  const prompt = parseChatPrompt(agentStatus, question, assistantMessage);
+  const respondPrompt = useCallback(
+    (sendKey: string) => {
+      void invoke("write_pty", { id: agentId, data: sendKey }).catch(() => {});
+      window.setTimeout(() => {
+        void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
+      }, 80);
+      window.setTimeout(() => fetchRef.current(), 500);
+    },
+    [agentId]
+  );
+
   // Esc cancels the in-progress turn from anywhere in the focused chat pane
   // (not just when the composer has focus) while the agent is working.
   useEffect(() => {
@@ -477,6 +496,26 @@ export function ChatView({
           </div>
         )}
       </div>
+      {prompt && (
+        <div className={`chat-prompt ${prompt.kind}`}>
+          <div className="chat-prompt-text">
+            {prompt.kind === "permission" ? "🔒 " : "❓ "}
+            {prompt.text}
+          </div>
+          <div className="chat-prompt-options">
+            {prompt.options.map((option, i) => (
+              <button
+                key={i}
+                type="button"
+                className="chat-prompt-option"
+                onClick={() => respondPrompt(option.send)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {queue.length > 0 && (
         <div className="chat-queue">
           <div className="chat-queue-head">

@@ -281,6 +281,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .chat-diff-line.del { background: rgba(248, 81, 73, 0.16); }
 .chat-diff-line.meta { color: var(--muted); background: rgba(128, 128, 128, 0.12); }
 .chat-diff-line.context { color: var(--muted); }
+.chat-prompt { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; padding: 10px 12px; border: 1px solid rgba(80, 223, 208, 0.4); border-radius: 10px; background: rgba(80, 223, 208, 0.07); }
+.chat-prompt.permission { border-color: rgba(240, 97, 109, 0.5); background: rgba(240, 97, 109, 0.08); }
+.chat-prompt-text { font-size: 13px; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat-prompt-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-prompt-option { padding: 7px 14px; border: 1px solid rgba(80, 223, 208, 0.5); border-radius: 8px; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+.chat-prompt-option:active { background: rgba(80, 223, 208, 0.16); }
+.chat-prompt.permission .chat-prompt-option { border-color: rgba(240, 97, 109, 0.6); }
 .chat-thinking { display: flex; align-items: center; gap: 8px; padding: 4px 2px; color: var(--muted); font-size: 12.5px; }
 .chat-stop { margin-left: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
 .chat-stop:hover { color: #eaf3fa; border-color: #f0616d; }

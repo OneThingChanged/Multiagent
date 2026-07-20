@@ -4088,6 +4088,31 @@ body.files-resizing .files-resizer::after {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-3px); }
 }
+.chat-prompt {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-accent, #58a6ff) 8%, var(--app-panel, var(--app-bg)));
+}
+.chat-prompt.permission {
+  background: color-mix(in srgb, var(--app-danger, #f85149) 8%, var(--app-panel, var(--app-bg)));
+}
+.chat-prompt-text { font-size: 13px; color: var(--app-text); overflow-wrap: anywhere; }
+.chat-prompt-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-prompt-option {
+  padding: 7px 14px;
+  border: 1px solid var(--app-accent, #58a6ff);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chat-prompt-option:hover { background: color-mix(in srgb, var(--app-accent, #58a6ff) 18%, transparent); }
+.chat-prompt.permission .chat-prompt-option { border-color: var(--app-danger, #f85149); }
 .chat-queue {
   flex: 0 0 auto;
   display: flex;

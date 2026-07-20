@@ -140,6 +140,52 @@ function questionOf(agent) {
   return questionDetails(agent).text;
 }
 
+const PERMISSION_HINTS = ["allow", "permission", "approve", "grant", "proceed?", "do you want", "y/n", "yes/no", "허용", "권한", "승인", "진행할까요", "계속할까요"];
+function promptFirstLine(t) {
+  const line = String(t || "").split(/\r?\n/).find((l) => l.trim()) || "";
+  return line.replace(/^[\s>❯•*-]+/, "").trim().slice(0, 200);
+}
+function promptOptionLines(t) {
+  const options = [];
+  for (const raw of String(t || "").split(/\r?\n/)) {
+    const line = raw.replace(/^[\s>❯•]+/, "").trim();
+    const m = line.match(/^(\d{1,2})[.)]\s+(.+)$/) || line.match(/^\[?([a-zA-Z])\]?[.)]\s+(.+)$/);
+    if (m && m[2]) options.push({ label: m[2].replace(/\s+/g, " ").slice(0, 80), send: m[1] });
+    if (options.length >= 12) break;
+  }
+  return options;
+}
+// Inline prompt (question options / permission) for the chat card.
+function promptFor(agent) {
+  if (!agent) return null;
+  const details = questionDetails(agent);
+  if (details.options && details.options.length) {
+    return {
+      kind: "question",
+      text: promptFirstLine(details.text),
+      options: details.options.map((label, i) => ({ label: String(label).slice(0, 80), send: String(i + 1) })),
+    };
+  }
+  const src = details.text || "";
+  if (!src) return null;
+  const numbered = promptOptionLines(src);
+  const lower = src.toLowerCase();
+  const isPerm = PERMISSION_HINTS.some((h) => lower.includes(h));
+  if (numbered.length >= 2) return { kind: isPerm ? "permission" : "question", text: promptFirstLine(src), options: numbered };
+  if (isPerm) {
+    const options = [{ label: "예 (Yes)", send: "y" }, { label: "아니오 (No)", send: "n" }];
+    if (lower.includes("always") || lower.includes("항상")) options.push({ label: "항상 허용", send: "a" });
+    return { kind: "permission", text: promptFirstLine(src), options };
+  }
+  return null;
+}
+async function respondPrompt(agentId, sendKey) {
+  await sendRaw(agentId, sendKey);
+  await new Promise((r) => setTimeout(r, 80));
+  await sendRaw(agentId, "\r");
+  lastChatFetch = { id: null, at: 0 };
+}
+
 function statusOf(agent) {
   const hookEvent = text(agent?.hook?.event).toLowerCase();
   const rawStatus = text(agent?.status).toLowerCase();
@@ -1303,6 +1349,21 @@ function renderChat(data) {
       think.appendChild(stop);
       frag.appendChild(think);
     }
+    // Inline prompt card (question / permission).
+    const prompt = agent ? promptFor(agent) : null;
+    if (prompt) {
+      const card = make("div", `chat-prompt ${prompt.kind}`);
+      card.appendChild(make("div", "chat-prompt-text", `${prompt.kind === "permission" ? "🔒 " : "❓ "}${prompt.text}`));
+      const opts = make("div", "chat-prompt-options");
+      for (const option of prompt.options) {
+        const button = make("button", "chat-prompt-option", option.label);
+        button.type = "button";
+        button.addEventListener("click", () => { void respondPrompt(agent.id, option.send); });
+        opts.appendChild(button);
+      }
+      card.appendChild(opts);
+      frag.appendChild(card);
+    }
   }
   el.replaceChildren(frag);
   if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
@@ -1356,16 +1417,17 @@ function syncSessionView() {
       lastChatFetch = { id: agent.id, at: now };
       fetchChat(agent.id);
     }
-    // Toggle the "작업 중…" indicator promptly when the busy state flips, even
+    // Re-render promptly when the busy state or the inline prompt changes, even
     // if the transcript itself didn't change this poll.
-    const busy = statusOf(agent) === "working";
-    if (busy !== lastChatBusy) {
-      lastChatBusy = busy;
+    const prompt = promptFor(agent);
+    const sig = `${statusOf(agent) === "working" ? 1 : 0}|${prompt ? `${prompt.kind}:${prompt.options.length}:${prompt.text}` : ""}`;
+    if (sig !== lastChatStatusSig) {
+      lastChatStatusSig = sig;
       if (lastChatData) renderChat(lastChatData);
     }
   }
 }
-let lastChatBusy = false;
+let lastChatStatusSig = "";
 
 // Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
 // and bounce any active Screen selection back to the Monitor.
