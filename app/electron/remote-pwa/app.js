@@ -777,6 +777,90 @@ const terminals = new Map();
 if (ui.outputText) ui.outputText.hidden = terminalSupported;
 if (ui.terminalMount) ui.terminalMount.hidden = !terminalSupported;
 
+// ---- Terminal hyperlinks (OSC 8 + visible URLs) ----
+// xterm renders OSC 8 hyperlinks natively; linkHandler opens them. But Codex's
+// TUI turns on mouse tracking, so plain clicks get reported to the app and the
+// link never activates. To match a real terminal we also hit-test the URL under
+// the pointer ourselves (reconstructing wrapped logical lines) and open it in a
+// capture-phase handler that stops the click before mouse reporting eats it.
+const CJK_URL_STOP =
+  "\\u1100-\\u11FF\\u2E80-\\uA4CF\\uAC00-\\uD7A3\\uF900-\\uFAFF\\uFE30-\\uFE4F\\uFF00-\\uFFEF\\u3000-\\u303F\\u3040-\\u30FF";
+const URL_RE = new RegExp(
+  `(https?):\\/\\/[^\\s"'!*(){}|\\\\^<>\`${CJK_URL_STOP}]*[^\\s"':,.!?{}|\\\\^~\\[\\]\`()<>${CJK_URL_STOP}]`,
+  "gi"
+);
+
+function openExternalUrl(uri) {
+  const target = String(uri || "").trim();
+  if (!target) return;
+  window.open(target, "_blank", "noopener,noreferrer");
+}
+
+function logicalLineAt(term, rowIndex) {
+  const buffer = term.buffer.active;
+  if (!buffer.getLine(rowIndex)) return null;
+  let start = rowIndex;
+  let guard = 0;
+  while (start > 0 && guard < 512 && buffer.getLine(start)?.isWrapped) { start -= 1; guard += 1; }
+  const cols = term.cols;
+  let text = "";
+  const cellMap = [];
+  guard = 0;
+  for (let r = start; r < buffer.length && guard < 512; r += 1, guard += 1) {
+    const line = buffer.getLine(r);
+    if (!line) break;
+    if (r !== start && !line.isWrapped) break;
+    for (let c = 0; c < cols; c += 1) {
+      const cell = line.getCell(c);
+      if (!cell) continue;
+      const width = cell.getWidth();
+      if (width === 0) continue;
+      const chars = cell.getChars() || " ";
+      for (let i = 0; i < chars.length; i += 1) cellMap.push({ row: r, col: c, width });
+      text += chars;
+    }
+  }
+  return { text: text.replace(/\s+$/, ""), cellMap };
+}
+
+function cellFromEvent(term, event) {
+  const screen = term.element?.querySelector(".xterm-screen");
+  if (!screen || term.cols < 1 || term.rows < 1) return null;
+  const rect = screen.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const style = window.getComputedStyle(screen);
+  const padL = parseInt(style.paddingLeft, 10) || 0;
+  const padT = parseInt(style.paddingTop, 10) || 0;
+  const cw = rect.width - padL - (parseInt(style.paddingRight, 10) || 0);
+  const ch = rect.height - padT - (parseInt(style.paddingBottom, 10) || 0);
+  if (cw <= 0 || ch <= 0) return null;
+  const x = event.clientX - rect.left - padL;
+  const y = event.clientY - rect.top - padT;
+  if (x < 0 || y < 0 || x > cw || y > ch) return null;
+  const col = Math.min(term.cols - 1, Math.max(0, Math.ceil(x / (cw / term.cols)) - 1));
+  const vrow = Math.min(term.rows - 1, Math.max(0, Math.ceil(y / (ch / term.rows)) - 1));
+  return { row: term.buffer.active.viewportY + vrow, col };
+}
+
+function urlAtEvent(term, event) {
+  const hit = cellFromEvent(term, event);
+  if (!hit) return null;
+  const logical = logicalLineAt(term, hit.row);
+  if (!logical) return null;
+  const { text, cellMap } = logical;
+  URL_RE.lastIndex = 0;
+  let match;
+  while ((match = URL_RE.exec(text))) {
+    for (let i = match.index; i < match.index + match[0].length; i += 1) {
+      const ref = cellMap[i];
+      if (ref && ref.row === hit.row && hit.col >= ref.col && hit.col < ref.col + ref.width) {
+        return match[0];
+      }
+    }
+  }
+  return null;
+}
+
 function buildTerminal(container, fontSize) {
   const term = new window.Terminal({
     cursorBlink: true,
@@ -785,10 +869,42 @@ function buildTerminal(container, fontSize) {
     scrollback: 6000,
     convertEol: false,
     theme: { background: "#050d14", foreground: "#cbd8e2", cursor: "#50dfd0" },
+    // Opens OSC 8 hyperlinks (label-style links whose URL is hidden in the
+    // escape sequence) that xterm detects natively.
+    linkHandler: { activate: (_event, uri) => openExternalUrl(uri), allowNonHttpProtocols: false },
   });
   term.open(container);
   const instance = { term, stream: null, agentId: null };
   term.onData((data) => { if (instance.agentId) void sendRaw(instance.agentId, data); });
+
+  // Visible-URL links: intercept before xterm's mouse reporting so a tap/click
+  // on a URL opens it even while Codex has mouse tracking on. mousedown/mouseup
+  // stop the report; the actual open happens on mouseup (a real click, not a drag).
+  const stopEvent = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+  let pendingUrl = null;
+  container.addEventListener("mousedown", (event) => {
+    pendingUrl = null;
+    if (event.button !== 0 || event.detail > 1 || event.shiftKey) return;
+    const url = urlAtEvent(term, event);
+    if (!url) return;
+    pendingUrl = url;
+    stopEvent(event);
+  }, { capture: true });
+  container.addEventListener("mouseup", (event) => {
+    if (!pendingUrl) return;
+    const url = pendingUrl;
+    pendingUrl = null;
+    stopEvent(event);
+    if (urlAtEvent(term, event) === url) openExternalUrl(url);
+  }, { capture: true });
+  container.addEventListener("click", (event) => {
+    if (urlAtEvent(term, event)) stopEvent(event);
+  }, { capture: true });
+
   terminals.set(container, instance);
   return instance;
 }
