@@ -36,6 +36,56 @@ type Status = "loading" | "unsupported" | "empty" | "ready";
 // older turns are revealed on demand.
 const CHAT_PAGE = 10;
 
+// Pull image file paths (quoted, Windows, or POSIX absolute) out of a user
+// message so they can render as thumbnails in the bubble instead of raw paths.
+const IMAGE_PATH_RE =
+  /"([^"]+\.(?:png|jpe?g|gif|webp|bmp))"|([A-Za-z]:\\[^\s"]+\.(?:png|jpe?g|gif|webp|bmp))|(\/[^\s"]+\.(?:png|jpe?g|gif|webp|bmp))/gi;
+
+function splitImagePaths(text: string): { rest: string; images: string[] } {
+  const images: string[] = [];
+  const rest = text
+    .replace(IMAGE_PATH_RE, (_m, quoted, win, unix) => {
+      images.push(quoted || win || unix);
+      return "";
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return { rest, images };
+}
+
+function ChatImage({ path }: { path: string }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let ok = true;
+    void invoke<string | { dataUrl?: string } | null>("read_image_data_url", { path })
+      .then((r) => {
+        if (ok) setUrl(typeof r === "string" ? r : r?.dataUrl ?? "");
+      })
+      .catch(() => {});
+    return () => {
+      ok = false;
+    };
+  }, [path]);
+  const name = path.split(/[\\/]/).pop() || path;
+  return url ? (
+    <img className="chat-user-img" src={url} alt={name} title={name} />
+  ) : (
+    <span className="chat-user-file" title={path}>🖼 {name}</span>
+  );
+}
+
+function UserMessage({ text }: { text: string }) {
+  const { rest, images } = splitImagePaths(text);
+  return (
+    <div className="chat-user">
+      {rest && <div className="chat-user-text">{rest}</div>}
+      {images.map((p, i) => (
+        <ChatImage key={`${p}-${i}`} path={p} />
+      ))}
+    </div>
+  );
+}
+
 function toolLabel(block: { name?: string; input?: unknown }): string {
   const input = block.input;
   let arg = "";
@@ -260,7 +310,7 @@ export function ChatView({
   const visibleTurns: ReactNode[] = ranges.slice(hidden).map((range) =>
     range.user ? (
       <div key={`u${range.start}`} className="chat-turn user">
-        <div className="chat-user">{blocks[range.start].text}</div>
+        <UserMessage text={blocks[range.start].text ?? ""} />
       </div>
     ) : (
       <AssistantTurn key={`a${range.start}`} run={blocks.slice(range.start, range.end)} />
@@ -276,6 +326,20 @@ export function ChatView({
     void invoke("write_pty", { id: agentId, data: "\x1b" }).catch(() => {});
     window.setTimeout(() => fetchRef.current(), 500);
   }, [agentId]);
+
+  // Esc cancels the in-progress turn from anywhere in the focused chat pane
+  // (not just when the composer has focus) while the agent is working.
+  useEffect(() => {
+    if (!active || !busy) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        interrupt();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, busy, interrupt]);
 
   // Actually write a message to the PTY + echo it instantly. Text and Enter go
   // as separate writes (80ms apart) so Codex/Claude don't treat "text\r" as a
@@ -354,7 +418,7 @@ export function ChatView({
         {status === "ready" && visibleTurns}
         {pending.map((t, i) => (
           <div key={`pending-${i}`} className="chat-turn user">
-            <div className="chat-user">{t}</div>
+            <UserMessage text={t} />
           </div>
         ))}
         {busy && status !== "unsupported" && status !== "loading" && (
@@ -398,7 +462,7 @@ export function ChatView({
         </div>
       )}
       {status !== "unsupported" && (
-        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} onInterrupt={interrupt} />
+        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} />
       )}
     </div>
   );
@@ -412,12 +476,10 @@ function ChatComposer({
   agentId,
   onSend,
   busy,
-  onInterrupt,
 }: {
   agentId: string;
   onSend: (text: string) => void;
   busy: boolean;
-  onInterrupt: () => void;
 }) {
   const [text, setText] = useState(() => draftStore.get(agentId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
@@ -502,12 +564,8 @@ function ChatComposer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Esc cancels the in-progress turn while the agent is working.
-    if (e.key === "Escape" && busy) {
-      e.preventDefault();
-      onInterrupt();
-      return;
-    }
+    // Esc-to-cancel is handled by a window listener in ChatView so it works
+    // regardless of focus; nothing to do here for Escape.
     // Enter sends; Shift+Enter is a newline. Ignore Enter mid-IME-composition
     // (Korean/Japanese) so a committing keystroke doesn't submit early.
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
