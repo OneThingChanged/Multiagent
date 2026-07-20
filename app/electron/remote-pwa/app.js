@@ -1125,10 +1125,31 @@ function renderAssistantTurn(run) {
 const CHAT_PAGE = 10;
 let chatVisible = CHAT_PAGE;
 let lastChatData = null;
+let chatHiddenCount = 0;
+let chatAutoLoading = false;
+
+// Auto-reveal older turns when the user scrolls to the top of the chat (the
+// "이전 대화 더 보기" button stays as an explicit affordance). Prepending grows
+// content above, so shift scrollTop by the added height to avoid a jump.
+function bindChatAutoLoad() {
+  const el = ui.chatView;
+  if (!el || el.dataset.autoload === "1") return;
+  el.dataset.autoload = "1";
+  el.addEventListener("scroll", () => {
+    if (chatAutoLoading || chatHiddenCount <= 0 || el.scrollTop >= 80) return;
+    chatAutoLoading = true;
+    const prevHeight = el.scrollHeight;
+    chatVisible += CHAT_PAGE * 2;
+    if (lastChatData) renderChat(lastChatData);
+    el.scrollTop += el.scrollHeight - prevHeight;
+    chatAutoLoading = false;
+  });
+}
 
 function renderChat(data) {
   const el = ui.chatView;
   if (!el) return;
+  bindChatAutoLoad();
   lastChatData = data;
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
@@ -1161,12 +1182,15 @@ function renderChat(data) {
     // Build DOM only for the most recent `chatVisible` turns so a long session
     // paints fast; the button reveals older turns on demand.
     const hidden = Math.max(0, ranges.length - chatVisible);
+    chatHiddenCount = hidden; // drives scroll-to-top auto-load
     if (hidden > 0) {
       const more = make("button", "chat-more", `▲ 이전 대화 더 보기 (${hidden})`);
       more.type = "button";
       more.addEventListener("click", () => {
+        const prevHeight = el.scrollHeight;
         chatVisible += CHAT_PAGE * 2;
         if (lastChatData) renderChat(lastChatData);
+        el.scrollTop += el.scrollHeight - prevHeight;
       });
       frag.appendChild(more);
     }

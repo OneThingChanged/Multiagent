@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -110,6 +110,9 @@ export function ChatView({
   const [visible, setVisible] = useState(CHAT_PAGE);
   const keyRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // When we reveal older turns, remember the scroll height taken just before so
+  // the layout effect can restore the viewport position (content grows above).
+  const anchorHeightRef = useRef<number | null>(null);
 
   useEffect(() => {
     keyRef.current = "";
@@ -179,6 +182,32 @@ export function ChatView({
   }
 
   const hidden = Math.max(0, ranges.length - visible);
+
+  const loadOlder = () => {
+    const el = scrollRef.current;
+    anchorHeightRef.current = el ? el.scrollHeight : null;
+    setVisible((v) => v + CHAT_PAGE * 2);
+  };
+
+  // Auto-reveal older turns when the user scrolls to the top (button remains
+  // as an explicit affordance). The anchor guard blocks re-entry until the
+  // layout effect below has restored position for the pending load.
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el || status !== "ready" || hidden <= 0) return;
+    if (el.scrollTop < 80 && anchorHeightRef.current === null) loadOlder();
+  };
+
+  // Prepending older turns grows content above the viewport; shift scrollTop by
+  // the added height so the previously-visible messages stay put (no jump).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && anchorHeightRef.current !== null) {
+      el.scrollTop += el.scrollHeight - anchorHeightRef.current;
+      anchorHeightRef.current = null;
+    }
+  }, [visible]);
+
   const visibleTurns: ReactNode[] = ranges.slice(hidden).map((range) =>
     range.user ? (
       <div key={`u${range.start}`} className="chat-turn user">
@@ -191,14 +220,14 @@ export function ChatView({
 
   return (
     <div className="chat-view">
-      <div className="chat-scroll" ref={scrollRef}>
+      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         {status === "unsupported" && (
           <div className="chat-empty">대화 보기를 지원하지 않는 세션입니다 (codex/claude).</div>
         )}
         {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
         {status === "empty" && <div className="chat-empty">아직 대화 기록이 없습니다.</div>}
         {status === "ready" && hidden > 0 && (
-          <button type="button" className="chat-more" onClick={() => setVisible((v) => v + CHAT_PAGE * 2)}>
+          <button type="button" className="chat-more" onClick={loadOlder}>
             ▲ 이전 대화 더 보기 ({hidden})
           </button>
         )}
