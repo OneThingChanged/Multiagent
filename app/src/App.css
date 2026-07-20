@@ -4034,6 +4034,8 @@ body.files-resizing .files-resizer::after {
   background: var(--app-bg);
 }
 .chat-empty { color: var(--app-muted); font-size: 13px; text-align: center; padding: 30px 0; }
+.chat-more { align-self: center; margin: 2px auto 10px; padding: 7px 16px; border: 1px solid var(--app-border); border-radius: 16px; background: transparent; color: var(--app-muted); font-size: 12px; cursor: pointer; }
+.chat-more:hover { color: var(--app-text); }
 .chat-turn { display: flex; flex-direction: column; gap: 7px; }
 .chat-turn.user { align-items: flex-end; }
 .chat-user {

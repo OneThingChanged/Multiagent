@@ -1122,9 +1122,14 @@ function renderAssistantTurn(run) {
   return turn;
 }
 
+const CHAT_PAGE = 80;
+let chatVisible = CHAT_PAGE;
+let lastChatData = null;
+
 function renderChat(data) {
   const el = ui.chatView;
   if (!el) return;
+  lastChatData = data;
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
   const frag = document.createDocumentFragment();
@@ -1133,19 +1138,33 @@ function renderChat(data) {
   } else if (!blocks.length) {
     frag.appendChild(make("div", "chat-empty", data?.missing ? "아직 대화 기록이 없습니다." : "대화를 불러오는 중…"));
   } else {
+    // Group into turns, then render only the most recent `chatVisible` so a
+    // long session paints fast; a button reveals older turns on demand.
+    const turns = [];
     let i = 0;
     while (i < blocks.length) {
       if (blocks[i].role === "user" && blocks[i].kind === "text") {
         const turn = make("div", "chat-turn user");
         turn.appendChild(make("div", "chat-user", blocks[i].text));
-        frag.appendChild(turn);
+        turns.push(turn);
         i += 1;
       } else {
         const run = [];
         while (i < blocks.length && blocks[i].role !== "user") { run.push(blocks[i]); i += 1; }
-        frag.appendChild(renderAssistantTurn(run));
+        turns.push(renderAssistantTurn(run));
       }
     }
+    const hidden = Math.max(0, turns.length - chatVisible);
+    if (hidden > 0) {
+      const more = make("button", "chat-more", `▲ 이전 대화 더 보기 (${hidden})`);
+      more.type = "button";
+      more.addEventListener("click", () => {
+        chatVisible += CHAT_PAGE * 2;
+        if (lastChatData) renderChat(lastChatData);
+      });
+      frag.appendChild(more);
+    }
+    for (const turn of turns.slice(hidden)) frag.appendChild(turn);
   }
   el.replaceChildren(frag);
   if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
@@ -1153,8 +1172,13 @@ function renderChat(data) {
 
 let lastChatKey = "";
 let lastChatFetch = { id: null, at: 0 };
+let chatAgent = null;
 async function fetchChat(agentId) {
   if (!agentId) return;
+  if (agentId !== chatAgent) {
+    chatAgent = agentId;
+    chatVisible = CHAT_PAGE; // reset pagination when switching sessions
+  }
   const seq = ++chatRequestSeq;
   try {
     const response = await fetch(`/api/chat?id=${encodeURIComponent(agentId)}`, { credentials: "same-origin" });

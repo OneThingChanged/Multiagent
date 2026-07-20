@@ -13,6 +13,10 @@ import type { ChatBlock } from "../platform/ipcContract";
 
 type Status = "loading" | "unsupported" | "empty" | "ready";
 
+// Render only the most recent N turns so a long transcript paints fast;
+// older turns are revealed on demand.
+const CHAT_PAGE = 80;
+
 function toolLabel(block: { name?: string; input?: unknown }): string {
   const input = block.input;
   let arg = "";
@@ -103,6 +107,7 @@ export function ChatView({
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
+  const [visible, setVisible] = useState(CHAT_PAGE);
   const keyRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -110,6 +115,7 @@ export function ChatView({
     keyRef.current = "";
     setStatus("loading");
     setBlocks([]);
+    setVisible(CHAT_PAGE);
   }, [agentId]);
 
   useEffect(() => {
@@ -171,6 +177,9 @@ export function ChatView({
     }
   }
 
+  const hidden = Math.max(0, turns.length - visible);
+  const visibleTurns = hidden > 0 ? turns.slice(hidden) : turns;
+
   return (
     <div className="chat-view" ref={scrollRef}>
       {status === "unsupported" && (
@@ -178,7 +187,12 @@ export function ChatView({
       )}
       {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
       {status === "empty" && <div className="chat-empty">아직 대화 기록이 없습니다.</div>}
-      {status === "ready" && turns}
+      {status === "ready" && hidden > 0 && (
+        <button type="button" className="chat-more" onClick={() => setVisible((v) => v + CHAT_PAGE * 2)}>
+          ▲ 이전 대화 더 보기 ({hidden})
+        </button>
+      )}
+      {status === "ready" && visibleTurns}
     </div>
   );
 }
