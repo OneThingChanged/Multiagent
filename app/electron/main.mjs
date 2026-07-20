@@ -41,7 +41,7 @@ import {
 } from "./services/ssh-service.mjs";
 import { resolveTerminalPath } from "./services/terminal-path-service.mjs";
 import { sanitizeTerminalOutput } from "./services/terminal-sanitize.mjs";
-import { parseChatTranscript } from "./services/chat-transcript.mjs";
+import { parseChatTranscript, deriveTurnLifecycle } from "./services/chat-transcript.mjs";
 import {
   LocalDashboardService,
   RemoteDashboardService,
@@ -1123,13 +1123,13 @@ async function readChatTranscript(tool, transcriptPath) {
       let text = buffer.toString("utf8");
       const newline = text.indexOf("\n"); // drop the partial first line
       if (newline >= 0) text = text.slice(newline + 1);
-      result = { blocks: parseChatTranscript(text, toolId), truncated: true, missing: false };
+      result = { blocks: parseChatTranscript(text, toolId), truncated: true, missing: false, lifecycle: deriveTurnLifecycle(text, toolId) };
     } finally {
       await handle.close();
     }
   } else {
     const text = await fsPromises.readFile(resolved, "utf8");
-    result = { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
+    result = { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false, lifecycle: deriveTurnLifecycle(text, toolId) };
   }
   if (result.blocks.length > MAX_CHAT_BLOCKS) {
     result = { ...result, blocks: result.blocks.slice(-MAX_CHAT_BLOCKS), truncated: true };

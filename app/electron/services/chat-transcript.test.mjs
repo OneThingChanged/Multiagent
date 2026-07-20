@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { parseChatTranscript } from "./chat-transcript.mjs";
+import { parseChatTranscript, deriveTurnLifecycle } from "./chat-transcript.mjs";
+
+describe("deriveTurnLifecycle", () => {
+  it("codex: task_complete → idle; lone task_started → working", () => {
+    const done = [
+      { type: "event_msg", payload: { type: "task_started" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]
+      .map((o) => JSON.stringify(o))
+      .join("\n");
+    expect(deriveTurnLifecycle(done, "codex")).toBe("idle");
+    expect(deriveTurnLifecycle(JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }), "codex")).toBe("working");
+  });
+
+  it("claude: assistant end_turn → idle; trailing user turn → working", () => {
+    const idle = JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" },
+    });
+    expect(deriveTurnLifecycle(idle, "claude")).toBe("idle");
+    const working = [
+      JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn" } }),
+      JSON.stringify({ type: "user", message: { role: "user", content: "more" } }),
+    ].join("\n");
+    expect(deriveTurnLifecycle(working, "claude")).toBe("working");
+  });
+});
 
 describe("parseChatTranscript — claude", () => {
   it("decodes user text, assistant text, thinking, and tool use/result", () => {

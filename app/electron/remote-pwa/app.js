@@ -816,8 +816,10 @@ const messageQueue = [];
 let queueAgentId = null;
 let lastSendAt = 0;
 
-const agentBusy = (agent) => statusOf(agent) === "working";
-const agentReady = (agent) => ["idle", "done", "attention"].includes(statusOf(agent));
+// Busy only when the hook says "working" AND the transcript's last turn isn't
+// finished — so a stale/stuck "working" hook doesn't trap queued messages.
+const agentBusy = (agent) => statusOf(agent) === "working" && lastChatData?.lifecycle !== "idle";
+const agentReady = (agent) => !agentBusy(agent) && !["offline", "unreachable"].includes(statusOf(agent));
 
 function renderComposerQueue() {
   const el = ui.composerQueue;
@@ -1336,9 +1338,10 @@ function renderChat(data) {
     }
   }
   // "작업 중…" indicator while the selected agent is working (like Codex's 생각 중).
+  // Suppress it when the transcript says the turn finished (stale hook status).
   if (!data?.unsupported) {
     const agent = selectedAgent();
-    if (agent && statusOf(agent) === "working") {
+    if (agent && statusOf(agent) === "working" && data?.lifecycle !== "idle") {
       const think = make("div", "chat-thinking");
       const dots = make("span", "chat-thinking-dots");
       dots.append(make("i", ""), make("i", ""), make("i", ""));

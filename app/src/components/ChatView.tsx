@@ -230,6 +230,8 @@ export function ChatView({
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [tool, setTool] = useState<string | undefined>(undefined);
+  // Turn lifecycle from the transcript — overrides a stale hook "working".
+  const [lifecycle, setLifecycle] = useState<"working" | "idle" | undefined>(undefined);
   const [visible, setVisible] = useState(CHAT_PAGE);
   // Reserved (queued) messages waiting to be sent while the agent is working.
   // Restored from the module store so switching to the terminal and back keeps
@@ -271,6 +273,7 @@ export function ChatView({
         }
         const next = result.blocks ?? [];
         if (result.tool) setTool(result.tool);
+        setLifecycle(result.lifecycle);
         // Drop optimistic echoes now present in the transcript (exact match on
         // a user text block) so we don't show them twice.
         const userTexts = new Set(
@@ -386,7 +389,11 @@ export function ChatView({
     )
   );
 
-  const busy = BUSY_STATUSES.includes(agentStatus);
+  // The transcript's turn lifecycle is authoritative: if it says the last turn
+  // finished, treat the session as not-busy even when the hook status is stuck
+  // at "working" (missed Stop hook). This stops a phantom "작업 중…" that traps
+  // composer sends in the queue.
+  const busy = BUSY_STATUSES.includes(agentStatus) && lifecycle !== "idle";
   const alive = !DEAD_STATUSES.includes(agentStatus);
 
   // Cancel the in-progress turn by sending Esc to the PTY — same as pressing

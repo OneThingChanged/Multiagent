@@ -138,6 +138,53 @@ function decodeCodexLine(obj, out) {
   }
 }
 
+// Decide whether the agent's LAST turn is still in progress ("working") or has
+// finished ("idle"), read from the transcript itself — reliable even when the
+// completion hook never fired and the app's status is stuck at "working".
+//   Codex: task_started (working) vs task_complete / turn_aborted (idle).
+//   Claude: last record — assistant with a terminal stop_reason = idle; an
+//           assistant awaiting tools (stop_reason "tool_use") or a trailing
+//           user turn = working.
+export function deriveTurnLifecycle(text, tool) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  if (tool === "codex") {
+    let state = "idle";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const type = obj?.payload?.type ?? obj?.type;
+      if (type === "task_started") state = "working";
+      else if (type === "task_complete" || type === "turn_aborted") state = "idle";
+    }
+    return state;
+  }
+  if (tool === "claude") {
+    let last = null;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (obj?.type === "user" || obj?.type === "assistant") last = obj;
+    }
+    if (!last) return "idle";
+    if (last.type === "assistant") {
+      const stop = last.message?.stop_reason;
+      return stop && stop !== "tool_use" ? "idle" : "working";
+    }
+    return "working"; // trailing user/tool_result turn → agent should act
+  }
+  return "idle";
+}
+
 // Parse a full transcript body into chat blocks. `tool` is "codex" | "claude".
 export function parseChatTranscript(text, tool) {
   const out = [];
