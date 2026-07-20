@@ -39,6 +39,8 @@ describe("TabContextMenu", () => {
         onRename={() => {}}
         onSetColor={() => {}}
         onReopen={() => {}}
+        chatMode={false}
+        onToggleChat={() => {}}
       />
     );
 
@@ -65,6 +67,8 @@ describe("TabContextMenu", () => {
         onRename={() => {}}
         onSetColor={() => {}}
         onReopen={() => {}}
+        chatMode={false}
+        onToggleChat={() => {}}
       />
     );
 

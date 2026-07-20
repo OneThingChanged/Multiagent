@@ -89,6 +89,8 @@ export type RenderCtx = {
   onDropTargetChange: (t: DropTargetState | null) => void;
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
+  chatModeAgents: Set<string>;
+  onToggleChat: (agentId: string) => void;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -109,7 +111,6 @@ export function PaneSlot({
   ctx: RenderCtx;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const [chatMode, setChatMode] = useState(false);
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
   const [termMenu, setTermMenu] = useState<{
@@ -124,6 +125,9 @@ export function PaneSlot({
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
+  // Chat vs terminal view is a per-session preference held in App, so the
+  // toggle, tab context menu, and re-opening a session all stay in sync.
+  const chatMode = activeAgentId ? ctx.chatModeAgents.has(activeAgentId) : false;
   const { termsRef, setAgentStatus, setAgentSessionId } = ctx;
 
   // Latest-agent ref read inside the spawn effect; lets that effect depend
@@ -857,11 +861,11 @@ export function PaneSlot({
             className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
-              setChatMode((v) => !v);
+              ctx.onToggleChat(activeAgentId);
             }}
-            title={chatMode ? "터미널 보기" : "대화 보기"}
+            title={chatMode ? "터미널 뷰로 전환" : "대화(채팅) 뷰로 전환"}
           >
-            {chatMode ? "⌗" : "💬"}
+            {chatMode ? "⌗ 터미널" : "💬 대화"}
           </button>
         )}
       </div>

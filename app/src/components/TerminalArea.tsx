@@ -90,6 +90,8 @@ export function TerminalArea({
   onDrop,
   onDropToEmpty,
   onTabContextMenu,
+  chatModeAgents,
+  onToggleChat,
   onOpenMarkdownPath,
   onOpenImagePath,
   onOpenFolderPath,
@@ -116,6 +118,8 @@ export function TerminalArea({
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onDropToEmpty: (agentId: string) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
+  chatModeAgents: Set<string>;
+  onToggleChat: (agentId: string) => void;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -245,6 +249,8 @@ export function TerminalArea({
     onDropTargetChange,
     onDrop,
     onTabContextMenu,
+    chatModeAgents,
+    onToggleChat,
     onOpenMarkdownPath,
     onOpenImagePath,
     onOpenFolderPath,

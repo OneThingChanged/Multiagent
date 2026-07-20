@@ -598,6 +598,18 @@ function App() {
   >(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // Per-session preference: view a session as a chat transcript vs the terminal.
+  const [chatModeAgents, setChatModeAgents] = useState<Set<string>>(
+    () => new Set()
+  );
+  const toggleChatMode = useCallback((agentId: string) => {
+    setChatModeAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
   const [projectContextMenu, setProjectContextMenu] =
     useState<ProjectContextMenuState | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<TabCtxState | null>(null);
@@ -2992,6 +3004,8 @@ function App() {
         onTabContextMenu={(path, agentId, x, y) =>
           setTabContextMenu({ path, agentId, x, y })
         }
+        chatModeAgents={chatModeAgents}
+        onToggleChat={toggleChatMode}
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
         onOpenFolderPath={handleOpenFolderPath}
@@ -3235,6 +3249,8 @@ function App() {
             setAgentPinned(tabContextMenu.agentId, !current?.pinned);
           }}
           onReopen={reopenClosedTab}
+          chatMode={chatModeAgents.has(tabContextMenu.agentId)}
+          onToggleChat={() => toggleChatMode(tabContextMenu.agentId)}
           onCloseTab={() =>
             closeTab(tabContextMenu.path, tabContextMenu.agentId)
           }
