@@ -34,3 +34,6 @@ Thumbs.db
 
 # Local-only research and third-party comparison notes
 /local-research/
+
+# root deps / tool caches
+node_modules/
