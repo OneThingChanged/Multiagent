@@ -5,7 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import { invoke, listen } from "../platform/runtime";
 import { electronBridge } from "../platform/electronBridge";
 import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
-import { parseChatPrompt } from "../lib/chatPrompt";
+import { parseChatPrompt, type ChatPromptOption } from "../lib/chatPrompt";
 import {
   applyAutocomplete,
   detectAutocomplete,
@@ -232,6 +232,8 @@ export function ChatView({
   const [tool, setTool] = useState<string | undefined>(undefined);
   // Turn lifecycle from the transcript — overrides a stale hook "working".
   const [lifecycle, setLifecycle] = useState<"working" | "idle" | undefined>(undefined);
+  // Signature of the prompt the user just answered (hides its card).
+  const [answeredPromptSig, setAnsweredPromptSig] = useState("");
   const [visible, setVisible] = useState(CHAT_PAGE);
   // Reserved (queued) messages waiting to be sent while the agent is working.
   // Restored from the module store so switching to the terminal and back keeps
@@ -258,6 +260,7 @@ export function ChatView({
     setVisible(CHAT_PAGE);
     setPending([]);
     setQueue(queueStore.get(agentId) ?? []); // restore this session's reservations
+    setAnsweredPromptSig("");
     firstLoadRef.current = true;
   }, [agentId]);
 
@@ -406,16 +409,33 @@ export function ChatView({
   // Inline prompt (question options / permission Allow-Deny) parsed from the
   // agent's waiting-status text; answered by writing the choice to the PTY.
   const prompt = parseChatPrompt(agentStatus, question, assistantMessage);
-  const respondPrompt = useCallback(
-    (sendKey: string) => {
-      void invoke("write_pty", { id: agentId, data: sendKey }).catch(() => {});
+  const promptSig = prompt
+    ? `${prompt.kind}|${prompt.text}|${prompt.options.map((o) => o.label).join("|")}`
+    : "";
+  // Hide the card once answered so repeated clicks don't pile up keystrokes;
+  // a genuinely different prompt (new signature) shows again.
+  const showPrompt = Boolean(prompt) && promptSig !== answeredPromptSig;
+
+  // Write a paced key sequence to the PTY (arrow/enter groups a beat apart so
+  // the TUI registers each keystroke), then re-poll.
+  const writeKeys = (keys: string[]) => {
+    keys.forEach((key, idx) => {
       window.setTimeout(() => {
-        void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
-      }, 80);
-      window.setTimeout(() => fetchRef.current(), 500);
-    },
-    [agentId]
-  );
+        void invoke("write_pty", { id: agentId, data: key }).catch(() => {});
+      }, idx * 60);
+    });
+    window.setTimeout(() => fetchRef.current(), keys.length * 60 + 400);
+  };
+  const respondPrompt = (option: ChatPromptOption) => {
+    setAnsweredPromptSig(promptSig);
+    if (prompt?.answerStyle === "arrow") {
+      // Claude's selector: move down to option i (1-based send), then Enter.
+      const steps = Math.max(0, Number(option.send) - 1);
+      writeKeys([...Array(steps).fill("\x1b[B"), "\r"]);
+    } else {
+      writeKeys([option.send, "\r"]);
+    }
+  };
 
   // Esc cancels the in-progress turn from anywhere in the focused chat pane
   // (not just when the composer has focus) while the agent is working.
@@ -530,7 +550,7 @@ export function ChatView({
           </div>
         )}
       </div>
-      {prompt && (
+      {showPrompt && prompt && (
         <div className={`chat-prompt ${prompt.kind}`}>
           <div className="chat-prompt-text">
             {prompt.kind === "permission" ? "🔒 " : "❓ "}
@@ -542,7 +562,7 @@ export function ChatView({
                 key={i}
                 type="button"
                 className="chat-prompt-option"
-                onClick={() => respondPrompt(option.send)}
+                onClick={() => respondPrompt(option)}
               >
                 {option.label}
               </button>

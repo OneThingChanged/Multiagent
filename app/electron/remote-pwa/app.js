@@ -163,6 +163,7 @@ function promptFor(agent) {
   if (details.options && details.options.length) {
     return {
       kind: "question",
+      answerStyle: agent.aiToolId === "codex" ? "digit" : "arrow",
       text: promptFirstLine(details.text),
       options: details.options.map((label, i) => ({ label: String(label).slice(0, 80), send: String(i + 1) })),
     };
@@ -172,18 +173,29 @@ function promptFor(agent) {
   const numbered = promptOptionLines(src);
   const lower = src.toLowerCase();
   const isPerm = PERMISSION_HINTS.some((h) => lower.includes(h));
-  if (numbered.length >= 2) return { kind: isPerm ? "permission" : "question", text: promptFirstLine(src), options: numbered };
+  if (numbered.length >= 2) return { kind: isPerm ? "permission" : "question", answerStyle: "digit", text: promptFirstLine(src), options: numbered };
   if (isPerm) {
     const options = [{ label: "예 (Yes)", send: "y" }, { label: "아니오 (No)", send: "n" }];
     if (lower.includes("always") || lower.includes("항상")) options.push({ label: "항상 허용", send: "a" });
-    return { kind: "permission", text: promptFirstLine(src), options };
+    return { kind: "permission", answerStyle: "digit", text: promptFirstLine(src), options };
   }
   return null;
 }
-async function respondPrompt(agentId, sendKey) {
-  await sendRaw(agentId, sendKey);
-  await new Promise((r) => setTimeout(r, 80));
-  await sendRaw(agentId, "\r");
+function promptSignature(prompt) {
+  return prompt ? `${prompt.kind}|${prompt.text}|${prompt.options.map((o) => o.label).join("|")}` : "";
+}
+let answeredPromptSig = "";
+async function respondPrompt(agentId, prompt, option) {
+  answeredPromptSig = promptSignature(prompt); // hide the card; block spam clicks
+  if (lastChatData) renderChat(lastChatData);
+  const keys =
+    prompt.answerStyle === "arrow"
+      ? [...Array(Math.max(0, Number(option.send) - 1)).fill("\x1b[B"), "\r"]
+      : [option.send, "\r"];
+  for (const key of keys) {
+    await sendRaw(agentId, key);
+    await new Promise((r) => setTimeout(r, 60));
+  }
   lastChatFetch = { id: null, at: 0 };
 }
 
@@ -1353,16 +1365,16 @@ function renderChat(data) {
       think.appendChild(stop);
       frag.appendChild(think);
     }
-    // Inline prompt card (question / permission).
+    // Inline prompt card (question / permission) — hidden once answered.
     const prompt = agent ? promptFor(agent) : null;
-    if (prompt) {
+    if (prompt && promptSignature(prompt) !== answeredPromptSig) {
       const card = make("div", `chat-prompt ${prompt.kind}`);
       card.appendChild(make("div", "chat-prompt-text", `${prompt.kind === "permission" ? "🔒 " : "❓ "}${prompt.text}`));
       const opts = make("div", "chat-prompt-options");
       for (const option of prompt.options) {
         const button = make("button", "chat-prompt-option", option.label);
         button.type = "button";
-        button.addEventListener("click", () => { void respondPrompt(agent.id, option.send); });
+        button.addEventListener("click", () => { void respondPrompt(agent.id, prompt, option); });
         opts.appendChild(button);
       }
       card.appendChild(opts);

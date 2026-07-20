@@ -9,6 +9,9 @@ import type { AgentStatus } from "../types";
 export type ChatPromptOption = { label: string; send: string };
 export type ChatPrompt = {
   kind: "question" | "permission";
+  // "arrow": Claude's structured selector — pick option i by ↓×i then Enter.
+  // "digit": a numeric/letter menu or y/n — send the key then Enter.
+  answerStyle: "arrow" | "digit";
   text: string;
   options: ChatPromptOption[];
 };
@@ -68,6 +71,7 @@ function parseStructured(raw: string): ChatPrompt | null {
     if (!choices.length) return null;
     return {
       kind: "question",
+      answerStyle: "arrow",
       text: String(q.question || q.header || "질문").slice(0, 200),
       options: choices.map((label, i) => ({ label: label.slice(0, 80), send: String(i + 1) })),
     };
@@ -97,6 +101,7 @@ export function parseChatPrompt(
   if (numbered.length >= 2) {
     return {
       kind: isPermission ? "permission" : "question",
+      answerStyle: "digit",
       text: firstLine(src),
       options: numbered,
     };
@@ -109,7 +114,7 @@ export function parseChatPrompt(
     if (lower.includes("always") || lower.includes("항상")) {
       options.push({ label: "항상 허용", send: "a" });
     }
-    return { kind: "permission", text: firstLine(src), options };
+    return { kind: "permission", answerStyle: "digit", text: firstLine(src), options };
   }
   return null;
 }
