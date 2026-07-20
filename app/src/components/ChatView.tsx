@@ -108,8 +108,12 @@ export function ChatView({
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [visible, setVisible] = useState(CHAT_PAGE);
+  // Messages just sent from the composer, echoed instantly so the chat updates
+  // without waiting for the next poll; dropped once the transcript includes them.
+  const [pending, setPending] = useState<string[]>([]);
   const keyRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fetchRef = useRef<() => void>(() => {});
   // When we reveal older turns, remember the scroll height taken just before so
   // the layout effect can restore the viewport position (content grows above).
   const anchorHeightRef = useRef<number | null>(null);
@@ -119,6 +123,7 @@ export function ChatView({
     setStatus("loading");
     setBlocks([]);
     setVisible(CHAT_PAGE);
+    setPending([]);
   }, [agentId]);
 
   useEffect(() => {
@@ -133,6 +138,12 @@ export function ChatView({
           return;
         }
         const next = result.blocks ?? [];
+        // Drop optimistic echoes now present in the transcript (exact match on
+        // a user text block) so we don't show them twice.
+        const userTexts = new Set(
+          next.filter((b) => b.role === "user" && b.kind === "text").map((b) => b.text ?? "")
+        );
+        setPending((prev) => prev.filter((t) => !userTexts.has(t)));
         const last = next[next.length - 1];
         const key = `${next.length}:${String(last?.text ?? last?.output ?? "").length}`;
         if (key === keyRef.current) return;
@@ -152,6 +163,7 @@ export function ChatView({
         // Keep the last conversation on a transient IPC error.
       }
     };
+    fetchRef.current = fetchBlocks;
     void fetchBlocks();
     const timer = window.setInterval(fetchBlocks, 3000);
     return () => {
@@ -218,6 +230,25 @@ export function ChatView({
     )
   );
 
+  const sendMessage = (raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    // Echo instantly, then send. Text and Enter go as separate writes (80ms
+    // apart) so Codex/Claude don't treat "text\r" as a multiline paste.
+    setPending((p) => [...p, value]);
+    void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
+    window.setTimeout(() => {
+      void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
+    }, 80);
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    });
+    // Re-poll soon so the real transcript (and the reply) lands quickly instead
+    // of waiting for the 3s tick.
+    window.setTimeout(() => fetchRef.current(), 700);
+    window.setTimeout(() => fetchRef.current(), 1600);
+  };
+
   return (
     <div className="chat-view">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
@@ -225,33 +256,36 @@ export function ChatView({
           <div className="chat-empty">대화 보기를 지원하지 않는 세션입니다 (codex/claude).</div>
         )}
         {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
-        {status === "empty" && <div className="chat-empty">아직 대화 기록이 없습니다.</div>}
+        {status === "empty" && !pending.length && (
+          <div className="chat-empty">아직 대화 기록이 없습니다.</div>
+        )}
         {status === "ready" && hidden > 0 && (
           <button type="button" className="chat-more" onClick={loadOlder}>
             ▲ 이전 대화 더 보기 ({hidden})
           </button>
         )}
         {status === "ready" && visibleTurns}
+        {pending.map((t, i) => (
+          <div key={`pending-${i}`} className="chat-turn user">
+            <div className="chat-user">{t}</div>
+          </div>
+        ))}
       </div>
-      {status !== "unsupported" && <ChatComposer agentId={agentId} />}
+      {status !== "unsupported" && <ChatComposer onSend={sendMessage} />}
     </div>
   );
 }
 
-// Send additional instructions straight to the session's PTY from the chat
-// view (so you don't have to switch to the terminal tab). Text and the Enter
-// keystroke MUST be written separately — a single "text\r" is treated as a
-// multiline paste by Codex/Claude and won't submit.
-function ChatComposer({ agentId }: { agentId: string }) {
+// Composer for sending additional instructions to the session from the chat
+// view (so you don't have to switch to the terminal tab). The actual send +
+// optimistic echo live in the parent; this just captures input.
+function ChatComposer({ onSend }: { onSend: (text: string) => void }) {
   const [text, setText] = useState("");
 
   const send = () => {
     const value = text.trim();
     if (!value) return;
-    void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
-    window.setTimeout(() => {
-      void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
-    }, 80);
+    onSend(value);
     setText("");
   };
 
