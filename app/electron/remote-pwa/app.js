@@ -44,6 +44,9 @@ const ui = {
   promptPanel: $("#promptPanel"),
   promptText: $("#promptText"),
   outputText: $("#outputText"),
+  sessionMode: $("#sessionMode"),
+  chatView: $("#chatView"),
+  outputPanel: $("#outputPanel"),
   terminalMount: $("#terminalMount"),
   terminalLive: $("#terminalLive"),
   copyOutputButton: $("#copyOutputButton"),
@@ -658,6 +661,7 @@ function renderSelection() {
   if (selection.type === "screen") renderScreen();
   if (selection.type === "session") renderSession();
   syncTerminal();
+  syncSessionView();
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor" && activeFilter !== "attention");
   ui.mobileScreensButton.classList.toggle("active", selection.type === "screen");
@@ -998,7 +1002,7 @@ function refitAllTerminals() {
 function syncTerminal() {
   if (!terminalSupported) return;
   const keep = new Set();
-  if (selection.type === "session") {
+  if (selection.type === "session" && sessionViewMode === "term") {
     const agent = selectedAgent();
     if (agent && ui.terminalMount) {
       attachTerminal(ui.terminalMount, agent.id);
@@ -1014,6 +1018,169 @@ function syncTerminal() {
   for (const container of [...terminals.keys()]) {
     if (!keep.has(container)) releaseTerminal(container);
   }
+}
+
+// ---- Conversation (chat) view ----
+// Renders an agent's own transcript (via /api/chat) as a chat instead of the
+// width-constrained terminal. Default on; the session view toggles chat/term.
+let sessionViewMode = localStorage.getItem("multiagent.remote.sessionMode") === "term" ? "term" : "chat";
+let chatRequestSeq = 0;
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function inlineMd(text) {
+  let out = escapeHtml(text);
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  out = out.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  return out;
+}
+function mdToHtml(text) {
+  const lines = String(text).split(/\r?\n/);
+  let html = "";
+  let inList = false;
+  const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (heading) { closeList(); html += `<h4>${inlineMd(heading[2])}</h4>`; }
+    else if (bullet) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inlineMd(bullet[1])}</li>`; }
+    else if (!line.trim()) { closeList(); }
+    else { closeList(); html += `<p>${inlineMd(line)}</p>`; }
+  }
+  closeList();
+  return html;
+}
+function toolLabel(tool) {
+  let arg = "";
+  const input = tool.input;
+  if (typeof input === "string") arg = input;
+  else if (input && typeof input === "object") {
+    arg = input.command || input.cmd || input.file_path || input.path || input.pattern || JSON.stringify(input);
+  }
+  return { name: tool.name || "tool", arg: String(arg).replace(/\s+/g, " ").slice(0, 90) };
+}
+
+function renderAssistantTurn(run) {
+  const turn = make("div", "chat-turn");
+  const role = make("div", "chat-role");
+  role.append(make("span", "av", "✦"), document.createTextNode("Assistant"));
+  turn.appendChild(role);
+
+  const tools = [];
+  let pendingCall = null;
+  const bodyNodes = [];
+  for (const block of run) {
+    if (block.kind === "tool-call") {
+      pendingCall = { name: block.name, input: block.input, output: null, isError: false };
+      tools.push(pendingCall);
+    } else if (block.kind === "tool-result") {
+      if (pendingCall && pendingCall.output === null) {
+        pendingCall.output = block.output; pendingCall.isError = block.isError; pendingCall = null;
+      } else {
+        tools.push({ name: "result", input: null, output: block.output, isError: block.isError });
+      }
+    } else if (block.kind === "reasoning") {
+      const d = make("details", "chat-work");
+      d.append(make("summary", "", "추론"));
+      const wrap = make("div", "chat-tools");
+      const pre = make("pre", "", block.text);
+      wrap.appendChild(pre);
+      d.appendChild(wrap);
+      bodyNodes.push(d);
+    } else if (block.kind === "text") {
+      const md = make("div", "chat-md");
+      md.innerHTML = mdToHtml(block.text);
+      bodyNodes.push(md);
+    } else if (block.kind === "image") {
+      bodyNodes.push(make("div", "chat-md", "🖼 이미지"));
+    }
+  }
+
+  if (tools.length) {
+    const group = make("details", "chat-work");
+    group.append(make("summary", "", `작업 · 툴 ${tools.length}개`));
+    const list = make("div", "chat-tools");
+    for (const tool of tools) {
+      const label = toolLabel(tool);
+      const item = make("details", "chat-tool");
+      const summary = make("summary", "");
+      summary.append(make("span", "k", "$"), make("span", "cmd", label.arg ? `${label.name} · ${label.arg}` : label.name));
+      item.appendChild(summary);
+      const pre = make("pre", tool.isError ? "err" : "", tool.output ?? "(출력 없음)");
+      item.appendChild(pre);
+      list.appendChild(item);
+    }
+    group.appendChild(list);
+    turn.appendChild(group);
+  }
+  for (const node of bodyNodes) turn.appendChild(node);
+  return turn;
+}
+
+function renderChat(data) {
+  const el = ui.chatView;
+  if (!el) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+  const frag = document.createDocumentFragment();
+  if (data?.unsupported) {
+    frag.appendChild(make("div", "chat-empty", "이 세션은 대화 보기를 지원하지 않습니다 (codex/claude)."));
+  } else if (!blocks.length) {
+    frag.appendChild(make("div", "chat-empty", data?.missing ? "아직 대화 기록이 없습니다." : "대화를 불러오는 중…"));
+  } else {
+    let i = 0;
+    while (i < blocks.length) {
+      if (blocks[i].role === "user" && blocks[i].kind === "text") {
+        const turn = make("div", "chat-turn user");
+        turn.appendChild(make("div", "chat-user", blocks[i].text));
+        frag.appendChild(turn);
+        i += 1;
+      } else {
+        const run = [];
+        while (i < blocks.length && blocks[i].role !== "user") { run.push(blocks[i]); i += 1; }
+        frag.appendChild(renderAssistantTurn(run));
+      }
+    }
+  }
+  el.replaceChildren(frag);
+  if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+}
+
+let lastChatKey = "";
+async function fetchChat(agentId) {
+  if (!agentId) return;
+  const seq = ++chatRequestSeq;
+  try {
+    const response = await fetch(`/api/chat?id=${encodeURIComponent(agentId)}`, { credentials: "same-origin" });
+    const data = await response.json().catch(() => ({ blocks: [] }));
+    if (seq !== chatRequestSeq) return; // a newer request superseded this one
+    const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+    const last = blocks[blocks.length - 1];
+    // Skip re-render when nothing changed so opened tool/▸ details stay open.
+    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}`;
+    if (key === lastChatKey) return;
+    lastChatKey = key;
+    renderChat(data);
+  } catch {
+    // Keep the last rendered conversation on a transient error.
+  }
+}
+
+// Show chat or terminal for the session view; refresh the active one.
+function syncSessionView() {
+  if (selection.type !== "session") return;
+  const agent = selectedAgent();
+  const chat = sessionViewMode === "chat";
+  if (ui.chatView) ui.chatView.hidden = !chat;
+  if (ui.outputPanel) ui.outputPanel.hidden = chat;
+  if (ui.sessionMode) {
+    for (const button of ui.sessionMode.children) {
+      button.classList.toggle("on", button.dataset.mode === sessionViewMode);
+    }
+  }
+  if (chat && agent) fetchChat(agent.id);
 }
 
 // Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
@@ -1175,6 +1342,14 @@ ui.backToScreenButton.addEventListener("click", () => {
 });
 ui.refreshButton.addEventListener("click", () => fetchState());
 ui.focusAnswerButton.addEventListener("click", () => ui.messageInput.focus());
+ui.sessionMode?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (!button) return;
+  sessionViewMode = button.dataset.mode === "term" ? "term" : "chat";
+  localStorage.setItem("multiagent.remote.sessionMode", sessionViewMode);
+  syncTerminal();
+  syncSessionView();
+});
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
 ui.composerKeys?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-key]");

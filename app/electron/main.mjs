@@ -171,6 +171,9 @@ let desktopPetUpdate = {
   question: null,
 };
 const monitorHooks = new Map();
+/** agentId -> latest hook-reported transcript path / session id (for the chat view). */
+const agentTranscripts = new Map();
+const agentSessionIds = new Map();
 
 app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
@@ -200,6 +203,10 @@ const hookService = new HookService({
         received_at: payload.received_at,
         lastTs: Date.now(),
       });
+      // Track the live transcript path / session id per agent so the chat view
+      // can read the conversation for any session.
+      if (payload.transcript_path) agentTranscripts.set(payload.id, payload.transcript_path);
+      if (payload.session_id) agentSessionIds.set(payload.id, payload.session_id);
       if (payload.event === "done" && payload.transcript_path) {
         try {
           usageIndex.ingestHook(
@@ -298,6 +305,7 @@ remoteService = new RemoteDashboardService({
     const entry = ptys.get(id);
     return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
   },
+  chatProvider: (id) => chatBlocksForAgent(id),
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
   },
@@ -1021,6 +1029,46 @@ async function readChatTranscript(tool, transcriptPath) {
   }
   const text = await fsPromises.readFile(resolved, "utf8");
   return { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
+}
+
+// Locate a transcript by session id when a hook didn't report its path — Codex
+// filenames embed the session id; Claude names the file <sessionId>.jsonl.
+function findTranscriptBySessionId(root, tool, sessionId) {
+  if (!root || !sessionId || !fs.existsSync(root)) return null;
+  const sid = String(sessionId).toLowerCase();
+  const stack = [root];
+  let scanned = 0;
+  while (stack.length && scanned < 8000) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      scanned += 1;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { stack.push(full); continue; }
+      const name = entry.name.toLowerCase();
+      if (!name.endsWith(".jsonl")) continue;
+      if (tool === "claude" ? name === `${sid}.jsonl` : name.includes(sid)) return full;
+    }
+  }
+  return null;
+}
+
+// Resolve + decode the current transcript for an agent (for the chat view).
+async function chatBlocksForAgent(agentId) {
+  const id = asString(agentId).trim();
+  const tool = ptys.get(id)?.aiToolId;
+  if (tool !== "codex" && tool !== "claude") {
+    return { blocks: [], truncated: false, missing: true, unsupported: true };
+  }
+  let transcriptPath = agentTranscripts.get(id);
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, agentSessionIds.get(id));
+    if (transcriptPath) agentTranscripts.set(id, transcriptPath); // cache the resolve
+  }
+  if (!transcriptPath) return { blocks: [], truncated: false, missing: true, tool };
+  const result = await readChatTranscript(tool, transcriptPath);
+  return { ...result, tool };
 }
 
 function resolveDocPath(folder, requested) {

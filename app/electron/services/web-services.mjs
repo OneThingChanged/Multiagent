@@ -205,7 +205,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -216,6 +216,7 @@ export class RemoteDashboardService {
     this.terminalSnapshot = terminalSnapshot ?? (() => null);
     this.subscribeTerminal = subscribeTerminal ?? (() => null);
     this.terminalSize = terminalSize ?? (() => null);
+    this.chatProvider = chatProvider ?? (() => null);
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -578,6 +579,16 @@ export class RemoteDashboardService {
         }
         if (request.method === "GET" && url.pathname === "/api/stream") {
           this.streamTerminal(request, response, String(url.searchParams.get("id") || "").trim());
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/chat") {
+          const id = String(url.searchParams.get("id") || "").trim();
+          try {
+            const result = (await this.chatProvider?.(id)) ?? { blocks: [], missing: true };
+            sendJson(response, 200, result);
+          } catch (error) {
+            sendJson(response, 500, { error: error.message, blocks: [] });
+          }
           return;
         }
         if (request.method === "GET" && sendRemoteAsset(response, url.pathname)) return;
