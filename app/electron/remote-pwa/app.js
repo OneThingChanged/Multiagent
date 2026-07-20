@@ -1152,6 +1152,7 @@ function renderChat(data) {
 }
 
 let lastChatKey = "";
+let lastChatFetch = { id: null, at: 0 };
 async function fetchChat(agentId) {
   if (!agentId) return;
   const seq = ++chatRequestSeq;
@@ -1183,7 +1184,16 @@ function syncSessionView() {
       button.classList.toggle("on", button.dataset.mode === sessionViewMode);
     }
   }
-  if (chat && agent) fetchChat(agent.id);
+  // Throttle: renderSelection runs on every state poll, but a chat fetch scans
+  // and parses the transcript server-side — refetch immediately on session/mode
+  // change, otherwise at most every few seconds.
+  if (chat && agent) {
+    const now = Date.now();
+    if (agent.id !== lastChatFetch.id || now - lastChatFetch.at > 3000) {
+      lastChatFetch = { id: agent.id, at: now };
+      fetchChat(agent.id);
+    }
+  }
 }
 
 // Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
@@ -1370,6 +1380,7 @@ ui.sessionMode?.addEventListener("click", (event) => {
   if (!button) return;
   sessionViewMode = button.dataset.mode === "term" ? "term" : "chat";
   localStorage.setItem("multiagent.remote.sessionMode", sessionViewMode);
+  lastChatFetch = { id: null, at: 0 }; // force an immediate chat refresh on switch
   syncTerminal();
   syncSessionView();
 });

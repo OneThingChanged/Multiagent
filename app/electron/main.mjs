@@ -174,6 +174,9 @@ const monitorHooks = new Map();
 /** agentId -> latest hook-reported transcript path / session id (for the chat view). */
 const agentTranscripts = new Map();
 const agentSessionIds = new Map();
+/** agentId -> epoch ms until which transcript resolution is known to fail
+ *  (avoids rescanning the session dir every poll for sessions with no file). */
+const transcriptMissUntil = new Map();
 
 app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
@@ -1013,6 +1016,10 @@ function chatSessionRoot(tool) {
 // view. Sandboxed to the tool's session directory. Very large transcripts are
 // read from the tail so a long session doesn't block the UI.
 const MAX_CHAT_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+// Parsed-transcript cache keyed by path → { mtimeMs, size, result }. Re-parsing
+// a large JSONL on every poll is what made the chat view lag; skip it when the
+// file is unchanged.
+const chatTranscriptCache = new Map();
 async function readChatTranscript(tool, transcriptPath) {
   const toolId = asString(tool);
   const root = chatSessionRoot(toolId);
@@ -1025,6 +1032,11 @@ async function readChatTranscript(tool, transcriptPath) {
   const rootReal = fs.existsSync(root) ? fs.realpathSync(root) : root;
   if (!isInside(rootReal, resolved)) throw new Error("허용되지 않은 트랜스크립트 경로입니다.");
   const stat = await fsPromises.stat(resolved);
+  const cached = chatTranscriptCache.get(resolved);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.result;
+  }
+  let result;
   if (stat.size > MAX_CHAT_TRANSCRIPT_BYTES) {
     const start = stat.size - MAX_CHAT_TRANSCRIPT_BYTES;
     const handle = await fsPromises.open(resolved, "r");
@@ -1034,13 +1046,16 @@ async function readChatTranscript(tool, transcriptPath) {
       let text = buffer.toString("utf8");
       const newline = text.indexOf("\n"); // drop the partial first line
       if (newline >= 0) text = text.slice(newline + 1);
-      return { blocks: parseChatTranscript(text, toolId), truncated: true, missing: false };
+      result = { blocks: parseChatTranscript(text, toolId), truncated: true, missing: false };
     } finally {
       await handle.close();
     }
+  } else {
+    const text = await fsPromises.readFile(resolved, "utf8");
+    result = { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
   }
-  const text = await fsPromises.readFile(resolved, "utf8");
-  return { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
+  chatTranscriptCache.set(resolved, { mtimeMs: stat.mtimeMs, size: stat.size, result });
+  return result;
 }
 
 // Locate a transcript by session id when a hook didn't report its path — Codex
@@ -1079,8 +1094,18 @@ async function chatBlocksForAgent(agentId) {
   const sessionId = agentSessionIds.get(id) || catalogAgent?.lastSessionId || null;
   let transcriptPath = agentTranscripts.get(id);
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    // findTranscriptBySessionId does a recursive dir scan; don't repeat it every
+    // poll when the transcript can't be found — back off for a while.
+    if ((transcriptMissUntil.get(id) ?? 0) > Date.now()) {
+      return { blocks: [], truncated: false, missing: true, tool };
+    }
     transcriptPath = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
-    if (transcriptPath) agentTranscripts.set(id, transcriptPath); // cache the resolve
+    if (transcriptPath) {
+      agentTranscripts.set(id, transcriptPath); // cache the resolve
+      transcriptMissUntil.delete(id);
+    } else {
+      transcriptMissUntil.set(id, Date.now() + 15_000);
+    }
   }
   if (!transcriptPath) return { blocks: [], truncated: false, missing: true, tool };
   const result = await readChatTranscript(tool, transcriptPath);
