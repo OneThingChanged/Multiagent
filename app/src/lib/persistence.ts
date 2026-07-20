@@ -50,9 +50,10 @@ function loadStoredProjects(rawAgents: StoredAgent[]): Project[] {
     const raw = localStorage.getItem(LS_PROJECTS);
     if (raw) {
       for (const project of JSON.parse(raw) as StoredProject[]) {
-        // SSH projects may have no local folder; still require an id.
+        // SSH projects may have no local folder; still require an id. Keep even
+        // folder-less projects so agents that reference them are never dropped
+        // (losing every session on restore when project metadata is partial).
         if (!project.id) continue;
-        if (!project.folder && !project.sshHostId) continue;
         existing.set(project.id, {
           id: project.id,
           name: project.name || projectNameFromFolder(project.folder || ""),
@@ -71,18 +72,31 @@ function loadStoredProjects(rawAgents: StoredAgent[]): Project[] {
   );
   for (const agent of rawAgents) {
     if (agent.projectId && existing.has(agent.projectId)) continue;
-    if (!agent.folder) continue;
-    if (byFolder.has(agent.folder)) continue;
+    if (agent.folder && byFolder.has(agent.folder)) continue;
 
-    const project: Project = {
-      id: crypto.randomUUID(),
-      name: projectNameFromFolder(agent.folder),
-      folder: agent.folder,
-      createdAt: agent.createdAt || Date.now(),
-      lastOpenedAt: agent.createdAt,
-    };
-    existing.set(project.id, project);
-    byFolder.set(project.folder, project);
+    // Every stored session must map to a project or loadStoredAgents drops it.
+    // Prefer a folder-derived project; for a folder-less agent whose project
+    // didn't survive, recover a placeholder keyed by its own projectId so the
+    // session still appears (and stays restorable) instead of disappearing.
+    if (agent.folder) {
+      const project: Project = {
+        id: crypto.randomUUID(),
+        name: projectNameFromFolder(agent.folder),
+        folder: agent.folder,
+        createdAt: agent.createdAt || Date.now(),
+        lastOpenedAt: agent.createdAt,
+      };
+      existing.set(project.id, project);
+      byFolder.set(project.folder, project);
+    } else if (agent.projectId) {
+      existing.set(agent.projectId, {
+        id: agent.projectId,
+        name: agent.name || "Recovered project",
+        folder: "",
+        createdAt: agent.createdAt || Date.now(),
+        lastOpenedAt: agent.createdAt,
+      });
+    }
   }
 
   return Array.from(existing.values()).sort(
