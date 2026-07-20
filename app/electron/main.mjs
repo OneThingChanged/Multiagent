@@ -1036,7 +1036,11 @@ function chatSessionRoot(tool) {
 // Read an agent transcript and decode it into chat blocks for the conversation
 // view. Sandboxed to the tool's session directory. Very large transcripts are
 // read from the tail so a long session doesn't block the UI.
-const MAX_CHAT_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+// Only ever parse the tail of a transcript for the chat view. A live session's
+// file grows (busting the mtime cache each poll), so parsing the whole thing on
+// the main thread froze the app — cap the parse to the most recent slice.
+const MAX_CHAT_TRANSCRIPT_BYTES = 1024 * 1024;
+const MAX_CHAT_BLOCKS = 400;
 // Parsed-transcript cache keyed by path → { mtimeMs, size, result }. Re-parsing
 // a large JSONL on every poll is what made the chat view lag; skip it when the
 // file is unchanged.
@@ -1074,6 +1078,9 @@ async function readChatTranscript(tool, transcriptPath) {
   } else {
     const text = await fsPromises.readFile(resolved, "utf8");
     result = { blocks: parseChatTranscript(text, toolId), truncated: false, missing: false };
+  }
+  if (result.blocks.length > MAX_CHAT_BLOCKS) {
+    result = { ...result, blocks: result.blocks.slice(-MAX_CHAT_BLOCKS), truncated: true };
   }
   chatTranscriptCache.set(resolved, { mtimeMs: stat.mtimeMs, size: stat.size, result });
   return result;
