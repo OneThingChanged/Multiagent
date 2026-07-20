@@ -1138,23 +1138,29 @@ function renderChat(data) {
   } else if (!blocks.length) {
     frag.appendChild(make("div", "chat-empty", data?.missing ? "아직 대화 기록이 없습니다." : "대화를 불러오는 중…"));
   } else {
-    // Group into turns, then render only the most recent `chatVisible` so a
-    // long session paints fast; a button reveals older turns on demand.
-    const turns = [];
+    // Group blocks into turns as [start, end) ranges. A new turn begins at a
+    // user *text* block; everything else — assistant text/reasoning/tools, and
+    // user images (role:"user", kind:"image") — folds into the preceding run.
+    // The `do…while` always advances `i`: a user block whose kind isn't "text"
+    // MUST be consumed here or the loop spins forever, building turns without
+    // bound (this was the runaway-memory freeze).
+    const ranges = [];
     let i = 0;
     while (i < blocks.length) {
-      if (blocks[i].role === "user" && blocks[i].kind === "text") {
-        const turn = make("div", "chat-turn user");
-        turn.appendChild(make("div", "chat-user", blocks[i].text));
-        turns.push(turn);
+      const b = blocks[i];
+      if (b.role === "user" && b.kind === "text") {
+        ranges.push({ user: true, start: i, end: i + 1 });
         i += 1;
       } else {
-        const run = [];
-        while (i < blocks.length && blocks[i].role !== "user") { run.push(blocks[i]); i += 1; }
-        turns.push(renderAssistantTurn(run));
+        const start = i;
+        do { i += 1; }
+        while (i < blocks.length && !(blocks[i].role === "user" && blocks[i].kind === "text"));
+        ranges.push({ user: false, start, end: i });
       }
     }
-    const hidden = Math.max(0, turns.length - chatVisible);
+    // Build DOM only for the most recent `chatVisible` turns so a long session
+    // paints fast; the button reveals older turns on demand.
+    const hidden = Math.max(0, ranges.length - chatVisible);
     if (hidden > 0) {
       const more = make("button", "chat-more", `▲ 이전 대화 더 보기 (${hidden})`);
       more.type = "button";
@@ -1164,7 +1170,15 @@ function renderChat(data) {
       });
       frag.appendChild(more);
     }
-    for (const turn of turns.slice(hidden)) frag.appendChild(turn);
+    for (const range of ranges.slice(hidden)) {
+      if (range.user) {
+        const turn = make("div", "chat-turn user");
+        turn.appendChild(make("div", "chat-user", blocks[range.start].text));
+        frag.appendChild(turn);
+      } else {
+        frag.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end)));
+      }
+    }
   }
   el.replaceChildren(frag);
   if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });

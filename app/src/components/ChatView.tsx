@@ -157,28 +157,37 @@ export function ChatView({
     };
   }, [agentId, active]);
 
-  const turns: ReactNode[] = [];
+  // Group blocks into turns as [start, end) ranges. A new turn begins at a user
+  // *text* block; everything else — assistant text/reasoning/tools and user
+  // images (role:"user", kind:"image") — folds into the preceding run. The
+  // do…while always advances `i`: a user block whose kind isn't "text" MUST be
+  // consumed here or the loop spins forever (runaway-memory freeze).
+  const ranges: { user: boolean; start: number; end: number }[] = [];
   let i = 0;
   while (i < blocks.length) {
-    if (blocks[i].role === "user" && blocks[i].kind === "text") {
-      turns.push(
-        <div key={`u${i}`} className="chat-turn user">
-          <div className="chat-user">{blocks[i].text}</div>
-        </div>
-      );
+    const b = blocks[i];
+    if (b.role === "user" && b.kind === "text") {
+      ranges.push({ user: true, start: i, end: i + 1 });
       i += 1;
     } else {
-      const run: ChatBlock[] = [];
-      while (i < blocks.length && blocks[i].role !== "user") {
-        run.push(blocks[i]);
+      const start = i;
+      do {
         i += 1;
-      }
-      turns.push(<AssistantTurn key={`a${i}`} run={run} />);
+      } while (i < blocks.length && !(blocks[i].role === "user" && blocks[i].kind === "text"));
+      ranges.push({ user: false, start, end: i });
     }
   }
 
-  const hidden = Math.max(0, turns.length - visible);
-  const visibleTurns = hidden > 0 ? turns.slice(hidden) : turns;
+  const hidden = Math.max(0, ranges.length - visible);
+  const visibleTurns: ReactNode[] = ranges.slice(hidden).map((range) =>
+    range.user ? (
+      <div key={`u${range.start}`} className="chat-turn user">
+        <div className="chat-user">{blocks[range.start].text}</div>
+      </div>
+    ) : (
+      <AssistantTurn key={`a${range.start}`} run={blocks.slice(range.start, range.end)} />
+    )
+  );
 
   return (
     <div className="chat-view" ref={scrollRef}>
