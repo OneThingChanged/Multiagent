@@ -4164,8 +4164,9 @@ body.files-resizing .files-resizer::after {
 .chat-composer-input {
   flex: 1;
   min-height: 38px;
-  max-height: 160px;
-  resize: vertical;
+  max-height: 220px;
+  overflow-y: auto;
+  resize: none;
   padding: 9px 11px;
   border: 1px solid var(--app-border);
   border-radius: 8px;

@@ -170,13 +170,13 @@ export function ChatView({
   agentId,
   active,
   agentStatus,
-  folder,
+  sessionId,
 }: {
   agentId: string;
   active: boolean;
   theme: AppThemeId;
   agentStatus: AgentStatus;
-  folder?: string;
+  sessionId?: string;
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
@@ -213,7 +213,7 @@ export function ChatView({
     let cancelled = false;
     const fetchBlocks = async () => {
       try {
-        const result = await invoke("chat_blocks", { id: agentId, folder });
+        const result = await invoke("chat_blocks", { id: agentId, sessionId });
         if (cancelled) return;
         if (result.unsupported) {
           setStatus("unsupported");
@@ -259,7 +259,7 @@ export function ChatView({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [agentId, active, folder]);
+  }, [agentId, active, sessionId]);
 
   // Group blocks into turns as [start, end) ranges. A new turn begins at a user
   // *text* block; everything else — assistant text/reasoning/tools and user
@@ -487,6 +487,16 @@ function ChatComposer({
   const [attachments, setAttachments] = useState<Attachment[]>(
     () => attachStore.get(agentId) ?? []
   );
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow the textarea to fit its content up to a max height, then scroll —
+  // so a long message is fully visible instead of trapped in one scrolling row.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [text]);
 
   // Restore the persisted draft/attachments when the session changes.
   useEffect(() => {
@@ -614,6 +624,7 @@ function ChatComposer({
       )}
       <div className="chat-composer-row">
         <textarea
+          ref={taRef}
           className="chat-composer-input"
           value={text}
           onChange={(e) => updateText(e.target.value)}

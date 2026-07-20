@@ -919,8 +919,8 @@ export function PaneSlot({
           active={active}
           theme={ctx.theme}
           agentStatus={activeAgent?.status ?? "running"}
-          folder={
-            ctx.projects.find((p) => p.id === activeAgent?.projectId)?.folder ?? undefined
+          sessionId={
+            activeAgent?.activity?.providerSessionId ?? activeAgent?.lastSessionId ?? undefined
           }
         />
       )}

@@ -1125,53 +1125,48 @@ function findTranscriptBySessionId(root, tool, sessionId) {
 }
 
 // Resolve + decode the current transcript for an agent (for the chat view).
-// Locate a transcript for an agent, trying the preferred tool first (by session
-// id, then by working folder) and then the other tool by folder — so a session
-// whose tool is mislabeled, or has no session id (e.g. after a restart), or
-// whose only transcript lives under the other CLI still resolves. Returns the
-// matched transcript path AND the tool it belongs to (so we decode correctly).
-async function resolveChatTranscript({ preferredTool, sessionId, folder }) {
+// Locate an agent's transcript strictly by its CLI session id — the only key
+// that uniquely identifies THIS session (matching by folder is unreliable when
+// several sessions share a working directory). Tries the declared tool first,
+// then the other CLI (in case the tool is mislabeled), and returns the matched
+// transcript path AND the tool it belongs to so we decode correctly.
+function resolveChatTranscriptBySession(preferredTool, sessionId) {
+  if (!sessionId) return null;
   const other = preferredTool === "codex" ? "claude" : "codex";
   const tools = preferredTool ? [preferredTool, other] : ["claude", "codex"];
   for (const tool of tools) {
-    if (sessionId) {
-      const bySid = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
-      if (bySid) return { path: bySid, tool };
-    }
-    if (folder) {
-      const byFolder = await sessionService
-        .resolveTranscript({ aiToolId: tool, folder, preferredSessionId: sessionId })
-        .catch(() => null);
-      if (byFolder) return { path: byFolder, tool };
-    }
+    const found = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
+    if (found) return { path: found, tool };
   }
   return null;
 }
 
-async function chatBlocksForAgent(agentId, folderArg) {
+async function chatBlocksForAgent(agentId, sessionIdArg) {
   const id = asString(agentId).trim();
   // Prefer the live PTY, but fall back to the synced catalog so idle/restored
   // sessions (no live PTY, no fresh hook) still resolve their tool + session.
   const catalogAgent = usageIndex.catalog.agents.find((agent) => agent.id === id);
   const declaredTool = ptys.get(id)?.aiToolId || catalogAgent?.aiToolId || null;
-  // The frontend passes the session's project folder — the most reliable cwd —
-  // ahead of the live pty cwd / catalog folder.
-  const folder =
-    asString(folderArg).trim() ||
-    ptys.get(id)?.cwd ||
-    catalogAgent?.folder ||
-    catalogAgent?.cwd ||
+  // The frontend passes the agent's own CLI session id (provider/last session),
+  // which survives restarts — the authoritative key for its transcript.
+  const sessionId =
+    asString(sessionIdArg).trim() ||
+    agentSessionIds.get(id) ||
+    catalogAgent?.lastSessionId ||
     null;
-  const sessionId = agentSessionIds.get(id) || catalogAgent?.lastSessionId || null;
 
   let transcriptPath = agentTranscripts.get(id);
   let tool = agentTranscriptTool.get(id) || declaredTool;
+  // Drop a cached path that doesn't belong to the current session id (a resumed
+  // session gets a new rollout; both CLIs embed the session id in the path).
+  if (transcriptPath && sessionId && !transcriptPath.toLowerCase().includes(sessionId.toLowerCase())) {
+    transcriptPath = null;
+  }
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    // The resolver does recursive dir scans; don't repeat every poll on a miss.
     if ((transcriptMissUntil.get(id) ?? 0) > Date.now()) {
       return { blocks: [], truncated: false, missing: true, tool: declaredTool ?? undefined };
     }
-    const resolved = await resolveChatTranscript({ preferredTool: declaredTool, sessionId, folder });
+    const resolved = resolveChatTranscriptBySession(declaredTool, sessionId);
     if (resolved) {
       transcriptPath = resolved.path;
       tool = resolved.tool;
@@ -1183,7 +1178,6 @@ async function chatBlocksForAgent(agentId, folderArg) {
     }
   }
   if (!transcriptPath) {
-    // Nothing found. Report unsupported only when we truly can't name a CLI.
     if (declaredTool !== "codex" && declaredTool !== "claude") {
       return { blocks: [], truncated: false, missing: true, unsupported: true };
     }
@@ -2390,7 +2384,7 @@ async function invokeCommand(event, command, rawArgs) {
     case "read_chat_transcript":
       return readChatTranscript(args.tool, args.path);
     case "chat_blocks":
-      return chatBlocksForAgent(args.id, args.folder);
+      return chatBlocksForAgent(args.id, args.sessionId);
     case "git_status":
       return gitStatusForTree(args.folder);
     case "git_changes":
