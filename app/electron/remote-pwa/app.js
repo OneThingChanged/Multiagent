@@ -54,6 +54,7 @@ const ui = {
   copyOutputButton: $("#copyOutputButton"),
   composerForm: $("#composerForm"),
   composerKeys: $("#composerKeys"),
+  composerQueue: $("#composerQueue"),
   messageInput: $("#messageInput"),
   sendButton: $("#sendButton"),
   refreshButton: $("#refreshButton"),
@@ -758,13 +759,78 @@ async function sendRaw(agentId, data) {
   }
 }
 
+// ---- Message queue ----
+// While the agent is working, composer sends are reserved in a queue and
+// drained one at a time once it's ready for input (with a cooldown so a send
+// doesn't fire during the brief lag before "working" registers). Items can be
+// cancelled before they go out. The queue is tied to the selected agent.
+const QUEUE_COOLDOWN_MS = 1200;
+const messageQueue = [];
+let queueAgentId = null;
+let lastSendAt = 0;
+
+const agentBusy = (agent) => statusOf(agent) === "working";
+const agentReady = (agent) => ["idle", "done", "attention"].includes(statusOf(agent));
+
+function renderComposerQueue() {
+  const el = ui.composerQueue;
+  if (!el) return;
+  el.replaceChildren();
+  if (!messageQueue.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.appendChild(make("div", "composer-queue-head", `예약 대기열 ${messageQueue.length} · 대기 상태가 되면 순서대로 전송`));
+  messageQueue.forEach((message, index) => {
+    const row = make("div", "composer-queue-item");
+    row.appendChild(make("span", "composer-queue-text", message));
+    const cancel = make("button", "composer-queue-cancel", "×");
+    cancel.type = "button";
+    cancel.title = "예약 취소";
+    cancel.addEventListener("click", () => { messageQueue.splice(index, 1); renderComposerQueue(); });
+    row.appendChild(cancel);
+    el.appendChild(row);
+  });
+}
+
+// Drop the queue when the selection moves to a different session.
+function syncQueueAgent(agent) {
+  if (queueAgentId && agent?.id !== queueAgentId) {
+    messageQueue.length = 0;
+    queueAgentId = agent?.id ?? null;
+    renderComposerQueue();
+  }
+}
+
+async function drainQueue() {
+  if (!messageQueue.length) return;
+  const agent = selectedAgent();
+  if (!agent || agent.id !== queueAgentId) return;
+  if (agentBusy(agent) || !agentReady(agent)) return;
+  if (Date.now() - lastSendAt < QUEUE_COOLDOWN_MS) return;
+  const next = messageQueue.shift();
+  renderComposerQueue();
+  lastSendAt = Date.now();
+  await sendInput(agent.id, next);
+  lastChatFetch = { id: null, at: 0 }; // pull the sent turn into the chat quickly
+}
+
 async function sendSelectedMessage() {
   const agent = selectedAgent();
   const message = ui.messageInput.value.trim();
   if (!agent || !message) return;
-  ui.sendButton.disabled = true;
-  if (await sendInput(agent.id, message)) ui.messageInput.value = "";
-  ui.sendButton.disabled = false;
+  if (queueAgentId !== agent.id) { messageQueue.length = 0; queueAgentId = agent.id; }
+  ui.messageInput.value = "";
+  const cooled = Date.now() - lastSendAt >= QUEUE_COOLDOWN_MS;
+  if (agentReady(agent) && !agentBusy(agent) && messageQueue.length === 0 && cooled) {
+    ui.sendButton.disabled = true;
+    lastSendAt = Date.now();
+    await sendInput(agent.id, message);
+    lastChatFetch = { id: null, at: 0 };
+    ui.sendButton.disabled = false;
+  } else {
+    messageQueue.push(message);
+    renderComposerQueue();
+    showToast("작업 중 — 대기열에 예약했습니다.");
+  }
 }
 
 // ---- Live terminals (xterm) ----
@@ -1238,6 +1304,7 @@ async function fetchChat(agentId) {
 function syncSessionView() {
   if (selection.type !== "session") return;
   const agent = selectedAgent();
+  syncQueueAgent(agent);
   const chat = sessionViewMode === "chat";
   if (ui.chatView) ui.chatView.hidden = !chat;
   if (ui.outputPanel) ui.outputPanel.hidden = chat;
@@ -1447,6 +1514,7 @@ ui.sessionMode?.addEventListener("click", (event) => {
   syncSessionView();
 });
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
+setInterval(() => { void drainQueue(); }, 500);
 ui.composerKeys?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-key]");
   if (!button) return;

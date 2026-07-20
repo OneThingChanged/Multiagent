@@ -889,7 +889,12 @@ export function PaneSlot({
         />
       )}
       {chatMode && activeAgentId && !activeDocId && (
-        <ChatView agentId={activeAgentId} active={active} theme={ctx.theme} />
+        <ChatView
+          agentId={activeAgentId}
+          active={active}
+          theme={ctx.theme}
+          agentStatus={activeAgent?.status ?? "running"}
+        />
       )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />

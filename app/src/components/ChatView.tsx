@@ -1,10 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { invoke } from "../platform/runtime";
 import type { AppThemeId } from "../lib/appTheme";
 import type { ChatBlock } from "../platform/ipcContract";
+import type { AgentStatus } from "../types";
+
+// While the agent is working, composer sends are queued and drained one at a
+// time once it's ready for input (with a short cooldown so a message doesn't
+// fire during the brief lag before "working" registers).
+const BUSY_STATUSES: AgentStatus[] = ["working", "starting"];
+const DEAD_STATUSES: AgentStatus[] = ["exited", "unreachable"];
+const QUEUE_COOLDOWN_MS = 1200;
 
 // Desktop conversation view: renders an agent's own transcript (Codex/Claude)
 // as a chat, the same shape the Remote client shows. Polls chat_blocks while
@@ -100,20 +108,28 @@ function AssistantTurn({ run }: { run: ChatBlock[] }) {
 export function ChatView({
   agentId,
   active,
+  agentStatus,
 }: {
   agentId: string;
   active: boolean;
   theme: AppThemeId;
+  agentStatus: AgentStatus;
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [visible, setVisible] = useState(CHAT_PAGE);
+  // Reserved (queued) messages waiting to be sent while the agent is working.
+  const [queue, setQueue] = useState<string[]>([]);
+  const lastDispatchRef = useRef(0);
   // Messages just sent from the composer, echoed instantly so the chat updates
   // without waiting for the next poll; dropped once the transcript includes them.
   const [pending, setPending] = useState<string[]>([]);
   const keyRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fetchRef = useRef<() => void>(() => {});
+  // First paint (session open / terminal→chat switch) should land at the
+  // bottom (most recent), not the top.
+  const firstLoadRef = useRef(true);
   // When we reveal older turns, remember the scroll height taken just before so
   // the layout effect can restore the viewport position (content grows above).
   const anchorHeightRef = useRef<number | null>(null);
@@ -124,6 +140,8 @@ export function ChatView({
     setBlocks([]);
     setVisible(CHAT_PAGE);
     setPending([]);
+    setQueue([]);
+    firstLoadRef.current = true;
   }, [agentId]);
 
   useEffect(() => {
@@ -149,12 +167,16 @@ export function ChatView({
         if (key === keyRef.current) return;
         keyRef.current = key;
         const el = scrollRef.current;
+        const firstLoad = firstLoadRef.current;
         const nearBottom = el
           ? el.scrollHeight - el.scrollTop - el.clientHeight < 80
           : true;
         setBlocks(next);
         setStatus(next.length ? "ready" : "empty");
-        if (nearBottom) {
+        // Always land at the bottom on the first paint; afterwards only follow
+        // when the user was already near the bottom.
+        if (firstLoad || nearBottom) {
+          firstLoadRef.current = false;
           requestAnimationFrame(() => {
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           });
@@ -230,24 +252,53 @@ export function ChatView({
     )
   );
 
+  const busy = BUSY_STATUSES.includes(agentStatus);
+  const alive = !DEAD_STATUSES.includes(agentStatus);
+
+  // Actually write a message to the PTY + echo it instantly. Text and Enter go
+  // as separate writes (80ms apart) so Codex/Claude don't treat "text\r" as a
+  // multiline paste.
+  const dispatch = useCallback(
+    (value: string) => {
+      lastDispatchRef.current = Date.now();
+      setPending((p) => [...p, value]);
+      void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
+      window.setTimeout(() => {
+        void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
+      }, 80);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      });
+      // Re-poll soon so the real transcript (and reply) lands fast, not on the 3s tick.
+      window.setTimeout(() => fetchRef.current(), 700);
+      window.setTimeout(() => fetchRef.current(), 1600);
+    },
+    [agentId]
+  );
+
+  // Composer submit: send now if the agent is ready and nothing is queued;
+  // otherwise reserve it in the queue to be drained when the agent frees up.
   const sendMessage = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
-    // Echo instantly, then send. Text and Enter go as separate writes (80ms
-    // apart) so Codex/Claude don't treat "text\r" as a multiline paste.
-    setPending((p) => [...p, value]);
-    void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
-    window.setTimeout(() => {
-      void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
-    }, 80);
-    requestAnimationFrame(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    });
-    // Re-poll soon so the real transcript (and the reply) lands quickly instead
-    // of waiting for the 3s tick.
-    window.setTimeout(() => fetchRef.current(), 700);
-    window.setTimeout(() => fetchRef.current(), 1600);
+    const cooled = Date.now() - lastDispatchRef.current >= QUEUE_COOLDOWN_MS;
+    if (alive && !busy && queue.length === 0 && cooled) dispatch(value);
+    else setQueue((q) => [...q, value]);
   };
+
+  // Drain the queue one message per cooldown while the agent is ready.
+  useEffect(() => {
+    if (busy || !alive || queue.length === 0) return;
+    const wait = Math.max(0, QUEUE_COOLDOWN_MS - (Date.now() - lastDispatchRef.current));
+    const timer = window.setTimeout(() => {
+      dispatch(queue[0]);
+      setQueue((q) => q.slice(1));
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [busy, alive, queue, dispatch]);
+
+  const cancelQueued = (index: number) =>
+    setQueue((q) => q.filter((_, i) => i !== index));
 
   return (
     <div className="chat-view">
@@ -271,7 +322,28 @@ export function ChatView({
           </div>
         ))}
       </div>
-      {status !== "unsupported" && <ChatComposer onSend={sendMessage} />}
+      {queue.length > 0 && (
+        <div className="chat-queue">
+          <div className="chat-queue-head">
+            예약 대기열 {queue.length}
+            {busy && <span className="chat-queue-hint">· 대기 상태가 되면 순서대로 전송</span>}
+          </div>
+          {queue.map((t, i) => (
+            <div key={`q${i}`} className="chat-queue-item">
+              <span className="chat-queue-text">{t}</span>
+              <button
+                type="button"
+                className="chat-queue-cancel"
+                title="예약 취소"
+                onClick={() => cancelQueued(i)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {status !== "unsupported" && <ChatComposer onSend={sendMessage} busy={busy} />}
     </div>
   );
 }
@@ -279,7 +351,13 @@ export function ChatView({
 // Composer for sending additional instructions to the session from the chat
 // view (so you don't have to switch to the terminal tab). The actual send +
 // optimistic echo live in the parent; this just captures input.
-function ChatComposer({ onSend }: { onSend: (text: string) => void }) {
+function ChatComposer({
+  onSend,
+  busy,
+}: {
+  onSend: (text: string) => void;
+  busy: boolean;
+}) {
   const [text, setText] = useState("");
 
   const send = () => {
@@ -305,7 +383,11 @@ function ChatComposer({ onSend }: { onSend: (text: string) => void }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
+        placeholder={
+          busy
+            ? "작업 중 — Enter로 예약(대기열에 추가)"
+            : "이 세션으로 전송…  (Enter 전송 · Shift+Enter 줄바꿈)"
+        }
         rows={1}
       />
       <button
@@ -314,7 +396,7 @@ function ChatComposer({ onSend }: { onSend: (text: string) => void }) {
         onClick={send}
         disabled={!text.trim()}
       >
-        전송
+        {busy ? "예약" : "전송"}
       </button>
     </div>
   );
