@@ -24,6 +24,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "read_markdown_file",
   "resolve_markdown_path",
   "list_directory",
+  "search_files",
   "read_text_file",
   "read_chat_transcript",
   "chat_blocks",
@@ -189,6 +190,12 @@ function assertInvokeRequest(command, rawArgs) {
     case "list_directory":
       assertPathString(args.folder, "folder");
       assertPathString(args.relative, "relative path", true);
+      break;
+    case "search_files":
+      assertPathString(args.folder, "folder");
+      if (typeof args.query !== "string") {
+        throw new TypeError("Electron search_files query must be a string");
+      }
       break;
     case "read_text_file":
     case "create_file":

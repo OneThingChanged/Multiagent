@@ -7,7 +7,7 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
-  | "read_text_file" | "read_chat_transcript" | "chat_blocks"
+  | "read_text_file" | "read_chat_transcript" | "chat_blocks" | "search_files"
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
   | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"

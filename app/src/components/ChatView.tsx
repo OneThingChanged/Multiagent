@@ -6,6 +6,13 @@ import { invoke } from "../platform/runtime";
 import { electronBridge } from "../platform/electronBridge";
 import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import { parseChatPrompt } from "../lib/chatPrompt";
+import {
+  applyAutocomplete,
+  detectAutocomplete,
+  filterSlashCommands,
+  slashCommandsForTool,
+  type AutocompleteTrigger,
+} from "../lib/composerAutocomplete";
 import type { AppThemeId } from "../lib/appTheme";
 import type { ChatBlock, ChatDiffLine } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
@@ -209,6 +216,7 @@ export function ChatView({
   sessionId,
   question,
   assistantMessage,
+  folder,
 }: {
   agentId: string;
   active: boolean;
@@ -217,9 +225,11 @@ export function ChatView({
   sessionId?: string;
   question?: string | null;
   assistantMessage?: string | null;
+  folder?: string;
 }) {
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const [status, setStatus] = useState<Status>("loading");
+  const [tool, setTool] = useState<string | undefined>(undefined);
   const [visible, setVisible] = useState(CHAT_PAGE);
   // Reserved (queued) messages waiting to be sent while the agent is working.
   // Restored from the module store so switching to the terminal and back keeps
@@ -260,6 +270,7 @@ export function ChatView({
           return;
         }
         const next = result.blocks ?? [];
+        if (result.tool) setTool(result.tool);
         // Drop optimistic echoes now present in the transcript (exact match on
         // a user text block) so we don't show them twice.
         const userTexts = new Set(
@@ -538,7 +549,7 @@ export function ChatView({
         </div>
       )}
       {status !== "unsupported" && (
-        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} />
+        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} tool={tool} folder={folder} />
       )}
     </div>
   );
@@ -548,20 +559,82 @@ export function ChatView({
 // view. The draft text and image attachments are persisted per session (module
 // stores) so switching to the terminal and back keeps them. On send, attachment
 // paths are appended to the message so Codex/Claude can read the images.
+type AcItem = { value: string; label: string; desc?: string };
+
 function ChatComposer({
   agentId,
   onSend,
   busy,
+  tool,
+  folder,
 }: {
   agentId: string;
   onSend: (text: string) => void;
   busy: boolean;
+  tool?: string;
+  folder?: string;
 }) {
   const [text, setText] = useState(() => draftStore.get(agentId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
     () => attachStore.get(agentId) ?? []
   );
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Autocomplete popup (/slash or @file).
+  const [ac, setAc] = useState<{ items: AcItem[]; index: number; trigger: AutocompleteTrigger } | null>(null);
+  const acTriggerRef = useRef<AutocompleteTrigger | null>(null);
+  const fileSeqRef = useRef(0);
+  const fileTimerRef = useRef<number | undefined>(undefined);
+
+  const refreshAutocomplete = (value: string, caret: number) => {
+    const trigger = detectAutocomplete(value, caret);
+    acTriggerRef.current = trigger;
+    if (!trigger) {
+      setAc(null);
+      return;
+    }
+    if (trigger.kind === "slash") {
+      const items = filterSlashCommands(slashCommandsForTool(tool), trigger.query).map((c) => ({
+        value: c.name,
+        label: `/${c.name}`,
+        desc: c.desc,
+      }));
+      setAc(items.length ? { items, index: 0, trigger } : null);
+      return;
+    }
+    // @file — debounced backend search under the session folder.
+    window.clearTimeout(fileTimerRef.current);
+    const seq = ++fileSeqRef.current;
+    if (!folder) {
+      setAc(null);
+      return;
+    }
+    fileTimerRef.current = window.setTimeout(() => {
+      void invoke("search_files", { folder, query: trigger.query, limit: 20 })
+        .then((paths) => {
+          const current = acTriggerRef.current;
+          if (seq !== fileSeqRef.current || !current || current.kind !== "file") return;
+          const list = Array.isArray(paths) ? (paths as string[]) : [];
+          const items = list.map((p) => ({ value: p, label: p }));
+          setAc(items.length ? { items, index: 0, trigger: current } : null);
+        })
+        .catch(() => {});
+    }, 140);
+  };
+
+  const acceptAutocomplete = (item: AcItem) => {
+    const trigger = ac?.trigger;
+    if (!trigger) return;
+    const result = applyAutocomplete(text, trigger, item.value);
+    updateText(result.text);
+    setAc(null);
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (el) {
+        el.focus();
+        el.selectionStart = el.selectionEnd = result.caret;
+      }
+    });
+  };
 
   // Auto-grow the textarea to fit its content up to a max height, then scroll —
   // so a long message is fully visible instead of trapped in one scrolling row.
@@ -667,6 +740,30 @@ function ChatComposer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Autocomplete popup takes priority over the send/newline keys.
+    if (ac) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setAc({ ...ac, index: (ac.index + 1) % ac.items.length });
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setAc({ ...ac, index: (ac.index - 1 + ac.items.length) % ac.items.length });
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        acceptAutocomplete(ac.items[ac.index]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setAc(null);
+        return;
+      }
+    }
     // Esc-to-cancel is handled by a window listener in ChatView.
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
     if (e.ctrlKey || e.metaKey) {
@@ -732,20 +829,42 @@ function ChatComposer({
           )}
         </div>
       )}
+      {ac && (
+        <div className="chat-ac">
+          {ac.items.map((item, i) => (
+            <button
+              type="button"
+              key={item.value}
+              className={`chat-ac-item ${i === ac.index ? "on" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                acceptAutocomplete(item);
+              }}
+            >
+              <span className="chat-ac-label">{item.label}</span>
+              {item.desc && <span className="chat-ac-desc">{item.desc}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="chat-composer-row">
         <textarea
           ref={taRef}
           className="chat-composer-input"
           value={text}
-          onChange={(e) => updateText(e.target.value)}
+          onChange={(e) => {
+            updateText(e.target.value);
+            refreshAutocomplete(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          }}
           onKeyDown={onKeyDown}
+          onBlur={() => window.setTimeout(() => setAc(null), 120)}
           onPaste={onPaste}
           onDragOver={onDragOver}
           onDrop={onDrop}
           placeholder={
             busy
               ? "작업 중 — Enter로 예약(대기열에 추가) · Ctrl+Enter 줄바꿈"
-              : "이 세션으로 전송…  (Enter 전송 · Ctrl+Enter 줄바꿈)"
+              : "이 세션으로 전송…  (Enter 전송 · Ctrl+Enter 줄바꿈 · /명령 @파일)"
           }
           rows={1}
         />

@@ -1220,6 +1220,49 @@ async function readMarkdownFile(folder, requested) {
 
 // File-tree browsing for the right sidebar. Unlike readMarkdownFile this is
 // strictly sandboxed to the project root via isInside.
+// Bounded recursive file search under a project folder for @file autocomplete.
+// Ranks basename-prefix matches first; skips vendor/build dirs.
+async function searchFiles(folder, query, limit) {
+  const rootRaw = asString(folder);
+  if (!rootRaw || !fs.existsSync(rootRaw)) return [];
+  const root = fs.realpathSync(rootRaw);
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 30;
+  const q = asString(query).toLowerCase();
+  const results = [];
+  const stack = [root];
+  let scanned = 0;
+  while (stack.length && results.length < cap * 4 && scanned < 8000) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      scanned += 1;
+      if (entry.isDirectory()) {
+        const lower = entry.name.toLowerCase();
+        if (!SKIPPED_TREE_DIRS.has(lower) && !entry.name.startsWith(".")) {
+          stack.push(path.join(dir, entry.name));
+        }
+      } else if (entry.isFile()) {
+        const rel = path.relative(root, path.join(dir, entry.name)).split(path.sep).join("/");
+        if (!q || rel.toLowerCase().includes(q)) results.push(rel);
+      }
+    }
+  }
+  const rank = (rel) => {
+    const base = rel.split("/").pop().toLowerCase();
+    if (!q) return 2;
+    if (base.startsWith(q)) return 0;
+    if (base.includes(q)) return 1;
+    return 2;
+  };
+  results.sort((a, b) => rank(a) - rank(b) || a.length - b.length || a.localeCompare(b));
+  return results.slice(0, cap);
+}
+
 async function listDirectory(folder, relative) {
   const root = fs.realpathSync(asString(folder));
   const requested = asString(relative ?? "").trim();
@@ -2379,6 +2422,8 @@ async function invokeCommand(event, command, rawArgs) {
       return resolveDocPath(args.folder, args.path);
     case "list_directory":
       return listDirectory(args.folder, args.relative);
+    case "search_files":
+      return searchFiles(args.folder, args.query, args.limit);
     case "read_text_file":
       return readTextFile(args.folder, args.relativePath);
     case "read_chat_transcript":

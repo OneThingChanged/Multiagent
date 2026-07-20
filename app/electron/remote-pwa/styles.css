@@ -332,6 +332,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .screen-terminal-mount { min-height: 0; overflow: hidden; border-radius: 8px; background: #050d14; }
 .composer { padding: 12px; }
 .composer label { display: block; margin-bottom: 8px; color: #b7c8d4; font-size: 10px; font-weight: 700; }
+.composer-ac { display: flex; flex-direction: column; margin-bottom: 8px; max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: rgba(9, 20, 30, 0.95); }
+.composer-ac-item { display: flex; align-items: baseline; gap: 10px; padding: 7px 11px; border: none; background: none; color: #cfe0ec; font-size: 11.5px; text-align: left; cursor: pointer; }
+.composer-ac-item.on { background: rgba(80, 223, 208, 0.16); }
+.composer-ac-label { font-weight: 700; }
+.composer-ac-desc { color: var(--muted); margin-left: auto; }
 .composer-queue { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; max-height: 140px; overflow-y: auto; }
 .composer-queue-head { color: var(--muted); font-size: 9px; font-weight: 700; }
 .composer-queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px dashed var(--line); border-radius: 8px; background: rgba(9, 20, 30, 0.6); }

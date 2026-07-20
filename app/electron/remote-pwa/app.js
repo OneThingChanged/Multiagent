@@ -55,6 +55,7 @@ const ui = {
   composerForm: $("#composerForm"),
   composerKeys: $("#composerKeys"),
   composerQueue: $("#composerQueue"),
+  composerAc: $("#composerAc"),
   messageInput: $("#messageInput"),
   sendButton: $("#sendButton"),
   refreshButton: $("#refreshButton"),
@@ -1627,7 +1628,63 @@ ui.composerKeys?.addEventListener("click", (event) => {
   const sequence = KEY_SEQUENCES[button.dataset.key];
   if (sequence) void sendRaw(agent.id, sequence);
 });
+// ---- Slash-command autocomplete (composer) ----
+const SLASH_CLAUDE = [["clear","대화 컨텍스트 지우기"],["compact","대화 요약·압축"],["model","모델 변경"],["review","코드 리뷰"],["init","CLAUDE.md 생성"],["agents","서브에이전트"],["cost","토큰/비용"],["config","설정"],["memory","메모리"],["status","상태"],["resume","세션 재개"],["export","내보내기"],["help","도움말"]];
+const SLASH_CODEX = [["clear","대화 지우기"],["compact","요약·압축"],["model","모델 변경"],["approvals","승인 정책"],["new","새 대화"],["diff","변경 diff"],["status","상태"],["init","AGENTS.md 생성"],["quit","종료"],["help","도움말"]];
+let acItems = [];
+let acIndex = 0;
+let acTrigger = null;
+
+function slashCatalog() {
+  return selectedAgent()?.aiToolId === "codex" ? SLASH_CODEX : SLASH_CLAUDE;
+}
+function renderComposerAc() {
+  const el = ui.composerAc;
+  if (!el) return;
+  el.replaceChildren();
+  if (!acItems.length) { el.hidden = true; return; }
+  el.hidden = false;
+  acItems.forEach(([name, desc], i) => {
+    const item = make("button", `composer-ac-item ${i === acIndex ? "on" : ""}`);
+    item.type = "button";
+    item.append(make("span", "composer-ac-label", `/${name}`), make("span", "composer-ac-desc", desc || ""));
+    item.addEventListener("mousedown", (e) => { e.preventDefault(); acceptComposerAc(i); });
+    el.appendChild(item);
+  });
+}
+function refreshComposerAc() {
+  const value = ui.messageInput.value;
+  const caret = ui.messageInput.selectionStart ?? value.length;
+  const m = value.slice(0, caret).match(/(?:^|\n)\/([^\s/]*)$/);
+  if (!m) { acTrigger = null; acItems = []; renderComposerAc(); return; }
+  const q = m[1].toLowerCase();
+  acTrigger = { start: caret - m[1].length - 1, end: caret };
+  acItems = slashCatalog().filter(([n]) => n.toLowerCase().startsWith(q)).slice(0, 10);
+  acIndex = 0;
+  renderComposerAc();
+}
+function acceptComposerAc(i) {
+  const pick = acItems[i];
+  if (!pick || !acTrigger) return;
+  const value = ui.messageInput.value;
+  const insert = `/${pick[0]} `;
+  ui.messageInput.value = value.slice(0, acTrigger.start) + insert + value.slice(acTrigger.end);
+  const caret = acTrigger.start + insert.length;
+  ui.messageInput.setSelectionRange(caret, caret);
+  acTrigger = null; acItems = [];
+  renderComposerAc();
+  ui.messageInput.focus();
+}
+ui.messageInput.addEventListener("input", refreshComposerAc);
+ui.messageInput.addEventListener("blur", () => setTimeout(() => { acItems = []; renderComposerAc(); }, 120));
 ui.messageInput.addEventListener("keydown", (event) => {
+  // Autocomplete popup takes priority.
+  if (acItems.length) {
+    if (event.key === "ArrowDown") { event.preventDefault(); acIndex = (acIndex + 1) % acItems.length; renderComposerAc(); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); acIndex = (acIndex - 1 + acItems.length) % acItems.length; renderComposerAc(); return; }
+    if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); acceptComposerAc(acIndex); return; }
+    if (event.key === "Escape") { event.preventDefault(); acItems = []; renderComposerAc(); return; }
+  }
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     void sendSelectedMessage();
