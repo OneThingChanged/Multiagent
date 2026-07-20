@@ -2409,6 +2409,26 @@ body,
   color: var(--app-soft-text);
   text-align: center;
 }
+.empty-hint-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  width: calc(100% - 16px);
+  margin: 8px;
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.empty-hint-action:hover {
+  border-color: var(--app-accent, #58a6ff);
+  color: var(--app-text);
+}
+.empty-hint-cta {
+  font-size: 11px;
+  color: var(--app-accent, #58a6ff);
+}
 
 .terminal-area {
   flex: 1;

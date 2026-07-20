@@ -891,7 +891,15 @@ export function Sidebar({
         {projects.length > 0 &&
           activeOnly &&
           !projects.some((p) => filterSections(p.id, p.name) !== null) && (
-            <div className="empty-hint">실행 중인 세션이 없습니다</div>
+            <button
+              type="button"
+              className="empty-hint empty-hint-action"
+              onClick={() => setActiveOnly(false)}
+              title="전체 세션 보기로 전환"
+            >
+              활성 세션 없음 · 숨겨진 프로젝트 {projects.length}개
+              <span className="empty-hint-cta">클릭해서 전체 보기</span>
+            </button>
           )}
       </div>
     </aside>
