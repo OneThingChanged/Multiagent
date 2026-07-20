@@ -254,13 +254,20 @@ async function repairActiveHooks() {
 }
 
 function liveOutputForAgents(agents, maxOutput = 80_000) {
-  return (Array.isArray(agents) ? agents : []).map((agent) => ({
-    ...agent,
-    output: sanitizeTerminalOutput(
-      ptys.get(agent.id)?.buffer.snapshot().slice(-maxOutput) ?? ""
-    ),
-    hook: monitorHooks.get(agent.id) ?? null,
-  }));
+  return (Array.isArray(agents) ? agents : []).map((agent) => {
+    // A session with no live PTY (restored on launch, or its process exited) is
+    // inactive — surface it as "offline" (비활성) rather than idle (대기), which
+    // is reserved for a running-but-waiting terminal.
+    const live = ptys.has(agent.id);
+    return {
+      ...agent,
+      status: live ? agent.status : "offline",
+      output: sanitizeTerminalOutput(
+        ptys.get(agent.id)?.buffer.snapshot().slice(-maxOutput) ?? ""
+      ),
+      hook: live ? monitorHooks.get(agent.id) ?? null : null,
+    };
+  });
 }
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
