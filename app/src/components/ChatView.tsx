@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { invoke } from "../platform/runtime";
+import { electronBridge } from "../platform/electronBridge";
+import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import type { AppThemeId } from "../lib/appTheme";
 import type { ChatBlock } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
@@ -418,6 +420,46 @@ function ChatComposer({
     setText("");
   };
 
+  // Append a file path to the input (like dropping/pasting into the terminal),
+  // keeping a trailing space so typing can continue.
+  const insertSnippet = (snippet: string) => {
+    if (!snippet) return;
+    setText((t) => (t.trim() ? `${t.replace(/\s*$/, "")} ${snippet} ` : `${snippet} `));
+  };
+
+  // Ctrl+V of a clipboard image → save it to a temp file and insert the path.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    const hasImage = items && Array.from(items).some((it) => it.type.startsWith("image/"));
+    if (!hasImage) return; // let normal text paste through
+    e.preventDefault();
+    void invoke<string | null>("save_clipboard_image")
+      .then((filePath) => {
+        if (filePath) insertSnippet(formatDroppedPathForTerminal(filePath));
+      })
+      .catch(() => {});
+  };
+
+  // Drag & drop a file/image → insert its path (Electron resolves the real path).
+  const onDragOver = (e: DragEvent<HTMLTextAreaElement>) => {
+    if (hasExternalFiles(e.dataTransfer)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+  const onDrop = (e: DragEvent<HTMLTextAreaElement>) => {
+    if (!hasExternalFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    const bridge = electronBridge();
+    const paths = extractDroppedFilePaths(
+      e.dataTransfer,
+      bridge ? (file) => bridge.getPathForFile(file) : undefined
+    )
+      .map(formatDroppedPathForTerminal)
+      .filter(Boolean);
+    if (paths.length) insertSnippet(paths.join(" "));
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Esc cancels the in-progress turn while the agent is working.
     if (e.key === "Escape" && busy) {
@@ -440,6 +482,9 @@ function ChatComposer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         placeholder={
           busy
             ? "작업 중 — Enter로 예약(대기열에 추가)"

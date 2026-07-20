@@ -52,6 +52,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "read_audio_file",
   "clipboard_read_text",
   "clipboard_write_text",
+  "save_clipboard_image",
   "show_native_notification",
   "resolve_cli_session",
   "relink_cli_session",

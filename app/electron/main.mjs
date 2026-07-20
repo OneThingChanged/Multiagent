@@ -2416,6 +2416,17 @@ async function invokeCommand(event, command, rawArgs) {
     case "clipboard_write_text":
       clipboard.writeText(asString(args.text));
       return null;
+    case "save_clipboard_image": {
+      // Write the current clipboard image to a temp PNG and return its path so
+      // the chat/terminal composer can reference it (Codex/Claude read the file).
+      const image = clipboard.readImage();
+      if (!image || image.isEmpty()) return null;
+      const dir = path.join(os.tmpdir(), "multiagent-pasted");
+      await fsPromises.mkdir(dir, { recursive: true });
+      const file = path.join(dir, `paste-${Date.now()}.png`);
+      await fsPromises.writeFile(file, image.toPNG());
+      return file;
+    }
     case "show_native_notification": {
       if (!Notification.isSupported()) return false;
       const notification = new Notification({
