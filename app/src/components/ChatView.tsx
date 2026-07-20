@@ -145,7 +145,6 @@ export function ChatView({
   }, [agentId]);
 
   useEffect(() => {
-    if (!active) return;
     let cancelled = false;
     const fetchBlocks = async () => {
       try {
@@ -186,7 +185,10 @@ export function ChatView({
       }
     };
     fetchRef.current = fetchBlocks;
+    // Load once whenever the view is shown (even for an inactive pane in a
+    // Screen split); only the focused pane keeps polling to limit work.
     void fetchBlocks();
+    if (!active) return () => { cancelled = true; };
     const timer = window.setInterval(fetchBlocks, 3000);
     return () => {
       cancelled = true;

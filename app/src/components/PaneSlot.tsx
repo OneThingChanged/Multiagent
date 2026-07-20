@@ -861,6 +861,9 @@ export function PaneSlot({
             className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
+              // Focus this pane too — otherwise an inactive pane's chat view
+              // never polls (it gates on `active`) and stays "loading".
+              ctx.setActivePath(path);
               ctx.onToggleChat(activeAgentId);
             }}
             title={chatMode ? "터미널 뷰로 전환" : "대화(채팅) 뷰로 전환"}
