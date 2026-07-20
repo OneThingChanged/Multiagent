@@ -4040,6 +4040,21 @@ body.files-resizing .files-resizer::after {
   flex-direction: column;
   gap: 13px;
 }
+.chat-diff {
+  margin: 4px 0 2px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--app-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.chat-diff-line { display: block; white-space: pre; padding: 0 8px 0 0; }
+.chat-diff-gutter { display: inline-block; width: 1.4em; text-align: center; opacity: 0.7; user-select: none; }
+.chat-diff-line.add { background: color-mix(in srgb, #3fb950 16%, transparent); color: var(--app-text); }
+.chat-diff-line.del { background: color-mix(in srgb, #f85149 16%, transparent); color: var(--app-text); }
+.chat-diff-line.meta { color: var(--app-muted); background: color-mix(in srgb, var(--app-muted) 10%, transparent); }
+.chat-diff-line.context { color: var(--app-muted); }
 .chat-thinking {
   display: flex;
   align-items: center;

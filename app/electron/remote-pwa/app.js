@@ -1122,13 +1122,27 @@ function mdToHtml(text) {
   return html;
 }
 function toolLabel(tool) {
-  let arg = "";
-  const input = tool.input;
-  if (typeof input === "string") arg = input;
-  else if (input && typeof input === "object") {
-    arg = input.command || input.cmd || input.file_path || input.path || input.pattern || JSON.stringify(input);
+  let arg = tool.summary || "";
+  if (!arg) {
+    const input = tool.input;
+    if (typeof input === "string") arg = input;
+    else if (input && typeof input === "object") {
+      arg = input.command || input.cmd || input.file_path || input.path || input.pattern || JSON.stringify(input);
+    }
   }
-  return { name: tool.name || "tool", arg: String(arg).replace(/\s+/g, " ").slice(0, 90) };
+  return { name: tool.name || "tool", arg: String(arg).replace(/\s+/g, " ").slice(0, 110) };
+}
+
+// Render a diff (from an edit tool call or diff-like output) as colored lines.
+function renderDiff(diff) {
+  const box = make("div", "chat-diff");
+  for (const line of diff) {
+    const row = make("div", `chat-diff-line ${line.type}`);
+    const gutter = make("span", "chat-diff-gutter", line.type === "add" ? "+" : line.type === "del" ? "-" : " ");
+    row.append(gutter, document.createTextNode(line.text || " "));
+    box.appendChild(row);
+  }
+  return box;
 }
 
 function renderAssistantTurn(run) {
@@ -1142,13 +1156,15 @@ function renderAssistantTurn(run) {
   const bodyNodes = [];
   for (const block of run) {
     if (block.kind === "tool-call") {
-      pendingCall = { name: block.name, input: block.input, output: null, isError: false };
+      pendingCall = { name: block.name, input: block.input, summary: block.summary, diff: block.diff || null, output: null, isError: false };
       tools.push(pendingCall);
     } else if (block.kind === "tool-result") {
       if (pendingCall && pendingCall.output === null) {
-        pendingCall.output = block.output; pendingCall.isError = block.isError; pendingCall = null;
+        pendingCall.output = block.output; pendingCall.isError = block.isError;
+        if (!pendingCall.diff && block.diff) pendingCall.diff = block.diff;
+        pendingCall = null;
       } else {
-        tools.push({ name: "result", input: null, output: block.output, isError: block.isError });
+        tools.push({ name: "result", input: null, output: block.output, isError: block.isError, diff: block.diff || null });
       }
     } else if (block.kind === "reasoning") {
       const d = make("details", "chat-work");
@@ -1177,8 +1193,10 @@ function renderAssistantTurn(run) {
       const summary = make("summary", "");
       summary.append(make("span", "k", "$"), make("span", "cmd", label.arg ? `${label.name} · ${label.arg}` : label.name));
       item.appendChild(summary);
-      const pre = make("pre", tool.isError ? "err" : "", tool.output ?? "(출력 없음)");
-      item.appendChild(pre);
+      if (tool.diff) item.appendChild(renderDiff(tool.diff));
+      if (tool.output !== undefined && tool.output !== null || !tool.diff) {
+        item.appendChild(make("pre", tool.isError ? "err" : "", tool.output ?? "(출력 없음)"));
+      }
       list.appendChild(item);
     }
     group.appendChild(list);

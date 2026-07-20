@@ -139,12 +139,16 @@ export type PortsResult = {
   ports: PortEntry[];
 };
 
+export type ChatDiffLine = { type: "add" | "del" | "context" | "meta"; text: string };
+
 export type ChatBlock = {
   role: "user" | "assistant" | "tool";
   kind: "text" | "reasoning" | "tool-call" | "tool-result" | "image";
   text?: string;
   name?: string;
   input?: unknown;
+  summary?: string;
+  diff?: ChatDiffLine[];
   output?: string;
   isError?: boolean;
 };

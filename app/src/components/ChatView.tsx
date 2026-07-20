@@ -6,7 +6,7 @@ import { invoke } from "../platform/runtime";
 import { electronBridge } from "../platform/electronBridge";
 import { extractDroppedFilePaths, formatDroppedPathForTerminal, hasExternalFiles } from "../lib/fileDrop";
 import type { AppThemeId } from "../lib/appTheme";
-import type { ChatBlock } from "../platform/ipcContract";
+import type { ChatBlock, ChatDiffLine } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
 
 // While the agent is working, composer sends are queued and drained one at a
@@ -94,21 +94,44 @@ function UserMessage({ text }: { text: string }) {
   );
 }
 
-function toolLabel(block: { name?: string; input?: unknown }): string {
-  const input = block.input;
-  let arg = "";
-  if (typeof input === "string") arg = input;
-  else if (input && typeof input === "object") {
-    const o = input as Record<string, unknown>;
-    arg = String(
-      o.command ?? o.cmd ?? o.file_path ?? o.path ?? o.pattern ?? JSON.stringify(o)
-    );
+function toolLabel(block: { name?: string; summary?: string; input?: unknown }): string {
+  // Prefer the server-computed summary; fall back to deriving from input.
+  let arg = block.summary ?? "";
+  if (!arg) {
+    const input = block.input;
+    if (typeof input === "string") arg = input;
+    else if (input && typeof input === "object") {
+      const o = input as Record<string, unknown>;
+      arg = String(o.command ?? o.cmd ?? o.file_path ?? o.path ?? o.pattern ?? JSON.stringify(o));
+    }
   }
-  arg = arg.replace(/\s+/g, " ").slice(0, 100);
+  arg = arg.replace(/\s+/g, " ").slice(0, 120);
   return arg ? `${block.name ?? "tool"} · ${arg}` : block.name ?? "tool";
 }
 
-type ToolPair = { name?: string; input?: unknown; output?: string; isError?: boolean };
+function ChatDiff({ diff }: { diff: ChatDiffLine[] }) {
+  return (
+    <div className="chat-diff">
+      {diff.map((line, i) => (
+        <div key={i} className={`chat-diff-line ${line.type}`}>
+          <span className="chat-diff-gutter">
+            {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
+          </span>
+          {line.text || " "}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type ToolPair = {
+  name?: string;
+  input?: unknown;
+  summary?: string;
+  diff?: ChatDiffLine[];
+  output?: string;
+  isError?: boolean;
+};
 
 function AssistantTurn({ run }: { run: ChatBlock[] }) {
   const tools: ToolPair[] = [];
@@ -116,15 +139,16 @@ function AssistantTurn({ run }: { run: ChatBlock[] }) {
   let pending: ToolPair | null = null;
   run.forEach((block, index) => {
     if (block.kind === "tool-call") {
-      pending = { name: block.name, input: block.input };
+      pending = { name: block.name, input: block.input, summary: block.summary, diff: block.diff };
       tools.push(pending);
     } else if (block.kind === "tool-result") {
       if (pending && pending.output === undefined) {
         pending.output = block.output;
         pending.isError = block.isError;
+        if (!pending.diff && block.diff) pending.diff = block.diff;
         pending = null;
       } else {
-        tools.push({ name: "result", output: block.output, isError: block.isError });
+        tools.push({ name: "result", output: block.output, isError: block.isError, diff: block.diff });
       }
     } else if (block.kind === "reasoning") {
       body.push(
@@ -163,7 +187,10 @@ function AssistantTurn({ run }: { run: ChatBlock[] }) {
                 <summary>
                   <span className="chat-tool-k">$</span> {toolLabel(tool)}
                 </summary>
-                <pre className={tool.isError ? "err" : ""}>{tool.output ?? "(출력 없음)"}</pre>
+                {tool.diff && <ChatDiff diff={tool.diff} />}
+                {(tool.output !== undefined || !tool.diff) && (
+                  <pre className={tool.isError ? "err" : ""}>{tool.output ?? "(출력 없음)"}</pre>
+                )}
               </details>
             ))}
           </div>

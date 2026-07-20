@@ -34,8 +34,33 @@ describe("parseChatTranscript — claude", () => {
       { role: "user", kind: "text", text: "안녕?" },
       { role: "assistant", kind: "reasoning", text: "let me think" },
       { role: "assistant", kind: "text", text: "안녕하세요!" },
-      { role: "assistant", kind: "tool-call", name: "Bash", input: { command: "ls" } },
-      { role: "tool", kind: "tool-result", output: "file.txt", isError: false },
+      { role: "assistant", kind: "tool-call", name: "Bash", input: { command: "ls" }, summary: "ls" },
+      { role: "tool", kind: "tool-result", output: "file.txt" },
+    ]);
+  });
+
+  it("summarizes and builds a diff for an edit tool call", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Edit",
+            input: { file_path: "D:/x/foo.ts", old_string: "a\nb", new_string: "a\nc" },
+          },
+        ],
+      },
+    });
+    const [block] = parseChatTranscript(line, "claude");
+    expect(block.summary).toBe("foo.ts");
+    expect(block.diff).toEqual([
+      { type: "meta", text: "foo.ts" },
+      { type: "del", text: "a" },
+      { type: "del", text: "b" },
+      { type: "add", text: "a" },
+      { type: "add", text: "c" },
     ]);
   });
 });
@@ -71,7 +96,7 @@ describe("parseChatTranscript — codex", () => {
     const blocks = parseChatTranscript(lines, "codex");
     expect(blocks).toEqual([
       { role: "user", kind: "text", text: "최신화 해줘" },
-      { role: "assistant", kind: "tool-call", name: "shell", input: '{"cmd":"git status"}' },
+      { role: "assistant", kind: "tool-call", name: "shell", input: { cmd: "git status" }, summary: "git status" },
       { role: "tool", kind: "tool-result", output: "clean" },
       { role: "assistant", kind: "text", text: "완료했습니다." },
     ]);
