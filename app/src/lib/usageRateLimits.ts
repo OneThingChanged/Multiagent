@@ -48,19 +48,24 @@ export function formatUsageWindow(minutes: number | null) {
   return `${minutes}분 한도`;
 }
 
+function pad2(value: number) {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+// resetsAt is a Unix timestamp in seconds. new Date() renders in the renderer's
+// system timezone (the user's Windows clock), so this shows the local wall-clock
+// reset time rather than a relative countdown — easier to read at a glance.
+// The second parameter is kept for call-site compatibility but unused now that
+// the value is absolute (nothing to recompute as the clock ticks).
 export function formatResetRemaining(
   resetsAt: number | null,
-  nowMs = Date.now()
+  _nowMs = Date.now()
 ) {
   if (!resetsAt) return "초기화 시간 미확인";
-  const remainingSeconds = Math.max(0, resetsAt - Math.floor(nowMs / 1000));
-  if (remainingSeconds === 0) return "곧 초기화";
-  const days = Math.floor(remainingSeconds / 86_400);
-  const hours = Math.floor((remainingSeconds % 86_400) / 3_600);
-  const minutes = Math.max(1, Math.floor((remainingSeconds % 3_600) / 60));
-  if (days > 0) return `${days}일 ${hours}시간 후 초기화`;
-  if (hours > 0) return `${hours}시간 ${minutes}분 후 초기화`;
-  return `${minutes}분 후 초기화`;
+  const d = new Date(resetsAt * 1000);
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad2(d.getHours())}:${pad2(
+    d.getMinutes()
+  )} 초기화`;
 }
 
 export function formatUpdatedAgo(updatedAt: number, nowMs = Date.now()) {
@@ -83,17 +88,14 @@ export function primaryUsageWindow(limit: UsageRateLimit) {
   return limit.primary ?? limit.secondary;
 }
 
-// Compact reset text for the status bar segments ("3시간 1분", "6일 22시간").
-export function formatResetShort(resetsAt: number | null, nowMs = Date.now()) {
+// Compact absolute reset time for the status bar segments ("7/21 18:53"), in
+// the user's local timezone.
+export function formatResetShort(resetsAt: number | null, _nowMs = Date.now()) {
   if (!resetsAt) return "";
-  const remainingSeconds = Math.max(0, resetsAt - Math.floor(nowMs / 1000));
-  if (remainingSeconds === 0) return "곧 초기화";
-  const days = Math.floor(remainingSeconds / 86_400);
-  const hours = Math.floor((remainingSeconds % 86_400) / 3_600);
-  const minutes = Math.max(1, Math.floor((remainingSeconds % 3_600) / 60));
-  if (days > 0) return `${days}일 ${hours}시간`;
-  if (hours > 0) return `${hours}시간 ${minutes}분`;
-  return `${minutes}분`;
+  const d = new Date(resetsAt * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(
+    d.getMinutes()
+  )}`;
 }
 
 // ---- Provider grouping (Codex / Claude / Gemini / …) ----

@@ -32,12 +32,16 @@ describe("usage rate limit formatting", () => {
     expect(formatUsageWindow(null)).toBe("사용 한도");
   });
 
-  it("formats reset countdowns without negative time", () => {
-    const now = Date.UTC(2026, 6, 18, 0, 0, 0);
-    expect(formatResetRemaining(now / 1000 + 6 * 86_400 + 23 * 3_600, now)).toBe(
-      "6일 23시간 후 초기화"
+  it("formats reset as absolute local wall-clock time", () => {
+    const ts = Math.floor(Date.parse("2026-07-21T18:53:00") / 1000);
+    const d = new Date(ts * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    expect(formatResetRemaining(ts)).toBe(
+      `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad(d.getHours())}:${pad(
+        d.getMinutes()
+      )} 초기화`
     );
-    expect(formatResetRemaining(now / 1000 - 1, now)).toBe("곧 초기화");
+    expect(formatResetRemaining(null)).toBe("초기화 시간 미확인");
   });
 
   it("clamps percentages and assigns warning levels", () => {
@@ -53,14 +57,16 @@ describe("usage rate limit formatting", () => {
     expect(formatUpdatedAgo(now - 6 * 60_000, now)).toBe("6분 전 갱신");
   });
 
-  it("formats compact reset countdowns for the status bar", () => {
-    const now = Date.UTC(2026, 6, 18, 0, 0, 0);
-    expect(formatResetShort(now / 1000 + 6 * 86_400 + 23 * 3_600, now)).toBe(
-      "6일 23시간"
+  it("formats compact absolute reset time for the status bar", () => {
+    const ts = Math.floor(Date.parse("2026-07-21T18:53:00") / 1000);
+    const d = new Date(ts * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    expect(formatResetShort(ts)).toBe(
+      `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(
+        d.getMinutes()
+      )}`
     );
-    expect(formatResetShort(now / 1000 + 3 * 3_600 + 90, now)).toBe("3시간 1분");
-    expect(formatResetShort(now / 1000 - 1, now)).toBe("곧 초기화");
-    expect(formatResetShort(null, now)).toBe("");
+    expect(formatResetShort(null)).toBe("");
   });
 });
 
