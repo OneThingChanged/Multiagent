@@ -180,7 +180,10 @@ export function deriveTurnLifecycle(text, tool) {
       const stop = last.message?.stop_reason;
       return stop && stop !== "tool_use" ? "idle" : "working";
     }
-    return "working"; // trailing user/tool_result turn → agent should act
+    // Trailing user turn → agent should act, UNLESS it's an interrupt marker
+    // ("[Request interrupted…]"), which means the turn was cancelled → idle.
+    if (/\[request interrupted/i.test(contentToText(last.message?.content))) return "idle";
+    return "working";
   }
   return "idle";
 }

@@ -232,6 +232,12 @@ export function ChatView({
   const [tool, setTool] = useState<string | undefined>(undefined);
   // Turn lifecycle from the transcript — overrides a stale hook "working".
   const [lifecycle, setLifecycle] = useState<"working" | "idle" | undefined>(undefined);
+  // Transcript signature + the value at the moment the user hit 중단/Esc, so an
+  // interrupt immediately unsticks a stuck "working" until genuinely new content
+  // arrives (msgKey changes).
+  const [msgKey, setMsgKey] = useState("");
+  const msgKeyRef = useRef("");
+  const [stoppedKey, setStoppedKey] = useState<string | null>(null);
   // Signature of the prompt the user just answered (hides its card).
   const [answeredPromptSig, setAnsweredPromptSig] = useState("");
   const [visible, setVisible] = useState(CHAT_PAGE);
@@ -261,6 +267,7 @@ export function ChatView({
     setPending([]);
     setQueue(queueStore.get(agentId) ?? []); // restore this session's reservations
     setAnsweredPromptSig("");
+    setStoppedKey(null);
     firstLoadRef.current = true;
   }, [agentId]);
 
@@ -287,6 +294,8 @@ export function ChatView({
         const key = `${next.length}:${String(last?.text ?? last?.output ?? "").length}`;
         if (key === keyRef.current) return;
         keyRef.current = key;
+        msgKeyRef.current = key;
+        setMsgKey(key);
         const el = scrollRef.current;
         const firstLoad = firstLoadRef.current;
         const nearBottom = el
@@ -396,13 +405,18 @@ export function ChatView({
   // finished, treat the session as not-busy even when the hook status is stuck
   // at "working" (missed Stop hook). This stops a phantom "작업 중…" that traps
   // composer sends in the queue.
-  const busy = BUSY_STATUSES.includes(agentStatus) && lifecycle !== "idle";
+  const stoppedHere = stoppedKey !== null && stoppedKey === msgKey;
+  const busy = BUSY_STATUSES.includes(agentStatus) && lifecycle !== "idle" && !stoppedHere;
   const alive = !DEAD_STATUSES.includes(agentStatus);
 
   // Cancel the in-progress turn by sending Esc to the PTY — same as pressing
   // Esc in the Codex/Claude TUI. Re-poll so the transcript updates promptly.
   const interrupt = useCallback(() => {
     void invoke("write_pty", { id: agentId, data: "\x1b" }).catch(() => {});
+    // Unstick the UI immediately: treat the session as idle until new content
+    // (a changed transcript signature) arrives, so a stuck "working" after an
+    // interrupt doesn't trap sends in the queue.
+    setStoppedKey(msgKeyRef.current);
     window.setTimeout(() => fetchRef.current(), 500);
   }, [agentId]);
 
