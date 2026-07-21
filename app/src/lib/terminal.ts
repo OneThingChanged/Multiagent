@@ -9,6 +9,7 @@ import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import type { DropZone, TerminalEntry } from "../types";
 import { loadAppTheme, type AppThemeId } from "./appTheme";
 
@@ -951,6 +952,14 @@ export function createEntry(
   term.loadAddon(search);
   const serialize = new SerializeAddon();
   term.loadAddon(serialize);
+  // Align xterm's character-width table with modern wcwidth (Unicode 11+).
+  // Without this, xterm defaults to the Unicode 6 tables where emoji and some
+  // symbols count as 1 cell, while CLI TUIs (e.g. Cline, which renders with
+  // Node's wcwidth) treat them as 2 — the mismatch drifts the cursor and makes
+  // output look shifted. Activating v11 keeps both sides in agreement.
+  const unicode11 = new Unicode11Addon();
+  term.loadAddon(unicode11);
+  term.unicode.activeVersion = "11";
   registerUrlLinkProvider(term, openTerminalUrl);
   if (onMarkdownPath) {
     registerMarkdownLinkProvider(
