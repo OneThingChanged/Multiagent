@@ -81,6 +81,13 @@ export const AI_TOOLS: AiTool[] = [
     dangerousFlag: "--yolo",
   },
   {
+    id: "cline",
+    label: "Cline",
+    icon: "◈",
+    iconColor: "#3aa0ff",
+    command: "cline",
+  },
+  {
     id: "none",
     label: "Shell only",
     icon: "$",

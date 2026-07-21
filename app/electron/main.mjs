@@ -958,13 +958,16 @@ async function spawnPty(args, event) {
         ? new CodexScrollbackFilter()
         : new PassThroughTerminalFilter(),
     quitCommand:
-      aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen"
+      aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen" || aiToolId === "cline"
         ? "/quit\r"
         : "exit\r",
     terminate:
       process.platform === "win32" &&
       !ssh &&
-      (aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen")
+      (aiToolId === "codex" ||
+        aiToolId === "claude" ||
+        aiToolId === "qwen" ||
+        aiToolId === "cline")
         ? () => terminateWindowsProcessTree(processHandle.pid)
         : null,
     release: () => {
