@@ -258,6 +258,11 @@ export function ChatView({
   // When we reveal older turns, remember the scroll height taken just before so
   // the layout effect can restore the viewport position (content grows above).
   const anchorHeightRef = useRef<number | null>(null);
+  // Set to the transcript signature at the moment "/clear" is sent. While the
+  // transcript still matches it (the agent hasn't cut over to a fresh
+  // conversation yet), the view stays empty instead of flashing the old messages
+  // back. Released once the transcript signature changes.
+  const clearedSigRef = useRef<string | null>(null);
 
   useEffect(() => {
     keyRef.current = "";
@@ -269,6 +274,7 @@ export function ChatView({
     setAnsweredPromptSig("");
     setStoppedKey(null);
     firstLoadRef.current = true;
+    clearedSigRef.current = null;
   }, [agentId]);
 
   useEffect(() => {
@@ -292,6 +298,13 @@ export function ChatView({
         setPending((prev) => prev.filter((t) => !userTexts.has(t)));
         const last = next[next.length - 1];
         const key = `${next.length}:${String(last?.text ?? last?.output ?? "").length}`;
+        // After "/clear", keep the view empty until the transcript actually
+        // changes (agent emptied it or cut over to a new session). Restoring the
+        // pre-clear content on the next poll would undo the clear visually.
+        if (clearedSigRef.current !== null) {
+          if (key === clearedSigRef.current) return;
+          clearedSigRef.current = null;
+        }
         if (key === keyRef.current) return;
         keyRef.current = key;
         msgKeyRef.current = key;
@@ -303,10 +316,12 @@ export function ChatView({
           : true;
         setBlocks(next);
         setStatus(next.length ? "ready" : "empty");
-        // Always land at the bottom on the first paint; afterwards only follow
-        // when the user was already near the bottom.
-        if (firstLoad || nearBottom) {
-          firstLoadRef.current = false;
+        // Follow live updates only when the user was already near the bottom.
+        // The first-paint bottom-pin is handled by the layout effect below (it
+        // runs after the new blocks commit to the DOM); doing it here with a rAF
+        // could fire before the commit, leaving scrollHeight stale so the view
+        // sticks at the top when re-entering the chat from another session.
+        if (nearBottom && !firstLoad) {
           requestAnimationFrame(() => {
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           });
@@ -391,6 +406,19 @@ export function ChatView({
     }
   }, [visible]);
 
+  // First paint after a fresh mount (opening the chat, or re-entering it from
+  // another session) pins to the bottom once the blocks have actually committed
+  // to the DOM — a layout effect sees the final scrollHeight, unlike a rAF fired
+  // from inside the async fetch, so the view no longer sticks at the top.
+  useLayoutEffect(() => {
+    if (!firstLoadRef.current || status !== "ready") return;
+    if (anchorHeightRef.current !== null) return; // loadOlder prepend in flight
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    firstLoadRef.current = false;
+  }, [status, blocks, visible]);
+
   const visibleTurns: ReactNode[] = ranges.slice(hidden).map((range) =>
     range.user ? (
       <div key={`u${range.start}`} className="chat-turn user">
@@ -471,7 +499,20 @@ export function ChatView({
   const dispatch = useCallback(
     (value: string) => {
       lastDispatchRef.current = Date.now();
-      setPending((p) => [...p, value]);
+      if (value.trim() === "/clear") {
+        // /clear resets the agent's conversation — mirror it in the view right
+        // away and suppress the pre-clear transcript until it changes on disk.
+        clearedSigRef.current = keyRef.current || "empty";
+        keyRef.current = "";
+        setBlocks([]);
+        setPending([]);
+        setVisible(CHAT_PAGE);
+        setStatus("empty");
+        setStoppedKey(null);
+        firstLoadRef.current = true;
+      } else {
+        setPending((p) => [...p, value]);
+      }
       void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
       window.setTimeout(() => {
         void invoke("write_pty", { id: agentId, data: "\r" }).catch(() => {});
