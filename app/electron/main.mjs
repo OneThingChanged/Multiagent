@@ -919,7 +919,7 @@ async function spawnPty(args, event) {
     requestedCwd && !isPackagedVirtualPath && fs.existsSync(requestedCwd)
       ? requestedCwd
       : os.homedir();
-  if (!ssh && (aiToolId === "codex" || aiToolId === "claude") && cwd) {
+  if (!ssh && (aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen") && cwd) {
     await hookService.setupProject(cwd, aiToolId).catch((error) => {
       console.warn(`[electron] hook setup failed for ${id}:`, error);
     });

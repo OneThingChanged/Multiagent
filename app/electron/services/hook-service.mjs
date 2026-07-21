@@ -18,6 +18,12 @@ const CLAUDE_EVENTS = [
   ["PostToolUseFailure", "working"],
   ["StopFailure", "blocked"],
 ];
+// Qwen Code (Gemini-CLI fork) supports the same event names + StopFailure and
+// a Notification event; config lives in .qwen/settings.json (Claude-shaped).
+const QWEN_EVENTS = [
+  ...CODEX_EVENTS,
+  ["StopFailure", "blocked"],
+];
 const CODEX_BEGIN = "# >>> multiagent electron hooks >>>";
 const CODEX_END = "# <<< multiagent electron hooks <<<";
 
@@ -196,7 +202,10 @@ async function atomicWrite(filePath, body) {
   }
 }
 
-function mergeClaude(existing, helperPath) {
+// Merge our managed hooks into a JSON settings file (Claude .claude/
+// settings.local.json, Qwen .qwen/settings.json — same shape), preserving all
+// other keys and replacing only our previously-injected (__source) entries.
+function mergeJsonSettingsHooks(existing, helperPath, events) {
   let settings;
   try {
     settings = existing.trim() ? JSON.parse(existing) : {};
@@ -207,7 +216,7 @@ function mergeClaude(existing, helperPath) {
   if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
     settings.hooks = {};
   }
-  for (const [eventName, event] of CLAUDE_EVENTS) {
+  for (const [eventName, event] of events) {
     const current = Array.isArray(settings.hooks[eventName]) ? settings.hooks[eventName] : [];
     settings.hooks[eventName] = [
       ...current.filter((entry) => entry?.__source !== HOOK_MARKER),
@@ -219,6 +228,14 @@ function mergeClaude(existing, helperPath) {
     ];
   }
   return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
+function mergeClaude(existing, helperPath) {
+  return mergeJsonSettingsHooks(existing, helperPath, CLAUDE_EVENTS);
+}
+
+function mergeQwen(existing, helperPath) {
+  return mergeJsonSettingsHooks(existing, helperPath, QWEN_EVENTS);
 }
 
 function removeManagedCodexBlock(existing) {
@@ -407,6 +424,13 @@ export class HookService {
         if (before !== after) await atomicWrite(target, after);
         return before !== after;
       }
+      if (aiToolId === "qwen") {
+        const target = path.join(root, ".qwen", "settings.json");
+        const before = await fsPromises.readFile(target, "utf8").catch(() => "");
+        const after = mergeQwen(before, this.helperPath);
+        if (before !== after) await atomicWrite(target, after);
+        return before !== after;
+      }
       return false;
     };
     const result = this.mergeQueue.then(task, task);
@@ -427,7 +451,7 @@ export class HookService {
       failures: [],
     };
     for (const entry of entries) {
-      if (!entry.cwd && !entry.ssh || !["codex", "claude"].includes(entry.aiToolId)) {
+      if (!entry.cwd && !entry.ssh || !["codex", "claude", "qwen"].includes(entry.aiToolId)) {
         summary.skipped += 1;
         continue;
       }
@@ -473,7 +497,7 @@ export class HookService {
         if (
           entry.ssh ||
           !entry.cwd ||
-          !["codex", "claude"].includes(entry.aiToolId)
+          !["codex", "claude", "qwen"].includes(entry.aiToolId)
         ) {
           continue;
         }
@@ -518,6 +542,7 @@ export class HookService {
 export const hookInternals = {
   mergeClaude,
   mergeCodex,
+  mergeQwen,
   removeManagedCodexBlock,
   remoteBootstrap,
 };
