@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { invoke } from "../platform/runtime";
+import { invoke, listen } from "../platform/runtime";
 import type { Agent, Project } from "../types";
 import { PortsMonitor } from "./PortsMonitor";
 import { ResourceMonitor } from "./ResourceMonitor";
@@ -212,6 +212,30 @@ export function UsageStatusBar({
     return () => {
       window.clearInterval(refreshTimer);
       window.clearInterval(clockTimer);
+    };
+  }, [load]);
+
+  // Refresh the moment a turn completes instead of waiting up to a full poll
+  // interval. On a "done" hook the main process has already re-ingested that
+  // agent's transcript (Codex rate limits) and kicked off the Claude OAuth
+  // refresh before dispatching the event, so re-reading the DB (load(false))
+  // surfaces the new numbers immediately. Debounced so a burst settles once.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten = () => {};
+    let timer: number | undefined;
+    void listen<{ event?: string }>("agent:hook-event", (e) => {
+      if (e.payload?.event !== "done") return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(false), 400);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten();
+      window.clearTimeout(timer);
     };
   }, [load]);
 
