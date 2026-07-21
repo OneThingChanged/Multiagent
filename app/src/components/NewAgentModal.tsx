@@ -8,14 +8,20 @@ export function NewAgentModal({
   defaultName,
   onCancel,
   onCreate,
+  disabledTools = [],
 }: {
   project: Project | null;
   defaultName: string;
   onCancel: () => void;
   onCreate: (payload: NewAgentPayload) => void;
+  disabledTools?: string[];
 }) {
+  // Only tools enabled in Settings → Agents ("none" always available).
+  const visibleTools = AI_TOOLS.filter(
+    (t) => t.id === "none" || !disabledTools.includes(t.id)
+  );
   const [name, setName] = useState(defaultName);
-  const [aiToolId, setAiToolId] = useState<string>(AI_TOOLS[0].id);
+  const [aiToolId, setAiToolId] = useState<string>(visibleTools[0]?.id ?? AI_TOOLS[0].id);
   const [dangerous, setDangerous] = useState(false);
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!selectedTool.dangerousFlag;
@@ -68,7 +74,7 @@ export function NewAgentModal({
             value={aiToolId}
             onChange={(e) => setAiToolId(e.target.value)}
           >
-            {AI_TOOLS.map((t) => (
+            {visibleTools.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}
               </option>

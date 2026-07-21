@@ -28,7 +28,7 @@ import { loadDiffToolCommand, saveDiffToolCommand } from "../lib/diffTool";
 import { SshSetupGuide } from "./SshSetupGuide";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import type { CommandShortcuts } from "../lib/commandRegistry";
-import type { Agent, SshHost } from "../types";
+import type { SshHost } from "../types";
 import { toolForId } from "../types";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
@@ -223,52 +223,38 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function agentStatusMeta(status: string): { label: string; color: string } {
-  switch (status) {
-    case "working":
-      return { label: "작업 중", color: "#e3b341" };
-    case "waiting":
-    case "blocked":
-      return { label: "답변 대기", color: "#f0883e" };
-    case "starting":
-      return { label: "시작 중", color: "#58a6ff" };
-    case "idle":
-    case "running":
-      return { label: "대기", color: "#3fb950" };
-    default:
-      return { label: "비활성", color: "#8b949e" };
-  }
-}
-
-function relSignal(ms: number | undefined, now: number): string {
-  if (!ms) return "신호 없음";
-  const s = Math.max(0, Math.round((now - ms) / 1000));
-  if (s < 60) return `${s}초 전`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}분 전`;
-  return `${Math.round(m / 60)}시간 전`;
-}
-
 type QwenRegionInfo = {
   available: boolean;
   region: string | null;
   regions: { id: string; label: string }[];
 };
 
+type ToolAvailability = Record<string, { available: boolean; path: string | null }>;
+
+// Tools that can be availability-checked + offered in the new-session picker.
+const CHECKABLE_TOOL_IDS = ["claude", "codex", "qwen", "cline"];
+
 function AgentsSettings({
-  agents,
+  disabledTools,
+  onToggleTool,
   showUsageBar,
   onShowUsageBarChange,
 }: {
-  agents: Agent[];
+  disabledTools: string[];
+  onToggleTool: (toolId: string, enabled: boolean) => void;
   showUsageBar: boolean;
   onShowUsageBarChange: (show: boolean) => void;
 }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((n) => n + 1), 3000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const [avail, setAvail] = useState<ToolAvailability | null>(null);
+  const [checking, setChecking] = useState(false);
+  const refreshAvail = () => {
+    setChecking(true);
+    void invoke<ToolAvailability>("check_tools")
+      .then(setAvail)
+      .catch(() => setAvail(null))
+      .finally(() => setChecking(false));
+  };
+  useEffect(refreshAvail, []);
 
   const [qwen, setQwen] = useState<QwenRegionInfo | null>(null);
   const [qwenBusy, setQwenBusy] = useState(false);
@@ -290,9 +276,49 @@ function AgentsSettings({
       .finally(() => setQwenBusy(false));
   };
 
-  const now = Date.now();
   return (
     <div className="app-settings-section">
+      <div className="agent-block">
+        <div className="agent-row-title-wrap">
+          <div className="agent-row-title">사용 가능한 도구</div>
+          <button type="button" className="agent-refresh" onClick={refreshAvail} disabled={checking}>
+            {checking ? "확인 중…" : "새로고침"}
+          </button>
+        </div>
+        <div className="agent-row-sub">
+          체크한 도구만 새 세션 만들기 드롭박스에 표시됩니다. (설치 여부는 오른쪽에 표시)
+        </div>
+        <div className="agent-tool-list">
+          {CHECKABLE_TOOL_IDS.map((id) => {
+            const tool = toolForId(id);
+            const info = avail?.[id];
+            const enabled = !disabledTools.includes(id);
+            return (
+              <label className="agent-tool-row" key={id}>
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => onToggleTool(id, e.target.checked)}
+                />
+                <span className="agent-conn-icon" style={{ color: tool.iconColor }}>
+                  {tool.icon}
+                </span>
+                <span className="agent-tool-name">{tool.label}</span>
+                <span
+                  className="agent-tool-avail"
+                  style={{
+                    color: avail == null ? "#8b949e" : info?.available ? "#3fb950" : "#f0883e",
+                  }}
+                  title={info?.path ?? ""}
+                >
+                  {avail == null ? "확인 중…" : info?.available ? "✓ 사용 가능" : "✗ 미설치"}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       <label className="agent-toggle-row">
         <div>
           <div className="agent-row-title">작업표시줄 사용량 표시</div>
@@ -331,35 +357,6 @@ function AgentsSettings({
         )}
         {qwenMsg && <div className="agent-hint">{qwenMsg}</div>}
       </div>
-
-      <div className="agent-block">
-        <div className="agent-row-title">에이전트 연결 상황</div>
-        {agents.length === 0 ? (
-          <div className="agent-hint">세션이 없습니다.</div>
-        ) : (
-          <div className="agent-conn-list">
-            {agents.map((a) => {
-              const meta = agentStatusMeta(a.status);
-              const tool = toolForId(a.aiToolId);
-              return (
-                <div className="agent-conn-row" key={a.id}>
-                  <span className="agent-conn-icon" style={{ color: tool.iconColor }}>
-                    {tool.icon}
-                  </span>
-                  <span className="agent-conn-name" title={a.folder || a.name}>
-                    {a.name}
-                  </span>
-                  <span className="agent-conn-status" style={{ color: meta.color }}>
-                    ● {meta.label}
-                  </span>
-                  <span className="agent-conn-signal">{relSignal(a.activity?.receivedAt, now)}</span>
-                  <span className="agent-conn-src">{a.activity?.source ?? "—"}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -373,7 +370,8 @@ export function SettingsModal({
   onResetDesktopPetPosition,
   commandShortcuts,
   onCommandShortcutsChange,
-  agents,
+  disabledTools,
+  onToggleTool,
   showUsageBar,
   onShowUsageBarChange,
   onClose,
@@ -386,7 +384,8 @@ export function SettingsModal({
   onResetDesktopPetPosition: () => void;
   commandShortcuts: CommandShortcuts;
   onCommandShortcutsChange: (shortcuts: CommandShortcuts) => void;
-  agents: Agent[];
+  disabledTools: string[];
+  onToggleTool: (toolId: string, enabled: boolean) => void;
   showUsageBar: boolean;
   onShowUsageBarChange: (show: boolean) => void;
   onClose: () => void;
@@ -1118,7 +1117,8 @@ export function SettingsModal({
 
         {tab === "agents" && (
           <AgentsSettings
-            agents={agents}
+            disabledTools={disabledTools}
+            onToggleTool={onToggleTool}
             showUsageBar={showUsageBar}
             onShowUsageBarChange={onShowUsageBarChange}
           />

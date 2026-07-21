@@ -603,6 +603,26 @@ function App() {
   const [chatModeAgents, setChatModeAgents] = useState<Set<string>>(
     () => new Set()
   );
+  // Tools hidden from the new-session picker (Settings → Agents). Default: none.
+  const [disabledTools, setDisabledTools] = useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("multiagent.disabledTools.v1") || "[]");
+      return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const handleToggleTool = useCallback((toolId: string, enabled: boolean) => {
+    setDisabledTools((prev) => {
+      const next = enabled ? prev.filter((id) => id !== toolId) : [...new Set([...prev, toolId])];
+      try {
+        localStorage.setItem("multiagent.disabledTools.v1", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
   // Bottom usage bar visibility (Settings → Agents).
   const [showUsageBar, setShowUsageBar] = useState<boolean>(
     () => localStorage.getItem("multiagent.showUsageBar.v1") !== "0"
@@ -3058,7 +3078,8 @@ function App() {
           onResetDesktopPetPosition={resetDesktopPetPosition}
           commandShortcuts={commandShortcuts}
           onCommandShortcutsChange={setCommandShortcuts}
-          agents={agents}
+          disabledTools={disabledTools}
+          onToggleTool={handleToggleTool}
           showUsageBar={showUsageBar}
           onShowUsageBarChange={handleShowUsageBarChange}
           onClose={() => setSettingsOpen(false)}
@@ -3085,6 +3106,7 @@ function App() {
         <NewAgentModal
           project={activeProject}
           defaultName={`Session ${projectAgents.length + 1}`}
+          disabledTools={disabledTools}
           onCancel={() => setShowModal(false)}
           onCreate={(payload) => {
             setShowModal(false);

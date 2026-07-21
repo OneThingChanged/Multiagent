@@ -54,6 +54,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "clipboard_read_text",
   "clipboard_write_text",
   "save_clipboard_image",
+  "check_tools",
   "qwen_region_get",
   "qwen_region_set",
   "show_native_notification",

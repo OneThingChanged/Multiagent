@@ -813,6 +813,28 @@ function findExecutableOnPath(name) {
     .find((line) => line && !line.toLowerCase().includes("\\windowsapps\\")) ?? null;
 }
 
+// Check whether each agent CLI is installed/resolvable on the app's PATH, so
+// Settings can show availability and the new-session picker can hide missing
+// ones. Uses the same PATH the app spawns with.
+const CHECKABLE_TOOLS = { claude: "claude", codex: "codex", qwen: "qwen", cline: "cline" };
+function checkToolAvailability() {
+  const out = {};
+  for (const [id, cmd] of Object.entries(CHECKABLE_TOOLS)) {
+    let found = null;
+    if (process.platform === "win32") {
+      found =
+        findExecutableOnPath(`${cmd}.cmd`) ||
+        findExecutableOnPath(`${cmd}.exe`) ||
+        findExecutableOnPath(cmd);
+    } else {
+      const which = spawnSync("which", [cmd], { encoding: "utf8", windowsHide: true });
+      found = which.status === 0 ? which.stdout.trim().split(/\r?\n/)[0] || null : null;
+    }
+    out[id] = { available: Boolean(found), path: found || null };
+  }
+  return out;
+}
+
 function defaultShell(requested) {
   if (requested && fs.existsSync(requested)) return requested;
   if (process.platform !== "win32") {
@@ -2496,6 +2518,8 @@ async function invokeCommand(event, command, rawArgs) {
     case "reveal_local_path":
       shell.showItemInFolder(resolveExistingPath("", args.path));
       return null;
+    case "check_tools":
+      return checkToolAvailability();
     case "qwen_region_get":
       return qwenRegionGet();
     case "qwen_region_set":
