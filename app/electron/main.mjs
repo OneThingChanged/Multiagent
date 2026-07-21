@@ -835,6 +835,76 @@ function checkToolAvailability() {
   return out;
 }
 
+function resolveClineExecutable() {
+  if (process.platform === "win32") {
+    return (
+      findExecutableOnPath("cline.cmd") ||
+      findExecutableOnPath("cline.exe") ||
+      findExecutableOnPath("cline")
+    );
+  }
+  const which = spawnSync("which", ["cline"], { encoding: "utf8", windowsHide: true });
+  return which.status === 0 ? which.stdout.trim().split(/\r?\n/)[0] || null : null;
+}
+
+function normalizePathForMatch(value) {
+  return String(value || "")
+    .replace(/[\\/]+$/, "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+}
+
+// Cline persists its own sessions; `cline history --json` lists them with the
+// workspace root and start time. On reopen we resume the most recent CLI
+// session whose workspace matches the project folder — no hooks needed (unlike
+// Codex/Claude, whose session ids we capture from hook events). Returns a
+// session id string, or null when there is nothing to resume.
+function resolveClineSession(folder) {
+  const target = normalizePathForMatch(folder);
+  if (!target) return null;
+  const exe = resolveClineExecutable();
+  if (!exe) return null;
+  // A .cmd shim can't be spawned directly on Windows; route it through cmd.exe
+  // with fixed literal args (no shell:true, so nothing is string-concatenated).
+  const isCmd = process.platform === "win32" && exe.toLowerCase().endsWith(".cmd");
+  const historyArgs = ["history", "--json", "--limit", "100"];
+  let result;
+  try {
+    result = spawnSync(
+      isCmd ? process.env.ComSpec || "cmd.exe" : exe,
+      isCmd ? ["/c", exe, ...historyArgs] : historyArgs,
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 12000,
+        maxBuffer: 16 * 1024 * 1024,
+      }
+    );
+  } catch {
+    return null;
+  }
+  if (!result || result.status !== 0 || !result.stdout) return null;
+  let sessions;
+  try {
+    sessions = JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(sessions)) return null;
+  const matches = sessions.filter((session) => {
+    if (!session || session.source !== "cli") return false;
+    const root = normalizePathForMatch(session.workspaceRoot || session.cwd);
+    return root === target;
+  });
+  if (!matches.length) return null;
+  // startedAt is ISO-8601, so a lexical descending sort is chronological.
+  matches.sort((a, b) =>
+    String(b.startedAt || "").localeCompare(String(a.startedAt || ""))
+  );
+  const id = matches[0]?.sessionId;
+  return typeof id === "string" && id ? id : null;
+}
+
 function defaultShell(requested) {
   if (requested && fs.existsSync(requested)) return requested;
   if (process.platform !== "win32") {
@@ -2826,6 +2896,8 @@ async function invokeCommand(event, command, rawArgs) {
         preferredSessionId: args.preferredSessionId,
         agentId: args.agentId,
       });
+    case "resolve_cline_session":
+      return resolveClineSession(args.folder);
     case "relink_cli_session":
       return sessionService.resolve({
         aiToolId: args.aiToolId,

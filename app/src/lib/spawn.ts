@@ -142,6 +142,20 @@ export async function buildSpawnArgs(
         }
       }
     }
+    // Cline keeps its own session store; resume the latest CLI session for this
+    // project folder via `cline --id <id>` (queried from `cline history`, no
+    // hooks required). Local only — the history query runs on this machine.
+    if (agent.aiToolId === "cline" && !sshHost && agent.folder) {
+      try {
+        const clineSession = await invoke<string | null>(
+          "resolve_cline_session",
+          { folder: agent.folder }
+        );
+        if (clineSession) cmd = `${cmd} --id ${clineSession}`;
+      } catch {
+        /* history unavailable → start a fresh session */
+      }
+    }
     cmd = addTerminalCompatibilityArgs(
       agent.aiToolId,
       cmd,

@@ -62,6 +62,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "qwen_region_set",
   "show_native_notification",
   "resolve_cli_session",
+  "resolve_cline_session",
   "relink_cli_session",
   "sync_remote_agents",
   "sync_remote_view",

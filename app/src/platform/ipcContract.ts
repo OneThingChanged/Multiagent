@@ -22,7 +22,7 @@ export type RuntimeCommand =
   | "clipboard_read_text" | "clipboard_write_text" | "save_clipboard_image"
   | "check_tools" | "qwen_region_get" | "qwen_region_set"
   | "show_native_notification"
-  | "resolve_cli_session" | "relink_cli_session" | "sync_remote_agents"
+  | "resolve_cli_session" | "resolve_cline_session" | "relink_cli_session" | "sync_remote_agents"
   | "sync_remote_view" | "sync_usage_catalog" | "sync_monitor_state"
   | "repair_active_hooks" | "export_diagnostics" | "usage_ingest_now"
   | "usage_rate_limits_get"
