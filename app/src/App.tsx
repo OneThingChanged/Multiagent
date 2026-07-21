@@ -21,6 +21,7 @@ import {
   LS_PROJECTS,
   LS_VIEW,
   toolForId,
+  toolSupportsChat,
 } from "./types";
 import type {
   Agent,
@@ -3251,6 +3252,9 @@ function App() {
           onReopen={reopenClosedTab}
           chatMode={chatModeAgents.has(tabContextMenu.agentId)}
           onToggleChat={() => toggleChatMode(tabContextMenu.agentId)}
+          canChat={toolSupportsChat(
+            agents.find((a) => a.id === tabContextMenu.agentId)?.aiToolId
+          )}
           onCloseTab={() =>
             closeTab(tabContextMenu.path, tabContextMenu.agentId)
           }

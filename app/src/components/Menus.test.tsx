@@ -41,6 +41,7 @@ describe("TabContextMenu", () => {
         onReopen={() => {}}
         chatMode={false}
         onToggleChat={() => {}}
+        canChat={true}
       />
     );
 
@@ -69,6 +70,7 @@ describe("TabContextMenu", () => {
         onReopen={() => {}}
         chatMode={false}
         onToggleChat={() => {}}
+        canChat={true}
       />
     );
 

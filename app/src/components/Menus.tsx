@@ -103,6 +103,7 @@ export function TabContextMenu({
   onReopen,
   chatMode,
   onToggleChat,
+  canChat,
 }: {
   state: TabCtxState;
   pinned: boolean;
@@ -119,6 +120,7 @@ export function TabContextMenu({
   onReopen: () => void;
   chatMode: boolean;
   onToggleChat: () => void;
+  canChat: boolean;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
   const run = (action: () => void) => () => {
@@ -147,10 +149,14 @@ export function TabContextMenu({
         <button className="ctx-item" onClick={run(() => onSplit("v"))}>
           아래로 분할
         </button>
-        <div className="ctx-separator" />
-        <button className="ctx-item" onClick={run(onToggleChat)}>
-          {chatMode ? "⌗ 터미널 뷰로 보기" : "💬 대화(채팅) 뷰로 보기"}
-        </button>
+        {canChat && (
+          <>
+            <div className="ctx-separator" />
+            <button className="ctx-item" onClick={run(onToggleChat)}>
+              {chatMode ? "⌗ 터미널 뷰로 보기" : "💬 대화(채팅) 뷰로 보기"}
+            </button>
+          </>
+        )}
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={run(onTogglePin)}>
           {pinned ? "탭 고정 해제" : "탭 고정"}

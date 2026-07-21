@@ -11,7 +11,7 @@ import type {
   SpawnTerminalResult,
   TerminalReplay,
 } from "../platform/ipcContract";
-import { toolForId } from "../types";
+import { toolForId, toolSupportsChat } from "../types";
 import { buildSpawnArgs } from "../lib/spawn";
 import type {
   Agent,
@@ -878,7 +878,7 @@ export function PaneSlot({
             </div>
           );
         })}
-        {activeAgentId && (
+        {activeAgentId && toolSupportsChat(activeAgent?.aiToolId) && (
           <button
             className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
             onClick={(e) => {
@@ -913,7 +913,7 @@ export function PaneSlot({
           theme={ctx.theme}
         />
       )}
-      {chatMode && activeAgentId && !activeDocId && (
+      {chatMode && activeAgentId && !activeDocId && toolSupportsChat(activeAgent?.aiToolId) && (
         <ChatView
           agentId={activeAgentId}
           active={active}
