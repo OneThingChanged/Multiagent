@@ -2271,6 +2271,44 @@ async function deletePathEntry(folder, relativePath) {
   return null;
 }
 
+// ---- Qwen region (ModelStudio Token Plan endpoint) ----
+// Qwen Code's ~/.qwen/settings.json pins every provider baseUrl to a regional
+// MaaS host (token-plan.<region>.maas.aliyuncs.com). The CLI has no in-app
+// region switch, so we read/rewrite it here (Beijing ↔ Singapore …).
+const QWEN_SETTINGS_PATH = () => path.join(os.homedir(), ".qwen", "settings.json");
+const QWEN_REGIONS = [
+  { id: "cn-beijing", label: "중국 (베이징)" },
+  { id: "ap-southeast-1", label: "싱가포르 (국제)" },
+];
+const QWEN_HOST_RE = /token-plan\.[a-z0-9-]+\.maas\.aliyuncs\.com/g;
+
+function qwenRegionGet() {
+  const file = QWEN_SETTINGS_PATH();
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { available: false, region: null, regions: QWEN_REGIONS };
+  }
+  const match = text.match(/token-plan\.([a-z0-9-]+)\.maas\.aliyuncs\.com/);
+  return { available: true, region: match ? match[1] : null, regions: QWEN_REGIONS };
+}
+
+async function qwenRegionSet(region) {
+  const target = asString(region).trim();
+  if (!QWEN_REGIONS.some((r) => r.id === target)) throw new Error("지원하지 않는 리전입니다.");
+  const file = QWEN_SETTINGS_PATH();
+  const text = await fsPromises.readFile(file, "utf8"); // throws if missing → surfaced to UI
+  const next = text.replace(QWEN_HOST_RE, `token-plan.${target}.maas.aliyuncs.com`);
+  const changed = next !== text;
+  if (changed) {
+    await fsPromises.writeFile(`${file}.bak-${process.pid}`, text, "utf8").catch(() => {});
+    await fsPromises.writeFile(file, next, "utf8");
+  }
+  const count = (text.match(QWEN_HOST_RE) || []).length;
+  return { ok: true, region: target, changed, count };
+}
+
 async function readImageDataUrl(requested, folder) {
   const resolved = resolveExistingPath(asString(folder), requested);
   const mime = IMAGE_MIME.get(path.extname(resolved).toLowerCase());
@@ -2458,6 +2496,10 @@ async function invokeCommand(event, command, rawArgs) {
     case "reveal_local_path":
       shell.showItemInFolder(resolveExistingPath("", args.path));
       return null;
+    case "qwen_region_get":
+      return qwenRegionGet();
+    case "qwen_region_set":
+      return qwenRegionSet(args.region);
     case "list_markdown_files":
       return listMarkdownFiles(args.folder);
     case "read_markdown_file":

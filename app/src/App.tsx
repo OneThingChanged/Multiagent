@@ -603,6 +603,18 @@ function App() {
   const [chatModeAgents, setChatModeAgents] = useState<Set<string>>(
     () => new Set()
   );
+  // Bottom usage bar visibility (Settings → Agents).
+  const [showUsageBar, setShowUsageBar] = useState<boolean>(
+    () => localStorage.getItem("multiagent.showUsageBar.v1") !== "0"
+  );
+  const handleShowUsageBarChange = useCallback((show: boolean) => {
+    setShowUsageBar(show);
+    try {
+      localStorage.setItem("multiagent.showUsageBar.v1", show ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const toggleChatMode = useCallback((agentId: string) => {
     setChatModeAgents((prev) => {
       const next = new Set(prev);
@@ -2931,7 +2943,7 @@ function App() {
   return (
     <div
       className={`app app-theme-${appTheme} ${
-        isElectronRuntime() ? "app-with-usage-status" : ""
+        isElectronRuntime() && showUsageBar ? "app-with-usage-status" : ""
       } ${!sidebarOpen ? "app-sidebar-collapsed" : ""}`}
     >
       {isElectronRuntime() && (
@@ -3029,7 +3041,7 @@ function App() {
           />
         </aside>
       )}
-      {isElectronRuntime() && (
+      {isElectronRuntime() && showUsageBar && (
         <UsageStatusBar
           agents={agents}
           projects={projects}
@@ -3046,6 +3058,9 @@ function App() {
           onResetDesktopPetPosition={resetDesktopPetPosition}
           commandShortcuts={commandShortcuts}
           onCommandShortcutsChange={setCommandShortcuts}
+          agents={agents}
+          showUsageBar={showUsageBar}
+          onShowUsageBarChange={handleShowUsageBarChange}
           onClose={() => setSettingsOpen(false)}
         />
       )}

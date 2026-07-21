@@ -19,6 +19,7 @@ export type RuntimeCommand =
   | "resolve_terminal_path"
   | "read_image_data_url" | "play_system_sound" | "read_audio_file"
   | "clipboard_read_text" | "clipboard_write_text" | "save_clipboard_image"
+  | "qwen_region_get" | "qwen_region_set"
   | "show_native_notification"
   | "resolve_cli_session" | "relink_cli_session" | "sync_remote_agents"
   | "sync_remote_view" | "sync_usage_catalog" | "sync_monitor_state"

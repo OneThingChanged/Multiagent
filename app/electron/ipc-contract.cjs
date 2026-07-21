@@ -54,6 +54,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "clipboard_read_text",
   "clipboard_write_text",
   "save_clipboard_image",
+  "qwen_region_get",
+  "qwen_region_set",
   "show_native_notification",
   "resolve_cli_session",
   "relink_cli_session",
@@ -196,6 +198,11 @@ function assertInvokeRequest(command, rawArgs) {
       assertPathString(args.folder, "folder");
       if (typeof args.query !== "string") {
         throw new TypeError("Electron search_files query must be a string");
+      }
+      break;
+    case "qwen_region_set":
+      if (typeof args.region !== "string" || !args.region.trim()) {
+        throw new TypeError("Electron qwen_region_set region must be a string");
       }
       break;
     case "read_text_file":

@@ -28,7 +28,8 @@ import { loadDiffToolCommand, saveDiffToolCommand } from "../lib/diffTool";
 import { SshSetupGuide } from "./SshSetupGuide";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import type { CommandShortcuts } from "../lib/commandRegistry";
-import type { SshHost } from "../types";
+import type { Agent, SshHost } from "../types";
+import { toolForId } from "../types";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
   { id: "system", label: "System" },
@@ -131,6 +132,7 @@ type DiagnosticExportState =
 
 type SettingsCategory =
   | "general"
+  | "agents"
   | "shortcuts"
   | "hooks"
   | "dashboard"
@@ -186,6 +188,7 @@ type NavEntry = {
 
 const ALL_NAV_ENTRIES: NavEntry[] = [
   { id: "general", group: "Workspace", label: "General", title: "General", sub: "테마 · 알림음 · 데스크톱 펫", keywords: "theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
+  { id: "agents", group: "Workspace", label: "Agents", title: "Agents", sub: "연결 상황 · 사용량 바 · Qwen 리전", keywords: "agent 에이전트 연결 connection status usage 사용량 bar qwen region 리전 나라 country", icon: <IconActivity /> },
   { id: "shortcuts", group: "Workspace", label: "Shortcuts", title: "Shortcuts", sub: "명령별 키보드 단축키", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
   { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
   { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
@@ -220,6 +223,147 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function agentStatusMeta(status: string): { label: string; color: string } {
+  switch (status) {
+    case "working":
+      return { label: "작업 중", color: "#e3b341" };
+    case "waiting":
+    case "blocked":
+      return { label: "답변 대기", color: "#f0883e" };
+    case "starting":
+      return { label: "시작 중", color: "#58a6ff" };
+    case "idle":
+    case "running":
+      return { label: "대기", color: "#3fb950" };
+    default:
+      return { label: "비활성", color: "#8b949e" };
+  }
+}
+
+function relSignal(ms: number | undefined, now: number): string {
+  if (!ms) return "신호 없음";
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 60) return `${s}초 전`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}분 전`;
+  return `${Math.round(m / 60)}시간 전`;
+}
+
+type QwenRegionInfo = {
+  available: boolean;
+  region: string | null;
+  regions: { id: string; label: string }[];
+};
+
+function AgentsSettings({
+  agents,
+  showUsageBar,
+  onShowUsageBarChange,
+}: {
+  agents: Agent[];
+  showUsageBar: boolean;
+  onShowUsageBarChange: (show: boolean) => void;
+}) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((n) => n + 1), 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const [qwen, setQwen] = useState<QwenRegionInfo | null>(null);
+  const [qwenBusy, setQwenBusy] = useState(false);
+  const [qwenMsg, setQwenMsg] = useState("");
+  useEffect(() => {
+    void invoke<QwenRegionInfo>("qwen_region_get")
+      .then(setQwen)
+      .catch(() => setQwen(null));
+  }, []);
+  const chooseRegion = (region: string) => {
+    setQwenBusy(true);
+    setQwenMsg("");
+    void invoke<{ ok: boolean; changed: boolean }>("qwen_region_set", { region })
+      .then((r) => {
+        setQwen((q) => (q ? { ...q, region } : q));
+        setQwenMsg(r.changed ? "변경됨 · 실행 중 Qwen 세션은 재시작해야 적용됩니다" : "이미 해당 리전입니다");
+      })
+      .catch((e) => setQwenMsg(`실패: ${String(e)}`))
+      .finally(() => setQwenBusy(false));
+  };
+
+  const now = Date.now();
+  return (
+    <div className="app-settings-section">
+      <label className="agent-toggle-row">
+        <div>
+          <div className="agent-row-title">작업표시줄 사용량 표시</div>
+          <div className="agent-row-sub">하단 바에 Codex/Claude 사용량·한도를 표시합니다.</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={showUsageBar}
+          onChange={(e) => onShowUsageBarChange(e.target.checked)}
+        />
+      </label>
+
+      <div className="agent-block">
+        <div className="agent-row-title">Qwen 리전 (나라)</div>
+        <div className="agent-row-sub">
+          Qwen Code(~/.qwen/settings.json)의 ModelStudio 엔드포인트 리전. 계정 지역과 맞춰야 합니다.
+        </div>
+        {qwen == null ? (
+          <div className="agent-hint">불러오는 중…</div>
+        ) : !qwen.available ? (
+          <div className="agent-hint">~/.qwen/settings.json 이 없습니다 (Qwen 미설정).</div>
+        ) : (
+          <div className="agent-region-row">
+            {qwen.regions.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                disabled={qwenBusy}
+                className={`agent-region-btn ${qwen.region === r.id ? "on" : ""}`}
+                onClick={() => chooseRegion(r.id)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {qwenMsg && <div className="agent-hint">{qwenMsg}</div>}
+      </div>
+
+      <div className="agent-block">
+        <div className="agent-row-title">에이전트 연결 상황</div>
+        {agents.length === 0 ? (
+          <div className="agent-hint">세션이 없습니다.</div>
+        ) : (
+          <div className="agent-conn-list">
+            {agents.map((a) => {
+              const meta = agentStatusMeta(a.status);
+              const tool = toolForId(a.aiToolId);
+              return (
+                <div className="agent-conn-row" key={a.id}>
+                  <span className="agent-conn-icon" style={{ color: tool.iconColor }}>
+                    {tool.icon}
+                  </span>
+                  <span className="agent-conn-name" title={a.folder || a.name}>
+                    {a.name}
+                  </span>
+                  <span className="agent-conn-status" style={{ color: meta.color }}>
+                    ● {meta.label}
+                  </span>
+                  <span className="agent-conn-signal">{relSignal(a.activity?.receivedAt, now)}</span>
+                  <span className="agent-conn-src">{a.activity?.source ?? "—"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal({
   theme,
   onThemeChange,
@@ -229,6 +373,9 @@ export function SettingsModal({
   onResetDesktopPetPosition,
   commandShortcuts,
   onCommandShortcutsChange,
+  agents,
+  showUsageBar,
+  onShowUsageBarChange,
   onClose,
 }: {
   theme: AppThemeId;
@@ -239,6 +386,9 @@ export function SettingsModal({
   onResetDesktopPetPosition: () => void;
   commandShortcuts: CommandShortcuts;
   onCommandShortcutsChange: (shortcuts: CommandShortcuts) => void;
+  agents: Agent[];
+  showUsageBar: boolean;
+  onShowUsageBarChange: (show: boolean) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<SettingsCategory>("general");
@@ -964,6 +1114,14 @@ export function SettingsModal({
         </div>
 
         </>
+        )}
+
+        {tab === "agents" && (
+          <AgentsSettings
+            agents={agents}
+            showUsageBar={showUsageBar}
+            onShowUsageBarChange={onShowUsageBarChange}
+          />
         )}
 
         {tab === "shortcuts" && (
