@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { invoke } from "../platform/runtime";
+import { invoke, listen } from "../platform/runtime";
 import type { Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
 import type {
@@ -399,6 +399,33 @@ export function FileTreePanel({
       void refreshGit();
     }
   }, [expanded, folder, loadDir, refreshGit]);
+
+  // Auto-refresh the tree + git when an agent finishes a tool or a turn — hook
+  // events (tool-end / done) mean files may have been created/edited/moved.
+  // Debounced so a burst of tool calls triggers a single rescan.
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten = () => {};
+    let timer: number | undefined;
+    void listen<{ event?: string }>("agent:hook-event", (e) => {
+      const ev = e.payload?.event;
+      if (ev !== "tool-end" && ev !== "done") return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => refreshRef.current(), 400);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten();
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const collapseAll = useCallback(() => {
     setExpanded(new Set());
