@@ -554,23 +554,35 @@ function App() {
   if (!bootstrapRef.current) bootstrapRef.current = loadBootstrap();
   const boot = bootstrapRef.current;
 
+  // Secondary windows own their screens/activation instead of mirroring the main
+  // window's. runtime_flags arrives async, but the load URL carries the flag
+  // synchronously — we need it before seeding groups state, so read it here.
+  const bootIsSecondary =
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("secondaryWindow") === "1";
+
   const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
     computeInitialReopen(boot)
   );
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
-  const [groups, setGroups] = useState<Group[]>(boot.groups);
+  // Secondary windows start with no screens; the open_agent_id effect seeds a
+  // solo screen for the session they were opened with. They never adopt the
+  // main window's shared groups.
+  const [groups, setGroups] = useState<Group[]>(
+    bootIsSecondary ? [] : boot.groups
+  );
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
   );
   // When a reopen prompt is pending, don't restore the active group yet (that
   // would auto-spawn its sessions) — wait for the user's answer.
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
-    pendingReopen ? null : boot.activeGroupId
+    bootIsSecondary || pendingReopen ? null : boot.activeGroupId
   );
   const [activePath, setActivePath] = useState<Path | null>(
-    pendingReopen ? null : boot.activePath
+    bootIsSecondary || pendingReopen ? null : boot.activePath
   );
 
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -729,6 +741,10 @@ function App() {
         setAgents(merged);
       }
     }
+
+    // Secondary windows keep their own screens/activation — sync projects and
+    // agents (shared, live PTYs) but never adopt the main window's groups.
+    if (bootIsSecondary) return;
 
     if (groupsRaw !== storedGroupsJsonRef.current) {
       const storedGroups = parseStoredArray<Group>(groupsRaw);
@@ -1033,6 +1049,9 @@ function App() {
   }, [agents]);
 
   useEffect(() => {
+    // Secondary windows must not overwrite the shared screen layout — that would
+    // sync their activation into the main window and pollute restore-on-launch.
+    if (bootIsSecondary) return;
     writeLocalStorageIfChanged(
       storedGroupsJsonRef,
       LS_GROUPS,
@@ -1041,7 +1060,7 @@ function App() {
   }, [groups]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || isSecondaryWindow || bootIsSecondary) return;
     // While the startup reopen prompt is open we deliberately hold activeGroupId
     // at null; don't persist that, or we'd lose the group to reopen.
     if (pendingReopen) return;
