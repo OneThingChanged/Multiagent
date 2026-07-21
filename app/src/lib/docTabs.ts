@@ -1,4 +1,5 @@
 import type { LayoutNode } from "../types";
+import { isGitHistoryTabId } from "./gitHistoryTabs";
 
 // Doc tabs are encoded as prefixed tab ids inside LeafNode.tabs so the whole
 // layout/group algebra (pruneAgent, addTabToLeafAt, performDrop, ...) keeps
@@ -72,12 +73,18 @@ export function docFileExtension(id: string): string {
 // Remove every doc tab from a layout tree. Used before mirroring layouts to
 // remote/monitor clients, which only understand agent ids. Standalone walk
 // (no ./layout import) so layout.ts can depend on this module without a cycle.
+// Drops both doc tabs and git-history tabs — the virtual, project-local tabs
+// that only exist on this desktop and must not leak into remote/monitor views.
+function isVirtualTab(id: string): boolean {
+  return isDocTabId(id) || isGitHistoryTabId(id);
+}
+
 export function stripDocTabs(node: LayoutNode | null): LayoutNode | null {
   if (!node) return null;
   if (node.type === "leaf") {
-    if (!node.tabs.some((t) => isDocTabId(t))) return node;
+    if (!node.tabs.some((t) => isVirtualTab(t))) return node;
     const activeTab = node.tabs[node.activeIndex] ?? null;
-    const newTabs = node.tabs.filter((t) => !isDocTabId(t));
+    const newTabs = node.tabs.filter((t) => !isVirtualTab(t));
     if (newTabs.length === 0) return null;
     let newActive =
       activeTab !== null ? newTabs.indexOf(activeTab) : node.activeIndex;

@@ -2191,6 +2191,176 @@ async function gitFileHistory(folder, relativePath) {
   return { commits };
 }
 
+// ---- Git History view (main-pane tab): paginated log, per-commit changed
+// files with +/- stats, and per-file unified diff parsed for inline render.
+
+const GIT_HASH_RE = /^[0-9a-fA-F]{4,64}$/;
+
+function assertGitHash(value) {
+  const hash = asString(value).trim();
+  if (!GIT_HASH_RE.test(hash)) throw new Error("잘못된 커밋 해시입니다.");
+  return hash;
+}
+
+function gitPathArg(relativePath) {
+  const rel = asString(relativePath).trim().replace(/^[\\/]+/, "");
+  if (rel.length > 4096) throw new Error("경로가 잘못되었습니다.");
+  return rel ? rel.split(path.sep).join("/") : "";
+}
+
+// Parse `git show -p` unified diff into { type, text }[] for the shared diff
+// renderer. Bounded so a huge commit can't blow up the renderer; the chat-view
+// parser caps at 160 lines for bubbles, but the history viewer wants the full
+// file diff, so this uses a larger ceiling.
+function gitDiffToLines(text, maxLines = 4000) {
+  const rows = String(text ?? "").split(/\r?\n/);
+  const lines = [];
+  let truncated = false;
+  for (const row of rows) {
+    if (lines.length >= maxLines) {
+      truncated = true;
+      break;
+    }
+    if (
+      row.startsWith("@@") ||
+      row.startsWith("diff ") ||
+      row.startsWith("index ") ||
+      row.startsWith("--- ") ||
+      row.startsWith("+++ ") ||
+      row.startsWith("new file") ||
+      row.startsWith("deleted file") ||
+      row.startsWith("rename ") ||
+      row.startsWith("similarity ")
+    ) {
+      lines.push({ type: "meta", text: row });
+    } else if (row.startsWith("+")) {
+      lines.push({ type: "add", text: row.slice(1) });
+    } else if (row.startsWith("-")) {
+      lines.push({ type: "del", text: row.slice(1) });
+    } else {
+      lines.push({ type: "context", text: row.startsWith(" ") ? row.slice(1) : row });
+    }
+  }
+  if (truncated) lines.push({ type: "meta", text: "… (diff truncated)" });
+  return lines;
+}
+
+async function gitLog(folder, options = {}) {
+  const root = fs.realpathSync(asString(folder));
+  const skip = Math.max(0, asPositiveInt(options.skip, 0) ?? 0);
+  const limit = Math.min(200, Math.max(1, asPositiveInt(options.limit, 50) ?? 50));
+  const gitPath = gitPathArg(options.path);
+  const search = asString(options.search).trim().slice(0, 200);
+  // %x1f = per-field unit separator, %x1e = per-record separator (so multi-line
+  // fields could never split a record — subjects are single-line but this keeps
+  // parsing robust). Fetch limit+1 to detect whether an older page exists.
+  const format =
+    "%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%cr%x1f%D%x1f%s%x1e";
+  const args = [
+    "log",
+    `--skip=${skip}`,
+    "-n",
+    String(limit + 1),
+    "--date=iso-strict",
+    `--pretty=format:${format}`,
+  ];
+  if (search) args.push("-i", `--grep=${search}`);
+  if (gitPath) args.push("--", gitPath);
+  let out = "";
+  try {
+    out = await runGit(root, args, 10000);
+  } catch {
+    return { commits: [], hasMore: false };
+  }
+  const records = out.split("\x1e").map((r) => r.replace(/^\r?\n/, "")).filter((r) => r.trim());
+  const hasMore = records.length > limit;
+  const commits = records.slice(0, limit).map((record) => {
+    const [hash, shortHash, parents, author, date, relDate, refs, subject] =
+      record.split("\x1f");
+    return {
+      hash: hash ?? "",
+      shortHash: shortHash ?? "",
+      parents: (parents ?? "").trim() ? parents.trim().split(/\s+/) : [],
+      author: author ?? "",
+      date: date ?? "",
+      relDate: relDate ?? "",
+      refs: (refs ?? "")
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean),
+      subject: subject ?? "",
+    };
+  });
+  return { commits, hasMore };
+}
+
+async function gitCommitFiles(folder, hash) {
+  const root = fs.realpathSync(asString(folder));
+  const h = assertGitHash(hash);
+  const metaOut = await runGit(
+    root,
+    [
+      "show",
+      "-s",
+      "--date=iso-strict",
+      "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%cr%x1f%B",
+      h,
+    ],
+    10000
+  );
+  const [full, short, parents, author, email, date, relDate, ...bodyParts] =
+    metaOut.split("\x1f");
+  // numstat gives additions/deletions; name-status gives the A/M/D/R letter.
+  const [numstatOut, nameStatusOut] = await Promise.all([
+    runGit(root, ["show", "--numstat", "--format=", h], 10000).catch(() => ""),
+    runGit(root, ["show", "--name-status", "--format=", h], 10000).catch(() => ""),
+  ]);
+  const stats = parseNumstat(numstatOut);
+  const files = [];
+  for (const line of nameStatusOut.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split("\t");
+    const code = parts[0]?.[0] ?? "M";
+    // Renames/copies carry two paths ("R100\told\tnew"); show the new path.
+    const rel = (parts.length >= 3 ? parts[2] : parts[1] ?? "").replace(/\\/g, "/");
+    if (!rel) continue;
+    const stat = stats.get(rel) ?? { additions: 0, deletions: 0 };
+    files.push({
+      relative_path: rel,
+      status: gitLetterFromCode(code),
+      additions: stat.additions,
+      deletions: stat.deletions,
+    });
+    if (files.length >= 2000) break;
+  }
+  return {
+    hash: full ?? h,
+    shortHash: short ?? "",
+    parents: (parents ?? "").trim() ? parents.trim().split(/\s+/) : [],
+    author: author ?? "",
+    email: email ?? "",
+    date: date ?? "",
+    relDate: relDate ?? "",
+    message: bodyParts.join("\x1f").trim(),
+    files,
+  };
+}
+
+async function gitCommitDiff(folder, hash, relativePath) {
+  const root = fs.realpathSync(asString(folder));
+  const h = assertGitHash(hash);
+  const gitPath = gitPathArg(relativePath);
+  if (!gitPath) throw new Error("경로가 비어 있습니다.");
+  let out = "";
+  try {
+    out = await runGit(root, ["show", "--format=", "-p", h, "--", gitPath], 10000);
+  } catch {
+    out = "";
+  }
+  return { diff: gitDiffToLines(out) };
+}
+
 // ---- File tree write operations (context menu). All sandboxed to the
 // project root; delete moves to the OS recycle bin instead of erasing.
 
@@ -2582,6 +2752,17 @@ async function invokeCommand(event, command, rawArgs) {
       return gitDiffTool(args.folder, args.relativePath, args.staged, args.command, args.ref);
     case "git_file_history":
       return gitFileHistory(args.folder, args.relativePath);
+    case "git_log":
+      return gitLog(args.folder, {
+        path: args.path,
+        skip: args.skip,
+        limit: args.limit,
+        search: args.search,
+      });
+    case "git_commit_files":
+      return gitCommitFiles(args.folder, args.hash);
+    case "git_commit_diff":
+      return gitCommitDiff(args.folder, args.hash, args.relativePath);
     case "create_file":
       return createFileEntry(args.folder, args.relativePath);
     case "create_directory":

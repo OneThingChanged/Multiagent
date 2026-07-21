@@ -63,6 +63,11 @@ import {
   stripDocTabs,
 } from "./lib/docTabs";
 import {
+  isGitHistoryTabId,
+  makeGitHistoryTabId,
+  parseGitHistoryTabId,
+} from "./lib/gitHistoryTabs";
+import {
   loadBootstrap,
   loadStoredView,
   normalizeStoredGroups,
@@ -1898,9 +1903,9 @@ function App() {
   );
 
   const closeTab = useCallback((path: Path, agentId: string) => {
-    if (isDocTabId(agentId)) {
-      // Doc tabs are simply discarded (no detached solo group, no reopen
-      // history in v1).
+    if (isDocTabId(agentId) || isGitHistoryTabId(agentId)) {
+      // Doc and git-history tabs are simply discarded (no detached solo group,
+      // no reopen history in v1).
       const next = groupOps.closeDocTab(
         {
           groups: groupsRef.current,
@@ -2118,14 +2123,16 @@ function App() {
       for (const id of memberIds) {
         applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
       }
-      // Also prune this project's doc tabs from every layout.
+      // Also prune this project's doc and git-history tabs from every layout.
       applyGroupOp((s) => {
         let state = s;
         for (const group of s.groups) {
           for (const tabId of collectAgentIds(group.layout)) {
             if (
-              isDocTabId(tabId) &&
-              parseDocTabId(tabId)?.projectId === projectId
+              (isDocTabId(tabId) &&
+                parseDocTabId(tabId)?.projectId === projectId) ||
+              (isGitHistoryTabId(tabId) &&
+                parseGitHistoryTabId(tabId)?.projectId === projectId)
             ) {
               state = groupOps.removeAgentFromLayout(state, tabId);
             }
@@ -2467,6 +2474,29 @@ function App() {
         // creates a new solo group for the doc, so a document can open even
         // before any terminal session exists.
         return groupOps.openAsTab(s, docId, projectId);
+      });
+    },
+    [applyGroupOp]
+  );
+
+  const openGitHistoryTab = useCallback(
+    (projectId: string, relativePath?: string | null) => {
+      const gitId = makeGitHistoryTabId(projectId, relativePath ?? null);
+      applyGroupOp((s) => {
+        const group = s.groups.find((g) => g.id === s.activeGroupId);
+        // Already open in the active screen → just focus it.
+        if (group && s.activePath) {
+          const existingPath = findLeafPath(group.layout, gitId);
+          if (existingPath) {
+            const layout = setLeafActiveTab(group.layout, existingPath, gitId);
+            return {
+              groups: updateGroup(s.groups, group.id, layout),
+              activeGroupId: s.activeGroupId,
+              activePath: existingPath,
+            };
+          }
+        }
+        return groupOps.openAsTab(s, gitId, projectId);
       });
     },
     [applyGroupOp]
@@ -2828,7 +2858,7 @@ function App() {
     }));
     const screenItems: QuickOpenItem[] = groups.flatMap((group, index) => {
       const memberIds = [...collectAgentIds(group.layout)].filter(
-        (id) => !isDocTabId(id)
+        (id) => !isDocTabId(id) && !isGitHistoryTabId(id)
       );
       const memberNames = memberIds
         .map((id) => agents.find((agent) => agent.id === id)?.name)
@@ -3057,6 +3087,7 @@ function App() {
             width={filesWidth}
             theme={appTheme}
             onOpenFile={openDocTab}
+            onOpenGitHistory={openGitHistoryTab}
             onClose={() => setFilesOpen(false)}
           />
         </aside>

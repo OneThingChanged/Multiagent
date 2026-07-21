@@ -153,6 +153,7 @@ export function FileTreePanel({
   width,
   theme,
   onOpenFile,
+  onOpenGitHistory,
   onClose,
 }: {
   projects: Project[];
@@ -160,6 +161,7 @@ export function FileTreePanel({
   width: number;
   theme: AppThemeId;
   onOpenFile: (projectId: string, relativePath: string) => void;
+  onOpenGitHistory: (projectId: string, relativePath?: string | null) => void;
   onClose: () => void;
 }) {
   // ---- Shown project: follows the active project unless pinned ----
@@ -938,6 +940,9 @@ export function FileTreePanel({
           onOpenFile={(rel) => {
             if (projectId) onOpenFile(projectId, rel);
           }}
+          onOpenHistory={(rel) => {
+            if (projectId) onOpenGitHistory(projectId, rel ?? null);
+          }}
           onMutated={() => void refreshGit()}
           onError={showOpError}
         />
@@ -1053,6 +1058,10 @@ export function FileTreePanel({
           onDelete={(entry) => void deleteEntry(entry)}
           onNewFile={(parent) => startCreate("new-file", parent)}
           onNewDir={(parent) => startCreate("new-dir", parent)}
+          onOpenHistory={(entry) => {
+            setCtxMenu(null);
+            if (projectId) onOpenGitHistory(projectId, entry.relativePath);
+          }}
         />
       )}
     </div>
@@ -1063,12 +1072,14 @@ function SourceControlView({
   folder,
   sshProject,
   onOpenFile,
+  onOpenHistory,
   onMutated,
   onError,
 }: {
   folder: string;
   sshProject: boolean;
   onOpenFile: (relativePath: string) => void;
+  onOpenHistory: (relativePath?: string | null) => void;
   onMutated: () => void;
   onError: (err: unknown) => void;
 }) {
@@ -1566,7 +1577,18 @@ function SourceControlView({
           )}
         </div>
         <div className="scm-commits">
-          <div className="scm-section">Commits</div>
+          <div className="scm-section">
+            <span>Commits</span>
+            <button
+              type="button"
+              className="scm-section-act"
+              onClick={() => onOpenHistory(null)}
+              title="전체 커밋 히스토리 자세히 보기"
+              aria-label="커밋 히스토리 자세히 보기"
+            >
+              🔍
+            </button>
+          </div>
           {changes.commits.map((commitEntry) => (
             <div className="scm-commit" key={commitEntry.hash}>
               <span className="scm-hash">{commitEntry.hash}</span>
@@ -1589,6 +1611,9 @@ function SourceControlView({
         >
           <button onClick={() => { onOpenFile(ctx.entry.relative_path); setCtx(null); }}>
             열기
+          </button>
+          <button onClick={() => { onOpenHistory(ctx.entry.relative_path); setCtx(null); }}>
+            이 경로 히스토리
           </button>
           <button onClick={() => { openDiff(ctx.entry.relative_path, ctx.staged); setCtx(null); }}>
             Diff (외부 프로그램)
@@ -1731,6 +1756,7 @@ function FileTreeContextMenu({
   onDelete,
   onNewFile,
   onNewDir,
+  onOpenHistory,
 }: {
   state: CtxMenuState;
   onOpenDoc: (entry: FileTreeEntry) => void;
@@ -1743,6 +1769,7 @@ function FileTreeContextMenu({
   onDelete: (entry: FileTreeEntry) => void;
   onNewFile: (parent: string) => void;
   onNewDir: (parent: string) => void;
+  onOpenHistory: (entry: FileTreeEntry) => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x: state.x, y: state.y });
@@ -1800,6 +1827,8 @@ function FileTreeContextMenu({
           <hr />
           {item("탐색기에서 보기", () => onReveal(entry))}
           <hr />
+          {item("이 경로 히스토리", () => onOpenHistory(entry))}
+          <hr />
           {item("이름 변경", () => onRename(entry))}
           {item("삭제 (휴지통)", () => onDelete(entry), { danger: true })}
         </>
@@ -1814,6 +1843,8 @@ function FileTreeContextMenu({
           {item("복제", () => onDuplicate(entry))}
           <hr />
           {item("탐색기에서 보기", () => onReveal(entry))}
+          <hr />
+          {item("이 경로 히스토리", () => onOpenHistory(entry))}
           <hr />
           {item("이름 변경", () => onRename(entry))}
           {item("삭제 (휴지통)", () => onDelete(entry), { danger: true })}

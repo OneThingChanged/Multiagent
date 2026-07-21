@@ -11,6 +11,7 @@ export type RuntimeCommand =
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
   | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"
+  | "git_log" | "git_commit_files" | "git_commit_diff"
   | "resource_usage"
   | "set_titlebar_overlay"
   | "list_ports" | "kill_port_process"
@@ -162,6 +163,38 @@ export type GitFileCommit = {
   author: string;
 };
 
+export type GitLogCommit = {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  date: string;
+  relDate: string;
+  refs: string[];
+  subject: string;
+};
+
+export type GitLogResult = { commits: GitLogCommit[]; hasMore: boolean };
+
+export type GitCommitFile = {
+  relative_path: string;
+  status: GitStatusLetter;
+  additions: number;
+  deletions: number;
+};
+
+export type GitCommitDetail = {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  email: string;
+  date: string;
+  relDate: string;
+  message: string;
+  files: GitCommitFile[];
+};
+
 export type GitChangesResult = {
   is_repo: boolean;
   branch: string;
@@ -236,6 +269,24 @@ export type RuntimeCommandContract = {
   git_file_history: {
     args: { folder: string; relativePath: string };
     result: { commits: GitFileCommit[] };
+  };
+  git_log: {
+    args: {
+      folder: string;
+      path?: string;
+      skip?: number;
+      limit?: number;
+      search?: string;
+    };
+    result: GitLogResult;
+  };
+  git_commit_files: {
+    args: { folder: string; hash: string };
+    result: GitCommitDetail;
+  };
+  git_commit_diff: {
+    args: { folder: string; hash: string; relativePath: string };
+    result: { diff: ChatDiffLine[] };
   };
   resource_usage: {
     args: Record<string, never>;

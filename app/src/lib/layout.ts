@@ -1,5 +1,6 @@
 import type { LayoutNode, LeafNode, Path, SplitNode, Group } from "../types";
 import { isDocTabId } from "./docTabs";
+import { isGitHistoryTabId } from "./gitHistoryTabs";
 
 export function makeLeaf(agentId: string): LeafNode {
   return {
@@ -191,7 +192,7 @@ export function validateLayout(
     for (const t of tabs) {
       // Doc tabs (doc:<projectId>:<path>) have no backing agent; keep them so
       // open documents survive an app restart.
-      if (!validIds.has(t) && !isDocTabId(t)) continue;
+      if (!validIds.has(t) && !isDocTabId(t) && !isGitHistoryTabId(t)) continue;
       if (seen.has(t)) continue;
       seen.add(t);
       validTabs.push(t);

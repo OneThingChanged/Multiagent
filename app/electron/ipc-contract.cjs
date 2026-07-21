@@ -38,6 +38,9 @@ const INVOKE_COMMANDS = Object.freeze([
   "git_checkout",
   "git_diff_tool",
   "git_file_history",
+  "git_log",
+  "git_commit_files",
+  "git_commit_diff",
   "resource_usage",
   "set_titlebar_overlay",
   "list_ports",
@@ -288,6 +291,34 @@ function assertInvokeRequest(command, rawArgs) {
       break;
     case "git_file_history":
       assertPathString(args.folder, "folder");
+      assertPathString(args.relativePath, "relative path");
+      break;
+    case "git_log":
+      assertPathString(args.folder, "folder");
+      if (args.path !== undefined && (typeof args.path !== "string" || args.path.length > 4096)) {
+        throw new TypeError("Electron git log path must be a string");
+      }
+      if (args.search !== undefined && (typeof args.search !== "string" || args.search.length > 200)) {
+        throw new TypeError("Electron git log search must be a string");
+      }
+      if (args.skip !== undefined && typeof args.skip !== "number") {
+        throw new TypeError("Electron git log skip must be a number");
+      }
+      if (args.limit !== undefined && typeof args.limit !== "number") {
+        throw new TypeError("Electron git log limit must be a number");
+      }
+      break;
+    case "git_commit_files":
+      assertPathString(args.folder, "folder");
+      if (typeof args.hash !== "string" || args.hash.length > 64) {
+        throw new TypeError("Electron git commit hash must be a string");
+      }
+      break;
+    case "git_commit_diff":
+      assertPathString(args.folder, "folder");
+      if (typeof args.hash !== "string" || args.hash.length > 64) {
+        throw new TypeError("Electron git commit hash must be a string");
+      }
       assertPathString(args.relativePath, "relative path");
       break;
     case "list_ports":

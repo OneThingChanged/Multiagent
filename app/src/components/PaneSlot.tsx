@@ -32,7 +32,13 @@ import {
   isDocTabId,
   parseDocTabId,
 } from "../lib/docTabs";
+import {
+  isGitHistoryTabId,
+  parseGitHistoryTabId,
+  gitHistoryTabTitle,
+} from "../lib/gitHistoryTabs";
 import { DocViewer } from "./DocViewer";
+import { GitHistoryView } from "./GitHistoryView";
 import { ChatView } from "./ChatView";
 import { TerminalContextMenu } from "./Menus";
 import {
@@ -121,7 +127,9 @@ export function PaneSlot({
   const active = pathEq(path, ctx.activePath);
   const activeTabId = activeAgentInLeaf(leaf);
   const activeDocId = activeTabId && isDocTabId(activeTabId) ? activeTabId : null;
-  const activeAgentId = activeDocId ? null : activeTabId;
+  const activeGitHistoryId =
+    activeTabId && isGitHistoryTabId(activeTabId) ? activeTabId : null;
+  const activeAgentId = activeDocId || activeGitHistoryId ? null : activeTabId;
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
@@ -813,6 +821,46 @@ export function PaneSlot({
               </div>
             );
           }
+          if (isGitHistoryTabId(tabAgentId)) {
+            const isActive = tabAgentId === activeTabId;
+            const isDragging = dragFrom === tabAgentId;
+            return (
+              <div
+                key={tabAgentId}
+                className={`pane-tab pane-tab-doc ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
+                draggable={false}
+                onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressNextTabClickRef.current) {
+                    suppressNextTabClickRef.current = false;
+                    e.preventDefault();
+                    return;
+                  }
+                  ctx.onSelectTab(path, tabAgentId);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
+                }}
+                title={gitHistoryTabTitle(tabAgentId)}
+              >
+                <span className="tab-doc-icon tab-doc-icon-git">GIT</span>
+                <span className="tab-name">{gitHistoryTabTitle(tabAgentId)}</span>
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.onCloseTab(path, tabAgentId);
+                  }}
+                  title="Close tab"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
           const tabAgent = ctx.agents.find((a) => a.id === tabAgentId);
           if (!tabAgent) return null;
           const isActive = tabAgentId === activeAgentId;
@@ -899,7 +947,11 @@ export function PaneSlot({
       <div
         ref={bodyRef}
         className="pane-body"
-        style={activeDocId || (chatMode && activeAgentId) ? { display: "none" } : undefined}
+        style={
+          activeDocId || activeGitHistoryId || (chatMode && activeAgentId)
+            ? { display: "none" }
+            : undefined
+        }
         onContextMenu={onTerminalContextMenu}
       />
       {activeDocId && (
@@ -911,6 +963,16 @@ export function PaneSlot({
             ) ?? null
           }
           theme={ctx.theme}
+        />
+      )}
+      {activeGitHistoryId && (
+        <GitHistoryView
+          tabId={activeGitHistoryId}
+          project={
+            ctx.projects.find(
+              (p) => p.id === parseGitHistoryTabId(activeGitHistoryId)?.projectId
+            ) ?? null
+          }
         />
       )}
       {chatMode && activeAgentId && !activeDocId && toolSupportsChat(activeAgent?.aiToolId) && (
