@@ -1,97 +1,97 @@
 # MultiAgent — Overview
 
-여러 AI 에이전트(Claude Code, Codex) 터미널 세션을 프로젝트 단위로 한 창에서 그룹·탭·분할로 관리하고, 외부 브라우저에서 원격 조작하며, 토큰 사용량을 집계하는 데스크톱 앱.
+A desktop app that manages multiple AI agent (Claude Code, Codex) terminal sessions per project in one window with groups, tabs, and splits, remote control from an external browser, and token usage accounting.
 
-## 목적
+## Goals
 
-- 여러 프로젝트에서 동시에 Claude/Codex를 돌릴 때, OS 터미널 창을 여러 개 띄우지 않고 한 윈도우에서 전환·정리
-- 어떤 에이전트가 "작업 중"인지 "끝났는지"를 상태점 + 알림(소리 포함)으로 표시
-- IDE 같은 다중 분할 + 다중 탭 레이아웃
-- 집 밖/다른 PC에서도 브라우저로 접속해 세션을 보고 명령
-- 도구·세션·프로젝트별 토큰 소비를 대시보드로 파악
+- When running Claude/Codex across many projects at once, switch and organize within one window instead of opening many OS terminal windows
+- Show which agents are "working" vs "done" with status dots + notifications (including sound)
+- IDE-like multi-split + multi-tab layout
+- Connect from a browser away from home / on another PC to view and command sessions
+- Track token consumption by tool, session, and project on a dashboard
 
-## 기술 스택
+## Tech Stack
 
-- **셸**: Tauri 2 (Rust 백엔드 + WebView2 프론트), standard / company 두 빌드 variant
-- **프론트**: React 19 + TypeScript + Vite (dev 포트 4420)
-- **터미널**: `@xterm/xterm` v6 + addon-fit / -search / -serialize / -web-links
+- **Shell**: Tauri 2 (Rust backend + WebView2 frontend), two build variants: standard / company
+- **Frontend**: React 19 + TypeScript + Vite (dev port 4420)
+- **Terminal**: `@xterm/xterm` v6 + addon-fit / -search / -serialize / -web-links
 - **PTY**: Rust `portable-pty` (Windows ConPTY)
-- **로컬 HTTP(hook 수신)**: `tiny_http` (127.0.0.1:랜덤)
-- **원격 서버**: `axum` + `tokio` (WebSocket), Cloudflare Tunnel(`cloudflared`)
-- **사용량 DB**: `rusqlite`(SQLite)
-- **인증**: GitHub Device Flow / OAuth 웹 flow
-- **업데이트**: `tauri-plugin-updater` (서명된 GitHub 릴리즈 자동 설치)
-- **기타 플러그인**: notification / dialog / opener / process
+- **Local HTTP (hook receiver)**: `tiny_http` (127.0.0.1:random)
+- **Remote server**: `axum` + `tokio` (WebSocket), Cloudflare Tunnel (`cloudflared`)
+- **Usage DB**: `rusqlite` (SQLite)
+- **Auth**: GitHub Device Flow / OAuth web flow
+- **Updates**: `tauri-plugin-updater` (signed GitHub release auto-install)
+- **Other plugins**: notification / dialog / opener / process
 
-## 기능 카탈로그
+## Feature Catalog
 
-### 세션·레이아웃
-| 기능 | 설명 |
+### Sessions & Layout
+| feature | description |
 |---|---|
-| 프로젝트/세션 모델 | 프로젝트 등록 → 접이식 트리 안에 별명 세션 생성 |
-| 멀티 탭 / 분할 | 한 패널에 여러 탭, 한 Screen에 2개 이상의 h/v 패널과 중첩 분할, 핸들로 크기 조절 |
-| 그룹 | 분할로 묶인 세션들이 한 그룹 — 누굴 클릭하든 그룹 전체 표시. 한 세션은 전역에서 정확히 한 그룹에만 소속 |
-| 분할 Screen 요약 | 사이드바의 `This PC`/프로젝트 트리 위에 `Screen N (A+B+C)`를 표시하고, 교차 프로젝트 멤버에도 같은 색 `SN` 배지를 표시. 행은 세션 검색이 아닌 Screen ID로 직접 전환 |
-| 드래그 앤 드롭 | 탭/사이드바 세션을 5존 드롭(center=탭, 4-edge=다중 패널 분할)으로 재배치. 다른 Screen으로 옮기면 기존 소속에서 제거 |
-| 그룹 세션 고정 | 그룹을 특정 세션 ID로 고정(PIN), 외부 세션 추가 차단 |
-| 1줄 사이드바 | 프로젝트·세션을 한 줄로 압축 표시 |
-| 프로젝트 재정렬 | 사이드바에서 프로젝트 드래그로 순서 변경 |
-| 검색 | 사이드바 상단에서 프로젝트명·세션명 필터 |
-| SSH 원격 세션 | 프로젝트를 등록된 SSH 호스트에 연결 → 세션이 원격 머신에서 실행 (Windows 원격은 상태점+resume까지, 아래 별도 항목) |
+| Project/session model | register a project → create aliased sessions inside a collapsible tree |
+| Multi-tab / splits | multiple tabs per pane, 2+ h/v panes per Screen with nested splits, resize via handles |
+| Groups | sessions joined by splits form one group — clicking any member shows the whole group. A session belongs to exactly one group globally |
+| Split Screen summary | above the sidebar's `This PC`/project tree, shows `Screen N (A+B+C)`, with the same-color `SN` badge on cross-project members. Rows jump directly by Screen ID, not session search |
+| Drag & drop | rearrange tabs/sidebar sessions via 5 drop zones (center = tab, 4 edges = multi-pane split). Moving to another Screen removes it from its previous membership |
+| Pin group sessions | pin a group to specific session IDs (PIN), blocking outside session additions |
+| 1-line sidebar | compress projects/sessions to single lines |
+| Project reorder | drag projects in the sidebar to change order |
+| Search | filter by project/session name at the top of the sidebar |
+| SSH remote sessions | connect a project to a registered SSH host → sessions run on the remote machine (Windows remotes get status dots + resume; see the dedicated entry below) |
 
-### 세션 관리 (우클릭 메뉴)
-전환 / 탭 추가 / 좌우·상하 분할 / 별명 변경 / **세션 재시작** / **세션 비활성화**(화면에 안 보일 때만, PTY만 종료해 리소스 해제) / **현재 세션으로 재등록**(디스크 최신 세션 찾아 resume 대상 갱신) / 그룹 세션 고정·해제 / **속성**(세션 ID·생성 시각·도구·폴더 등). 프로젝트 우클릭: 이름 변경 / 삭제 / 속성.
+### Session Management (context menu)
+Switch / add as tab / split right·down / rename alias / **Restart session** / **Deactivate session** (only when not visible; kills just the PTY to free resources) / **Relink to current session** (finds the newest on-disk session and updates the resume target) / pin·unpin group sessions / **Properties** (session ID, creation time, tool, folder, etc.). Project right-click: rename / delete / properties.
 
-### 상태·알림
-| 기능 | 설명 |
+### Status & Notifications
+| feature | description |
 |---|---|
-| Working/Done 감지 | Claude/Codex hook(UserPromptSubmit/Stop) → 로컬 HTTP → 상태점(노란 펄스/초록) |
-| 알림 | 완료 시 인앱 토스트 + OS 알림 + **알림음**(시스템음/커스텀 파일/끄기, 설정에서 선택) |
-| Desktop Pet | 포커스를 받지 않는 항상-위 펫 창으로 idle/working/done과 작업·완료 수를 표시. 작업 배지를 누르면 세션·도구·최신 질문을 보고, 항목/완료 말풍선을 클릭하면 해당 세션으로 이동 |
-| 세션 Resume | SessionStart hook으로 session_id 캡처 → 다음 실행 시 `codex resume`/`claude --resume` ([RESUME.md](RESUME.md)) |
-| 스크롤백 복원 | 종료 직전 스크롤백 저장 → 재시작 시 복원 |
+| Working/Done detection | Claude/Codex hooks (UserPromptSubmit/Stop) → local HTTP → status dot (yellow pulse / green) |
+| Notifications | on completion: in-app toast + OS notification + **notification sound** (system sound / custom file / off, chosen in Settings) |
+| Desktop Pet | an always-on-top, non-focusable pet window showing idle/working/done plus working/completed counts. Clicking the working badge shows session·tool·latest question; clicking an item/completion balloon jumps to that session |
+| Session resume | capture session_id via SessionStart hook → `codex resume`/`claude --resume` on next run ([RESUME.md](RESUME.md)) |
+| Scrollback restore | save scrollback just before exit → restore on restart |
 
-### 뷰어·터미널
-| 기능 | 설명 |
+### Viewers & Terminal
+| feature | description |
 |---|---|
-| 파일 트리 사이드바 | 우측 사이드바에 프로젝트 전체 파일 트리 — 프로젝트 드롭박스·고정(📌)·프로젝트별 펼침 상태 영구화·모두 펼치기/접기·git 상태 뱃지(M/U/A/D 색상, 폴더 전파, 10s 폴링)·Find files 검색·우클릭 메뉴(새 파일/폴더, 복제, 이름 변경, 휴지통 삭제, 경로 복사). 열기는 창 우측 상단 🗀 버튼, 열림 상태/폭 영구화 |
-| Source Control 뷰 | 파일 트리 패널의 ⎇ 탭 — 브랜치/ahead-behind, Staged/Changes 그룹(개별·전체 스테이징), 파일별 +/− 라인 수, 커밋 메시지 입력 후 Commit(Ctrl+Enter), 최근 커밋 목록. 변경 수 뱃지가 탭에 상시 표시 |
-| 문서 탭 | 트리/터미널 링크/QuickOpen에서 파일 열기 → 메인 워크스페이스에 탭으로 렌더 (md=GFM·하이라이트, html=sandbox iframe, 이미지, 텍스트=읽기전용 소스). 터미널 탭과 같은 탭스트립에서 분할·드래그·복원 |
-| 이미지 뷰어 | 터미널 출력의 이미지 경로(png/jpg/…) 클릭 → 인앱 뷰어 |
-| 문서 링크 | 터미널의 `.md`/`.html` 경로 클릭 → 문서 탭 (프로젝트 폴더 밖은 OS 기본 앱) |
-| Ctrl+Enter | 줄바꿈 입력 (IME 합성 안전 처리) |
-| Ctrl+F | 터미널 검색 |
-| Ctrl+C/V | 텍스트 복사/붙여넣기, 이미지 클립보드는 raw 키스트로크 |
-| Ctrl+휠 | 터미널 폰트 줌 (저장됨) |
-| 휠 스크롤 | 일반 버퍼는 항상 scrollback(mouse tracking 무시), 전체화면 TUI는 휠을 TUI에 전달(마우스 휠 이벤트 또는 PageUp/Down) |
+| File tree sidebar | full project file tree on the right sidebar — project dropdown, pin (📌), per-project expansion state persistence, expand/collapse all, git status badges (M/U/A/D colors, folder propagation, 10s polling), Find files search, context menu (new file/folder, duplicate, rename, trash delete, copy path). Open via the 🗀 button at the window's top-right; open state/width persisted |
+| Source Control view | the ⎇ tab of the file tree panel — branch/ahead-behind, Staged/Changes groups (per-file & stage-all), per-file +/− line counts, Commit after entering a message (Ctrl+Enter), recent commits list. A change-count badge is always shown on the tab |
+| Document tabs | open a file from the tree/terminal link/QuickOpen → rendered as a tab in the main workspace (md = GFM + highlight, html = sandbox iframe, images, text = read-only source). Splits/drags/restores in the same tab strip as terminal tabs |
+| Image viewer | click an image path (png/jpg/…) in terminal output → in-app viewer |
+| Document links | click a `.md`/`.html` path in the terminal → document tab (outside the project folder opens the OS default app) |
+| Ctrl+Enter | newline input (IME composition safe) |
+| Ctrl+F | terminal search |
+| Ctrl+C/V | copy/paste text; image clipboard goes through as a raw keystroke |
+| Ctrl+wheel | terminal font zoom (persisted) |
+| Wheel scroll | normal buffer always scrolls scrollback (ignores mouse tracking); fullscreen TUIs receive the wheel (mouse wheel events or PageUp/Down) |
 
-### 단축키
-`Ctrl+T` 새 세션 · `Ctrl+Shift+P` 새 프로젝트 · `Ctrl+W` 활성 탭 닫기 ·
-`Ctrl+Shift+T` 최근 닫은 탭 복원 · `Ctrl+1~9` 탭 전환 · `Ctrl+F` 검색 ·
-`Esc` 검색/Docs 닫기.
+### Shortcuts
+`Ctrl+T` new session · `Ctrl+Shift+P` new project · `Ctrl+W` close active tab ·
+`Ctrl+Shift+T` restore recently closed tab · `Ctrl+1~9` switch tabs · `Ctrl+F` search ·
+`Esc` close search/Docs.
 
-### 원격 접속 ([REMOTE.md](REMOTE.md))
-내장 axum 웹 서버 + Cloudflare Tunnel(quick/named, 고정 도메인 가능) + GitHub 로그인 + **계정 승인제**. 외부 브라우저에서 세션 목록·터미널·입력. 독립 뷰어(데스크탑과 다른 세션을 따로 봄).
+### Remote Access ([REMOTE.md](REMOTE.md))
+Built-in axum web server + Cloudflare Tunnel (quick/named, fixed domain possible) + GitHub login + **account approval**. Session list, terminal, and input from an external browser. Independent viewer (views a different session than the desktop).
 
-### SSH 원격 세션
-같은 망(또는 사내망/VPN)으로 닿는 다른 컴퓨터에 SSH로 접속해 그 머신에서 셸/claude/codex 실행. 설정 → **SSH Hosts** 탭에서 호스트(host/user/port/identity/extraOptions/Remote OS) 등록 후(**사용 방법** 버튼에 단계별 가이드 + 공개키 복사/생성), New Project에서 **"Run on remote host"**로 호스트+원격 폴더 지정. 백엔드는 로컬 PowerShell 대신 `ssh -tt`로 PTY를 띄운다(Windows 내장 OpenSSH). Windows 원격은 npm `.ps1` 실행 정책 오류를 피하려고 기본적으로 `codex.cmd`/`claude.cmd` shim을 사용한다.
-- **Windows 원격(Phase 2)**: `ssh -R` 역터널 + 원격 hook 푸시로 **working/done 상태점 + 세션 resume**까지 동작(로컬과 동일).
-- **POSIX(Linux/macOS) 원격**: 셸·도구 실행은 정상, 상태점은 running까지(상태/resume은 후속 Phase). 사용량 집계는 원격 전체 미지원.
-- 상세·제약은 [KNOWN_ISSUES.md](KNOWN_ISSUES.md), resume 흐름은 [RESUME.md](RESUME.md).
+### SSH Remote Sessions
+Connect via SSH to another computer reachable on the same network (or office VPN) and run shell/claude/codex on that machine. In Settings → **SSH Hosts** tab, register hosts (host/user/port/identity/extraOptions/Remote OS) (the **Usage guide** (사용 방법) button has a step-by-step guide + public key copy/generate), then in New Project choose **"Run on remote host"** with host + remote folder. The backend spawns the PTY with `ssh -tt` instead of local PowerShell (Windows built-in OpenSSH). On Windows remotes, `codex.cmd`/`claude.cmd` shims are used by default to avoid the npm `.ps1` execution policy error.
+- **Windows remote (Phase 2)**: `ssh -R` reverse tunnel + remote hook push gives **working/done status dots + session resume** (same as local).
+- **POSIX (Linux/macOS) remote**: shell/tool execution works; status dots only reach running (status/resume is a later Phase). Usage accounting is unsupported for all remotes.
+- Details & constraints in [KNOWN_ISSUES.md](KNOWN_ISSUES.md), resume flow in [RESUME.md](RESUME.md).
 
-### 사용량 대시보드 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
-transcript JSONL을 파싱해 토큰 사용량을 SQLite에 적재, 별도 로컬 웹 대시보드(차트·요약·세션별)로 시각화.
-Electron 앱은 Codex(세션 transcript)·Claude(OAuth usage 엔드포인트)에서 관측한 기간별 계정 한도도 SQLite에 보존하고, 하단 상태 바에 **도구별 세그먼트**(게이지 + 클릭 시 도구별 팝오버)로 표시한다.
+### Usage Dashboard ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+Parses transcript JSONL to load token usage into SQLite, visualized on a separate local web dashboard (charts, summaries, per-session).
+The Electron app also preserves per-period account rate limits observed from Codex (session transcripts) and Claude (OAuth usage endpoint) in SQLite, shown on the bottom status bar as **per-tool segments** (gauge + per-tool popover on click).
 
-### 기타
-| 기능 | 설명 |
+### Misc
+| feature | description |
 |---|---|
-| 커스텀 탑바 | 네이티브 타이틀바/메뉴 제거(Electron). 좌/우 사이드바 토글·Quick Open·알림·핀·새 창·펫·설정 버튼 + 창 드래그 존. 네이티브 min/max/close 오버레이 유지(Snap Layouts 동작) |
-| Resource Manager | 상태 바 우측 ▦ — 앱 전체 메모리 총합 + 팝오버에서 프로젝트→세션별 프로세스 트리 CPU%/메모리 |
-| Ports 모니터 | 상태 바 우측 🔌 — 열린 TCP 포트를 프로젝트별 귀속(세션 하위 프로세스/커맨드라인 경로)해 표시, 브라우저 열기·주소 복사·프로세스 종료, External 접힘 섹션 |
-| 좌측 사이드바 접기 | 탑바 ⫞ 토글, 상태 영구화 |
-| 자동 업데이트 | 설정 → About → Check, 서명 검증 후 다운로드·설치·재시작 ([RELEASE.md](RELEASE.md)) |
-| 멀티 윈도우 | 새 창 열기 (탑바) |
-| 항상 위 | always-on-top 토글 (탑바 핀) |
-| 테마 | Soft / GitHub / Warm / Light (앱·터미널·Docs 공통) |
-| 영구화 | localStorage(projects/agents/groups/view/theme/…) + 로컬 JSON/SQLite(원격·사용량). groups는 현재 목록을 authoritative하게 저장하고 구버전 중복은 Screen 우선으로 자동 정규화 |
+| Custom top bar | native titlebar/menu removed (Electron). Left/right sidebar toggles, Quick Open, notifications, pin, new window, pet, settings buttons + window drag zone. Native min/max/close overlay kept (Snap Layouts works) |
+| Resource Manager | ▦ on the right of the status bar — total app memory + popover with per-project→session process tree CPU%/memory |
+| Ports monitor | 🔌 on the right of the status bar — open TCP ports attributed per project (session child processes/command-line paths), open in browser, copy address, kill process, External collapsed section |
+| Left sidebar collapse | ⫞ toggle in the top bar, state persisted |
+| Auto updates | Settings → About → Check; downloads, installs, and restarts after signature verification ([RELEASE.md](RELEASE.md)) |
+| Multi-window | open a new window (top bar) |
+| Always on top | always-on-top toggle (top bar pin) |
+| Themes | Soft / GitHub / Warm / Light (shared across app, terminal, Docs) |
+| Persistence | localStorage (projects/agents/groups/view/theme/…) + local JSON/SQLite (remote/usage). groups stores the current list authoritatively and auto-normalizes legacy duplicates preferring Screens |

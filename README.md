@@ -1,203 +1,145 @@
 # OneThingChanged MultiAgent
 
-**Current version:** `0.5.28`
+**English** | [한국어](README.ko.md)
 
-OneThingChanged MultiAgent is a Tauri desktop app for running and organizing multiple AI-agent terminal sessions in one workspace.
+[![Version](https://img.shields.io/badge/version-0.5.61-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
+
+**One workspace for every AI agent terminal.** MultiAgent runs and organizes multiple AI-agent CLI sessions — Claude Code, Codex, Qwen, Cline — as project-scoped tabs and split panes in a single Windows desktop app, with hook-based status detection, session resume, a chat view, remote phone access, and token-usage tracking.
+
+Instead of juggling a pile of terminal windows, you register each project once, then launch named sessions inside it — switching, splitting, and monitoring everything from one window.
 
 ---
 
-## 한국어
+## Features
 
-### 소개
+### Sessions & Layout
+- **Project-first workflow** — register a project folder, then create aliased sessions under it in the collapsible sidebar tree
+- **Tabs & nested splits** — horizontal/vertical panes, 5-zone drag-and-drop (center = merge as tab, edges = split), resizable splitters
+- **Screens** — every session belongs to exactly one split group; sidebar summaries like `Screen 1 (A+B+C)` jump straight to that layout
+- **Session management** — restart, deactivate (kill the PTY but keep the session), rename, relink to the latest on-disk session, pin a group to specific session IDs
 
-OneThingChanged MultiAgent는 Codex, Claude, Shell 같은 여러 터미널 기반 에이전트를 프로젝트 단위로 묶어 하나의 데스크톱 앱에서 관리하기 위한 도구입니다.
+### Agent Status & Notifications
+- **Working/done detection** — Claude Code / Codex / Qwen hooks report over a local HTTP channel; every session shows a live status dot (idle / starting / running / working / exited)
+- **Completion alerts** — in-app toast, Windows notification, and a configurable sound (system sound / custom file / off)
+- **Desktop Pet** — an always-on-top, non-focusable mascot showing idle/working/done, running & completed counts, and the latest prompt; click to jump to the session
 
-프로젝트를 먼저 선택하고 그 안에 별명 있는 세션을 여러 개 만들어 작업합니다. 터미널 창을 계속 바꾸지 않아도 되도록 사이드바, 탭, 분할 화면, 파일 트리, 문서 뷰어를 한 화면에 모아 둔 앱입니다.
+### Chat View
+- A rich conversation view alongside the raw terminal (for transcript-based tools): tool-call blocks with summaries and edit diffs, inline question/permission cards, thinking indicator
+- Composer with `/` command and `@` file autocomplete, clipboard-image paste, large-paste collapsing, message queueing while the agent works, Esc to cancel
 
-### 주요 기능
+### Session Resume
+- `SessionStart` hooks capture each tool's session ID; reopening a session runs `codex resume <id>` / `claude --resume <id>` automatically
+- Scrollback snapshots restore the terminal view after an app restart
+- **Relink to current session** recovers a lost resume target by scanning the newest on-disk transcript
 
-- 프로젝트를 먼저 등록하고 프로젝트 트리 아래에서 세션을 생성/전환
-- 프로젝트별 세션 목록 접기/펼치기
-- 세션별 별명 지정 및 우클릭 메뉴에서 별명 변경
-- 터미널을 탭으로 관리
-- 터미널 화면을 2개 이상의 다중 패널로 분할해서 여러 세션을 동시에 확인
-- 사이드바 `SCREENS`에서 `Screen 1 (A+B+C)` 형태로 분할 그룹을 확인하고 정확한 Screen으로 전환
-- 한 세션은 하나의 Screen에만 소속되며, 기존 중복 레이아웃은 시작 시 자동 복구
-- 드래그 앤 드롭으로 탭과 패널 위치 조정
-- `Ctrl+C`는 선택 영역 복사, `Ctrl+V`는 붙여넣기
-- `Ctrl + 마우스 휠`로 터미널 글자 크기 확대/축소
-- 오른쪽 파일 트리 사이드바 (전체 프로젝트 파일, lazy 로딩, 파일명 검색)
-- 파일 클릭 시 메인 워크스페이스에 문서 탭으로 렌더 (Markdown/HTML/이미지/텍스트)
-- 터미널에 출력된 `.md` 경로를 클릭해서 문서 탭으로 열기
-- 파일 트리와 터미널 영역 사이의 크기 조절
-- 그룹을 현재 Codex/Claude 세션 ID에 고정
-- GitHub Releases 기반 수동 업데이트 확인
-- 앱 전체 테마 설정: Soft, GitHub, Warm, Light
+### Files, Docs & Git
+- **File tree sidebar** — lazy-loaded project explorer with git status badges, find-files filter, and full file operations (new/duplicate/rename/delete/copy path)
+- **Source Control view** — branch & ahead/behind, staged vs. changes, per-file +/− counts, commit box, recent commits
+- **Document tabs** — Markdown (GFM + syntax highlight), sandboxed HTML, images, and read-only text open next to your terminals; clicking paths in terminal output opens them inline
 
-### 화면 구성
+### Remote Access
+- **Remote PWA** — monitor and nudge sessions from a phone browser over a Cloudflare Tunnel, protected by GitHub login + owner approval (standard builds only)
+- **SSH remote sessions** — run agents on another machine over SSH; Windows remotes get full status dots and resume via a reverse hook tunnel
 
-- **왼쪽 사이드바**: 접이식 프로젝트/세션 트리, 파일 트리 토글, 설정, 새 세션 추가
-- **가운데 작업 영역**: 탭/분할 터미널 + 문서 탭
-- **오른쪽 파일 트리**: 프로젝트 파일 탐색 (클릭하면 가운데에 문서 탭으로 열림)
+### Monitoring & Usage
+- **Local dashboard** (`127.0.0.1:4421`) — live sessions, hook state, project docs, and token usage on one web page
+- **Usage tracking** — transcript JSONL parsed into SQLite; per-project/session token stats with charts
+- **Account rate limits** — Codex (transcript) and Claude (OAuth usage endpoint) limits in the status bar, with warning colors at 70%/90%
+- **Resource manager & Ports monitor** — per-session CPU/memory process tree, and open TCP ports attributed to projects
 
-### 실행 환경
+### Productivity
+- **Quick Open** (`Ctrl+K`) — projects, sessions, Screens, docs, and commands in one search
+- **Attention Center** — unread waiting/blocked/completed items that jump to the session
+- Customizable keyboard shortcuts, four themes (Soft / GitHub / Warm / Light), multi-window, always-on-top
+- **Auto-updates** from signed GitHub Releases
 
-이 프로젝트는 Tauri 2, React, TypeScript, Rust 기반입니다.
+## Supported Agents
 
-개발 실행에는 다음 도구가 필요합니다.
+| Agent | Status hooks | Session resume | Chat view |
+|---|:---:|:---:|:---:|
+| Claude Code | ✅ | ✅ (`--resume`) | ✅ |
+| Codex | ✅ | ✅ (`resume`) | ✅ |
+| Qwen | ✅ | — | — (terminal-only) |
+| Cline | — | — | — (terminal-only) |
+| Shell only | — | — | — |
 
-- Node.js / npm
-- Rust / Cargo
-- Windows 환경의 Tauri 빌드 도구
-- 사용할 에이전트 CLI, 예: Codex CLI, Claude CLI 등
+Any CLI works in **Shell only** mode — you get the terminal without hooks, resume, or chat.
 
-### 개발 실행
+## Requirements
+
+**Runtime:** Windows 10/11 (WebView2 runtime — included with Windows 11), plus the agent CLIs you plan to use (`claude`, `codex`, … on PATH)
+
+**Development:**
+
+| Tool | Version |
+|---|---|
+| Node.js | 24+ |
+| Rust | 1.95+ stable |
+| Visual Studio 2022 Build Tools | "Desktop development with C++" workload |
+| PowerShell | 7+ recommended (falls back to 5.1) |
+
+## Quick Start
 
 ```bash
 cd app
 npm install
-npm run tauri dev
+
+npm run tauri dev       # Tauri shell (dev, HMR on port 4420)
+npm run electron:dev    # Electron shell (dev, HMR on port 4420)
 ```
 
-### 릴리즈 빌드
+### Build & Test
 
 ```bash
-cd app
-npm run tauri build
+npm test                       # vitest unit/integration tests
+
+npm run tauri build            # Tauri release (standard)
+npm run tauri:build:all        # Tauri standard + company
+npm run electron:dist          # Electron installer (standard)
+npm run electron:dist:all      # Electron standard + company
 ```
 
-Windows 릴리즈 빌드 후 산출물은 보통 아래 경로에 생성됩니다.
+Tauri artifacts land in `app/src-tauri/target/release/bundle/` (the NSIS `*-setup.exe` is the recommended installer); Electron artifacts land in `app/electron-dist/`.
+
+## Build Variants
+
+| Variant | Identifier | Remote PWA / Tunnel |
+|---|---|---|
+| **standard** | `com.jintae.multiagent` | ✅ included |
+| **company** | `com.jintae.multiagent.company` | ❌ removed (UI and backend) |
+
+Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Signed-release and update-manifest procedures are documented in [docs/RELEASE.md](docs/RELEASE.md).
+
+## Project Structure
 
 ```text
-app/src-tauri/target/release/bundle/nsis/
-app/src-tauri/target/release/bundle/msi/
+├─ app/                    # Desktop app
+│  ├─ src/                 # React 19 + TypeScript renderer (shared by both shells)
+│  ├─ src-tauri/           # Tauri 2 backend (Rust): PTY, hooks, remote, usage
+│  ├─ electron/            # Electron main process + services (node-pty)
+│  └─ scripts/             # Build / release scripts
+├─ docs/                   # In-depth project docs (Korean)
+├─ SETUP.md                # Portable setup guide
+└─ LICENSE                 # MIT
 ```
 
-`nsis` 폴더의 `*-setup.exe` 파일은 일반 사용자에게 배포하기 좋은 설치 파일입니다.
+## Documentation
 
-### 프로젝트 구조
+Detailed docs live in [`docs/`](docs/README.md):
 
-```text
-.
-├─ app/                 # Tauri + React 앱
-│  ├─ src/              # React/TypeScript 프론트엔드
-│  └─ src-tauri/        # Rust/Tauri 백엔드
-├─ docs/                # 프로젝트 문서
-├─ SETUP.md             # 초기 설정 메모
-├─ README.md            # 프로젝트 소개 문서
-└─ LICENSE              # MIT License
-```
+- [OVERVIEW.md](docs/OVERVIEW.md) — goals, tech stack, full feature catalog
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — processes, Rust/React models, layout tree, persistence
+- [UX.md](docs/UX.md) — every interaction: sidebar, drag-and-drop, shortcuts, viewers, notifications
+- [REMOTE.md](docs/REMOTE.md) — Remote PWA: tunnel, GitHub auth, account approval
+- [RESUME.md](docs/RESUME.md) — session resume flow and its limits
+- [MONITOR.md](docs/MONITOR.md) / [USAGE_DASHBOARD.md](docs/USAGE_DASHBOARD.md) — local dashboard & token accounting
+- [BUILD.md](docs/BUILD.md) / [RELEASE.md](docs/RELEASE.md) — build, sign, publish, auto-update
+- [ELECTRON_MIGRATION.md](docs/ELECTRON_MIGRATION.md) — Electron shell implementation & verification
+- [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) — known limitations & future work
 
-### 문서
+## License
 
-자세한 내부 구조와 작업 기록은 `docs/` 폴더에 정리되어 있습니다.
+[MIT](LICENSE)
 
-- `docs/OVERVIEW.md`: 프로젝트 개요
-- `docs/ARCHITECTURE.md`: 구조와 주요 모듈
-- `docs/UX.md`: UI/UX 동작 방식
-- `docs/BUILD.md`: 빌드 방법
-- `docs/KNOWN_ISSUES.md`: 알려진 이슈
-- `docs/RESUME.md`: 작업 재개용 메모
-
-### 라이선스
-
-이 프로젝트는 MIT License를 사용합니다.
-
----
-
-## English
-
-### Overview
-
-OneThingChanged MultiAgent is a desktop app for managing multiple terminal-based AI agents such as Codex, Claude, and Shell sessions by project.
-
-It is designed for workflows where you choose a project first, then run named sessions inside that project. Instead of switching between many terminal windows, the app provides a sidebar, tabs, split panes, a file tree, and a document viewer in one interface.
-
-### Features
-
-- Register projects, then create and switch sessions in the project tree
-- Expand and collapse each project's session list
-- Assign session aliases and rename them from the context menu
-- Manage terminal sessions with tabs
-- Split the terminal workspace into two or more panes
-- View and switch exact split groups from sidebar summaries such as `Screen 1 (A+B+C)`
-- Keep every session in exactly one Screen and repair legacy duplicate layouts on startup
-- Reorganize tabs and panes with drag and drop
-- `Ctrl+C` copies the selected terminal text, `Ctrl+V` pastes
-- `Ctrl + mouse wheel` zooms terminal text in and out
-- Right-side file tree sidebar (full project files, lazy loading, name filter)
-- Click a file to open it as a document tab in the main workspace (Markdown / HTML / image / text)
-- Click `.md` paths printed in the terminal to open them as document tabs
-- Resizable boundary between the terminal workspace and the file tree
-- Pin a group to the current Codex/Claude session IDs
-- Manual update check from GitHub Releases
-- Global app themes: Soft, GitHub, Warm, and Light
-
-### Layout
-
-- **Left sidebar**: collapsible project/session tree, file tree toggle, settings, and new-session button
-- **Center workspace**: tabbed and split terminal panes plus document tabs
-- **Right file tree**: project file explorer (click a file to open it as a document tab)
-
-### Requirements
-
-This project is built with Tauri 2, React, TypeScript, and Rust.
-
-For local development, install:
-
-- Node.js / npm
-- Rust / Cargo
-- Tauri build requirements for Windows
-- The agent CLI tools you want to use, for example Codex CLI or Claude CLI
-
-### Development
-
-```bash
-cd app
-npm install
-npm run tauri dev
-```
-
-### Release Build
-
-```bash
-cd app
-npm run tauri build
-```
-
-On Windows, release artifacts are usually generated under:
-
-```text
-app/src-tauri/target/release/bundle/nsis/
-app/src-tauri/target/release/bundle/msi/
-```
-
-The `*-setup.exe` file in the `nsis` folder is the recommended installer for general distribution.
-
-### Project Structure
-
-```text
-.
-├─ app/                 # Tauri + React app
-│  ├─ src/              # React/TypeScript frontend
-│  └─ src-tauri/        # Rust/Tauri backend
-├─ docs/                # Project documentation
-├─ SETUP.md             # Setup notes
-├─ README.md            # Project overview
-└─ LICENSE              # MIT License
-```
-
-### Documentation
-
-More detailed notes are available in the `docs/` directory.
-
-- `docs/OVERVIEW.md`: project overview
-- `docs/ARCHITECTURE.md`: architecture and major modules
-- `docs/UX.md`: UI/UX behavior
-- `docs/BUILD.md`: build instructions
-- `docs/KNOWN_ISSUES.md`: known issues
-- `docs/RESUME.md`: resume notes for future work
-
-### License
-
-This project is licensed under the MIT License.

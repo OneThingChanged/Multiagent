@@ -1,116 +1,117 @@
 # Known Issues & Future Work
 
-## 알려진 제약
+## Known Limitations
 
-### 영구화의 한계
-- 프로젝트 **설정**(이름·폴더)과 세션 **설정**(별명·프로젝트·AI 도구·dangerous·lastSessionId)·**레이아웃**(그룹/분할/탭 순서·활성)·**view**·**앱 테마**·**Docs 폭**·**터미널 폰트 크기**는 localStorage에 저장됨
-- 그룹 세션 고정값(`sessionPins`, `sessionLocked`)도 localStorage의 그룹 데이터에 같이 저장됨
-- 하지만 **터미널 세션의 OS 프로세스는 복원 불가**: 앱이 닫히면 PowerShell+Claude/Codex 프로세스가 죽음
-- **Codex 대화는 resume 가능**: 창 닫을 때 자동 `/quit` → token 캡처 → 다음 실행 시 `codex resume <token>`으로 재개
-- **Claude 대화도 resume 가능**: SessionStart hook으로 `session_id` 캡처 → 다음 실행 시 `claude --resume <id>`로 재개. 자세한 건 [RESUME.md](RESUME.md)
-- Electron은 앱이 켜진 동안 main의 세션별 512K sequence model로 renderer reload/숨은 pane
-  재부착을 복구하고, 종료 시 xterm 최근 1,000줄을 runtime-local scrollback으로 저장한다.
-  다만 앱 종료 뒤 PTY 자체를 살리는 daemon은 없으므로 전체 출력 transcript를 영구 보존하는
-  기능은 아니다. Codex/Claude 대화 원본은 provider resume 데이터가 기준이다.
+### Persistence Limits
+- Project **settings** (name·folder) and session **settings** (alias·project·AI tool·dangerous·lastSessionId), **layout** (group/split/tab order·active), **view**, **app theme**, **Docs width**, and **terminal font size** are stored in localStorage
+- Group session pins (`sessionPins`, `sessionLocked`) are also stored with the group data in localStorage
+- However, **the OS processes of terminal sessions cannot be restored**: when the app closes, the PowerShell+Claude/Codex processes die
+- **Codex conversations can resume**: automatic `/quit` on window close → token capture → `codex resume <token>` on next run
+- **Claude conversations can also resume**: `session_id` capture via SessionStart hook → `claude --resume <id>` on next run. Details in [RESUME.md](RESUME.md)
+- While the app is running, Electron's per-session 512K sequence model in main covers
+  renderer reload/hidden pane reattach, and on exit it saves the newest 1,000 xterm lines
+  as runtime-local scrollback. But there is no daemon keeping the PTY itself alive after
+  the app exits, so this is not a permanent full-output transcript feature. The canonical
+  Codex/Claude conversation originals are the provider resume data.
 
-### Window 크기 변경 시 scrollback
-- xterm cols가 바뀌면 자동 reflow되지만, Codex/Claude가 **이전 너비 기준으로 줄바꿈을 baked in** 한 출력은 새 너비로 다시 펴지지 않음. 새 출력만 새 너비로 나옴
+### Scrollback on Window Resize
+- xterm reflows automatically when cols change, but output that Codex/Claude **baked in with wrapping based on the previous width** does not re-wrap to the new width. Only new output uses the new width
 
-### 휠 스크롤 / TUI
-- 휠 처리는 그 순간 터미널이 **어떤 화면 버퍼를 쓰는지**로 갈린다. 버퍼 선택은 터미널(앱)이 아니라 **실행 중인 프로그램**이 정한다(`\x1b[?1049h`로 alternate 진입, `…l`로 복귀). 셸 프롬프트·일반 출력은 normal 버퍼, vim/less/man·git pager·claude/codex 인터랙티브 화면은 alternate 버퍼.
-- **일반(메인) 버퍼**: 휠을 capture 단계에서 가로채 xterm scrollback으로 강제 스크롤(TUI mouse tracking 무시) — 이때 public `scrollLines()` 대신 즉시 buffer scroll 경로(`scrollTerminalLinesImmediately`)를 써서 streaming 출력 중 위로 스크롤해도 최하단으로 안 튀게 한다.
-- **alternate-screen 버퍼(claude/codex 같은 전체화면 TUI)**: alt-screen엔 scrollback이 없어 xterm 휠 경로를 타면 빈 줄이 보였다가 다음 repaint에서 최하단으로 튕긴다. 그래서 viewport를 직접 굴리지 않고 **스크롤 신호를 TUI 본인에게 넘긴다**:
-  - TUI가 **마우스 리포팅을 켰으면**(`term.modes.mouseTrackingMode !== "none"`) 휠 위치(col/row)로 **네이티브 SGR 마우스 휠 이벤트**(`\x1b[<64/65;col;rowM`)를 PTY에 보내 표준 터미널처럼 TUI가 자기 화면을 스크롤하게 한다.
-  - 마우스 리포팅이 **꺼져 있으면** `PageUp/PageDown`(`\x1b[5~`/`\x1b[6~`)으로 폴백한다.
-  - `Shift+휠`은 3배.
+### Wheel Scroll / TUI
+- Wheel handling depends on **which screen buffer** the terminal is using at that moment. Buffer selection is decided by the **running program**, not the terminal (app) (`\x1b[?1049h` enters alternate, `…l` returns). Shell prompts and normal output use the normal buffer; vim/less/man, git pager, and claude/codex interactive screens use the alternate buffer.
+- **Normal (main) buffer**: the wheel is intercepted at the capture phase to force-scroll the xterm scrollback (ignoring TUI mouse tracking) — using the immediate buffer scroll path (`scrollTerminalLinesImmediately`) instead of the public `scrollLines()`, so scrolling up during streaming output does not jump to the bottom.
+- **Alternate-screen buffer (fullscreen TUIs like claude/codex)**: alt-screen has no scrollback, so going through xterm's wheel path shows blank lines that snap back to the bottom on the next repaint. Instead of rolling the viewport directly, **the scroll signal is handed to the TUI itself**:
+  - If the TUI has **mouse reporting on** (`term.modes.mouseTrackingMode !== "none"`), a **native SGR mouse wheel event** (`\x1b[<64/65;col;rowM`) with the wheel position (col/row) is sent to the PTY, so the TUI scrolls its own screen like a standard terminal.
+  - If mouse reporting is **off**, it falls back to `PageUp/PageDown` (`\x1b[5~`/`\x1b[6~`).
+  - `Shift+wheel` is 3x.
 
-### Codex + xterm.js scrollback 삭제 완화
-- Windows의 xterm.js 호스트에서는 Codex TUI가 normal buffer에 `CSI 2J`/`CSI 3J`를 출력해, 세션 JSONL은 정상인데 터미널의 이전 화면만 사라지는 upstream 문제가 있다. 관련 보고: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
-- v0.5.26부터 Codex는 자동으로 `--no-alt-screen`을 사용하며, PTY 출력에서 Codex의 `CSI 3J`(scrollback purge)만 스트리밍 필터로 제거한다. `CSI 2J`와 다른 ANSI 제어는 TUI 렌더링을 위해 그대로 전달한다.
-- ANSI 시퀀스가 여러 PTY read로 나뉘어도 필터 상태를 유지한다. Claude와 일반 Shell 출력에는 적용하지 않는다.
-- 이미 실행 중인 Codex에는 소급 적용되지 않으므로 업데이트 후 세션을 다시 열어야 한다. 이 조치는 xterm 화면 보존을 위한 호환성 완화이며 Codex의 JSONL 대화 원본이나 resume 데이터는 변경하지 않는다.
-- **알려진 한계 — 재렌더 잘림**: `CSI 2J`는 그대로 전달되는데, xterm.js의 2J는 (Windows Terminal과 달리) 지워지는 viewport 내용을 스크롤백으로 밀지 않고 삭제한다(xterm.js#5745). Codex가 화면을 재구성(리사이즈·긴 작업 후 등)하면서 transcript 꼬리만 다시 그리면, 그 순간 화면에 있던 일부 줄이 스크롤백에서 빠져 **중간이 잘린 것처럼** 보일 수 있다. 대화 원본(JSONL·`ctrl+t` transcript)은 무손실이다.
-- **세션별 우회**: 세션 속성 → **Alt-screen 모드**를 켜면 그 Codex는 `--no-alt-screen` 없이 alternate screen에서 실행된다(Orca와 같은 방식). 잘림·스크롤백 이슈가 원천적으로 사라지는 대신 대화가 xterm 스크롤백(Ctrl+F 검색·드래그 복사)에 남지 않고, 히스토리는 Codex 내부 스크롤·`ctrl+t`로 본다. 재시작부터 적용.
+### Codex + xterm.js Scrollback Deletion Mitigation
+- On Windows xterm.js hosts, the Codex TUI emits `CSI 2J`/`CSI 3J` on the normal buffer, an upstream issue where the session JSONL is fine but the terminal's previous screen disappears. Related reports: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
+- Since v0.5.26, Codex is automatically launched with `--no-alt-screen`, and only Codex's `CSI 3J` (scrollback purge) is removed from PTY output by a streaming filter. `CSI 2J` and other ANSI controls pass through for TUI rendering.
+- Filter state is preserved even when an ANSI sequence splits across multiple PTY reads. Not applied to Claude or plain Shell output.
+- Not retroactive to already-running Codex sessions, so reopen sessions after updating. This measure is a compatibility mitigation to preserve the xterm screen; it does not change Codex's JSONL conversation original or resume data.
+- **Known limit — re-render truncation**: `CSI 2J` passes through, and xterm.js's 2J deletes viewport contents instead of pushing them into scrollback like Windows Terminal does (xterm.js#5745). When Codex rebuilds the screen (resize, after long work, etc.) and redraws only the transcript tail, some lines then on screen drop out of scrollback and it can **look like the middle was cut**. The conversation original (JSONL, `ctrl+t` transcript) is lossless.
+- **Per-session workaround**: enable **Alt-screen mode** in session properties to run that Codex on the alternate screen without `--no-alt-screen` (same approach as Orca). Truncation/scrollback issues disappear at the source, but the conversation does not remain in xterm scrollback (Ctrl+F search, drag copy); history is viewed via Codex's internal scroll and `ctrl+t`. Applies from restart.
 
-### 머신마다 휠 동작이 다른 이유 (일반 스크롤 vs PageUp/Down)
-- 같은 앱·같은 코드라도 그 PC에서 도는 **claude/codex CLI 버전·모드**에 따라 인터랙티브 화면이 normal 버퍼로 그려질 수도, alternate 버퍼로 그려질 수도 있다. v0.5.26 이후 앱이 시작하는 Codex는 위 호환성 완화를 위해 normal buffer를 강제한다. Claude와 사용자가 직접 실행한 다른 TUI는 기존처럼 각 프로그램의 버퍼 선택을 따른다.
-- alternate라도 그 TUI가 마우스 리포팅을 켜면 휠 스크롤이 자연스럽게 되고, 끄면 PageUp/Down 페이지 단위로 보인다.
-- 즉 "어떤 컴퓨터는 일반 스크롤, 어떤 컴퓨터는 PageUp/Down"은 앱 버그가 아니라 **그 PC claude/codex의 화면 버퍼·마우스 리포팅 차이**다. 양쪽 `claude --version`을 맞추면 동작이 일치한다. git/man 등 pager가 원인이면 `git config --global core.pager 'less -X'` 또는 `export LESS='-X'`로 normal 버퍼를 유지할 수 있다.
+### Why Wheel Behavior Differs per Machine (normal scroll vs PageUp/Down)
+- Even with the same app and code, depending on the **claude/codex CLI version/mode** running on that PC, the interactive screen may be drawn on the normal buffer or the alternate buffer. Codex launched by the app after v0.5.26 forces the normal buffer for the compatibility mitigation above. Claude and other TUIs launched manually follow each program's buffer choice as before.
+- Even on alternate, if that TUI enables mouse reporting, wheel scrolling works naturally; if off, it pages by PageUp/Down.
+- In other words, "normal scroll on one computer, PageUp/Down on another" is not an app bug but **a difference in screen buffer/mouse reporting of that PC's claude/codex**. Aligning `claude --version` on both sides makes behavior match. If a pager like git/man is the cause, use `git config --global core.pager 'less -X'` or `export LESS='-X'` to stay on the normal buffer.
 
-### Markdown 문서 뷰어 스캔 제한
-- Markdown 스캔은 성능 보호를 위해 최대 500개 파일까지만 수집
-- 단일 Markdown 파일은 2MB 초과 시 읽지 않음
-- `node_modules`, `target`, `dist`, `.git`, `.claude`, `.codex` 등 내부/대형 폴더는 스캔 제외
+### Markdown Document Viewer Scan Limits
+- Markdown scan collects up to 500 files for performance protection
+- Single Markdown files over 2MB are not read
+- Internal/large folders like `node_modules`, `target`, `dist`, `.git`, `.claude`, `.codex` are excluded from scanning
 
-### Hook 의존
-- 작업 상태는 Codex 6종 Hook과 Claude 8종 Hook을 사용한다. `working/waiting/blocked/done`은 PTY 생존 상태와 별도로 관리한다.
-- Claude는 `.claude/settings.local.json`, Codex는 `.codex/config.toml`에 hook 머지
-- hook 실행에 PowerShell 인터프리터가 한 번 더 떠야 함 — 작은 지연
-- Electron은 1분마다 local Hook 서버/helper/config를 자동 점검한다. 상태 표시가 멈추면 설정 → **General → Agent Hooks → Hook 점검 및 복구**에서 즉시 재구성할 수 있다. SSH 원격 세션은 역터널 때문에 세션 재시작이 필요할 수 있다.
-- Codex는 새로 추가되거나 내용이 바뀐 project Hook을 hash 기준으로 다시 검토한다. 시작 경고가 보이면 `/hooks`에서 MultiAgent command와 경로를 확인한 뒤 신뢰한다. 앱은 다른 사용자 Hook까지 우회하는 `--dangerously-bypass-hook-trust`를 자동으로 사용하지 않는다.
-- 작업 event가 30분 이상 갱신되지 않으면 `done`으로 추정하지 않고 PTY의 `running` 표시로 낮춘다. 원인 분석이 필요하면 설정 → **About → Support diagnostics**에서 진단 JSON을 저장한다.
+### Hook Dependency
+- Work status uses Codex's 6 hook kinds and Claude's 8 hook kinds. `working/waiting/blocked/done` is managed separately from PTY survival.
+- Merged into `.claude/settings.local.json` for Claude and `.codex/config.toml` for Codex
+- Hook execution spawns a PowerShell interpreter once more — small delay
+- Electron auto-checks the local hook server/helper/config every minute. If status display stalls, Settings → **General → Agent Hooks → Hook check & repair** (Hook 점검 및 복구) can reconfigure immediately. SSH remote sessions may need a session restart because of the reverse tunnel.
+- Codex re-reviews newly added or content-changed project hooks by hash. If a start warning appears, check the MultiAgent command and path in `/hooks` and trust them. The app does not automatically use `--dangerously-bypass-hook-trust`, which would also bypass other user hooks.
+- If no work event refreshes for 30+ minutes, it is not assumed `done` but lowered to the PTY's `running` display. To analyze the cause, save a diagnostics JSON in Settings → **About → Support diagnostics**.
 
-### 같은 에이전트 동시 표시 불가
-- xterm Terminal 인스턴스 1개당 DOM 1곳에만 mount 가능
-- 같은 에이전트를 두 패널에 동시에 보여줄 수 없음 (드롭 시 항상 한 곳으로 이동)
+### Cannot Show the Same Agent Simultaneously
+- One xterm Terminal instance can only mount to one DOM location
+- The same agent cannot be shown in two panes at once (dropping always moves it to one place)
 
 ### Desktop Pet
-- 펫은 과거 완료 팝업처럼 완료 순간 WebView를 새로 만들지 않고, Tauri setup 메인 스레드에서 `focused(false)`로 만든 창을 계속 재사용한다. 페이지 로드가 끝나면 `focusable(false)`로 전환하며, 이는 Windows에서 알림 창 생성이 터미널 포커스를 빼앗던 회귀를 피하기 위한 설계다
-- 현재는 주 MultiAgent 프로세스만 펫을 소유한다. 별도 프로세스로 실행된 **새 창**의 세션 완료를 단일 펫으로 합치는 broker는 아직 없으며, 새 창 자체에는 중복 펫을 띄우지 않는다
-- 펫의 투명 창 사각 영역은 Windows hit testing 특성상 아래 앱의 마우스 입력 일부를 가릴 수 있다. 창 크기를 작게 유지하고 드래그로 이동하도록 구현돼 있다
+- The pet does not create a new WebView at completion like the old completion popup; it reuses a window created with `focused(false)` on the Tauri setup main thread. After page load it switches to `focusable(false)` — a design to avoid the regression where notification window creation stole terminal focus on Windows
+- Currently only the main MultiAgent process owns a pet. There is no broker yet that merges session completions from a **new window** (separate process) into the single pet, and new windows do not spawn duplicate pets
+- The pet's transparent window rectangle can block some mouse input to apps below due to Windows hit testing. It is implemented to stay small and be draggable
 
-### 그룹 세션 고정의 범위
-- 현재 구현은 그룹에 "현재 저장된 세션 ID"를 고정하는 방식이다. 과거 세션 목록을 보여주고 선택하는 UI는 아직 없음
-- 고정값은 다음 spawn부터 적용된다. 이미 실행 중인 Codex/Claude 프로세스는 자동 재시작하지 않음
-- 고정된 세션 ID가 도구 쪽에서 더 이상 resume 불가하면 사용자가 고정을 해제하거나 새 세션을 시작해야 함
+### Scope of Group Session Pinning
+- The current implementation pins the "currently stored session IDs" to the group. There is no UI yet that lists and selects from past sessions
+- Pins apply from the next spawn. Already-running Codex/Claude processes are not restarted automatically
+- If a pinned session ID is no longer resumable by the tool, the user must unpin or start a new session
 
-### 자동 업데이트 / 릴리즈 운영
-- 자동 업데이트는 GitHub의 **Latest 릴리즈**에 첨부된 `latest.json`(+`.sig`)에 의존. 릴리즈를 draft로 두거나 latest 마킹·서명·매니페스트를 빠뜨리면 업데이트가 안 보임 ([RELEASE.md](RELEASE.md) 체크리스트)
-- `/releases/latest/download/` 경로는 GitHub CDN 캐시로 publish 직후 몇 분간 옛 버전을 줄 수 있음
-- 서명 private key를 잃으면 기존 사용자는 자동 업데이트 불가 (새 키 + 수동 재설치 필요)
+### Auto-Update / Release Operations
+- Auto-update relies on `latest.json` (+`.sig`) attached to the **Latest release** on GitHub. If the release stays a draft, or latest marking/signing/manifest are missed, no update appears (see the [RELEASE.md](RELEASE.md) checklist)
+- The `/releases/latest/download/` path may serve the old version for a few minutes after publishing due to GitHub CDN caching
+- Losing the signing private key means existing users cannot auto-update (new key + manual reinstall required)
 
-### 원격 접속 제약
-- 내부 localhost 구간은 평문 HTTP (외부는 Cloudflare가 TLS). LAN 직접 접속(레거시 토큰)은 같은 망에서 평문
-- quick tunnel URL은 켤 때마다 바뀜. 고정 도메인은 Cloudflare 계정 + 도메인으로 named tunnel 필요
-- 같은 세션을 데스크탑·웹에서 동시에 보면 PTY가 하나라 출력이 공유됨 (의도된 동작; 화면 크기는 데스크탑이 주인)
+### Remote Access Constraints
+- The internal localhost segment is plain HTTP (external is Cloudflare TLS). Direct LAN access (legacy token) is plaintext on the same network
+- Quick tunnel URLs change every launch. A fixed domain requires a Cloudflare account + domain for a named tunnel
+- Viewing the same session on desktop and web shares one PTY, so output is shared (intended; desktop owns the screen size)
 
-### SSH 원격 세션
-- **Windows 원격 = working/done 상태 + 세션 resume 지원 (Phase 2)**: spawn 시 `ssh -R <port>:127.0.0.1:<hookPort>` 역터널로 원격 hook이 로컬 서버에 도달. 원격 `<folder>\.claude\multiagent-notify.ps1`를 푸시하고 `settings.local.json`/`config.toml`에 hook 머지(원격 read→로컬 Rust 머지→write, base64 전송). env(`MULTIAGENT_PORT/TOKEN/AGENT_ID`)는 원격 PowerShell 명령에 주입. session-start hook이 `lastSessionId`를 채워 다음 spawn에서 `claude --resume <id>`(codex는 `resume <id>`)
-- **POSIX(Linux/macOS) 원격 = 상태/resume 미지원**: 아직 Phase 2 미적용. 원격 셸은 뜨지만 상태점은 running까지, resume 분기는 건너뜀
-- **사용량 집계 미지원(원격 전체)**: usage 대시보드는 로컬 transcript만 파싱 → 원격 세션 토큰은 안 잡힘
-- **Docs/이미지 뷰어 미지원**: 로컬 폴더 스캔 기반이라 SSH 프로젝트(로컬 folder 없음)에선 비활성
-- **클라이언트 OpenSSH 필요**: Windows 내장 `ssh.exe`(OpenSSH 클라이언트)가 PATH에 있어야 함. 없으면 spawn/Test 실패
-- **원격 셸 종류 선택**: SSH Hosts 등록 시 **Remote OS**(Linux/macOS=POSIX, Windows=PowerShell)를 골라야 명령 형식이 맞음. POSIX는 `cd '<folder>' && exec ...`, Windows는 `powershell -NoProfile -NoExit -EncodedCommand ...` 안에서 `$env:` 주입 + `Set-Location -LiteralPath` + `<tool>` 실행. 기본값은 POSIX
-- **Windows SSH의 npm `.ps1` 실행 정책 문제**: Windows에서 npm으로 설치한 Codex/Claude는 `codex.ps1`/`claude.ps1`와 `codex.cmd`/`claude.cmd`가 같이 생긴다. 원격 PowerShell은 `.ps1` shim을 먼저 잡아 `PSSecurityException`이 날 수 있으므로, SSH Hosts의 **Use .cmd shims for npm CLIs** 옵션이 기본 켜짐이며 Windows 원격에서는 `codex.cmd`/`claude.cmd`를 실행한다. 특수하게 `.ps1`을 써야 하는 호스트만 이 옵션을 끈다.
-- **SSH TUI 방향키 보정**: Windows OpenSSH/ConPTY 경로에서는 xterm application cursor 모드(`ESC O A/B/C/D`)가 일부 원격 TUI에서 무시될 수 있다. SSH 세션은 방향키를 일반 CSI(`ESC [ A/B/C/D`)로 정규화하고, 원격 도구 실행 전 `TERM=xterm-256color`, `COLORTERM=truecolor`를 강제해 Codex/Claude hook review 같은 메뉴가 방향키를 인식하도록 한다.
-- **역터널 차단 시 graceful degrade**: 원격 sshd가 `AllowTcpForwarding`를 끄면 `-R`가 조용히 실패 → 세션은 정상 동작하되 상태/resume만 비활성(`ExitOnForwardFailure` 미설정)
-- **Windows 원격 셸 무관(cmd/PowerShell)**: 원격 명령은 `powershell -EncodedCommand <base64>`로 보내므로, 그 서버의 SSH 기본 셸이 cmd든 PowerShell(구버전 5.1 포함)이든 동작한다. 폴더 경로 공백/특수문자도 base64 + `-LiteralPath`로 안전. 동시 세션은 호스트별 고유 역터널 포트로 충돌 방지
-- **인증 방식 토글(키/비밀번호)**: SSH Hosts 등록 시 호스트별 **Auth method** 선택.
-  - **키(기본)**: identity 파일 지정 시 자동으로 `-o IdentitiesOnly=yes` → ssh-agent에 키가 많아 생기는 **"Too many authentication failures"**를 방지(그 키 하나만 시도). 키 인증이 미리 동작해야 함.
-  - **비밀번호**: `-o PubkeyAuthentication=no`로 키를 안 던지고 바로 비번. 비번을 저장해두면 연결 시 앱이 **PTY에 자동 입력**(`password:` 프롬프트 감지). 비번은 localStorage가 아니라 로컬 `ssh-secrets.json`(`<app_local_data_dir>`)에 저장 — client_secret과 동일 수준의 로컬 평문(동기화·UI 반환 안 됨). 미저장 시 터미널에서 직접 입력.
-- **비밀번호 호스트는 원격 hook(상태/resume) 미지원**: Phase 2 hook 설정은 비대화형(BatchMode) ssh라 비번 인증이 불가 → 비번 호스트는 **자동 연결·터미널만** 되고 working/done·resume은 안 됨(키 모드 Windows 원격만 Phase 2). (SSH_ASKPASS 기반 비번 hook은 실 서버 검증 후 후속)
-- **서버측 `AllowGroups` 등은 앱이 못 고침**: 서버 `sshd_config`의 그룹/정책 제한으로 막히면 서버에서 계정을 허용 그룹에 추가해야 함(클라이언트 옵션으로 우회 불가)
+### SSH Remote Sessions
+- **Windows remote = working/done status + session resume supported (Phase 2)**: at spawn, an `ssh -R <port>:127.0.0.1:<hookPort>` reverse tunnel lets remote hooks reach the local server. Pushes the remote `<folder>\.claude\multiagent-notify.ps1` and merges hooks into `settings.local.json`/`config.toml` (remote read → local Rust merge → write, base64 transfer). env (`MULTIAGENT_PORT/TOKEN/AGENT_ID`) is injected into the remote PowerShell command. The session-start hook fills `lastSessionId` so the next spawn runs `claude --resume <id>` (codex `resume <id>`)
+- **POSIX (Linux/macOS) remote = status/resume unsupported**: Phase 2 not applied yet. The remote shell opens but status dots only reach running; the resume branch is skipped
+- **Usage accounting unsupported (all remotes)**: the usage dashboard only parses local transcripts → remote session tokens are not captured
+- **Docs/image viewer unsupported**: based on local folder scans, so disabled for SSH projects (no local folder)
+- **OpenSSH client required**: Windows built-in `ssh.exe` (OpenSSH client) must be on PATH. Otherwise spawn/Test fails
+- **Remote shell type selection**: when registering in SSH Hosts, choose **Remote OS** (Linux/macOS = POSIX, Windows = PowerShell) for the right command format. POSIX is `cd '<folder>' && exec ...`; Windows runs inside `powershell -NoProfile -NoExit -EncodedCommand ...` with `$env:` injection + `Set-Location -LiteralPath` + `<tool>` execution. Default is POSIX
+- **npm `.ps1` execution policy issue on Windows SSH**: Codex/Claude installed via npm on Windows create both `codex.ps1`/`claude.ps1` and `codex.cmd`/`claude.cmd`. The remote PowerShell grabs the `.ps1` shim first, which can throw `PSSecurityException`, so the SSH Hosts **Use .cmd shims for npm CLIs** option is ON by default and Windows remotes run `codex.cmd`/`claude.cmd`. Only hosts that specifically need `.ps1` turn this option off.
+- **SSH TUI arrow-key correction**: on the Windows OpenSSH/ConPTY path, xterm application cursor mode (`ESC O A/B/C/D`) can be ignored by some remote TUIs. SSH sessions normalize arrow keys to plain CSI (`ESC [ A/B/C/D`) and force `TERM=xterm-256color`, `COLORTERM=truecolor` before remote tool execution, so menus like Codex/Claude hook review recognize arrow keys.
+- **Graceful degrade when reverse tunnel is blocked**: if the remote sshd disables `AllowTcpForwarding`, `-R` fails silently → the session works normally but status/resume are disabled (`ExitOnForwardFailure` not set)
+- **Independent of the Windows remote shell (cmd/PowerShell)**: the remote command is sent as `powershell -EncodedCommand <base64>`, so it works whether that server's SSH default shell is cmd or PowerShell (including legacy 5.1). Folder paths with spaces/special chars are safe via base64 + `-LiteralPath`. Concurrent sessions avoid collisions via per-host unique reverse tunnel ports
+- **Auth method toggle (key/password)**: per-host **Auth method** selection when registering in SSH Hosts.
+  - **Key (default)**: specifying an identity file automatically adds `-o IdentitiesOnly=yes` → prevents **"Too many authentication failures"** from ssh-agent holding many keys (tries only that one key). Key auth must already work.
+  - **Password**: `-o PubkeyAuthentication=no` skips keys and goes straight to password. If the password is stored, the app **auto-types it into the PTY** on connect (`password:` prompt detection). Passwords are stored not in localStorage but in local `ssh-secrets.json` (`<app_local_data_dir>`) — same level of local plaintext as client_secret (never synced or returned to the UI). If not stored, type directly in the terminal.
+- **Password-auth hosts do not support remote hooks (status/resume)**: Phase 2 hook setup uses non-interactive (BatchMode) ssh, so password auth is impossible → password hosts only get **auto-connect + terminal**; working/done·resume are unavailable (Phase 2 only for key-mode Windows remotes). (SSH_ASKPASS-based password hooks are a follow-up after real-server verification)
+- **Server-side `AllowGroups` etc. cannot be fixed by the app**: if blocked by group/policy restrictions in the server's `sshd_config`, the account must be added to the allowed group on the server (cannot be bypassed with client options)
 
-### codex 플러그인 hook 호환
-- codex companion 플러그인의 `hooks.json`이 codex 버전의 hook 스키마와 안 맞으면(예: 최상위 `description` 필드) hook 로딩 실패 → working 표시/세션 캡처가 안 될 수 있음 ([RESUME.md](RESUME.md))
+### Codex Plugin Hook Compatibility
+- If a codex companion plugin's `hooks.json` does not match codex's hook schema (e.g., a top-level `description` field), hook loading fails → working display/session capture may not work ([RESUME.md](RESUME.md))
 
-### dev 모드에서 부모 죽으면 자식 stale 가능
-- app.exe 강제종료 시 PowerShell 자식이 즉시 안 죽고 orphan이 될 수 있음
-- 정상 종료 (창 X) 경로에선 portable-pty가 master drop → slave EIO → child 종료 cascade
+### Stale Children Possible if Parent Dies in Dev Mode
+- Force-killing app.exe can leave the PowerShell child alive as an orphan
+- On the normal exit path (window X), portable-pty drops master → slave EIO → child exit cascade
 
-## 구현 완료 (과거 phase 2 후보)
+## Implemented (Past Phase 2 Candidates)
 
-세션 재시작·비활성화·재등록, 전역 단축키(Ctrl+T/W/1-9/F), 스크롤백 영속화, 터미널 검색(Ctrl+F), 알림음 옵션, 자동 업데이터, 프로젝트 드래그 재정렬·삭제·속성, 세션 속성, 사이드바 검색, 이미지/HTML 뷰어, 원격 접속, 사용량 대시보드는 모두 구현됨.
+Session restart/deactivate/relink, global shortcuts (Ctrl+T/W/1-9/F), scrollback persistence, terminal search (Ctrl+F), notification sound options, auto-updater, project drag reorder/delete/properties, session properties, sidebar search, image/HTML viewers, remote access, and the usage dashboard are all implemented.
 
-## 잠재 개선 (남은 것)
+## Potential Improvements (Remaining)
 
-- **탭 reorder**: 같은 leaf 안에서 탭 순서 드래그 변경 (현재 같은 leaf center 드롭은 no-op)
-- **세션 설정 편집 확장**: 별명은 바꿀 수 있지만 프로젝트/AI 도구/dangerous 변경 UI는 없음
-- **모델/플래그 커스터마이즈**: 도구별 추가 CLI 인자(예: `claude -m sonnet`)를 모달에서 지정
-- **세션 복제**: 같은 프로젝트에 동일 설정으로 새 세션
-- **그룹 이름/색**: 사이드바 그룹 식별 강화
-- **세션 export/import**: 그룹/레이아웃을 JSON으로
-- **로그 export**: 에이전트별 출력 로그 파일
-- **세션 프로세스 영속화**: 앱을 닫아도 PowerShell+CLI를 백그라운드 유지 (Windows에선 어려움; 현재는 resume으로 대화만 복원)
-- **모바일 전용 원격 UI**: 현재 원격 웹은 데스크탑 브라우저 기준. 좁은 화면용 레이아웃 별도 필요
-- **다국어**: UI 한/영 혼용 → 통일
+- **Tab reorder**: drag tab order within the same leaf (currently a center drop on the same leaf is a no-op)
+- **Extended session settings edit**: alias can be changed, but no UI for project/AI tool/dangerous changes
+- **Model/flag customization**: specify extra per-tool CLI args (e.g., `claude -m sonnet`) in the modal
+- **Session duplicate**: new session with identical settings in the same project
+- **Group name/color**: stronger group identification in the sidebar
+- **Session export/import**: groups/layouts as JSON
+- **Log export**: per-agent output log files
+- **Session process persistence**: keep PowerShell+CLI alive in the background when the app closes (hard on Windows; currently conversations are only restored via resume)
+- **Mobile-specific remote UI**: the current remote web targets desktop browsers. A separate narrow-screen layout is needed
+- **i18n**: UI mixes Korean/English → unify

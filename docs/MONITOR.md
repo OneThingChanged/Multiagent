@@ -1,87 +1,87 @@
 # MultiAgent Dashboard
 
-활성 MultiAgent 세션, split 그룹, hook 상태, 프로젝트 `docs`, Usage 사용량을 하나의 로컬 웹에서 보는 기능. 구현 파일: `app/src-tauri/src/monitor.rs`, `monitor_dashboard.html`.
+A feature that shows active MultiAgent sessions, split groups, hook status, project `docs`, and Usage data on a single local web page. Implementation files: `app/src-tauri/src/monitor.rs`, `monitor_dashboard.html`.
 
-## 목적
+## Purpose
 
-여러 Claude/Codex 세션을 동시에 켜면 현재 어떤 세션이 live인지, 어느 split이 선택됐는지, 각 프로젝트의 phase/TODO 문서가 어디 있는지 헷갈린다. 모니터는 앱 내부 상태와 파일 시스템 문서를 한 화면에 합쳐 보여준다.
+With many Claude/Codex sessions running at once, it gets hard to tell which sessions are live, which split is selected, and where each project's phase/TODO docs live. The monitor combines in-app state and filesystem docs on one screen.
 
-## 서버
+## Server
 
-- bind `127.0.0.1:<port>`, 기본 **4421**. 충돌 시 4421~4499 fallback.
-- 설정 → **Dashboard** 탭에서 단일 Dashboard 서버를 Start/Stop/Open/Copy, 자동 시작, 포트 변경 가능.
-- 기본 설정은 자동 시작 ON이다. 설정 파일은 `%LOCALAPPDATA%\com.jintae.multiagent\monitor-config.json`.
+- Binds to `127.0.0.1:<port>`, default **4421**. Falls back within 4421–4499 on conflict.
+- In Settings → **Dashboard** tab you can Start/Stop/Open/Copy the single Dashboard server, enable auto-start, and change the port.
+- Auto-start is ON by default. Config file: `%LOCALAPPDATA%\com.jintae.multiagent\monitor-config.json`.
 
-## 데이터 소스
+## Data Sources
 
-정확도를 위해 단일 소스에 의존하지 않는다.
+For accuracy, it does not rely on a single source.
 
-| 목적 | 1차 소스 | 보조 소스 |
+| purpose | primary source | secondary source |
 |---|---|---|
-| live 여부 | Rust `AppState.ptys` + `session-locks` 파일 lock | 프론트 agent status |
-| 작업 상태 | hook last event (`working`/`done`/`session-start`) | 프론트 agent status |
-| 토큰 사용량 | UsageHub SQLite 집계 | transcript reindex |
-| 앱 배치 | React에서 sync하는 `projects`/`agents`/`groups`/`view` | localStorage 원본 |
-| 세션 ID | hook `session_id` | agent `lastSessionId` |
-| 문서 | 프로젝트 folder 하위 `docs`/`Docs`/`DOCS` | 파일명 score |
+| liveness | Rust `AppState.ptys` + `session-locks` file lock | frontend agent status |
+| work state | hook last event (`working`/`done`/`session-start`) | frontend agent status |
+| token usage | UsageHub SQLite aggregation | transcript reindex |
+| app layout | `projects`/`agents`/`groups`/`view` synced from React | localStorage originals |
+| session ID | hook `session_id` | agent `lastSessionId` |
+| docs | `docs`/`Docs`/`DOCS` under the project folder | filename score |
 
-중요: hook 이벤트가 없더라도 PTY나 lock이 살아 있으면 live 세션이다. 이 경우 화면에는 `hook missing`으로 표시한다.
+Important: even without hook events, a session is live if its PTY or lock is alive. This is shown as `hook missing` on screen.
 
 ## API
 
-| 경로 | 반환 |
+| path | returns |
 |---|---|
-| `GET /` | Dashboard HTML (`Monitor`/`Usage` 화면 포함) |
-| `GET /api/state` | 프로젝트, 그룹, 세션, 상태, docs 후보 목록 |
-| `GET /api/docs/read?path=...` | 알려진 프로젝트 docs 폴더 내부의 `.md`/`.html` 내용 |
-| `POST /api/hooks/reconnect?agentId=...` | 해당 local Claude/Codex 프로젝트의 hook 설정 재작성 |
-| `GET /api/usage/*` | 같은 서버에서 Usage 요약/프로젝트/세션/최근 이벤트/타임라인 제공 |
-| `POST /api/usage/reindex` | transcript 즉시 재색인 |
+| `GET /` | Dashboard HTML (includes `Monitor`/`Usage` screens) |
+| `GET /api/state` | projects, groups, sessions, status, docs candidate list |
+| `GET /api/docs/read?path=...` | contents of `.md`/`.html` inside a known project docs folder |
+| `POST /api/hooks/reconnect?agentId=...` | rewrites hook config for that local Claude/Codex project |
+| `GET /api/usage/*` | Usage summary/projects/sessions/recent events/timeline on the same server |
+| `POST /api/usage/reindex` | immediate transcript reindex |
 
-`/api/docs/read`는 sync된 프로젝트의 `docs` 폴더 내부 파일만 읽는다. 최대 3MB까지 미리보기한다.
+`/api/docs/read` only reads files inside the `docs` folder of synced projects. It previews up to 3MB.
 
-## 상태 모델
+## State Model
 
-| 상태 | 의미 |
+| state | meaning |
 |---|---|
-| `working` | live이고 hook 또는 프론트 status가 작업중 |
-| `live` | live이고 hook은 있으나 작업중/완료로 특정되지 않음 |
-| `live-done` | live이고 마지막 hook이 `done` |
-| `hook-missing` | live지만 hook 이벤트가 아직 없음 |
-| `stale` | live는 아니지만 최근 hook이 남아 있음 |
-| `idle`/`running`/`exited` | 프론트 status fallback |
+| `working` | live, and hook or frontend status says working |
+| `live` | live, hook exists but not specifically working/done |
+| `live-done` | live, and last hook was `done` |
+| `hook-missing` | live but no hook events yet |
+| `stale` | not live, but a recent hook remains |
+| `idle`/`running`/`exited` | frontend status fallback |
 
-## Hook 재연결
+## Hook Reconnect
 
-`hook missing` 세션에는 **Reconnect hooks** 버튼이 표시된다. 이 버튼은 해당 agent의 `folder`에 있는 Claude/Codex hook 설정을 현재 MultiAgent 인스턴스의 `notify.ps1`, hook port/token으로 다시 쓴다.
+`hook missing` sessions show a **Reconnect hooks** button. It rewrites the Claude/Codex hook config in that agent's `folder` with the current MultiAgent instance's `notify.ps1`, hook port/token.
 
-설정 → **General → Agent Hooks → Hook 점검 및 복구**는 `AppState.ptys`의 실제 활성 세션과 동기화된 세션 목록을 전체 비교한다. 활성 local Claude/Codex 세션에 대해 helper 파일과 hook 설정을 검증하고 누락·손상된 항목만 다시 병합한다. 로컬 hook HTTP 서버가 응답하지 않으면 새 port/token으로 서버를 다시 띄우고 `hook-info.json`도 갱신한다. 이미 실행 중인 local helper는 기존 env 연결이 실패하면 최신 `hook-info.json`으로 한 번 재시도하므로 앱이나 세션을 강제 종료하지 않고 복구할 수 있다.
+Settings → **General → Agent Hooks → Hook check & repair** (Hook 점검 및 복구) compares the entire synced session list against the actual active sessions in `AppState.ptys`. For active local Claude/Codex sessions it verifies helper files and hook config, and re-merges only missing/damaged items. If the local hook HTTP server does not respond, it relaunches the server with a new port/token and updates `hook-info.json`. An already-running local helper retries once with the latest `hook-info.json` when its existing env connection fails, so you can recover without force-killing the app or sessions.
 
-활성 SSH 세션의 역터널은 시작 당시 로컬 hook port에 고정된다. 이 경우 복구 결과에 **세션 다시 열기 필요**로 표시되며 해당 원격 세션을 재시작해야 한다.
+An active SSH session's reverse tunnel is fixed to the local hook port at launch time. In that case the repair result shows **session restart required** (세션 다시 열기 필요) and you must restart that remote session.
 
-주의: 이미 실행 중인 CLI가 hook 설정을 언제 다시 읽는지는 도구 구현에 따라 다를 수 있다. 재연결은 미래 hook 이벤트 또는 다음 세션 시작에 확실히 반영되고, 실행 중 세션은 다음 prompt/stop 이벤트에서 반영될 수 있다.
+Note: when an already-running CLI re-reads its hook config depends on the tool's implementation. A reconnect reliably applies to future hook events or the next session start; a running session may pick it up on the next prompt/stop event.
 
-## Usage 결합
+## Usage Integration
 
-Dashboard는 `UsageHub`의 `usage.db` 세션 집계를 함께 읽어서 세션 카드, 상세 영역, `Usage` 화면에 총 토큰, 최신 model, 프로젝트/세션별 사용량을 표시한다. Usage 데이터가 없거나 DB가 아직 초기화되지 않았으면 해당 배지는 생략된다.
+The Dashboard also reads the `UsageHub` `usage.db` session aggregates and shows total tokens, latest model, and per-project/session usage on session cards, detail areas, and the `Usage` screen. If there is no Usage data or the DB is not initialized yet, those badges are omitted.
 
-## Docs 스캔 규칙
+## Docs Scan Rules
 
-각 agent folder에서 `docs`, `Docs`, `DOCS`를 재귀 스캔하고 `.md`, `.markdown`, `.html`, `.htm`만 표시한다. 우선순위는 다음과 같다.
+Under each agent folder, `docs`, `Docs`, and `DOCS` are scanned recursively and only `.md`, `.markdown`, `.html`, `.htm` are shown. Priority order:
 
-- agent 이름 포함: 예 `ToonShader`, `Weather`
+- contains agent name: e.g. `ToonShader`, `Weather`
 - `CURRENT`, `PLAN`, `TODO`, `PHASE`, `Roadmap`
 - `README.md`
 - `overview`, `architecture`
 
-이 규칙 덕분에 현재처럼 프로젝트마다 문서 구조가 달라도 우선은 잘 맞는 파일을 위로 올릴 수 있다.
+Thanks to these rules, the best-matching files rise to the top even when each project has a different docs structure.
 
-## Claude/Codex 공통 운용 규칙
+## Common Claude/Codex Operating Rules
 
-새 프로젝트나 장기 작업은 가능하면 다음 중 하나를 둔다.
+For new projects or long-running work, keep one of the following if possible:
 
-- `docs/CURRENT.md`: 지금 하는 작업, 다음 액션, blocker
-- `docs/PLAN.md`: phase별 계획
-- `docs/TODO.md` 또는 `docs/TODO_<AgentName>.md`: agent별 할 일
+- `docs/CURRENT.md`: current work, next actions, blockers
+- `docs/PLAN.md`: per-phase plan
+- `docs/TODO.md` or `docs/TODO_<AgentName>.md`: per-agent todos
 
-Claude와 Codex 모두 작업 시작/완료/phase 변경 시 같은 파일을 갱신하면 모니터가 자동으로 우선 노출한다.
+When both Claude and Codex update the same file on work start/completion/phase change, the monitor automatically surfaces it first.

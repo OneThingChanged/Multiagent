@@ -1,274 +1,272 @@
-# UX / 조작법
+# UX / Interactions
 
-## 탑바 (커스텀 타이틀바)
+## Top Bar (Custom Titlebar)
 
-Windows 기본 타이틀바와 `File/Edit/View/Window` 메뉴를 제거하고 36px 커스텀 탑바로 대체했다 (Electron 전용). 최소화/최대화/닫기는 OS가 그리는 네이티브 오버레이라 Win11 Snap Layouts와 닫기 확인 플로우가 그대로 동작한다.
+The Windows default titlebar and `File/Edit/View/Window` menu were removed and replaced with a 36px custom top bar (Electron only). Minimize/maximize/close are a native overlay drawn by the OS, so Win11 Snap Layouts and the close-confirmation flow still work.
 
 ```
-[✻ MultiAgent] [⫞ 좌측 사이드바] ·· [⌕ Quick Open] [! 알림] ·· [핀] [새 창] [🤖 펫] [⚙ 설정] │ [⫟ 파일 트리] [─ ▢ ✕]
+[✻ MultiAgent] [⫞ left sidebar] ·· [⌕ Quick Open] [! notifications] ·· [pin] [new window] [🤖 pet] [⚙ settings] │ [⫟ file tree] [─ ▢ ✕]
 ```
 
-- **⫞**: 좌측 사이드바 접기/펼치기 — 상태는 재시작 후에도 유지 (`multiagent.sidebarOpen.v1`)
-- 가운데 빈 영역: **창 드래그** (더블클릭 = 최대화 토글)
-- **⌕ Quick Open**: 통합 검색 (Ctrl+K와 동일) / **!**: Attention Center (읽지 않음 수 뱃지)
-- **핀**(상시 최상단) · **새 창** · **🤖 Desktop Pet** · **⚙ 설정** — 기존 사이드바 헤더에서 이동
-- **⫟**: 우측 파일 트리 접기/펼치기
-- 메뉴 제거로 기본 메뉴의 Ctrl+R 가속키가 터미널 입력을 가로채던 문제도 해결됨. DevTools는 `F12`/`Ctrl+Shift+I`, 개발 모드 리로드는 `Ctrl+Shift+R`
-- 테마를 바꾸면 네이티브 창 버튼 배경/심볼 색도 함께 바뀐다
+- **⫞**: collapse/expand the left sidebar — state persists across restarts (`multiagent.sidebarOpen.v1`)
+- Empty center area: **window drag** (double-click = toggle maximize)
+- **⌕ Quick Open**: unified search (same as Ctrl+K) / **!**: Attention Center (unread count badge)
+- **Pin** (always on top) · **New window** · **🤖 Desktop Pet** · **⚙ Settings** — moved from the sidebar header
+- **⫟**: collapse/expand the right file tree
+- Removing the menu also fixed the issue where the default menu's Ctrl+R accelerator stole terminal input. DevTools is `F12`/`Ctrl+Shift+I`, dev-mode reload is `Ctrl+Shift+R`
+- Changing the theme also changes the native window buttons' background/symbol colors
 
-## 사이드바
+## Sidebar
 
-- 사이드바 본문은 접이식 프로젝트 트리다. 각 프로젝트 행 아래에 그 프로젝트의 세션들이 표시된다. 프로젝트·세션 모두 **한 줄**로 압축 표시되고, 상세(경로·세션 ID·생성 시각 등)는 hover title과 우클릭 속성에서 확인
-- **상단 검색창**: 프로젝트명·세션명으로 필터. 프로젝트명 매칭이면 그 프로젝트의 모든 세션, 세션명 매칭이면 해당 세션만 표시. 검색 중에는 자동 펼침
-- **프로젝트 `>`/`v` 버튼**: 세션 목록 접기/펼치기
-- **프로젝트 좌클릭**: 프로젝트 활성화 + 첫 세션 그룹 표시 (접혀 있으면 펼침)
-- 세션이 아직 없는 새 프로젝트도 목록에 표시된다. 펼치면 `Select project, then click + to start a session` 안내가 보이고, 상단 `+`로 첫 세션을 만들 수 있다
-- **프로젝트 드래그**: 사이드바에서 위/아래로 끌어 프로젝트 순서 변경
-- **세션 좌클릭**: 그 세션의 그룹으로 전환. 클릭한 세션이 그 leaf의 활성 탭이 됨
-- **세션 더블클릭**: 별명 변경 팝업
-- **프로젝트 행에 마우스를 올리면 우측에 `+` 버튼** — 누르면 그 프로젝트가 활성화되며 바로 새 세션 모달이 열림
-- **Projects 제목 옆 + 버튼**: 새 프로젝트 (핀·새 창·펫·설정·Quick Open·알림 버튼은 전부 탑바로 이동)
-- **세션 우클릭**: 컨텍스트 메뉴
-  - 전환 (현재 그룹으로 이동) / 탭으로 추가 / 오른쪽 분할 / 아래로 분할
-  - **새 창에서 열기** — 새 MultiAgent 창을 띄우고 해당 세션을 선택한다. 같은 세션이 다른 창에서 이미 실행 중이면 세션락이 중복 실행을 막는다
-  - 세션 별명 변경
-  - **세션 재시작** — exited 세션을 재spawn (resume 포함)
-  - **세션 비활성화** — 실행 중이고 **화면에 안 보이는** 세션의 PTY만 종료해 리소스 해제. 다시 선택하면 resume으로 재시작 (보이는 세션은 비활성 처리되어 못 누름)
-  - **현재 세션으로 재등록** — 그 도구·폴더의 디스크 최신 세션을 찾아 resume 대상(`lastSessionId`)을 갱신 (hook 오류 등으로 세션 ID를 잃었을 때 복구)
-  - 현재 세션으로 그룹 고정 / 그룹 세션 고정 해제
-  - **속성** — 이름·프로젝트·도구·상태·세션 ID·생성 시각·폴더·Agent ID + 편집 토글: **Dangerous 모드**(권한 확인 생략 플래그), **Alt-screen 모드**(Codex 전용 — 켜면 alternate screen에서 실행되어 재렌더 잘림이 사라지지만 대화가 터미널 스크롤백에 남지 않음). 토글 변경은 세션 재시작부터 적용
-- **프로젝트 우클릭**: 이름 변경 / **속성**(폴더·세션 수·생성/열람 시각·Project ID) / **프로젝트 삭제**(확인 후 세션·PTY·스크롤백까지 정리)
-- **× 버튼**: 세션 영구 삭제 (PTY kill + sidebar/layout/storage에서 제거)
-- **드래그**: 펼쳐진 모든 프로젝트의 세션을 패널 위로 끌어 드롭 존 시스템 사용 (다른 프로젝트 세션도 같은 화면에 배치 가능)
+- The sidebar body is a collapsible project tree. Each project row lists its sessions below it. Projects and sessions are all shown **compressed to one line**; details (path, session ID, creation time, etc.) are in the hover title and the right-click properties
+- **Top search box**: filter by project/session name. A project-name match shows all sessions of that project; a session-name match shows only that session. Auto-expands while searching
+- **Project `>`/`v` button**: collapse/expand the session list
+- **Project left-click**: activate the project + show the first session group (expands if collapsed)
+- New projects with no sessions yet also appear in the list. When expanded, a `Select project, then click + to start a session` guide shows, and the top `+` creates the first session
+- **Project drag**: drag up/down in the sidebar to reorder projects
+- **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf
+- **Session double-click**: rename alias popup
+- **Hovering a project row shows a `+` button on the right** — clicking activates that project and immediately opens the new session modal
+- **`+` button next to the Projects title**: new project (pin, new window, pet, settings, Quick Open, and notification buttons all moved to the top bar)
+- **Session right-click**: context menu
+  - Switch (jump to current group) / add as tab / split right / split down
+  - **Open in new window** — launches a new MultiAgent window and selects that session. If the same session is already running in another window, the session lock prevents duplicate execution
+  - Rename session alias
+  - **Restart session** — re-spawn an exited session (resume included)
+  - **Deactivate session** — for a running session that is **not visible on screen**, kills only the PTY to free resources. Selecting it again restarts it with resume (visible sessions are deactivated-disabled)
+  - **Relink to current session** (현재 세션으로 재등록) — finds the newest on-disk session for that tool+folder and updates the resume target (`lastSessionId`) (recovery when the session ID was lost, e.g. hook errors)
+  - Pin group to current sessions / unpin group sessions
+  - **Properties** — name, project, tool, status, session ID, creation time, folder, agent ID + edit toggles: **Dangerous mode** (skip-permissions flag), **Alt-screen mode** (Codex only — when on, runs on the alternate screen so re-render truncation disappears, but the conversation does not remain in terminal scrollback). Toggle changes apply from session restart
+- **Project right-click**: rename / **Properties** (folder, session count, created/opened times, project ID) / **Delete project** (after confirmation, cleans up sessions, PTYs, and scrollback)
+- **× button**: permanently delete a session (PTY kill + remove from sidebar/layout/storage)
+- **Drag**: drag sessions from any expanded project onto panes to use the drop-zone system (sessions from other projects can also be placed on the same screen)
 
-### 사이드바 시각
+### Sidebar Visuals
 
-- 활성 프로젝트: 왼쪽 파란 막대 + 강조 배경
-- 활성 그룹 멤버: 옅은 파란 배경 + 왼쪽 막대
-- 활성 leaf의 활성 탭 세션: 진한 파란 배경
-- 고정 그룹 멤버: 이름 옆 `PIN` 배지
-- 그룹 사이: 가는 회색 구분선
-- 세션 항목: 상태점 / 도구 아이콘 / 별명 / dangerous `!` / 닫기 `x` (한 줄)
+- Active project: left blue bar + highlighted background
+- Active group members: light blue background + left bar
+- Active tab session of the active leaf: deep blue background
+- Pinned group members: `PIN` badge next to the name
+- Between groups: thin gray divider
+- Session item: status dot / tool icon / alias / dangerous `!` / close `x` (one line)
 
-### 상태점
+### Status Dots
 
-| 색 | 의미 |
+| color | meaning |
 |---|---|
-| 회색 | idle — 아직 spawn 안 됨 (저장된 상태에서 복원) |
-| 노랑 (블링크 없음) | starting — spawn 직후 첫 데이터 대기 |
-| 초록 | running — 정상 |
-| 노랑 + pulse 애니메이션 | working — Claude/Codex가 응답 처리 중 (hook 신호 기준) |
-| 회색 | exited — PTY 종료 |
+| gray | idle — not spawned yet (restored from saved state) |
+| yellow (no blink) | starting — right after spawn, waiting for first data |
+| green | running — normal |
+| yellow + pulse animation | working — Claude/Codex processing a response (based on hook signals) |
+| gray | exited — PTY terminated |
 
-## 새 프로젝트 / 세션 모달
+## New Project / Session Modals
 
-- **New Project**: 프로젝트 이름과 루트 폴더를 입력. 이 폴더가 세션 cwd와 Docs 스캔 root가 됨
-  - **Run on remote host (SSH)** 토글: 켜면 폴더 대신 등록된 SSH 호스트(드롭다운)와 **원격 폴더**를 입력. 이 프로젝트의 세션은 그 머신에서 SSH로 실행됨 (호스트는 설정 → SSH Hosts에서 먼저 등록)
-- **New Session**: 활성 프로젝트 안에 세션을 만든다
-- **Session alias**: 사이드바/탭/Docs subtitle에 표시될 이름
+- **New Project**: enter a project name and root folder. This folder becomes the session cwd and the Docs scan root
+  - **Run on remote host (SSH)** toggle: when on, instead of a folder, pick a registered SSH host (dropdown) and enter a **remote folder**. This project's sessions run over SSH on that machine (register hosts first in Settings → SSH Hosts)
+- **New Session**: creates a session inside the active project
+- **Session alias**: the name shown in the sidebar/tabs/Docs subtitle
 - **AI tool**: Claude Code / Codex / Shell only
-- **Dangerous mode**: 체크 시 `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex) 플래그 자동 추가. 빨간색 ⚠ 강조
-- 백드롭 클릭으로는 안 닫힘. Cancel/Esc로만 닫힘 (오타 입력 도중 사라짐 방지)
+- **Dangerous mode**: when checked, auto-adds `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex). Highlighted in red ⚠
+- Does not close on backdrop click. Only Cancel/Esc closes (prevents losing input mid-typing)
 
-## 패널 탭 스트립
+## Panel Tab Strip
 
-- 상단 가로 줄. 활성 탭에 위쪽 파란 인디케이터
-- **탭 클릭**: 그 탭 활성화 + 그 leaf를 active path로
-- **탭 ×**: 그 탭만 닫음. 그 세션은 새 solo 그룹으로 분리 (사이드바에선 살아있고 클릭으로 부활 가능). 마지막 탭이면 패널 사라짐
-- **탭 우클릭 메뉴**: 오른쪽/아래로 분할 · **탭 고정**(📌, 일괄 닫기에서 제외) · 닫기(Ctrl+W) · **다른 탭 닫기** · **오른쪽 탭 모두 닫기** · 최근 닫은 탭 다시 열기 · 이름 변경 · **탭 색상**(9색 + 없음, 탭 상단 stripe). 고정 탭은 "다른 탭/오른쪽 탭 닫기"에서 건너뜀. 고정·색상은 재시작에도 유지
-- **탭 드래그**: 다른 패널 위로 → 5존 드롭 (아래)
+- Horizontal strip at the top. Active tab has a blue indicator on top
+- **Tab click**: activate that tab + make that leaf the active path
+- **Tab ×**: closes just that tab. The session splits off into a new solo group (still alive in the sidebar, revivable by clicking). If it was the last tab, the pane disappears
+- **Tab right-click menu**: split right/down · **Pin tab** (📌, excluded from mass closes) · close (Ctrl+W) · **Close other tabs** · **Close tabs to the right** · reopen recently closed tab · rename · **Tab color** (9 colors + none, stripe on top of the tab). Pinned tabs are skipped by "close others/close to the right". Pin and color persist across restarts
+- **Tab drag**: onto another pane → 5-zone drop (below)
 
-## 드래그 앤 드롭 — 5존 드롭
+## Drag & Drop — 5-Zone Drop
 
-드래그 중 마우스를 패널 위에 올리면 5개 영역이 표시됨:
+Hovering the mouse over a pane while dragging shows 5 zones:
 
-| 영역 | 동작 |
+| zone | action |
 |---|---|
-| Center | 그 패널의 탭으로 추가 (이미 있으면 활성화) |
-| Top edge | 그 패널을 위/아래로 vertical split, 위에 끼움 |
-| Bottom edge | vertical split, 아래에 끼움 |
-| Left edge | 좌/우 horizontal split, 왼쪽 끼움 |
-| Right edge | horizontal split, 오른쪽 끼움 |
+| Center | add as a tab of that pane (activates if already there) |
+| Top edge | vertical split above/below that pane, inserted above |
+| Bottom edge | vertical split, inserted below |
+| Left edge | left/right horizontal split, inserted left |
+| Right edge | horizontal split, inserted right |
 
-target의 부모 split이 이미 같은 방향이면 그 split의 형제로 추가 (sizes 자동 재분배), 아니면 target leaf를 새 split으로 wrap.
+If the target's parent split already has the same direction, it is added as a sibling of that split (sizes auto-redistributed); otherwise the target leaf is wrapped in a new split.
 
-같은 leaf의 단독 탭을 자기 패널로 드롭하는 건 no-op (`isOnlyTabSource` 가드).
+Dropping a leaf's only tab onto its own pane is a no-op (`isOnlyTabSource` guard).
 
-세션이 고정된 그룹은 외부 세션을 탭/분할/드래그로 추가할 수 없다. 고정 그룹 안의 기존 멤버끼리 재배치하는 것은 허용된다. 다른 고정 그룹에 속한 세션도 현재 그룹으로 이동할 수 없다.
+A session-pinned group cannot accept outside sessions via tabs/splits/drag. Rearranging existing members inside a pinned group is allowed. Sessions belonging to a different pinned group also cannot move into the current group.
 
-프로젝트가 다른 세션도 같은 그룹 안에 탭/분할로 배치할 수 있다. 이 경우 사이드바에서는 각 세션이 자기 프로젝트 아래에 계속 보이고, 활성 그룹 배경/막대로 같은 작업 화면에 묶여 있음을 표시한다.
+Sessions from different projects can be placed as tabs/splits within the same group. In that case, each session still appears under its own project in the sidebar, with the active group background/bar showing they are joined on the same work screen.
 
-## 그룹 세션 고정
+## Pinning Group Sessions
 
-- 사이드바에서 그룹 멤버를 우클릭하고 **현재 세션으로 그룹 고정**을 누르면, 그 그룹 안의 세션들 중 `lastSessionId`가 있는 항목을 그룹에 저장한다
-- 이후 해당 그룹에서 세션을 spawn할 때는 `agent.lastSessionId`보다 그룹의 고정 세션 ID를 우선 사용한다
-- 고정된 그룹은 사이드바에 `PIN` 배지가 표시된다
-- **그룹 세션 고정 해제**를 누르면 그룹 고정값을 제거하고, 다시 각 세션의 최신 `lastSessionId`를 사용한다
-- 고정은 다음 spawn부터 적용된다. 이미 실행 중인 터미널 프로세스는 강제로 재시작하지 않는다
+- Right-click a group member in the sidebar and choose **Pin group to current sessions** (현재 세션으로 그룹 고정) to store the sessions in that group that have a `lastSessionId` into the group
+- Afterwards, sessions spawned in that group prefer the group's pinned session IDs over `agent.lastSessionId`
+- Pinned groups show a `PIN` badge in the sidebar
+- Choosing **Unpin group sessions** (그룹 세션 고정 해제) removes the group's pins and each session's latest `lastSessionId` is used again
+- Pins apply from the next spawn. Already-running terminal processes are not force-restarted
 
-## 패널 분할 핸들
+## Split Handles
 
-- 분할 사이의 가는 회색 띠. 마우스 올리면 파랑색
-- 드래그로 분할 비율 조정. 최소 폭 ~120px 제한
+- Thin gray band between splits. Turns blue on hover
+- Drag to adjust split ratios. Minimum width ~120px
 
-## 파일 트리 사이드바 & 문서 탭
+## File Tree Sidebar & Document Tabs
 
-Orca 스타일: 우측 사이드바는 **파일 트리만** 보여주고, 파일을 클릭하면 **메인 워크스페이스의 활성 패널에 문서 탭**으로 열린다 (터미널 탭과 같은 탭스트립에 공존).
+Orca style: the right sidebar shows **only the file tree**, and clicking a file opens it as a **document tab in the active pane of the main workspace** (coexisting in the same tab strip as terminal tabs).
 
-### 파일 트리 사이드바
+### File Tree Sidebar
 
-- **탑바 우측의 ⫟ 버튼** 또는 `Ctrl+Shift+D`로 열고 닫음 (패널 헤더의 ×로도 닫힘). 열림 상태와 폭은 다음 실행에도 유지됨
-- 패널 최상단 탭으로 **🗀 Files / ⎇ Source Control** 뷰 전환. ⎇ 탭에는 변경 파일 수 뱃지 표시
-- 오버레이가 아닌 레이아웃 형제 — 열면 터미널 영역이 줄어듦. 경계선 드래그로 폭 조절
-- **프로젝트 드롭박스**: 패널 최상단에서 표시할 프로젝트를 직접 선택 (이름 + 폴더 경로 목록). 기본적으로는 활성 프로젝트를 따라감
-- **고정(📌) 버튼**: 켜면 세션/프로젝트를 전환해도 트리가 현재 프로젝트에 고정됨. 고정 상태는 재시작에도 유지되고, 고정된 프로젝트가 삭제되면 자동 해제
-- 표시 중인 프로젝트 폴더의 **전체 파일/폴더**를 표시 (`node_modules`, `.git`, `target`, `dist`, `build`, `.next`, `.cache`, `.venv`, `__pycache__`, `out` 제외)
-- 폴더는 펼칠 때 lazy 로딩 (디렉토리당 최대 2,000개)
-- **펼침 상태는 프로젝트별로 기억** — 다른 프로젝트에 갔다 돌아와도, 앱을 재시작해도 그대로 복원
-- 툴바: 모두 펼치기(⊞, 400 폴더 상한) / 모두 접기(⊟) / 새로고침(⟳)
-- **Git 상태 표시**: 프로젝트가 git 저장소면 변경 파일을 색 + 한 글자 뱃지로 표시 — `M` 수정(노랑) · `U` 미추적(초록) · `A` 스테이징(초록) · `D` 삭제(빨강, 취소선) · `R` 이름변경. 폴더에는 하위 변경의 대표 상태가 전파됨(D > M > A > U). 10초 주기 자동 갱신
-- **Find files** 입력: 파일명 부분일치 검색 (하위 폴더 재귀, 결과 상한 200개). `Esc`로 지움
-- SSH 프로젝트는 파일 트리 미지원 (안내문 표시)
+- Open/close via the **⫟ button on the right of the top bar** or `Ctrl+Shift+D` (also closes via the panel header ×). Open state and width persist to the next run
+- The topmost panel tabs switch between **🗀 Files / ⎇ Source Control** views. The ⎇ tab shows a changed-file count badge
+- A layout sibling, not an overlay — opening shrinks the terminal area. Drag the boundary to adjust width
+- **Project dropdown**: directly choose which project to show at the top of the panel (name + folder path list). Follows the active project by default
+- **Pin (📌) button**: when on, the tree stays fixed to the current project even when switching sessions/projects. Pin state persists across restarts and auto-releases if the pinned project is deleted
+- Shows **all files/folders** of the displayed project folder (excluding `node_modules`, `.git`, `target`, `dist`, `build`, `.next`, `.cache`, `.venv`, `__pycache__`, `out`)
+- Folders lazy-load on expand (max 2,000 entries per directory)
+- **Expansion state remembered per project** — restored when returning from another project or restarting the app
+- Toolbar: expand all (⊞, 400-folder cap) / collapse all (⊟) / refresh (⟳)
+- **Git status display**: if the project is a git repo, changed files get a color + one-letter badge — `M` modified (yellow) · `U` untracked (green) · `A` staged (green) · `D` deleted (red, strikethrough) · `R` renamed. Folders get the representative status of descendants propagated (D > M > A > U). Auto-refresh every 10 seconds
+- **Find files** input: filename substring search (recursive into subfolders, max 200 results). `Esc` clears
+- SSH projects do not support the file tree (guide text shown)
 
-### Source Control 뷰 (⎇ 탭)
+### Source Control View (⎇ tab)
 
-- 브랜치 표시줄: 현재 브랜치 + `↑ahead ↓behind` + upstream (`vs origin/main`)
-- 커밋 메시지 입력 + **Stage All** / **Commit** 버튼 (`Ctrl+Enter`로도 커밋)
-- **Commit 동작** (VS Code 방식): 스테이징된 항목이 있으면 `Commit (N)` = 그것만 커밋(선택 커밋). 스테이징이 없으면 `Commit All (N)` = 전체 스테이징 후 커밋. 메시지 + 변경사항만 있으면 활성화되어 dead-end가 없음
-- **행 선택**: 단일 클릭 = 체크박스 선택/해제, **Shift+클릭 = 범위 선택**, 더블 클릭 = 문서 탭으로 열기 (텍스트 하이라이트 없음)
-- **다중 선택 배치 바**: 선택된 항목이 있으면 상단에 `N개 선택 · Stage · Unstage · Discard · ×` 표시 — 여러 파일을 한 번에 처리
-- **Staged / Changes** 그룹: 행 hover 시 `+`/`−`(스테이지/언스테이지)와 `↺`(Discard) 버튼. 부분 스테이징(`MM`)은 양쪽에 표시
-- **Discard(되돌리기)**: 확인 다이얼로그 후 — 수정/삭제(M/D)는 `git restore`로 마지막 커밋 상태 복원, 미추적(U)은 휴지통으로, 스테이징된 신규(A)는 언스테이지 후 휴지통. 파일이 다른 프로그램(예: Unreal Editor)에 잠겨 있으면 실패할 수 있음
-- 파일별 `+추가/−삭제` 라인 수와 상태 색 표시, 하단에 최근 커밋 8개
-- git 작업 직후 즉시 갱신 + 10초 주기 폴링. 비저장소/미설치는 안내문. push는 미지원 (터미널에서)
+- Branch bar: current branch + `↑ahead ↓behind` + upstream (`vs origin/main`)
+- Commit message input + **Stage All** / **Commit** buttons (commit also via `Ctrl+Enter`)
+- **Commit behavior** (VS Code style): if there are staged items, `Commit (N)` = commit only those (selected commit). If nothing is staged, `Commit All (N)` = stage all then commit. Enabled whenever there is a message + changes, so there is no dead end
+- **Row selection**: single click = toggle checkbox, **Shift+click = range select**, double-click = open as document tab (no text highlight)
+- **Multi-select batch bar**: with items selected, a top bar shows `N selected · Stage · Unstage · Discard · ×` — handle many files at once
+- **Staged / Changes** groups: row hover shows `+`/`−` (stage/unstage) and `↺` (Discard) buttons. Partial staging (`MM`) shows on both sides
+- **Discard**: after a confirmation dialog — modified/deleted (M/D) are restored to the last commit state via `git restore`, untracked (U) goes to the trash, staged-new (A) is unstaged then trashed. May fail if the file is locked by another program (e.g., Unreal Editor)
+- Per-file `+added/−deleted` line counts and status colors, with the 8 most recent commits at the bottom
+- Refreshes immediately after git actions + 10s polling. Non-repo/git-missing shows guide text. Push is unsupported (use the terminal)
 
-### 파일 트리 우클릭 메뉴
+### File Tree Context Menu
 
-- **파일**: 열기(문서 탭) / OS 기본 앱으로 열기 / 경로 복사 / 상대 경로 복사 / 복제 / 탐색기에서 보기 / 이름 변경 / 삭제(휴지통)
-- **폴더**: 새 파일 / 새 폴더 / 경로 복사 / 상대 경로 복사 / 탐색기에서 보기 / 이름 변경 / 삭제(휴지통)
-- **빈 영역 우클릭**: 프로젝트 루트에 새 파일 / 새 폴더
-- 새 파일·새 폴더·이름 변경은 트리 안 **인라인 입력** (Enter 확정 / Esc 취소, 이름 변경 시 확장자 앞부분 자동 선택)
-- 삭제는 영구 삭제가 아니라 **OS 휴지통으로 이동** — 복구 가능
-- 모든 파일 작업은 프로젝트 폴더 안으로 제한(샌드박스)되고, 작업 후 해당 폴더와 git 상태가 자동 갱신됨
+- **File**: open (document tab) / open with OS default app / copy path / copy relative path / duplicate / reveal in Explorer / rename / delete (trash)
+- **Folder**: new file / new folder / copy path / copy relative path / reveal in Explorer / rename / delete (trash)
+- **Empty area right-click**: new file / new folder at the project root
+- New file, new folder, and rename use **inline input** in the tree (Enter to confirm / Esc to cancel; on rename, the part before the extension is auto-selected)
+- Deletion is not permanent — it goes to the **OS trash** and is recoverable
+- All file operations are sandboxed inside the project folder, and the folder and git status auto-refresh afterwards
 
-### 문서 탭 (DocViewer)
+### Document Tabs (DocViewer)
 
-- 트리에서 파일 **더블 클릭 = 열기** (단일 클릭은 선택/해제). 활성 패널에 탭으로 열리고, **같은 파일을 다시 열면 기존 탭 포커스** (다른 Screen에 열려 있으면 현재 패널로 이동)
-- 열린 세션 화면이 없어도 문서를 열 수 있음 — 문서 하나짜리 새 화면이 자동 생성됨
-- 파일 종류별 렌더링:
-  - `.md`/`.markdown` — GFM + 코드 하이라이트 렌더
-  - `.html`/`.htm` — **sandbox iframe** 렌더 (문서 자체 스크립트는 차단). 문서 안의 http(s) 링크는 **Ctrl+클릭(또는 휠클릭)** 시 OS 기본 브라우저로 열림 (일반 클릭은 무시, `#앵커`는 문서 내 이동)
-  - 이미지(png/jpg/gif/webp/svg/…) — 이미지 뷰어
-  - 기타 텍스트 파일 — 읽기전용 문법 하이라이트 소스 (2MB 한도)
-  - 바이너리/초과 크기 — "OS로 열기" / "탐색기에서 보기" 버튼
-- 탭 헤더: 상대경로 + `Refresh`(다시 읽기) / `Open`(기본 프로그램) / `Reveal`(탐색기 위치)
-- 문서 탭은 터미널 탭과 동일하게 **드래그로 분할/이동**, `Ctrl+1~9` 전환, `Ctrl+W` 닫기 지원. 닫아도 세션과 달리 흔적이 남지 않음 (Ctrl+Shift+T 복원 대상 아님)
-- 문서 탭은 재시작 후에도 복원됨. 파일이 삭제됐으면 에러 패널(Retry/Reveal) 표시
-- 원격(Remote PWA)·Dashboard에는 문서 탭이 노출되지 않음 (터미널 세션만 동기화)
-- 터미널 출력의 문서 경로(`docs/README.md`, `Docs/Foo.md:42` 등)는 클릭 가능. 프로젝트 안의 `.md`/`.html`은 문서 탭으로, **프로젝트 폴더 밖 절대경로**는 기존처럼 OS 기본 앱으로 열림. **Ctrl+클릭하면** 프로젝트 안 파일도 인앱 대신 OS 기본 앱(html이면 브라우저)으로 열림
-- QuickOpen(`Ctrl+K`)의 문서 검색 결과도 문서 탭으로 열림
+- In the tree, **double-click = open** (single click selects/deselects). Opens as a tab in the active pane; **reopening the same file focuses its existing tab** (if open on another Screen, it moves to the current pane)
+- Docs can be opened even with no session screen — a new single-document screen is auto-created
+- Rendering by file kind:
+  - `.md`/`.markdown` — GFM + code highlight render
+  - `.html`/`.htm` — **sandbox iframe** render (the document's own scripts are blocked). http(s) links inside the document open in the OS default browser on **Ctrl+click (or wheel click)** (plain click ignored, `#anchor` navigates within the document)
+  - images (png/jpg/gif/webp/svg/…) — image viewer
+  - other text files — read-only syntax-highlighted source (2MB limit)
+  - binary/oversized — "Open with OS" / "Reveal in Explorer" buttons
+- Tab header: relative path + `Refresh` (re-read) / `Open` (default program) / `Reveal` (Explorer location)
+- Document tabs support **drag split/move**, `Ctrl+1~9` switching, and `Ctrl+W` close, same as terminal tabs. Unlike sessions, closing leaves no trace (not a Ctrl+Shift+T restore target)
+- Document tabs are also restored after a restart. If the file was deleted, an error panel (Retry/Reveal) shows
+- Document tabs are not exposed on Remote (Remote PWA) or the Dashboard (only terminal sessions sync)
+- Document paths in terminal output (`docs/README.md`, `Docs/Foo.md:42`, etc.) are clickable. `.md`/`.html` inside the project open as document tabs; **absolute paths outside the project folder** open the OS default app as before. **Ctrl+click** opens even in-project files with the OS default app (browser for html) instead of in-app
+- Document search results in QuickOpen (`Ctrl+K`) also open as document tabs
 
-## 설정
+## Settings
 
-사이드바 상단 **설정** 버튼으로 팝업을 연다 (`Esc`/바깥 클릭/닫기). 탭(General/Usage/Remote/SSH Hosts/About — company 빌드는 Remote 제외):
+The sidebar top **Settings** (설정) button opens the popup (`Esc`/outside click/close). Tabs (General/Usage/Remote/SSH Hosts/About — company builds exclude Remote):
 
-- **General**: 테마(Soft/GitHub/Warm/Light — 앱·터미널·Docs 공통) + 알림음(System/Custom/Off, Test) + **Desktop Pet** 표시/위치 초기화
-- **Usage**: 사용량 대시보드 서버 on/off·포트, URL 복사, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
-- **Remote PWA**(standard 전용): 모바일 리모컨 서버·Cloudflare 터널 Start/Stop, GitHub OAuth/Device Flow·Owner, named tunnel(token/hostname/port), 계정 승인 관리. Monitor에서 작업 중·질문·완료·대기·비활성을 구분하고, 데스크톱의 Screen/패널/탭 구성 또는 개별 Session을 골라 최근 요청·출력·질문을 확인하고 짧은 지시를 전송한다. 모바일 홈 화면 설치와 실행 중 알림을 지원한다 ([REMOTE.md](REMOTE.md))
-- **SSH Hosts**: SSH 원격 세션용 호스트 레지스트리. 호스트 추가/편집/삭제(label·remote OS·user·host·port·**auth method**·identity 파일[Browse] 또는 비밀번호·extra options) + **Test connection**. Windows 호스트는 **Use .cmd shims for npm CLIs**가 기본 켜짐이라 PowerShell 실행 정책이 `codex.ps1`/`claude.ps1`을 막아도 `codex.cmd`/`claude.cmd`로 실행한다. **Auth method**: 키(identity 지정 시 자동 IdentitiesOnly로 "Too many authentication failures" 방지) / 비밀번호(저장 시 연결할 때 자동 입력, 로컬 `ssh-secrets.json`에만 저장)
-- **About**: 제작자, 버전, **Check**(자동 업데이트 — 서명 검증 후 다운로드·설치·재시작), Releases
+- **General**: theme (Soft/GitHub/Warm/Light — shared across app/terminal/Docs) + notification sound (System/Custom/Off, Test) + **Desktop Pet** show/reset position
+- **Usage**: usage dashboard server on/off·port, copy URL, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+- **Remote PWA** (standard only): mobile remote server·Cloudflare tunnel Start/Stop, GitHub OAuth/Device Flow·Owner, named tunnel (token/hostname/port), account approval management. Monitor distinguishes working/question/done/waiting/inactive, and you can pick the desktop's Screen/pane/tab layout or an individual Session to view the latest request/output/question and send short commands. Supports mobile home screen install and notifications while running ([REMOTE.md](REMOTE.md))
+- **SSH Hosts**: host registry for SSH remote sessions. Add/edit/delete hosts (label·remote OS·user·host·port·**auth method**·identity file [Browse] or password·extra options) + **Test connection**. For Windows hosts, **Use .cmd shims for npm CLIs** is ON by default, so even if PowerShell execution policy blocks `codex.ps1`/`claude.ps1`, it runs `codex.cmd`/`claude.cmd`. **Auth method**: key (auto IdentitiesOnly when an identity is specified, preventing "Too many authentication failures") / password (auto-typed on connect when stored; stored only in local `ssh-secrets.json`)
+- **About**: author, version, **Check** (auto-update — downloads, installs, and restarts after signature verification), Releases
 
-설정값은 localStorage 및 로컬 JSON에 저장되어 다음 실행에도 유지된다.
+Setting values are stored in localStorage and local JSON, persisting to the next run.
+## Bottom Usage Status Bar
 
-## 하단 사용량 상태 바
+- The bottom of the Electron app always shows Codex·Claude account limits as **per-tool segments**. Each segment shows a tool icon + per-limit gauge bar (6px) + usage rate + time until reset (compact notation). Claude's per-model limits (e.g., Fable) attach inside the Claude segment with short names
+- **Clicking a segment opens a popover just for that tool** above that spot: tool name, plan, refresh time + large gauge bars per limit window (8px), `N% used`, reset time. New providers like Gemini automatically get a segment once limit data arrives
+- Codex reads from local session records containing `token_count.rate_limits`; Claude queries the usage endpoint with the OAuth token from `~/.claude/.credentials.json`, and snapshots per limit are kept in `usage.db`. Auto-refreshes when a session completes; **refresh** re-checks the latest session/endpoint
+- Codex shows only the one representative account limit (`limit_id="codex"`); per-model weekly limits of the form `codex_<model>` (e.g., GPT-5.3-Codex-Spark) are hidden as noise. Claude shows the default limits (5-hour, weekly) and per-model weekly limits (e.g., Claude Fable, Opus) as independent items. Warning color from 70%, danger color from 90%
+- Tools that do not provide account limit metadata (Shell, etc.) and SSH remote sessions are currently excluded from the bottom limit display. The existing Usage dashboard's local token accounting is unchanged
 
-- Electron 앱 하단에 Codex·Claude 계정 한도를 **도구별 세그먼트**로 항상 표시한다. 각 세그먼트는 도구 아이콘 + 한도별 게이지바(6px) + 사용률 + 초기화까지 남은 시간(압축 표기)을 보여준다. Claude의 모델별 한도(예: Fable)는 Claude 세그먼트 안에 짧은 이름으로 붙는다
-- **세그먼트를 누르면 그 도구만의 팝오버**가 그 위치 위에 뜬다: 도구 이름·플랜·갱신 시각 + 한도 윈도우별 큰 게이지바(8px)·`N% 사용`·초기화 시각. Gemini 등 새 프로바이더는 limit 데이터만 들어오면 자동으로 세그먼트가 생긴다
-- Codex는 `token_count.rate_limits`가 포함된 로컬 세션 기록에서, Claude는 `~/.claude/.credentials.json`의 OAuth 토큰으로 usage 엔드포인트를 조회해 최신 값을 읽고 `usage.db`에 한도별 스냅샷을 보존한다. 세션이 완료되면 자동 갱신하고, **새로고침**은 최근 세션/엔드포인트를 다시 확인한다
-- Codex는 대표 계정 한도(`limit_id="codex"`) 하나만 표시하고, `codex_<model>` 형태의 모델별 주간 한도(예: GPT-5.3-Codex-Spark)는 노이즈라 표시하지 않는다. Claude는 기본 한도(5시간·주간)와 모델별 주간 한도(예: Claude Fable·Opus)를 각각 독립된 항목으로 표시한다. 70%부터 경고색, 90%부터 위험색을 사용한다
-- 계정 한도 메타데이터를 제공하지 않는 도구(Shell 등)와 SSH 원격 세션은 현재 하단 한도 표시에 포함하지 않는다. 기존 Usage 대시보드의 로컬 토큰 집계는 그대로 유지된다
+## Resource Manager (right of status bar)
 
-## Resource Manager (상태 바 우측)
+- The **▦ memory segment** on the right of the status bar shows the total memory of the whole app process tree (UI + all local sessions) (20s cycle)
+- Clicking opens a popover: top summary (`CPU % · total memory · % of system RAM`) + a **project group → session** hierarchy list. Session rows show status dot, name, process count, CPU%, memory, sorted by memory desc. Bottom `App processes (UI etc.)` = total − session sum
+- While the popover is open, refreshes every 5s + refresh button. CPU% is computed as the delta between two samples, so it may show 0% right after the first display
+- SSH sessions are excluded (no local processes). Windows uses a `Win32_Process` CIM query (~100ms), POSIX uses `ps`
 
-- 상태 바 우측의 **▦ 메모리 세그먼트**가 앱 전체 프로세스 트리(UI + 모든 로컬 세션)의 메모리 총합을 표시 (20초 주기)
-- 누르면 팝오버: 상단 요약(`CPU % · 총 메모리 · 시스템 RAM 대비 %`) + **프로젝트 그룹 → 세션** 계층 목록. 세션 행은 상태점·이름·프로세스 수·CPU%·메모리를 보여주고 메모리 큰 순으로 정렬. 맨 아래 `앱 프로세스 (UI 등)` = 전체 − 세션 합
-- 팝오버가 열려 있는 동안 5초 주기 갱신 + 새로고침 버튼. CPU%는 두 샘플 간 차이로 계산되어 첫 표시 직후엔 0%로 보일 수 있음
-- SSH 세션은 로컬 프로세스가 없어 제외. Windows는 `Win32_Process` CIM 쿼리(~100ms), POSIX는 `ps` 사용
+## Ports (right of status bar)
 
-## Ports (상태 바 우측)
+- The **🔌 segment** on the right of the status bar shows the count of open TCP ports attributed to projects (workspace) (30s cycle + immediate scan when the popover opens)
+- Popover: `N workspace · M external` summary + **port list per project group** (port · process name · `host:port`). The 🗀 in the group header jumps to the project
+- Port attribution has 2 stages: ① if the listener process is a child of a session PTY → that session's project (dev server launched from the terminal) ② if the process command line contains the project folder path → that project (UnrealEditor etc. launched outside the terminal)
+- **EXTERNAL PORTS**: remaining unattributed listeners shown in a collapsed section
+- `0.0.0.0`/`::` wildcard binds are shown as `localhost`. Both IPv4+IPv6 collected, max 200
 
-- 상태 바 우측의 **🔌 세그먼트**가 프로젝트에 귀속된(workspace) 열린 TCP 포트 수를 표시 (30초 주기 + 팝오버 열 때 즉시 스캔)
-- 팝오버: `N workspace · M external` 요약 + **프로젝트 그룹별 포트 목록** (포트번호 · 프로세스명 · `호스트:포트`). 그룹 헤더의 🗀로 프로젝트로 이동
-- 포트 귀속 2단계: ① 리스너 프로세스가 세션 PTY의 하위 프로세스면 그 세션의 프로젝트 (터미널에서 띄운 dev 서버) ② 프로세스 커맨드라인에 프로젝트 폴더 경로가 포함되면 그 프로젝트 (터미널 밖에서 띄운 UnrealEditor 등)
-- 행 hover 액션: **↗ 브라우저 열기** · **⧉ 주소 복사** · **✕ 프로세스 종료** (workspace 소유만, 앱 자신 제외, 종료 직전 포트 소유 재검증)
-- **EXTERNAL PORTS**: 귀속 안 된 나머지 리스너를 접힘 섹션으로 표시
-- `0.0.0.0`/`::` 와일드카드 바인드는 `localhost`로 표기. IPv4+IPv6 모두 수집, 최대 200개
+## Window Close (X button)
 
-## 창 닫기 (X 버튼)
+- Clicking close does not exit immediately; the backend blocks once
+- Automatically sends `/quit\r` to all running Codex/Claude agents
+- Waits 2 seconds, capturing the resume token (`codex resume <uuid>`) Codex prints, saved to localStorage
+- Then actually closes the window
+- Next app run → click that agent in the sidebar → starts automatically with `codex resume <token>` → continues the previous session
+- See [RESUME.md](RESUME.md) for full behavior and limits
+## Keyboard / Copy / Paste / Zoom
 
-- 닫기 누르면 즉시 종료하지 않고 백엔드가 한번 막음
-- 실행 중인 모든 Codex/Claude 에이전트에 자동으로 `/quit\r` 전송
-- 2초 대기하며 Codex가 출력하는 resume token (`codex resume <uuid>`)을 캡처해 localStorage에 저장
-- 그 다음 실제로 창 닫음
-- 다음 앱 실행 → 사이드바에서 그 agent 클릭 → 자동으로 `codex resume <token>`으로 시작 → 직전 세션 이어짐
-- 자세한 동작과 한계는 [RESUME.md](RESUME.md)
+- **Ctrl+C**: copy selected text (with no selection, it does NOT send a CLI interrupt)
+- **Shift+drag**: forces text selection even in mouse-tracking TUIs (Claude etc.) (normal drag goes to the TUI). xterm default behavior
+- **Terminal right-click menu**: copy (when selected) / paste / select all — select then right-click to copy. Right-click on a link goes to link handling
+- **Terminal link Ctrl+click**: opens `.html`/`.md` path links with the OS default app (browser for html) instead of in-app. http(s) URLs open the browser immediately on click
+- **Ctrl+V**: text goes as xterm bracketed paste; image clipboard goes as a raw Ctrl+V keystroke (Codex image paste compatible). Ctrl+Shift+V passes through as-is
+- **Ctrl+Enter**: newline input. Handled so characters do not break during Korean (IME) composition
+- **Ctrl+F**: terminal search bar (next/previous/Esc to close)
+- **Mouse wheel/arrow keys**: behavior splits by the current terminal buffer. On the **normal buffer** (shell, normal output), xterm scrollback moves directly, and the internal buffer scroll state updates immediately so scrolling up during streaming output keeps the current viewport. On **alternate-screen TUIs** (Claude/Codex, vim, less, etc.), the wheel is not applied to the viewport but handed to the TUI itself — if the TUI has mouse reporting on, native wheel events are forwarded so the TUI scrolls its own screen; if off, they are converted to `PageUp/PageDown`. SSH sessions normalize arrow keys to plain CSI sequences for remote TUI compatibility. (The same screen may look like normal scroll on one PC and PageUp/Down on another depending on that PC's claude version/mode — see [KNOWN_ISSUES.md](KNOWN_ISSUES.md))
+- **Ctrl+wheel**: terminal font zoom (persisted)
 
-## 키보드 / 복사 / 붙여넣기 / 줌
+### Global Shortcuts
 
-- **Ctrl+C**: 선택 텍스트 복사 (선택 없으면 CLI interrupt로 보내지 않음)
-- **Shift+드래그**: 마우스 트래킹 TUI(Claude 등)에서도 텍스트 선택 강제 (일반 드래그는 TUI로 전달됨). xterm 기본 동작
-- **터미널 우클릭 메뉴**: 복사(선택 있을 때) / 붙여넣기 / 모두 선택 — 선택 후 우클릭으로 복사 가능. 링크 위 우클릭은 링크 처리로 넘어감
-- **터미널 링크 Ctrl+클릭**: `.html`/`.md` 경로 링크를 인앱 대신 OS 기본 앱(html이면 브라우저)으로 엶. http(s) URL은 클릭 시 바로 브라우저
-- **Ctrl+V**: 텍스트는 xterm bracketed paste, 이미지 클립보드는 raw Ctrl+V 키스트로크 (Codex 이미지 paste 호환). Ctrl+Shift+V는 그대로 통과
-- **Ctrl+Enter**: 줄바꿈 입력. 한글(IME) 합성 중에는 글자가 깨지지 않도록 처리됨
-- **Ctrl+F**: 터미널 검색 바 (다음/이전/Esc 닫기)
-- **마우스 휠/방향키**: 그 순간 터미널 버퍼에 따라 동작이 갈림. **일반 버퍼**(셸·일반 출력)에서는 xterm scrollback을 직접 움직이고, streaming 출력 중 위로 올려도 현재 viewport를 유지하도록 내부 buffer scroll 상태를 즉시 갱신함. **alternate-screen TUI**(Claude/Codex·vim·less 등)에서는 빈 scrollback으로 올라가지 않도록 휠을 viewport에 쓰지 않고 TUI 본인에게 넘김 — TUI가 마우스 리포팅을 켰으면 네이티브 휠 이벤트를 전달해 TUI가 자기 화면을 스크롤하고, 껐으면 `PageUp/PageDown`으로 바꿔 보냄. SSH 세션은 원격 TUI 호환을 위해 방향키를 일반 CSI 시퀀스로 정규화한다. (그 PC의 claude 버전/모드에 따라 같은 화면도 일반 스크롤로 보일 수도, PageUp/Down으로 보일 수도 있음 — [KNOWN_ISSUES.md](KNOWN_ISSUES.md) 참고)
-- **Ctrl+마우스 휠**: 터미널 폰트 줌 (저장됨)
-
-### 전역 단축키
-
-| 키 | 동작 |
+| key | action |
 |---|---|
-| `Ctrl+T` | 새 세션 (활성 프로젝트 없으면 새 프로젝트) |
-| `Ctrl+Shift+P` | 새 프로젝트 |
-| `Ctrl+W` | 활성 탭 닫기 |
-| `Ctrl+Shift+T` | 최근 닫은 탭을 원래 Screen·패널·탭 위치에 복원 |
-| `Ctrl+1`~`9` | 활성 leaf의 N번째 탭 전환 |
-| `Ctrl+F` | 터미널 검색 |
-| `Esc` | 검색/Docs 닫기 |
+| `Ctrl+T` | new session (new project if no active project) |
+| `Ctrl+Shift+P` | new project |
+| `Ctrl+W` | close active tab |
+| `Ctrl+Shift+T` | restore the recently closed tab to its original Screen/pane/tab position |
+| `Ctrl+1`~`9` | switch to the Nth tab of the active leaf |
+| `Ctrl+F` | terminal search |
+| `Esc` | close search/Docs |
 
-(입력창에 포커스가 있을 땐 단축키가 가로채지 않음)
+(Shortcuts are not intercepted while an input field has focus)
 
-최근 닫은 탭 기록은 명시적으로 닫은 탭만 최대 20개까지 현재 앱 실행 중에 보존한다.
-복원은 기존 PTY와 세션을 재사용하므로 작업 출력이 끊기지 않는다. 닫은 뒤 레이아웃이
-바뀌었으면 같은 leaf를 우선하고, 사라졌으면 해당 Screen의 살아 있는 패널에 안전하게
-복원한다. 세션 자체를 삭제했거나 앱을 다시 시작하면 기록은 복원 대상에서 제외된다.
+Recently closed tab history keeps up to 20 explicitly closed tabs for the current app run.
+Restore reuses the existing PTY and session, so work output is not interrupted. If the
+layout changed after closing, the same leaf is preferred; if it is gone, the tab is safely
+restored to a living pane of that Screen. Deleting the session itself or restarting the
+app removes it from the restore targets.
 
-## 이미지 뷰어
+## Image Viewer
 
-- 터미널 출력의 이미지 경로(`*.png/jpg/jpeg/gif/webp/bmp/svg/ico`)는 클릭하면 인앱 모달 뷰어로 열림 (절대경로·프로젝트 폴더 상대경로 모두)
-- Esc 또는 바깥 클릭으로 닫음
+- Image paths in terminal output (`*.png/jpg/jpeg/gif/webp/bmp/svg/ico`) open in an in-app modal viewer on click (both absolute and project-folder-relative paths)
+- Close with Esc or outside click
 
-## 작업 완료 알림
+## Completion Notifications
 
-- Claude/Codex의 `Stop` hook이 fire되면:
-  - 노란 pulse → 초록색 복귀
-  - 우측 상단 인앱 토스트 5초 (클릭으로 그 그룹 활성화)
-  - Windows 토스트 (권한 허용 시)
-  - **알림음**: 설정에서 시스템음 / 커스텀 사운드 파일 / 끄기 선택 (Test 버튼으로 미리듣기)
-  - **Desktop Pet**: 완료 애니메이션 + 프로젝트/세션과 최신 사용자 질문 한 줄을 담은 말풍선 + 미확인 완료 배지. 펫 클릭 시 앱을 앞으로 가져오고 최근 완료 세션으로 이동
-- 알림은 한 번만. hook이 중복 fire되어도 상태가 working이 아니면 무시
-- 원격 접속 승인 요청이 오면 별도 토스트 + 알림음 ([REMOTE.md](REMOTE.md))
+- When Claude/Codex's `Stop` hook fires:
+  - yellow pulse → back to green
+  - in-app toast top-right for 5s (click to activate that group)
+  - Windows toast (when permission granted)
+  - **Notification sound**: choose system sound / custom sound file / off in Settings (Test button previews)
+  - **Desktop Pet**: completion animation + balloon with project/session and the latest user question in one line + unseen completion badge. Clicking the pet brings the app forward and jumps to the most recent completed session
+- Notified only once. Even if the hook fires redundantly, it is ignored unless the state was working
+- A separate toast + notification sound for remote access approval requests ([REMOTE.md](REMOTE.md))
 
 ## Desktop Pet
 
-- 앱 시작 시 펫 네이티브 창은 처음엔 숨겨 만들고, 메인 UI가 준비된 뒤 사이드바의 저장된 **펫 보기** 토글을 적용한 다음 메인 MultiAgent 창을 마지막으로 표시·포커스한다. 따라서 펫만 앞에 나타나고 메인이 뒤에 숨는 상태를 방지한다
-- 펫은 메인 앱과 같은 프로세스에 종속된다. 메인 앱을 종료하거나 업데이트 설치를 시작하면 펫을 포함한 프로세스 전체가 종료되며, 펫만 단독으로 남지 않는다. 새 창 프로세스에는 중복 펫을 만들지 않는다
-- 펫 창은 `focusable(false)`이며 완료 순간 새 창을 만들지 않고 기존 창의 CSS 상태만 바꾼다. 따라서 활성 터미널의 키보드 포커스를 가져가지 않는다
-- idle은 잠든 얼굴, running은 깨어 있는 얼굴, working은 타이핑 애니메이션, done은 점프·완료 말풍선으로 표시한다
-- 세션 단위로 현재 작업 중이면 `…N`, 미확인 완료가 있으면 `✓N` 배지를 동시에 표시한다. 같은 `lastSessionId`는 한 번만 세며, 완료된 세션이 다시 작업을 시작하면 완료에서 빠지고 작업 중으로 이동한다
-- 작업 중인 세션이 하나라도 있으면 완료 배지가 함께 있어도 펫 표정·모션은 working을 유지한다. 완료 점프 모션은 작업 중 세션이 없을 때만 실행한다
-- `…N` 배지를 클릭하면 현재 작업 중인 프로젝트/세션·도구와 `UserPromptSubmit` hook에서 캡처한 최신 사용자 질문을 작은 목록으로 보여준다. 목록 항목을 클릭하면 해당 세션으로 이동한다
-- 펫 아래 `•••` 핸들을 끌어 현재 실행 중 위치를 옮길 수 있다. 앱을 다시 실행하면 주 모니터 오른쪽 아래 기본 위치에서 시작한다
-- 펫을 우클릭하면 전용 메뉴가 열리며 **Close pet**으로 숨길 수 있다. 사이드바 로봇 토글과 Settings 옵션도 OFF로 동기화된다
-- 설정 → General에서 끄거나 기본 위치로 초기화할 수 있다
+- At app start, the pet native window is first created hidden; after the main UI is ready, the sidebar's saved **pet visibility** toggle is applied, and then the main MultiAgent window is finally shown/focused. This prevents the state where only the pet is in front and the main window is hidden behind
+- The pet is bound to the same process as the main app. Quitting the main app or starting an update install terminates the whole process including the pet; the pet never remains alone. New window processes do not get duplicate pets
+- The pet window is `focusable(false)` and does not create a new window at completion; it only changes the CSS state of the existing window. So it never steals keyboard focus from the active terminal
+- idle is a sleeping face, running is an awake face, working is a typing animation, done is a jump + completion balloon
+- Per session, a `…N` badge shows while working and a `✓N` badge for unseen completions; both can show at once. The same `lastSessionId` is counted only once, and a completed session that starts working again moves from completed to working
+- If any session is working, the pet keeps the working expression/motion even with completion badges present. The completion jump motion only runs when no session is working
+- Clicking the `…N` badge shows a small list of currently working projects/sessions, tools, and the latest user question captured from the `UserPromptSubmit` hook. Clicking a list item jumps to that session
+- Drag the `•••` handle below the pet to move it during the current run. On the next app launch it starts at the default bottom-right position of the primary monitor
+- Right-clicking the pet opens a dedicated menu with **Close pet** to hide it. The sidebar robot toggle and the Settings option sync to OFF as well
+- Can be turned off or reset to the default position in Settings → General

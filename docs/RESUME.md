@@ -1,18 +1,18 @@
-# 세션 Resume
+# Session Resume
 
-앱을 닫고 다시 켜도 Codex/Claude 세션을 이어서 사용하기 위한 메커니즘. 현재는 각 도구의 `SessionStart` hook에서 전달되는 `session_id`를 공통 필드 `lastSessionId`로 저장하고, 다음 spawn 때 도구별 resume 명령으로 사용한다.
+The mechanism for continuing Codex/Claude sessions after closing and reopening the app. Currently, the `session_id` delivered by each tool's `SessionStart` hook is stored in the common field `lastSessionId`, and used as the tool-specific resume command on the next spawn.
 
-## 동작 시나리오
+## Scenario
 
-1. 사용자가 Codex/Claude 에이전트로 대화/작업
-2. 사용자가 창 **X** 클릭
-3. 백엔드가 close를 가로채고 프론트에 `app:close-requested` 이벤트 발생
-4. 프론트가 실행 중인 모든 Codex/Claude 에이전트에 `/quit\r` 전송
-5. 세션 ID는 이미 `SessionStart` hook 시점에 저장되어 있으므로 close path는 도구를 정상 종료하는 역할만 함
-6. 짧게 대기 후 `confirm_close` 커맨드로 실제 종료
-7. 다음번 앱 실행 → 사이드바에서 그 agent 클릭 → spawn 시 `codex resume <id>` 또는 `claude --resume <id>` (+ dangerous 플래그) 자동 입력
+1. User chats/works with a Codex/Claude agent
+2. User clicks the window **X**
+3. The backend intercepts the close and emits an `app:close-requested` event to the frontend
+4. The frontend sends `/quit\r` to all running Codex/Claude agents
+5. The session ID is already stored by the `SessionStart` hook, so the close path only shuts the tools down gracefully
+6. After a short wait, the `confirm_close` command performs the actual exit
+7. Next app run → click that agent in the sidebar → spawn auto-types `codex resume <id>` or `claude --resume <id>` (+ dangerous flag)
 
-## 창 닫기 인터셉트 (Rust)
+## Window Close Intercept (Rust)
 
 ```rust
 window.on_window_event(move |event| {
@@ -26,23 +26,23 @@ window.on_window_event(move |event| {
 });
 ```
 
-`confirm_close` 커맨드가 `close_confirmed` 플래그를 true로 세팅 후 `window.close()` → 두 번째 close 이벤트는 그대로 통과.
+The `confirm_close` command sets the `close_confirmed` flag to true and then calls `window.close()` → the second close event passes through.
 
-## 세션 ID 캡처
+## Session ID Capture
 
-1. 앱이 각 에이전트 폴더의 `.claude/settings.local.json`과 `.codex/config.toml`에 `SessionStart` hook을 머지
-2. 도구가 켜질 때 hook 실행 → `notify.ps1 session-start`
-3. `notify.ps1`이 stdin JSON에서 `session_id`(+ `transcript_path`, `cwd`) 추출
-4. HTTP `/event`에 `{ id, event: "session-start", session_id, token, ... }` POST
-   - 포트·토큰은 **세션별 환경변수 `MULTIAGENT_PORT`/`MULTIAGENT_TOKEN` 우선**, 없을 때만 `hook-info.json` fallback. 세션은 자기를 spawn한(살아있는) 앱에 1:1로 묶이므로 앱 재시작·다중 인스턴스에서도 정확
-5. Rust 서버가 토큰 검증 후 `agent:hook-event` 발생
-6. 프론트가 `agent.lastSessionId`에 저장하고 `multiagent.agents.v1`에 영구화
+1. The app merges a `SessionStart` hook into each agent folder's `.claude/settings.local.json` and `.codex/config.toml`
+2. When the tool starts, the hook fires → `notify.ps1 session-start`
+3. `notify.ps1` extracts `session_id` (+ `transcript_path`, `cwd`) from stdin JSON
+4. POSTs `{ id, event: "session-start", session_id, token, ... }` to HTTP `/event`
+   - Port/token come from the per-session env vars `MULTIAGENT_PORT`/`MULTIAGENT_TOKEN` first, falling back to `hook-info.json` only if absent. A session is bound 1:1 to the (living) app that spawned it, so this stays correct across app restarts and multiple instances
+5. The Rust server validates the token and emits `agent:hook-event`
+6. The frontend stores it in `agent.lastSessionId` and persists to `multiagent.agents.v1`
 
-resume·compact·clear 등으로 새 session이 시작되면 hook이 다시 fire되므로 가장 최근 세션 ID가 덮어써진다.
+When a new session starts via resume/compact/clear, the hook fires again and the newest session ID overwrites it.
 
-## Spawn 시 세션 ID 사용
+## Using the Session ID at Spawn
 
-PaneSlot의 apply에서:
+In PaneSlot's apply:
 
 ```ts
 let cmd = tool.command;  // "codex"
@@ -60,36 +60,36 @@ if (agent.dangerous && tool.dangerousFlag) {
 // invoke spawn_pty with initCommand = cmd
 ```
 
-결과 예: `codex resume 019e3eda-7a41-77e2-9165-cb5e11e13021 --dangerously-bypass-approvals-and-sandbox`
-Claude 결과 예: `claude --resume <session_id> --dangerously-skip-permissions`
-Windows SSH 호스트는 기본적으로 npm `.ps1` shim 대신 `.cmd` shim을 써서 `codex.cmd resume ...` / `claude.cmd --resume ...` 형태로 실행한다.
+Example result: `codex resume 019e3eda-7a41-77e2-9165-cb5e11e13021 --dangerously-bypass-approvals-and-sandbox`
+Claude example: `claude --resume <session_id> --dangerously-skip-permissions`
+On Windows SSH hosts, the `.cmd` shims are used by default instead of the npm `.ps1` shims, producing `codex.cmd resume ...` / `claude.cmd --resume ...`.
 
-## 그룹 세션 고정
+## Pinning Group Sessions
 
-사이드바 우클릭 메뉴의 **현재 세션으로 그룹 고정**은 그룹 멤버들의 현재 `lastSessionId`를 `Group.sessionPins`에 저장한다. 이후 해당 그룹에서 spawn되는 에이전트는 최신 `lastSessionId`보다 그룹의 고정 세션 ID를 우선 사용한다.
+The sidebar context menu's **Pin group to current sessions** (현재 세션으로 그룹 고정) stores the group members' current `lastSessionId` values into `Group.sessionPins`. Afterwards, agents spawned in that group prefer the group's pinned session IDs over the latest `lastSessionId`.
 
-고정 그룹은 `sessionLocked` 상태가 되어 외부 에이전트를 탭/분할/드래그로 추가할 수 없다. 이미 실행 중인 터미널 프로세스는 자동 재시작하지 않으므로 고정값은 다음 spawn부터 적용된다.
+A pinned group becomes `sessionLocked`, so outside agents cannot be added via tabs/splits/drag. Already-running terminal processes are not restarted automatically, so pins apply from the next spawn.
 
-## 현재 세션으로 재등록 (복구)
+## Relink to Current Session (Recovery)
 
-hook이 안 돌거나(예: 깨진 codex 플러그인 `hooks.json`이 파싱 실패해 SessionStart가 안 fire) `lastSessionId`가 옛 값으로 굳으면 resume이 엉뚱한 세션을 잡는다. 사이드바 세션 우클릭 → **현재 세션으로 재등록**:
+If the hook never fired (e.g., a broken codex plugin `hooks.json` fails to parse so SessionStart never fires) or `lastSessionId` is stuck on an old value, resume targets the wrong session. Sidebar session right-click → **Relink to current session** (현재 세션으로 재등록):
 
-- `relink_cli_session`(Rust) → `usage.rs`의 `find_latest_for_folder(tool, folder)`가 그 도구·폴더의 **디스크 최신 transcript**에서 session_id를 추출
-  - claude: `~/.claude/projects/<encoded-folder>/<id>.jsonl` 중 최신
-  - codex: `~/.codex/sessions/**/rollout-...<id>.jsonl` 중 cwd 일치 최신
-- 찾은 id를 `lastSessionId`로 갱신 → **다음 spawn부터** 그 세션으로 resume
-- transcript 탐색 로직은 사용량 대시보드와 공유 ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+- `relink_cli_session` (Rust) → `usage.rs`'s `find_latest_for_folder(tool, folder)` extracts the session_id from the **newest on-disk transcript** for that tool+folder
+  - claude: newest of `~/.claude/projects/<encoded-folder>/<id>.jsonl`
+  - codex: newest of `~/.codex/sessions/**/rollout-...<id>.jsonl` with matching cwd
+- Updates `lastSessionId` with the found id → **from the next spawn**, resume targets that session
+- The transcript search logic is shared with the usage dashboard ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 
-## 한계 / 미지원
+## Limits / Unsupported
 
-- **Shell only 모드**: `/quit`이 PowerShell에 없어 에러가 잠깐 보일 수 있음 (해롭진 않음, resume 대상 아님)
-- **세션 ID 무효화**: 도구가 그 세션을 더 이상 resume 못 하거나 jsonl이 삭제되면 실패 → 새 세션 시작 (재등록으로 디스크 최신 세션을 다시 잡아볼 수 있음)
-- **첫 spawn**: 최초 생성 직후엔 SessionStart hook 전이라 resume 대상 없음. 한 번 떠야 다음부터 정상
-- **SSH 원격 세션**: **Windows 원격은 Phase 2로 resume 지원** — `ssh -R` 역터널 + 원격 hook으로 session-start가 `lastSessionId`를 채우고, 다음 spawn에서 `claude --resume <id>`(codex `resume <id>`)로 이어감(로컬 디스크 `resolve_cli_session`는 건너뜀, 원격 transcript를 못 보므로 저장된 id를 신뢰). **POSIX 원격은 아직 미지원**(새 세션). 상세·제약은 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)
-- **codex 플러그인 hooks.json 호환**: codex companion 플러그인의 `hooks.json` 최상위에 `description` 같은 미지원 필드가 있으면 codex가 hook 로딩에 실패해 SessionStart가 안 옴 → 해당 필드 제거 또는 플러그인 정리 필요
+- **Shell only mode**: `/quit` does not exist in PowerShell so an error may flash briefly (harmless, not a resume target)
+- **Session ID invalidated**: if the tool can no longer resume that session or the jsonl was deleted, it fails → a new session starts (relink can re-target the newest on-disk session)
+- **First spawn**: right after creation there is no resume target because SessionStart has not fired yet. Works from the first actual run onwards
+- **SSH remote sessions**: **Windows remotes support resume via Phase 2** — the `ssh -R` reverse tunnel + remote hooks fill `lastSessionId` via session-start, and the next spawn continues with `claude --resume <id>` (codex `resume <id>`). The local-disk `resolve_cli_session` is skipped (remote transcripts are not visible, so the stored id is trusted). **POSIX remotes are not supported yet** (new session). Details & constraints in [KNOWN_ISSUES.md](KNOWN_ISSUES.md)
+- **Codex plugin hooks.json compatibility**: if a codex companion plugin's `hooks.json` has unsupported top-level fields like `description`, codex fails to load hooks and SessionStart never arrives → remove those fields or clean up the plugin
 
-## persistence
+## Persistence
 
-`StoredAgent.lastSessionId?: string`이 `multiagent.agents.v1` localStorage 키에 같이 저장됨. 기존 `lastResumeToken`, `lastClaudeSessionId`는 로드 시 `lastSessionId`로 마이그레이션되는 legacy 필드다.
+`StoredAgent.lastSessionId?: string` is stored in the `multiagent.agents.v1` localStorage key. The legacy fields `lastResumeToken` and `lastClaudeSessionId` are migrated into `lastSessionId` on load.
 
-그룹 고정 세션은 `multiagent.groups.v1` 안의 `Group.sessionPins`와 `Group.sessionLocked`에 저장된다.
+Pinned group sessions are stored in `Group.sessionPins` and `Group.sessionLocked` inside `multiagent.groups.v1`.
