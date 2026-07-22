@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MultiAgent",
-  "version": "0.5.28",
+  "version": "0.5.65",
   "identifier": "com.jintae.multiagent",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:24420",
+    "devUrl": "http://localhost:4420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

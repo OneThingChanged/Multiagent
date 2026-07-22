@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/runtime";
 import { toolForId } from "../types";
 import type { Agent, SshHost } from "../types";
 import { findSshHost } from "./sshHosts";
@@ -21,8 +21,12 @@ export type SpawnArgs = {
 
 export function addTerminalCompatibilityArgs(
   aiToolId: string,
-  command: string
+  command: string,
+  useAltScreen = false
 ): string {
+  // Per-session opt-out (세션 속성 → Alt-screen): let Codex run on the
+  // alternate screen instead of forcing the scrollback-preserving mode.
+  if (useAltScreen) return command;
   if (
     aiToolId === "codex" &&
     !/(?:^|\s)--no-alt-screen(?:\s|$)/.test(command)
@@ -47,6 +51,29 @@ export function resolveRemoteToolCommand(
 
   if (aiToolId === "codex" && command === "codex") return "codex.cmd";
   if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  if (aiToolId === "qwen" && command === "qwen") return "qwen.cmd";
+  if (aiToolId === "cline" && command === "cline") return "cline.cmd";
+  return command;
+}
+
+function currentPlatform(): string {
+  if (typeof navigator === "undefined") return "";
+  return `${navigator.userAgent} ${navigator.platform}`;
+}
+
+export function resolveLocalToolCommand(
+  aiToolId: string,
+  command: string,
+  platform = currentPlatform()
+): string {
+  if (!/(?:win32|windows|win64)/i.test(platform)) return command;
+
+  // npm installs both .ps1 and .cmd launchers on Windows. PowerShell resolves
+  // the blocked .ps1 first on restricted PCs, while the .cmd shim is safe.
+  if (aiToolId === "codex" && command === "codex") return "codex.cmd";
+  if (aiToolId === "claude" && command === "claude") return "claude.cmd";
+  if (aiToolId === "qwen" && command === "qwen") return "qwen.cmd";
+  if (aiToolId === "cline" && command === "cline") return "cline.cmd";
   return command;
 }
 
@@ -64,7 +91,9 @@ export async function buildSpawnArgs(
   let initCommand: string | null = null;
 
   if (tool.command) {
-    let cmd = resolveRemoteToolCommand(agent.aiToolId, tool.command, sshHost);
+    let cmd = sshHost
+      ? resolveRemoteToolCommand(agent.aiToolId, tool.command, sshHost)
+      : resolveLocalToolCommand(agent.aiToolId, tool.command);
     if (sshHost) {
       // Windows remote (Phase 2): remote hooks capture session_id into
       // lastSessionId, so resume directly (no local-disk resolve, which can't
@@ -113,7 +142,25 @@ export async function buildSpawnArgs(
         }
       }
     }
-    cmd = addTerminalCompatibilityArgs(agent.aiToolId, cmd);
+    // Cline keeps its own session store; resume the latest CLI session for this
+    // project folder via `cline --id <id>` (queried from `cline history`, no
+    // hooks required). Local only — the history query runs on this machine.
+    if (agent.aiToolId === "cline" && !sshHost && agent.folder) {
+      try {
+        const clineSession = await invoke<string | null>(
+          "resolve_cline_session",
+          { folder: agent.folder }
+        );
+        if (clineSession) cmd = `${cmd} --id ${clineSession}`;
+      } catch {
+        /* history unavailable → start a fresh session */
+      }
+    }
+    cmd = addTerminalCompatibilityArgs(
+      agent.aiToolId,
+      cmd,
+      agent.useAltScreen === true
+    );
     if (agent.dangerous && tool.dangerousFlag) {
       cmd = `${cmd} ${tool.dangerousFlag}`;
     }

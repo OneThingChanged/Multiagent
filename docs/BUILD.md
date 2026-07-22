@@ -1,92 +1,121 @@
 # Build & Run
 
-## 사전 요구
+## Prerequisites
 
 - **Node.js** 24+
-- **Rust** stable (1.95+, rustup 권장)
+- **Rust** stable (1.95+, rustup recommended)
 - **Visual Studio 2022 C++ Build Tools** (MSVC)
-- **WebView2** (Windows 11 기본 포함)
-- **PowerShell 7+** (없으면 5.1로 폴백)
+- **WebView2** (included with Windows 11)
+- **PowerShell 7+** (falls back to 5.1 if missing)
 
-## 처음 셋업
+## First-time Setup
 
 ```bash
 cd K:\AI\MultiAgent\app
 npm install
 ```
 
-## 개발 모드 (HMR)
+## Development Mode (HMR)
 
 ```bash
 cd K:\AI\MultiAgent\app
 npm run tauri dev
 ```
 
-- Vite 4420 포트 + Tauri가 Rust 빌드 후 `target/debug/app.exe` 실행
-- `src/**` 변경 → Vite HMR 즉시 반영
-- `src-tauri/**` 변경 → Tauri watcher가 자동 재컴파일 + 앱 재시작
-- 윈도우 닫으면 dev 세션 종료. 다시 띄우려면 `npm run tauri dev`
+- Vite on port 4420 + Tauri runs `target/debug/app.exe` after the Rust build
+- `src/**` changes → applied instantly via Vite HMR
+- `src-tauri/**` changes → Tauri watcher auto-recompiles + restarts the app
+- Closing the window ends the dev session. Relaunch with `npm run tauri dev`
 
-## 디버그 빌드
+On the Electron experiment branch, the same renderer is launched with:
+
+```bash
+cd K:\AI\MultiAgent\app
+npm run electron:dev
+```
+
+Electron also uses Vite `4420`, with auxiliary HMR port `4422`. For installer/security/PTY verification commands and migration criteria, see [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md).
+
+Electron installers are built separately for standard and company.
+
+| variant | command | updater metadata |
+|---|---|---|
+| standard | `npm run electron:dist` | `latest.yml` |
+| company | `npm run electron:dist:company` | `latest-company.yml` |
+| both | `npm run electron:dist:all` | both channels |
+
+Company Electron uses the `com.jintae.multiagent.company.electron` identifier and the
+`%LOCALAPPDATA%\com.jintae.multiagent.company` shared snapshot, and blocks Remote/Tunnel
+commands in main as well.
+
+The Electron Windows local launcher invokes npm global CLIs as `codex.cmd`/`claude.cmd`.
+So even when PowerShell ExecutionPolicy blocks `codex.ps1`, sessions can start without
+changing any policy. If you hit the same error when running directly in PowerShell, use
+`codex.cmd` or `claude.cmd` as well.
+
+## Debug Build
 
 ```bash
 cd K:\AI\MultiAgent\app
 npm run tauri -- build --debug
 ```
 
-산출물 경로:
+Artifact paths:
 
-| 종류 | 경로 |
+| kind | path |
 |---|---|
-| 디버그 EXE | `src-tauri/target/debug/app.exe` |
-| 디버그 NSIS 인스톨러 | `src-tauri/target/debug/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
-| 디버그 MSI 인스톨러 | `src-tauri/target/debug/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
+| Debug EXE | `src-tauri/target/debug/app.exe` |
+| Debug NSIS installer | `src-tauri/target/debug/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
+| Debug MSI installer | `src-tauri/target/debug/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
 
-디버그 빌드는 dev profile이라 최적화가 약하지만, 릴리즈보다 빌드가 빠르고 로컬 확인용으로 적합.
+Debug builds use the dev profile, so optimization is weak, but they build faster than
+release and are good for local verification.
 
-## 릴리즈 빌드
+## Release Build
 
 ```bash
 cd K:\AI\MultiAgent\app
 npm run tauri build
 ```
 
-산출물 경로:
+Artifact paths:
 
-| 종류 | 경로 |
+| kind | path |
 |---|---|
-| 단독 실행 EXE | `src-tauri/target/release/app.exe` |
-| NSIS 인스톨러 | `src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
-| MSI 인스톨러 | `src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
+| Standalone EXE | `src-tauri/target/release/app.exe` |
+| NSIS installer | `src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe` |
+| MSI installer | `src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi` |
 
-> Cargo 패키지 이름이 `app`이라 단독 EXE는 `app.exe`로 빌드됨. `MultiAgent.exe`로 바꾸려면 `Cargo.toml`의 `[package].name`을 변경 (`[lib].name`은 유지).
+> Because the Cargo package name is `app`, the standalone EXE is built as `app.exe`. To rename it to `MultiAgent.exe`, change `[package].name` in `Cargo.toml` (keep `[lib].name` as-is).
 
-코드 서명을 안 했으므로 첫 실행 시 Windows SmartScreen 경고. "추가 정보 → 실행" 으로 진행.
+Without code signing, Windows SmartScreen warns on first launch. Proceed via "More info → Run anyway".
 
-> 배포(GitHub Releases 게시 + updater 서명 + latest.json)는 [RELEASE.md](RELEASE.md) 참고. 위 `npm run tauri build`는 서명 없는 로컬 빌드이고, 배포용은 서명 키 환경변수를 줘야 한다.
+> For publishing (GitHub Releases + updater signing + latest.json), see [RELEASE.md](RELEASE.md). The `npm run tauri build` above is an unsigned local build; release builds need the signing key environment variables.
 
-## 빌드 Variant
+## Build Variants
 
-배포용으로는 두 variant를 같이 준비한다.
+For distribution, both variants are prepared together.
 
-| variant | 명령 | 차이 |
+| variant | command | difference |
 |---|---|---|
-| standard | `npm run tauri:build:standard` | 전체 기능 포함 |
-| company | `npm run tauri:build:company` | Remote 탭/서버/터널 기능 제외 |
-| both | `npm run tauri:build:all` | standard 후 company 순서로 둘 다 빌드 |
-| signed release | `npm run release:build:all` | 두 variant 빌드 + updater manifest 필수 생성 |
+| standard | `npm run tauri:build:standard` | all features included |
+| company | `npm run tauri:build:company` | Remote tab/server/tunnel features removed |
+| both | `npm run tauri:build:all` | builds standard then company in order |
+| signed release | `npm run release:build:all` | builds both variants + requires updater manifests |
 
-회사 빌드는 별도 Tauri config(`src-tauri/tauri.company.conf.json`)를 merge해서 `productName`, `identifier`, updater endpoint를 분리한다. 따라서 일반 설치본과 회사 설치본은 서로 덮어쓰지 않고, 각자 자기 업데이트 채널만 따른다.
+The company build merges a separate Tauri config (`src-tauri/tauri.company.conf.json`) to
+split `productName`, `identifier`, and the updater endpoint. So the standard and company
+installs never overwrite each other, and each follows only its own update channel.
 
-로컬 컴파일 확인만 할 때:
+For a compile-only check:
 
 ```bash
 npm run tauri:build:company -- --debug --no-bundle
 ```
 
-## dev 트러블슈팅
+## Dev Troubleshooting
 
-- **포트 4420 점유**: vite dev 포트. `netstat -ano | findstr :4420`로 PID 찾아 vite node 종료 (release app.exe는 건드리지 말 것)
-- **`target\debug\app.exe` 락**: 이전 app.exe가 살아있어 덮어쓰기 실패. `taskkill /F /IM app.exe`
-- **rebuild 너무 오래**: cargo가 changed crate 만 컴파일. 첫 dev 빌드만 2-3분. 이후 Rust 소스만 바꿔도 ~20s 내
-- **Hook이 안 fire**: `%LOCALAPPDATA%\com.jintae.multiagent\hook.log`에서 진단 (notify.ps1이 매 호출마다 timestamp + event + agent + 결과 기록)
+- **Port 4420 in use**: the Vite dev port. Find the PID with `netstat -ano | findstr :4420` and kill the Vite node process (do not touch a release app.exe)
+- **`target\debug\app.exe` locked**: a previous app.exe is still alive so overwrite fails. `taskkill /F /IM app.exe`
+- **Rebuild takes too long**: cargo only compiles changed crates. Only the first dev build takes 2–3 minutes; afterwards Rust-only changes take ~20s
+- **Hooks not firing**: check `%LOCALAPPDATA%\com.jintae.multiagent\hook.log` for diagnostics (notify.ps1 logs timestamp + event + agent + result on every call)

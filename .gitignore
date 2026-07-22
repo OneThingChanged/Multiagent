@@ -29,5 +29,11 @@ Thumbs.db
 *.sln
 *.sw?
 
+# Electron experiment packaging output
+/app/electron-dist/
+
 # Local-only research and third-party comparison notes
 /local-research/
+
+# root deps / tool caches
+node_modules/

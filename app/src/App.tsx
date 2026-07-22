@@ -6,9 +6,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import {
+  getCurrentWindow,
+  invoke,
+  listen,
+  UserAttentionType,
+} from "./platform/runtime";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 
@@ -18,9 +21,11 @@ import {
   LS_PROJECTS,
   LS_VIEW,
   toolForId,
+  toolSupportsChat,
 } from "./types";
 import type {
   Agent,
+  AgentRuntimeStatus,
   AgentStatus,
   ContextMenuState,
   DragState,
@@ -47,17 +52,57 @@ import {
   firstLeafPath,
   getAt,
   groupOf,
+  setLeafActiveTab,
+  updateGroup,
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
+import {
+  isDocTabId,
+  makeDocTabId,
+  parseDocTabId,
+  stripDocTabs,
+} from "./lib/docTabs";
+import {
+  isGitHistoryTabId,
+  makeGitHistoryTabId,
+  parseGitHistoryTabId,
+} from "./lib/gitHistoryTabs";
 import {
   loadBootstrap,
   loadStoredView,
   normalizeStoredGroups,
 } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
-import { applyTerminalTheme, createEntry } from "./lib/terminal";
+import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
+import {
+  AGENT_ACTIVITY_STALE_AFTER_MS,
+  applyAgentHookEvent,
+  applyAgentRuntimeStatus,
+  deriveAgentStatus,
+  isAgentActivelyWorking,
+  runtimeStatusOf,
+  type AgentHookEvent,
+} from "./lib/agentActivity";
+import {
+  COMMAND_DEFINITIONS,
+  commandForKeyboardEvent,
+  loadCommandShortcuts,
+  saveCommandShortcuts,
+  type CommandId,
+  type CommandShortcuts,
+} from "./lib/commandRegistry";
+import {
+  loadAttentionItems,
+  markAttentionRead,
+  removeSessionAttention,
+  saveAttentionItems,
+  upsertAttentionItem,
+  type AttentionItem,
+  type AttentionKind,
+} from "./lib/attention";
+import type { QuickOpenItem } from "./lib/quickOpen";
 import {
   clearScrollback,
   loadScrollback,
@@ -67,6 +112,17 @@ import {
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
+import { persistStorageSnapshot } from "./platform/storageMigration";
+import { isElectronRuntime } from "./platform/electronBridge";
+import type {
+  SpawnTerminalResult,
+  TerminalDataPayload,
+  TerminalReplay,
+} from "./platform/ipcContract";
+import {
+  completeTerminalSync,
+  deliverTerminalData,
+} from "./lib/terminalDelivery";
 import {
   buildDesktopPetUpdate,
   completionForAgent,
@@ -76,12 +132,13 @@ import {
 } from "./lib/desktopPet";
 
 import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { ToastContainer } from "./components/Toast";
 import { ContextMenu, ProjectContextMenu, TabContextMenu } from "./components/Menus";
-import { DocsPanel } from "./components/DocsPanel";
+import { FileTreePanel } from "./components/FileTreePanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
@@ -90,19 +147,27 @@ import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
 import { ProjectPropertiesModal } from "./components/ProjectPropertiesModal";
+import { QuickOpen } from "./components/QuickOpen";
+import { AttentionCenter } from "./components/AttentionCenter";
+import { UsageStatusBar } from "./components/UsageStatusBar";
 
-const LS_DOCS_WIDTH = "multiagent.docsWidth.v1";
+const LS_FILES_WIDTH = "multiagent.filesWidth.v1";
+const LS_FILES_OPEN = "multiagent.filesOpen.v1";
+const LS_SIDEBAR_OPEN = "multiagent.sidebarOpen.v1";
 const LS_ALWAYS_ON_TOP = "multiagent.alwaysOnTop.v1";
-const DEFAULT_DOCS_WIDTH = 640;
-const MIN_DOCS_WIDTH = 360;
+const DEFAULT_FILES_WIDTH = 300;
+const MIN_FILES_WIDTH = 200;
 const MIN_WORKSPACE_WIDTH = 260;
+const MAX_RECENTLY_CLOSED_TABS = 20;
 
-type DocsRequest = {
+type QuickDocument = {
   projectId: string;
-  agentId: string | null;
+  projectName: string;
   relativePath: string;
-  key: number;
+  name: string;
 };
+
+type AttentionDraft = Omit<AttentionItem, "id" | "read">;
 
 type TerminalPathResolution = {
   kind: "image" | "html" | "markdown" | "folder" | "file";
@@ -112,6 +177,8 @@ type TerminalPathResolution = {
 type RuntimeFlags = {
   secondary_window: boolean;
   open_agent_id?: string | null;
+  build_variant?: "standard" | "company";
+  remote_enabled?: boolean;
 };
 
 function readLocalStorageValue(key: string) {
@@ -164,6 +231,9 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     folder: agent.folder,
     aiToolId: agent.aiToolId,
     dangerous: agent.dangerous,
+    useAltScreen: agent.useAltScreen || undefined,
+    pinned: agent.pinned || undefined,
+    tabColor: agent.tabColor || undefined,
     createdAt: agent.createdAt,
     lastSessionId: agent.lastSessionId,
   };
@@ -256,6 +326,9 @@ function agentFromStored(
     aiToolId,
     aiLabel: toolForId(aiToolId).label,
     dangerous: !!stored.dangerous,
+    useAltScreen: stored.useAltScreen || undefined,
+    pinned: stored.pinned || undefined,
+    tabColor: stored.tabColor || undefined,
     createdAt: stored.createdAt || existing?.createdAt || Date.now(),
     lastSessionId:
       stored.lastSessionId ??
@@ -263,6 +336,8 @@ function agentFromStored(
       stored.lastResumeToken ??
       existing?.lastSessionId,
     status: existing?.status ?? "idle",
+    runtimeStatus: existing?.runtimeStatus ?? "idle",
+    activity: existing?.activity,
     sshHostId: project.sshHostId,
     remoteFolder: project.remoteFolder,
   };
@@ -372,21 +447,37 @@ function reconcileGroupSelection(
   };
 }
 
-function clampDocsWidth(width: number) {
+function clampFilesWidth(width: number) {
   const viewportMax =
     typeof window === "undefined"
-      ? DEFAULT_DOCS_WIDTH
-      : Math.max(MIN_DOCS_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
-  if (!Number.isFinite(width)) return DEFAULT_DOCS_WIDTH;
-  return Math.min(viewportMax, Math.max(MIN_DOCS_WIDTH, Math.round(width)));
+      ? DEFAULT_FILES_WIDTH
+      : Math.max(MIN_FILES_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
+  if (!Number.isFinite(width)) return DEFAULT_FILES_WIDTH;
+  return Math.min(viewportMax, Math.max(MIN_FILES_WIDTH, Math.round(width)));
 }
 
-function loadDocsWidth() {
+function loadFilesWidth() {
   try {
-    const raw = localStorage.getItem(LS_DOCS_WIDTH);
-    return raw ? clampDocsWidth(Number(raw)) : DEFAULT_DOCS_WIDTH;
+    const raw = localStorage.getItem(LS_FILES_WIDTH);
+    return raw ? clampFilesWidth(Number(raw)) : DEFAULT_FILES_WIDTH;
   } catch {
-    return DEFAULT_DOCS_WIDTH;
+    return DEFAULT_FILES_WIDTH;
+  }
+}
+
+function loadFilesOpen() {
+  try {
+    return localStorage.getItem(LS_FILES_OPEN) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function loadSidebarOpen() {
+  try {
+    return localStorage.getItem(LS_SIDEBAR_OPEN) !== "false";
+  } catch {
+    return true;
   }
 }
 
@@ -398,16 +489,27 @@ function loadAlwaysOnTop() {
   }
 }
 
-function isHtmlDocumentPath(path: string) {
-  return /\.(?:html|htm)$/i.test(path.trim());
-}
-
 function isAbsoluteFsPath(path: string) {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
 
 function joinFsPath(folder: string, relativePath: string) {
   return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
+}
+
+// Returns the project-relative path when absolutePath is inside folder,
+// otherwise null. Case-insensitive to match Windows path semantics.
+function relativeIfInside(folder: string, absolutePath: string): string | null {
+  const normFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normPath = absolutePath.replace(/\\/g, "/");
+  if (!normFolder) return null;
+  if (
+    normPath.toLowerCase().startsWith(`${normFolder.toLowerCase()}/`) &&
+    normPath.length > normFolder.length + 1
+  ) {
+    return normPath.slice(normFolder.length + 1);
+  }
+  return null;
 }
 
 // Startup reopen prompt: the previously-active group (with sessions) is restored
@@ -452,30 +554,43 @@ function App() {
   if (!bootstrapRef.current) bootstrapRef.current = loadBootstrap();
   const boot = bootstrapRef.current;
 
+  // Secondary windows own their screens/activation instead of mirroring the main
+  // window's. runtime_flags arrives async, but the load URL carries the flag
+  // synchronously — we need it before seeding groups state, so read it here.
+  const bootIsSecondary =
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("secondaryWindow") === "1";
+
   const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
     computeInitialReopen(boot)
   );
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
-  const [groups, setGroups] = useState<Group[]>(boot.groups);
+  // Secondary windows start with no screens; the open_agent_id effect seeds a
+  // solo screen for the session they were opened with. They never adopt the
+  // main window's shared groups.
+  const [groups, setGroups] = useState<Group[]>(
+    bootIsSecondary ? [] : boot.groups
+  );
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
   );
   // When a reopen prompt is pending, don't restore the active group yet (that
   // would auto-spawn its sessions) — wait for the user's answer.
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
-    pendingReopen ? null : boot.activeGroupId
+    bootIsSecondary || pendingReopen ? null : boot.activeGroupId
   );
   const [activePath, setActivePath] = useState<Path | null>(
-    pendingReopen ? null : boot.activePath
+    bootIsSecondary || pendingReopen ? null : boot.activePath
   );
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameProjectId, setRenameProjectId] = useState<string | null>(null);
-  const [docsOpen, setDocsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(loadFilesOpen);
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
@@ -488,8 +603,7 @@ function App() {
   const [desktopPetQuestions, setDesktopPetQuestions] = useState<
     Record<string, string>
   >({});
-  const [docsWidth, setDocsWidth] = useState(loadDocsWidth);
-  const [docsRequest, setDocsRequest] = useState<DocsRequest | null>(null);
+  const [filesWidth, setFilesWidth] = useState(loadFilesWidth);
   const [imageViewer, setImageViewer] = useState<{
     path: string;
     folder: string | null;
@@ -502,14 +616,69 @@ function App() {
   >(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // Per-session preference: view a session as a chat transcript vs the terminal.
+  const [chatModeAgents, setChatModeAgents] = useState<Set<string>>(
+    () => new Set()
+  );
+  // Tools hidden from the new-session picker (Settings → Agents). Default: none.
+  const [disabledTools, setDisabledTools] = useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("multiagent.disabledTools.v1") || "[]");
+      return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const handleToggleTool = useCallback((toolId: string, enabled: boolean) => {
+    setDisabledTools((prev) => {
+      const next = enabled ? prev.filter((id) => id !== toolId) : [...new Set([...prev, toolId])];
+      try {
+        localStorage.setItem("multiagent.disabledTools.v1", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+  // Bottom usage bar visibility (Settings → Agents).
+  const [showUsageBar, setShowUsageBar] = useState<boolean>(
+    () => localStorage.getItem("multiagent.showUsageBar.v1") !== "0"
+  );
+  const handleShowUsageBarChange = useCallback((show: boolean) => {
+    setShowUsageBar(show);
+    try {
+      localStorage.setItem("multiagent.showUsageBar.v1", show ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleChatMode = useCallback((agentId: string) => {
+    setChatModeAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
   const [projectContextMenu, setProjectContextMenu] =
     useState<ProjectContextMenuState | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<TabCtxState | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickDocuments, setQuickDocuments] = useState<QuickDocument[]>([]);
+  const [quickDocumentsLoading, setQuickDocumentsLoading] = useState(false);
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>(
+    loadAttentionItems
+  );
+  const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcuts>(
+    loadCommandShortcuts
+  );
   const [runtimeFlags, setRuntimeFlags] = useState<RuntimeFlags | null>(null);
   const isSecondaryWindow = !!runtimeFlags?.secondary_window;
+  const remoteEnabled = runtimeFlags?.remote_enabled ?? !IS_COMPANY_BUILD;
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
@@ -532,6 +701,8 @@ function App() {
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
+  const executeCommandRef = useRef<((commandId: CommandId) => void) | null>(null);
+  const recentlyClosedTabsRef = useRef<groupOps.ClosedTabHistoryEntry[]>([]);
 
   const syncSharedStateFromStorage = useCallback(() => {
     const projectsRaw = readLocalStorageValue(LS_PROJECTS);
@@ -570,6 +741,10 @@ function App() {
         setAgents(merged);
       }
     }
+
+    // Secondary windows keep their own screens/activation — sync projects and
+    // agents (shared, live PTYs) but never adopt the main window's groups.
+    if (bootIsSecondary) return;
 
     if (groupsRaw !== storedGroupsJsonRef.current) {
       const storedGroups = parseStoredArray<Group>(groupsRaw);
@@ -616,6 +791,20 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!runtimeFlags) return;
+    invoke("renderer_ready").catch(() => {});
+    if (isSecondaryWindow) return;
+    const persist = () => persistStorageSnapshot().catch(() => {});
+    persist();
+    const interval = window.setInterval(persist, 3000);
+    window.addEventListener("beforeunload", persist);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("beforeunload", persist);
+    };
+  }, [isSecondaryWindow, runtimeFlags]);
 
   useEffect(() => {
     if (!runtimeFlags) return;
@@ -688,7 +877,7 @@ function App() {
   // Mirror agent metadata into the Rust remote hub so the remote web
   // client can list sessions and show live status.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
+    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
     const projectNames = new Map(projects.map((p) => [p.id, p.name]));
     const payload = {
       agents: agents.map((a) => ({
@@ -703,13 +892,13 @@ function App() {
     if (remoteAgentsJsonRef.current === json) return;
     remoteAgentsJsonRef.current = json;
     invoke("sync_remote_agents", payload).catch(() => {});
-  }, [agents, isSecondaryWindow, projects, runtimeFlags]);
+  }, [agents, isSecondaryWindow, projects, remoteEnabled, runtimeFlags]);
 
-  // Mirror projects + sessions so the remote web client can list them.
-  // The web client is an independent viewer: it picks which session to
-  // view locally, so desktop active/layout is intentionally not synced.
+  // Mirror projects, sessions, and the read-only Screen layout so the remote
+  // client can offer the same Screen/session navigation as the desktop app.
+  // Remote selection remains independent and never changes the desktop view.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || IS_COMPANY_BUILD) return;
+    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
     const payload = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -723,12 +912,27 @@ function App() {
         status: a.status,
         aiToolId: a.aiToolId,
       })),
+      groups: groups.flatMap((group) => {
+        // Remote clients only understand agent ids — hide doc tabs.
+        const layout = stripDocTabs(group.layout);
+        if (!layout) return [];
+        return [{ id: group.id, projectId: group.projectId, layout }];
+      }),
+      activeGroupId,
     };
     const view = JSON.stringify(payload);
     if (remoteViewJsonRef.current === view) return;
     remoteViewJsonRef.current = view;
     invoke("sync_remote_view", { view }).catch(() => {});
-  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+  }, [
+    projects,
+    agents,
+    groups,
+    activeGroupId,
+    isSecondaryWindow,
+    remoteEnabled,
+    runtimeFlags,
+  ]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
@@ -771,7 +975,12 @@ function App() {
         lastSessionId: a.lastSessionId ?? null,
         sshHostId: a.sshHostId ?? null,
       })),
-      groups,
+      // Monitor clients only understand agent ids — hide doc tabs.
+      groups: groups.flatMap((group) => {
+        const layout = stripDocTabs(group.layout);
+        if (!layout) return [];
+        return [{ ...group, layout }];
+      }),
       view: {
         activeProjectId,
         activeGroupId,
@@ -840,6 +1049,9 @@ function App() {
   }, [agents]);
 
   useEffect(() => {
+    // Secondary windows must not overwrite the shared screen layout — that would
+    // sync their activation into the main window and pollute restore-on-launch.
+    if (bootIsSecondary) return;
     writeLocalStorageIfChanged(
       storedGroupsJsonRef,
       LS_GROUPS,
@@ -848,7 +1060,7 @@ function App() {
   }, [groups]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || isSecondaryWindow || bootIsSecondary) return;
     // While the startup reopen prompt is open we deliberately hold activeGroupId
     // at null; don't persist that, or we'd lose the group to reopen.
     if (pendingReopen) return;
@@ -868,9 +1080,78 @@ function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_DOCS_WIDTH, String(docsWidth));
+      localStorage.setItem(LS_FILES_WIDTH, String(filesWidth));
     } catch {}
-  }, [docsWidth]);
+  }, [filesWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_FILES_OPEN, String(filesOpen));
+    } catch {}
+  }, [filesOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_SIDEBAR_OPEN, String(sidebarOpen));
+    } catch {}
+  }, [sidebarOpen]);
+
+  // Keep the native window-control overlay colors in sync with the theme.
+  useEffect(() => {
+    if (!isElectronRuntime()) return;
+    const el = document.querySelector(".app");
+    if (!el) return;
+    const styles = getComputedStyle(el);
+    const hex = (name: string) => {
+      const value = styles.getPropertyValue(name).trim();
+      return /^#[0-9a-fA-F]{3,8}$/.test(value) ? value : null;
+    };
+    invoke("set_titlebar_overlay", {
+      color: hex("--app-panel") ?? "#0b0f15",
+      symbolColor: hex("--app-muted") ?? "#8b949e",
+    }).catch(() => {});
+  }, [appTheme]);
+
+  useEffect(() => {
+    saveAttentionItems(attentionItems);
+  }, [attentionItems]);
+
+  useEffect(() => {
+    saveCommandShortcuts(commandShortcuts);
+  }, [commandShortcuts]);
+
+  useEffect(() => {
+    if (!quickOpen) return;
+    let cancelled = false;
+    setQuickDocumentsLoading(true);
+    void Promise.all(
+      projects
+        .filter((project) => !project.sshHostId)
+        .map(async (project) => {
+          try {
+            const files = await invoke<Array<{ name: string; relative_path: string }>>(
+              "list_markdown_files",
+              { folder: project.folder }
+            );
+            return files.map((file) => ({
+              projectId: project.id,
+              projectName: project.name,
+              relativePath: file.relative_path,
+              name: file.name,
+            }));
+          } catch {
+            return [];
+          }
+        })
+    ).then((groups) => {
+      if (!cancelled) setQuickDocuments(groups.flat());
+    }).finally(() => {
+      if (!cancelled) setQuickDocumentsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projects, quickOpen]);
 
   useEffect(() => {
     for (const entry of termsRef.current.values()) {
@@ -904,42 +1185,27 @@ function App() {
         setSearchOpen(false);
         return;
       }
-      if (event.key === "Escape" && docsOpen && !settingsOpen) {
+      if (event.key === "Escape" && quickOpen) {
         event.preventDefault();
-        setDocsOpen(false);
+        setQuickOpen(false);
         return;
       }
-      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
+      if (event.key === "Escape" && attentionOpen) {
+        event.preventDefault();
+        setAttentionOpen(false);
         return;
       }
+      const commandId = commandForKeyboardEvent(event, commandShortcuts);
+      if (
+        commandId &&
+        (!inField || commandId === "quick-open" || commandId === "attention-center")
+      ) {
+        event.preventDefault();
+        executeCommandRef.current?.(commandId);
+        return;
+      }
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
       const key = event.key.toLowerCase();
-      if (key === "f") {
-        if (inField) return;
-        event.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-      if (key === "t") {
-        if (inField) return;
-        event.preventDefault();
-        if (activeProjectIdRef.current) setShowModal(true);
-        else setShowProjectModal(true);
-        return;
-      }
-      if (key === "w") {
-        if (inField) return;
-        event.preventDefault();
-        const groupId = activeGroupIdRef.current;
-        const path = activePathRef.current;
-        if (!groupId || !path) return;
-        const group = groupsRef.current.find((g) => g.id === groupId);
-        if (!group) return;
-        const node = getAt(group.layout, path);
-        if (!node || node.type !== "leaf") return;
-        const activeId = node.tabs[node.activeIndex];
-        if (activeId) closeTabRef.current?.(path, activeId);
-        return;
-      }
       if (key >= "1" && key <= "9") {
         if (inField) return;
         const idx = parseInt(key, 10) - 1;
@@ -958,7 +1224,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [docsOpen, searchOpen, settingsOpen]);
+  }, [attentionOpen, commandShortcuts, quickOpen, searchOpen, settingsOpen]);
 
   const handleThemeChange = useCallback((theme: AppThemeId) => {
     setAppTheme(theme);
@@ -967,7 +1233,7 @@ function App() {
 
   useEffect(() => {
     const handleResize = () => {
-      setDocsWidth((width) => clampDocsWidth(width));
+      setFilesWidth((width) => clampFilesWidth(width));
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -1005,6 +1271,22 @@ function App() {
     },
     []
   );
+
+  const pushAttention = useCallback((draft: AttentionDraft) => {
+    setAttentionItems((items) => {
+      const existing = items.find((item) => item.dedupeKey === draft.dedupeKey);
+      if (
+        existing &&
+        existing.createdAt === draft.createdAt &&
+        existing.body === draft.body
+      ) return items;
+      return upsertAttentionItem(items, {
+        ...draft,
+        id: `${draft.dedupeKey}:${draft.createdAt}:${crypto.randomUUID()}`,
+        read: false,
+      });
+    });
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -1083,6 +1365,15 @@ function App() {
     listen<{ agentId?: string }>("desktop-pet:activate", (event) => {
       activate(event.payload?.agentId);
       setDesktopPetCompletions([]);
+      if (event.payload?.agentId) {
+        const agentId = event.payload.agentId;
+        setAttentionItems((items) =>
+          markAttentionRead(
+            items,
+            new Set(items.filter((item) => item.agentId === agentId).map((item) => item.id))
+          )
+        );
+      }
     }).then(track).catch(() => {});
     listen("desktop-pet:close-requested", () => {
       handleDesktopPetEnabledChange(false);
@@ -1103,17 +1394,43 @@ function App() {
       else unsubs.push(u);
     };
 
-    listen<{ id: string; data: string }>("pty:data", (e) => {
+    listen<TerminalDataPayload>("pty:data", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
-      const data = e.payload.data;
       const entry = termsRef.current.get(id);
-      entry?.term.write(data);
+      if (entry) {
+        const result = deliverTerminalData(
+          entry,
+          e.payload,
+          (data) => entry.term.write(data)
+        );
+        if (result === "gap" && isElectronRuntime()) {
+          const resync = async () => {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              const replay = await invoke<TerminalReplay>("attach_terminal", {
+                id,
+                afterSequence: entry.lastSequence,
+              });
+              if (termsRef.current.get(id) !== entry) {
+                await invoke("detach_terminal", { id }).catch(() => {});
+                return;
+              }
+              const syncResult = completeTerminalSync(
+                entry,
+                replay,
+                (data) => entry.term.write(data)
+              );
+              if (syncResult !== "gap") return;
+            }
+          };
+          void resync().catch(() => {});
+        }
+      }
 
       setAgents((cur) =>
         cur.map((a) =>
           a.id === id && (a.status === "idle" || a.status === "starting")
-            ? { ...a, status: "running" }
+            ? applyAgentRuntimeStatus(a, "running")
             : a
         )
       );
@@ -1122,19 +1439,45 @@ function App() {
     listen<{ id: string }>("pty:exit", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
+      const exitingAgent = agentsRef.current.find((agent) => agent.id === id);
+      if (exitingAgent && isAgentActivelyWorking(exitingAgent)) {
+        const sessionKey =
+          exitingAgent.activity?.providerSessionId?.trim() ||
+          exitingAgent.lastSessionId?.trim() ||
+          id;
+        const projectName =
+          projectsRef.current.find((project) => project.id === exitingAgent.projectId)
+            ?.name || "Unknown project";
+        pushAttention({
+          dedupeKey: `stale:${sessionKey}`,
+          kind: "stale",
+          agentId: id,
+          sessionKey,
+          title: `${projectName} / ${exitingAgent.name}`,
+          body: "작업 중 PTY가 종료되었습니다. 세션 상태를 확인해 주세요.",
+          createdAt: Date.now(),
+        });
+      }
       const entry = termsRef.current.get(id);
       if (entry) {
+        entry.spawned = false;
+        entry.spawnPromise = null;
+        entry.attached = false;
+        entry.syncing = false;
+        entry.pendingOutput = [];
         try {
           const data = entry.serialize.serialize({ scrollback: 1000 });
           saveScrollback(id, data);
         } catch {}
       }
       setAgents((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: "exited" } : a))
+        prev.map((a) =>
+          a.id === id ? applyAgentRuntimeStatus(a, "exited") : a
+        )
       );
     }).then(track);
 
-    if (!IS_COMPANY_BUILD) {
+    if (remoteEnabled) {
       listen<{ login: string }>("remote:access-request", (e) => {
         if (cancelled) return;
         playNotificationSound();
@@ -1147,63 +1490,51 @@ function App() {
     }
 
 
-    listen<void>("app:close-requested", async () => {
-      if (cancelled) return;
-      // Remember which sessions were running so the next launch can offer to
-      // reopen them all (across every group), not just the active one. Snapshot
-      // before /quit, which flips them to exited.
-      try {
-        const running = agentsRef.current
-          .filter((a) => {
-            if (a.status === "exited" || a.status === "idle") return false;
-            const e = termsRef.current.get(a.id);
-            return !!e && e.spawned;
-          })
-          .map((a) => a.id);
-        localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(running));
-      } catch {
-        // ignore
-      }
-      // Session IDs are already captured at SessionStart time; close path just
-      // needs to send /quit so the tools shut down cleanly, then confirm.
-      const targets = agentsRef.current.filter((a) => {
-        if (a.status === "exited" || a.status === "idle") return false;
-        if (a.aiToolId !== "codex" && a.aiToolId !== "claude") return false;
-        const e = termsRef.current.get(a.id);
-        return !!e && e.spawned;
-      });
-      await Promise.all(
-        targets.map((a) =>
-          invoke("write_pty", { id: a.id, data: "/quit\r" }).catch(() => {})
-        )
-      );
-      await new Promise((r) =>
-        setTimeout(r, targets.length > 0 ? 300 : 50)
-      );
-      for (const [agentId, entry] of termsRef.current) {
-        try {
-          const data = entry.serialize.serialize({ scrollback: 1000 });
-          saveScrollback(agentId, data);
-        } catch (err) {
-          console.warn("serialize failed", agentId, err);
-        }
-      }
-      await invoke("confirm_close").catch(() => {});
-    }).then(track);
-
-    listen<{
-      id: string;
-      event: string;
-      session_id?: string;
-      prompt?: string;
-    }>(
+    listen<AgentHookEvent>(
       "agent:hook-event",
       (e) => {
         if (cancelled) return;
-        const { id, event, session_id, prompt } = e.payload;
-        if (event === "working") {
-          const workingAgent = agentsRef.current.find((agent) => agent.id === id);
-          const sessionKey = workingAgent?.lastSessionId?.trim() || id;
+        const payload = e.payload;
+        const { id, event } = payload;
+        const currentAgent = agentsRef.current.find((agent) => agent.id === id);
+        const nextAgent = currentAgent
+          ? applyAgentHookEvent(currentAgent, payload)
+          : null;
+        const nextWorkStatus = nextAgent?.activity?.workStatus;
+        const isActiveWork =
+          nextWorkStatus === "working" ||
+          nextWorkStatus === "waiting" ||
+          nextWorkStatus === "blocked";
+
+        if (isActiveWork && nextAgent) {
+          const sessionKey =
+            nextAgent.activity?.providerSessionId?.trim() ||
+            nextAgent.lastSessionId?.trim() ||
+            id;
+          const projectName =
+            projectsRef.current.find((project) => project.id === nextAgent.projectId)
+              ?.name || "Unknown project";
+          setAttentionItems((items) =>
+            removeSessionAttention(items, sessionKey)
+          );
+          if (nextWorkStatus === "waiting" || nextWorkStatus === "blocked") {
+            const kind: AttentionKind = nextWorkStatus;
+            const body =
+              nextAgent.activity?.interactiveQuestion?.trim() ||
+              nextAgent.activity?.lastPrompt?.trim() ||
+              (kind === "waiting"
+                ? "사용자 응답 또는 권한 승인을 기다리고 있습니다."
+                : "작업이 차단되었습니다. 세션을 확인해 주세요.");
+            pushAttention({
+              dedupeKey: `${kind}:${sessionKey}`,
+              kind,
+              agentId: id,
+              sessionKey,
+              title: `${projectName} / ${nextAgent.name}`,
+              body,
+              createdAt: nextAgent.activity?.receivedAt || Date.now(),
+            });
+          }
           setDesktopPetCompletions((previous) =>
             previous.filter(
               (completion) =>
@@ -1212,21 +1543,21 @@ function App() {
           );
           setDesktopPetQuestions((previous) => {
             const next = { ...previous };
-            const question = prompt?.trim();
+            const question =
+              payload.interactive_question?.trim() ||
+              (payload.tool_name?.toLowerCase() === "askuserquestion"
+                ? payload.tool_input?.trim()
+                : undefined) ||
+              payload.prompt?.trim();
             if (question) next[id] = question;
-            else delete next[id];
             desktopPetQuestionsRef.current = next;
             return next;
           });
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.status !== "exited"
-                ? { ...a, status: "working" }
-                : a
-            )
-          );
-        } else if (event === "done") {
-          const completedQuestion = desktopPetQuestionsRef.current[id];
+        } else if (event === "done" && nextAgent) {
+          const completedQuestion =
+            desktopPetQuestionsRef.current[id] ||
+            currentAgent?.activity?.interactiveQuestion ||
+            currentAgent?.activity?.lastPrompt;
           setDesktopPetQuestions((previous) => {
             if (!(id in previous)) return previous;
             const next = { ...previous };
@@ -1234,15 +1565,20 @@ function App() {
             desktopPetQuestionsRef.current = next;
             return next;
           });
-          const target = agentsRef.current.find((a) => a.id === id);
-          if (target && target.status === "working") {
+          const hadActiveWork =
+            currentAgent &&
+            (isAgentActivelyWorking(currentAgent) ||
+              currentAgent.activity?.workStatus === "working" ||
+              currentAgent.activity?.workStatus === "waiting" ||
+              currentAgent.activity?.workStatus === "blocked");
+          if (currentAgent && hadActiveWork) {
             const project = projectsRef.current.find(
-              (candidate) => candidate.id === target.projectId
+              (candidate) => candidate.id === currentAgent.projectId
             );
             const projectName = project?.name || "Unknown project";
-            const title = `${projectName} / ${target.name}`;
+            const title = `${projectName} / ${currentAgent.name}`;
             const petCompletion = completionForAgent(
-              target,
+              nextAgent,
               projectsRef.current,
               completedQuestion
             );
@@ -1256,8 +1592,23 @@ function App() {
                 .slice(-8),
               petCompletion,
             ]);
+            const sessionKey = petCompletion.sessionKey;
+            setAttentionItems((items) =>
+              removeSessionAttention(items, sessionKey)
+            );
+            pushAttention({
+              dedupeKey: `completed:${sessionKey}`,
+              kind: "completed",
+              agentId: currentAgent.id,
+              sessionKey,
+              title,
+              body: completedQuestion?.trim()
+                ? `완료 · ${completedQuestion.trim()}`
+                : "작업이 끝났습니다.",
+              createdAt: nextAgent.activity?.receivedAt || Date.now(),
+            });
             playNotificationSound();
-            pushToast(target.id, title, "작업이 끝났어요");
+            pushToast(currentAgent.id, title, "작업이 끝났어요");
             // When the app isn't focused, flash the taskbar so the user notices
             // (clicking the taskbar brings the app forward, where the in-app
             // toast is clickable to jump to the session). The always-on-top
@@ -1270,25 +1621,20 @@ function App() {
                 getCurrentWindow()
                   .requestUserAttention(UserAttentionType.Critical)
                   .catch(() => {});
+                notifyDone({
+                  projectName,
+                  sessionName: currentAgent.name,
+                  onActivate: () => selectAgentRef.current?.(currentAgent.id),
+                }).catch(() => {});
               })
               .catch(() => {});
           }
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.status === "working"
-                ? { ...a, status: "running" }
-                : a
-            )
-          );
-        } else if (event === "session-start" && session_id) {
-          setAgents((cur) =>
-            cur.map((a) =>
-              a.id === id && a.lastSessionId !== session_id
-                ? { ...a, lastSessionId: session_id }
-                : a
-            )
-          );
         }
+        setAgents((cur) =>
+          cur.map((agent) =>
+            agent.id === id ? applyAgentHookEvent(agent, payload) : agent
+          )
+        );
       }
     ).then(track);
 
@@ -1296,7 +1642,114 @@ function App() {
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [pushToast]);
+  }, [pushAttention, pushToast]);
+
+  // A lost Stop hook must not leave the UI and desktop pet spinning forever.
+  // Keep the detailed activity for diagnostics, but degrade stale work to the
+  // live process state until a new hook event arrives.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      for (const agent of agentsRef.current) {
+        const activity = agent.activity;
+        if (
+          !activity ||
+          now - activity.receivedAt <= AGENT_ACTIVITY_STALE_AFTER_MS ||
+          !["working", "waiting", "blocked"].includes(activity.workStatus)
+        ) continue;
+        const sessionKey =
+          activity.providerSessionId?.trim() ||
+          agent.lastSessionId?.trim() ||
+          agent.id;
+        const projectName =
+          projectsRef.current.find((project) => project.id === agent.projectId)?.name ||
+          "Unknown project";
+        pushAttention({
+          dedupeKey: `stale:${sessionKey}`,
+          kind: "stale",
+          agentId: agent.id,
+          sessionKey,
+          title: `${projectName} / ${agent.name}`,
+          body: "Hook 상태가 오래되어 현재 작업 상태를 다시 확인해야 합니다.",
+          createdAt: activity.receivedAt,
+        });
+      }
+      setAgents((current) =>
+        current.map((agent) => {
+          const status = deriveAgentStatus(
+            runtimeStatusOf(agent),
+            agent.activity,
+            now
+          );
+          return status === agent.status ? agent : { ...agent, status };
+        })
+      );
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [pushAttention]);
+
+  // Keep the close handshake isolated from the frequently-changing PTY/hook
+  // listeners. That prevents an effect cleanup race from leaving Electron to
+  // wait for its fallback timeout during shutdown.
+  useEffect(() => {
+    if (!runtimeFlags || isSecondaryWindow) return;
+    let closing = false;
+    let unsubscribe: (() => void) | null = null;
+    listen<void>("app:close-requested", async () => {
+      if (closing) return;
+      closing = true;
+      try {
+        const running = agentsRef.current
+          .filter((agent) => {
+            if (agent.status === "exited" || agent.status === "idle") return false;
+            return Boolean(termsRef.current.get(agent.id)?.spawned);
+          })
+          .map((agent) => agent.id);
+        localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(running));
+        await persistStorageSnapshot().catch(() => {});
+
+        const targets = agentsRef.current.filter((agent) => {
+          if (agent.status === "exited" || agent.status === "idle") return false;
+          if (agent.aiToolId !== "codex" && agent.aiToolId !== "claude") return false;
+          return Boolean(termsRef.current.get(agent.id)?.spawned);
+        });
+        await Promise.all(
+          targets.map((agent) =>
+            isElectronRuntime()
+              ? invoke("terminal_session_action", {
+                  id: agent.id,
+                  action: "quit",
+                }).catch(() => {})
+              : invoke("write_pty", {
+                  id: agent.id,
+                  data: "/quit\r",
+                }).catch(() => {})
+          )
+        );
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, targets.length > 0 ? 300 : 20)
+        );
+        for (const [agentId, entry] of termsRef.current) {
+          try {
+            saveScrollback(
+              agentId,
+              entry.serialize.serialize({ scrollback: 1000 })
+            );
+          } catch (error) {
+            console.warn("serialize failed", agentId, error);
+          }
+        }
+        await persistStorageSnapshot().catch(() => {});
+      } finally {
+        await invoke("confirm_close").catch(() => {});
+      }
+    })
+      .then((remove) => {
+        unsubscribe = remove;
+      })
+      .catch(() => {});
+    return () => unsubscribe?.();
+  }, [isSecondaryWindow, remoteEnabled, runtimeFlags]);
 
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 
@@ -1316,6 +1769,15 @@ function App() {
     []
   );
 
+  const commitGroupState = useCallback((next: groupOps.GroupState) => {
+    groupsRef.current = next.groups;
+    activeGroupIdRef.current = next.activeGroupId;
+    activePathRef.current = next.activePath;
+    setGroups(next.groups);
+    setActiveGroupId(next.activeGroupId);
+    setActivePath(next.activePath);
+  }, []);
+
   const activateAgentProject = useCallback((agentId: string) => {
     const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
     if (!agent) return null;
@@ -1330,7 +1792,13 @@ function App() {
     return agent;
   }, []);
 
-  const restartAgent = useCallback((id: string) => {
+  const restartAgent = useCallback(async (id: string) => {
+    const wasIdle = agentsRef.current.find((agent) => agent.id === id)?.status === "idle";
+    if (isElectronRuntime()) {
+      await invoke("terminal_session_action", { id, action: "restart" }).catch(() => {});
+    } else {
+      await invoke("kill_pty", { id }).catch(() => {});
+    }
     const entry = termsRef.current.get(id);
     if (entry) {
       entry.term.dispose();
@@ -1338,14 +1806,22 @@ function App() {
     }
     clearScrollback(id);
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+      prev.map((a) =>
+        a.id === id
+          ? applyAgentRuntimeStatus(a, wasIdle ? "starting" : "idle")
+          : a
+      )
     );
   }, []);
 
   // Stop a running session's PTY process to free CPU/memory, but keep it
   // in the list (and its lastSessionId). Selecting it again respawns/resumes.
-  const deactivateAgent = useCallback((id: string) => {
-    invoke("kill_pty", { id }).catch(() => {});
+  const deactivateAgent = useCallback(async (id: string) => {
+    if (isElectronRuntime()) {
+      await invoke("terminal_session_action", { id, action: "sleep" }).catch(() => {});
+    } else {
+      await invoke("kill_pty", { id }).catch(() => {});
+    }
     const entry = termsRef.current.get(id);
     if (entry) {
       try {
@@ -1354,18 +1830,24 @@ function App() {
       termsRef.current.delete(id);
     }
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: "idle" } : a))
+      prev.map((a) =>
+        a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
+      )
     );
-  }, []);
+    applyGroupOp((state) => groupOps.removeAgentFromLayout(state, id));
+  }, [applyGroupOp]);
 
   const selectAgent = useCallback(
     (agentId: string) => {
       const agent = activateAgentProject(agentId);
-      applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
       const current = agentsRef.current.find((a) => a.id === agentId);
       if (current?.status === "exited") {
-        restartAgent(agentId);
+        void restartAgent(agentId).then(() => {
+          applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
+        });
+        return;
       }
+      applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
     },
     [activateAgentProject, applyGroupOp, restartAgent]
   );
@@ -1439,18 +1921,120 @@ function App() {
     [activateAgentProject, applyGroupOp]
   );
 
-  const closeTab = useCallback(
-    (path: Path, agentId: string) =>
-      applyGroupOp((s) =>
-        groupOps.closeTab(
-          s,
-          path,
-          agentId,
-          agentsRef.current.find((agent) => agent.id === agentId)?.projectId
-        )
-      ),
-    [applyGroupOp]
+  const closeTab = useCallback((path: Path, agentId: string) => {
+    if (isDocTabId(agentId) || isGitHistoryTabId(agentId)) {
+      // Doc and git-history tabs are simply discarded (no detached solo group,
+      // no reopen history in v1).
+      const next = groupOps.closeDocTab(
+        {
+          groups: groupsRef.current,
+          activeGroupId: activeGroupIdRef.current,
+          activePath: activePathRef.current,
+        },
+        path,
+        agentId
+      );
+      commitGroupState(next);
+      return;
+    }
+    const result = groupOps.closeTabWithHistory(
+      {
+        groups: groupsRef.current,
+        activeGroupId: activeGroupIdRef.current,
+        activePath: activePathRef.current,
+      },
+      path,
+      agentId,
+      agentsRef.current.find((agent) => agent.id === agentId)?.projectId
+    );
+    if (!result.closed) return;
+    recentlyClosedTabsRef.current = [
+      ...recentlyClosedTabsRef.current.slice(-(MAX_RECENTLY_CLOSED_TABS - 1)),
+      result.closed,
+    ];
+    commitGroupState(result.state);
+  }, [commitGroupState]);
+
+  // Tab context-menu batch closers. Compute the target tab ids from the leaf
+  // up front (so shifting indices don't matter), skip pinned tabs, then close
+  // each. Closing detaches the session to its own group (it is not killed).
+  const closeTabsInLeaf = useCallback(
+    (path: Path, keep: (agentId: string, index: number) => boolean) => {
+      const group = groupsRef.current.find(
+        (g) => g.id === activeGroupIdRef.current
+      );
+      const leaf = group ? getAt(group.layout, path) : null;
+      if (!leaf || leaf.type !== "leaf") return;
+      const pinnedIds = new Set(
+        agentsRef.current.filter((a) => a.pinned).map((a) => a.id)
+      );
+      const toClose = leaf.tabs.filter(
+        (id, index) => !keep(id, index) && !pinnedIds.has(id)
+      );
+      for (const id of toClose) closeTabRef.current?.(path, id);
+    },
+    []
   );
+
+  const closeOtherTabs = useCallback(
+    (path: Path, agentId: string) =>
+      closeTabsInLeaf(path, (id) => id === agentId),
+    [closeTabsInLeaf]
+  );
+
+  const closeTabsToRight = useCallback(
+    (path: Path, agentId: string) => {
+      const group = groupsRef.current.find(
+        (g) => g.id === activeGroupIdRef.current
+      );
+      const leaf = group ? getAt(group.layout, path) : null;
+      if (!leaf || leaf.type !== "leaf") return;
+      const anchor = leaf.tabs.indexOf(agentId);
+      if (anchor < 0) return;
+      closeTabsInLeaf(path, (_id, index) => index <= anchor);
+    },
+    [closeTabsInLeaf]
+  );
+
+  const setAgentPinned = useCallback((agentId: string, pinned: boolean) => {
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.id === agentId ? { ...a, pinned: pinned || undefined } : a
+      )
+    );
+  }, []);
+
+  const setAgentTabColor = useCallback(
+    (agentId: string, color: string | null) => {
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === agentId ? { ...a, tabColor: color || undefined } : a
+        )
+      );
+    },
+    []
+  );
+
+  const reopenClosedTab = useCallback(() => {
+    while (recentlyClosedTabsRef.current.length > 0) {
+      const closed = recentlyClosedTabsRef.current.pop()!;
+      if (!agentsRef.current.some((agent) => agent.id === closed.agentId)) {
+        continue;
+      }
+      const result = groupOps.reopenClosedTab(
+        {
+          groups: groupsRef.current,
+          activeGroupId: activeGroupIdRef.current,
+          activePath: activePathRef.current,
+        },
+        closed
+      );
+      if (!result.restored) continue;
+      commitGroupState(result.state);
+      activateAgentProject(closed.agentId);
+      return;
+    }
+  }, [activateAgentProject, commitGroupState]);
 
   useEffect(() => {
     closeTabRef.current = closeTab;
@@ -1537,7 +2121,12 @@ function App() {
       if (!ok) return;
 
       for (const a of members) {
-        await invoke("kill_pty", { id: a.id }).catch(() => {});
+        await invoke(
+          isElectronRuntime() ? "terminal_session_action" : "kill_pty",
+          isElectronRuntime()
+            ? { id: a.id, action: "close" }
+            : { id: a.id }
+        ).catch(() => {});
         const entry = termsRef.current.get(a.id);
         entry?.term.dispose();
         termsRef.current.delete(a.id);
@@ -1553,6 +2142,23 @@ function App() {
       for (const id of memberIds) {
         applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
       }
+      // Also prune this project's doc and git-history tabs from every layout.
+      applyGroupOp((s) => {
+        let state = s;
+        for (const group of s.groups) {
+          for (const tabId of collectAgentIds(group.layout)) {
+            if (
+              (isDocTabId(tabId) &&
+                parseDocTabId(tabId)?.projectId === projectId) ||
+              (isGitHistoryTabId(tabId) &&
+                parseGitHistoryTabId(tabId)?.projectId === projectId)
+            ) {
+              state = groupOps.removeAgentFromLayout(state, tabId);
+            }
+          }
+        }
+        return state;
+      });
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       if (activeProjectIdRef.current === projectId) {
         setActiveProjectId(null);
@@ -1583,6 +2189,7 @@ function App() {
           aiLabel: tool.label,
           dangerous: payload.dangerous && !!tool.dangerousFlag,
           status: "starting",
+          runtimeStatus: "starting",
           createdAt: Date.now(),
           sshHostId: project.sshHostId,
           remoteFolder: project.remoteFolder,
@@ -1594,7 +2201,21 @@ function App() {
   );
 
   const setAgentStatus = useCallback((id: string, status: AgentStatus) => {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    setAgents((prev) =>
+      prev.map((agent) => {
+        if (agent.id !== id) return agent;
+        if (
+          status === "idle" ||
+          status === "starting" ||
+          status === "running" ||
+          status === "exited" ||
+          status === "unreachable"
+        ) {
+          return applyAgentRuntimeStatus(agent, status as AgentRuntimeStatus);
+        }
+        return { ...agent, runtimeStatus: "running", status };
+      })
+    );
   }, []);
 
   const setAgentSessionId = useCallback((id: string, sessionId: string | null) => {
@@ -1610,7 +2231,10 @@ function App() {
   const removeAgent = useCallback(
     async (id: string) => {
       removedAgentIdsRef.current.add(id);
-      await invoke("kill_pty", { id }).catch(() => {});
+      await invoke(
+        isElectronRuntime() ? "terminal_session_action" : "kill_pty",
+        isElectronRuntime() ? { id, action: "close" } : { id }
+      ).catch(() => {});
       const entry = termsRef.current.get(id);
       entry?.term.dispose();
       termsRef.current.delete(id);
@@ -1789,10 +2413,9 @@ function App() {
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
       else if (action === "restart") {
-        selectAgent(id);
-        restartAgent(id);
+        void restartAgent(id).then(() => selectAgent(id));
       } else if (action === "deactivate") {
-        deactivateAgent(id);
+        void deactivateAgent(id);
       } else if (action === "relink") {
         relinkSession(id);
       } else if (action === "properties") {
@@ -1823,17 +2446,17 @@ function App() {
     setDropTarget(null);
   }, []);
 
-  const handleDocsResizeStart = useCallback(
+  const handleFilesResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      document.body.classList.add("docs-resizing");
+      document.body.classList.add("files-resizing");
 
       const handleMove = (moveEvent: PointerEvent) => {
-        setDocsWidth(clampDocsWidth(window.innerWidth - moveEvent.clientX));
+        setFilesWidth(clampFilesWidth(window.innerWidth - moveEvent.clientX));
       };
       const handleEnd = () => {
-        document.body.classList.remove("docs-resizing");
+        document.body.classList.remove("files-resizing");
         window.removeEventListener("pointermove", handleMove);
         window.removeEventListener("pointerup", handleEnd);
         window.removeEventListener("pointercancel", handleEnd);
@@ -1846,8 +2469,60 @@ function App() {
     []
   );
 
+  // Open a project file as a document tab in the main workspace.
+  // Re-clicking an already-open file focuses its existing tab: first in the
+  // active Screen, otherwise openAsTab moves it here from any other group.
+  const openDocTab = useCallback(
+    (projectId: string, relativePath: string) => {
+      const docId = makeDocTabId(projectId, relativePath);
+      applyGroupOp((s) => {
+        const group = s.groups.find((g) => g.id === s.activeGroupId);
+        // Already open in the active screen → just focus it.
+        if (group && s.activePath) {
+          const existingPath = findLeafPath(group.layout, docId);
+          if (existingPath) {
+            const layout = setLeafActiveTab(group.layout, existingPath, docId);
+            return {
+              groups: updateGroup(s.groups, group.id, layout),
+              activeGroupId: s.activeGroupId,
+              activePath: existingPath,
+            };
+          }
+        }
+        // openAsTab appends to the active leaf, or — when no screen is open —
+        // creates a new solo group for the doc, so a document can open even
+        // before any terminal session exists.
+        return groupOps.openAsTab(s, docId, projectId);
+      });
+    },
+    [applyGroupOp]
+  );
+
+  const openGitHistoryTab = useCallback(
+    (projectId: string, relativePath?: string | null) => {
+      const gitId = makeGitHistoryTabId(projectId, relativePath ?? null);
+      applyGroupOp((s) => {
+        const group = s.groups.find((g) => g.id === s.activeGroupId);
+        // Already open in the active screen → just focus it.
+        if (group && s.activePath) {
+          const existingPath = findLeafPath(group.layout, gitId);
+          if (existingPath) {
+            const layout = setLeafActiveTab(group.layout, existingPath, gitId);
+            return {
+              groups: updateGroup(s.groups, group.id, layout),
+              activeGroupId: s.activeGroupId,
+              activePath: existingPath,
+            };
+          }
+        }
+        return groupOps.openAsTab(s, gitId, projectId);
+      });
+    },
+    [applyGroupOp]
+  );
+
   const handleOpenMarkdownPath = useCallback(
-    async (agentId: string, path: string) => {
+    async (agentId: string, path: string, external = false) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
       const project = projectsRef.current.find(
         (candidate) => candidate.id === agent?.projectId
@@ -1859,25 +2534,32 @@ function App() {
           folder: project.folder,
           path,
         });
-        if (isHtmlDocumentPath(relativePath)) {
+        // Ctrl/Cmd+click → open with the OS default app (browser for .html)
+        // instead of the in-app doc tab.
+        if (external) {
           const fullPath = isAbsoluteFsPath(relativePath)
             ? relativePath
             : joinFsPath(project.folder, relativePath);
           await invoke("open_local_path", { path: fullPath });
           return;
         }
-        setDocsOpen(true);
-        setDocsRequest({
-          projectId: project.id,
-          agentId,
-          relativePath,
-          key: Date.now(),
-        });
+        // resolve_markdown_path returns an absolute path only for docs living
+        // outside the project root — those still open externally.
+        if (isAbsoluteFsPath(relativePath)) {
+          const inside = relativeIfInside(project.folder, relativePath);
+          if (inside) {
+            openDocTab(project.id, inside);
+          } else {
+            await invoke("open_local_path", { path: relativePath });
+          }
+          return;
+        }
+        openDocTab(project.id, relativePath);
       } catch {
         pushToast(agentId, agent.name, "문서 파일을 열 수 없습니다.");
       }
     },
-    [pushToast]
+    [openDocTab, pushToast]
   );
 
   const handleOpenImagePath = useCallback((agentId: string, path: string) => {
@@ -1928,7 +2610,12 @@ function App() {
         }
 
         if (resolved.kind === "html") {
-          await invoke("open_local_path", { path: resolved.path });
+          const inside = relativeIfInside(project.folder, resolved.path);
+          if (inside) {
+            openDocTab(project.id, inside);
+          } else {
+            await invoke("open_local_path", { path: resolved.path });
+          }
           return;
         }
 
@@ -1937,13 +2624,13 @@ function App() {
             folder: project.folder,
             path: resolved.path,
           });
-          setDocsOpen(true);
-          setDocsRequest({
-            projectId: project.id,
-            agentId,
-            relativePath,
-            key: Date.now(),
-          });
+          if (isAbsoluteFsPath(relativePath)) {
+            const inside = relativeIfInside(project.folder, relativePath);
+            if (inside) openDocTab(project.id, inside);
+            else await invoke("open_local_path", { path: relativePath });
+          } else {
+            openDocTab(project.id, relativePath);
+          }
           return;
         }
 
@@ -1957,7 +2644,7 @@ function App() {
         pushToast(agentId, agent.name, `경로를 열 수 없습니다: ${String(error)}`);
       }
     },
-    [pushToast]
+    [openDocTab, pushToast]
   );
 
   // Spawn an agent's PTY without it being the visible pane — used to reopen
@@ -1982,7 +2669,7 @@ function App() {
         );
         termsRef.current.set(agentId, entry);
       }
-      if (!entry.opened) {
+      if (!entry.opened && !isElectronRuntime()) {
         // Don't call term.open() on a detached element — xterm's renderer needs
         // an attached, sized node. Writes still buffer and render when PaneSlot
         // opens it on first view. Restore scrollback here, since PaneSlot only
@@ -1998,25 +2685,35 @@ function App() {
       entry.spawned = true;
       setAgentStatus(agentId, "starting");
       try {
-        const group = groupsRef.current.find((g) =>
-          collectAgentIds(g.layout).has(agentId)
-        );
-        const { initCommand, ssh, cwd } = await buildSpawnArgs(
-          agent,
-          group?.sessionPins ?? null,
-          setAgentSessionId
-        );
-        await invoke("spawn_pty", {
-          id: agentId,
-          shell: null,
-          cwd,
-          initCommand,
-          aiToolId: agent.aiToolId,
-          ssh,
-          cols: 120,
-          rows: 30,
-        });
+        entry.spawnPromise = (async () => {
+          const group = groupsRef.current.find((g) =>
+            collectAgentIds(g.layout).has(agentId)
+          );
+          const { initCommand, ssh, cwd } = await buildSpawnArgs(
+            agent,
+            group?.sessionPins ?? null,
+            setAgentSessionId
+          );
+          return invoke<SpawnTerminalResult>("spawn_pty", {
+            id: agentId,
+            shell: null,
+            cwd,
+            initCommand,
+            aiToolId: agent.aiToolId,
+            ssh,
+            cols: 120,
+            rows: 30,
+          });
+        })();
+        const pendingSpawn = entry.spawnPromise;
+        const result = await pendingSpawn;
+        if (entry.spawnPromise === pendingSpawn) entry.spawnPromise = null;
+        if (isElectronRuntime()) {
+          entry.restoreScrollbackOnAttach = !result.reattached;
+          if (result.cancelled) entry.spawned = false;
+        }
       } catch (err) {
+        entry.spawnPromise = null;
         entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
         setAgentStatus(agentId, "exited");
       }
@@ -2030,6 +2727,24 @@ function App() {
       setAgentSessionId,
     ]
   );
+
+  // Remote "restart session" (비활성 → 다시 시작): the mobile/site client asks
+  // the desktop to respawn an offline session by id, reusing the same spawn path.
+  useEffect(() => {
+    if (!remoteEnabled) return;
+    let cancelled = false;
+    let unlisten = () => {};
+    listen<{ id: string }>("remote:restart-session", (event) => {
+      if (!cancelled && event.payload?.id) void spawnAgentInBackground(event.payload.id);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, [remoteEnabled, spawnAgentInBackground]);
 
   // Startup reopen prompt answers.
   const confirmReopen = useCallback(() => {
@@ -2085,6 +2800,147 @@ function App() {
       setActivePath(path);
     },
     [activateAgentProject, groups]
+  );
+
+  const executeCommand = useCallback((commandId: CommandId) => {
+    switch (commandId) {
+      case "quick-open":
+        setQuickOpen(true);
+        break;
+      case "attention-center":
+        setAttentionOpen(true);
+        break;
+      case "terminal-search":
+        setSearchOpen(true);
+        break;
+      case "new-session":
+        if (activeProjectIdRef.current) setShowModal(true);
+        else setShowProjectModal(true);
+        break;
+      case "new-project":
+        setShowProjectModal(true);
+        break;
+      case "close-pane": {
+        const groupId = activeGroupIdRef.current;
+        const path = activePathRef.current;
+        const group = groupsRef.current.find((candidate) => candidate.id === groupId);
+        const node = group && path ? getAt(group.layout, path) : null;
+        if (node?.type === "leaf") {
+          const agentId = node.tabs[node.activeIndex];
+          if (agentId) closeTab(path!, agentId);
+        }
+        break;
+      }
+      case "reopen-closed-tab":
+        reopenClosedTab();
+        break;
+      case "toggle-docs":
+        setFilesOpen((open) => !open);
+        break;
+      case "toggle-pet":
+        handleDesktopPetEnabledChange(!desktopPetEnabled);
+        break;
+      case "toggle-always-on-top":
+        toggleAlwaysOnTop();
+        break;
+      case "open-new-window":
+        openNewAppWindow();
+        break;
+      case "settings":
+        setSettingsOpen(true);
+        break;
+    }
+  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, reopenClosedTab, toggleAlwaysOnTop]);
+
+  useEffect(() => {
+    executeCommandRef.current = executeCommand;
+  }, [executeCommand]);
+
+  const quickOpenItems = useMemo<QuickOpenItem[]>(() => {
+    const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+    const projectItems: QuickOpenItem[] = projects.map((project) => ({
+      id: `project:${project.id}`,
+      kind: "project",
+      title: project.name,
+      subtitle: project.folder,
+      searchText: `${project.folder} project`,
+      projectId: project.id,
+    }));
+    const sessionItems: QuickOpenItem[] = agents.map((agent) => ({
+      id: `session:${agent.id}`,
+      kind: "session",
+      title: agent.name,
+      subtitle: `${projectNames.get(agent.projectId) || "Unknown project"} · ${agent.aiLabel} · ${agent.status}`,
+      searchText: `${agent.folder} ${agent.aiToolId} ${agent.lastSessionId || ""}`,
+      projectId: agent.projectId,
+      agentId: agent.id,
+    }));
+    const screenItems: QuickOpenItem[] = groups.flatMap((group, index) => {
+      const memberIds = [...collectAgentIds(group.layout)].filter(
+        (id) => !isDocTabId(id) && !isGitHistoryTabId(id)
+      );
+      const memberNames = memberIds
+        .map((id) => agents.find((agent) => agent.id === id)?.name)
+        .filter(Boolean) as string[];
+      const targetAgentId = memberIds[0];
+      if (!targetAgentId) return [];
+      return [{
+        id: `screen:${group.id}`,
+        kind: "screen" as const,
+        title: `Screen ${index + 1}`,
+        subtitle: memberNames.join(" + "),
+        searchText: memberNames.join(" "),
+        groupId: group.id,
+        agentId: targetAgentId,
+      }];
+    });
+    const documentItems: QuickOpenItem[] = quickDocuments.map((document) => ({
+      id: `document:${document.projectId}:${document.relativePath}`,
+      kind: "document",
+      title: document.name,
+      subtitle: `${document.projectName} · ${document.relativePath}`,
+      searchText: `${document.projectName} ${document.relativePath}`,
+      projectId: document.projectId,
+      relativePath: document.relativePath,
+    }));
+    const commandItems: QuickOpenItem[] = COMMAND_DEFINITIONS.map((command) => ({
+      id: `command:${command.id}`,
+      kind: "command",
+      title: command.title,
+      subtitle: [command.description, commandShortcuts[command.id]].filter(Boolean).join(" · "),
+      searchText: command.keywords,
+      commandId: command.id,
+    }));
+    return [...projectItems, ...sessionItems, ...screenItems, ...documentItems, ...commandItems];
+  }, [agents, commandShortcuts, groups, projects, quickDocuments]);
+
+  const handleQuickOpenSelect = useCallback((item: QuickOpenItem) => {
+    setQuickOpen(false);
+    if (item.kind === "project" && item.projectId) {
+      selectProject(item.projectId);
+    } else if (item.kind === "session" && item.agentId) {
+      selectAgent(item.agentId);
+    } else if (item.kind === "screen" && item.groupId && item.agentId) {
+      selectScreen(item.groupId, item.agentId);
+    } else if (item.kind === "document" && item.projectId && item.relativePath) {
+      setActiveProjectId(item.projectId);
+      openDocTab(item.projectId, item.relativePath);
+    } else if (item.kind === "command" && item.commandId) {
+      executeCommand(item.commandId as CommandId);
+    }
+  }, [executeCommand, openDocTab, selectAgent, selectProject, selectScreen]);
+
+  const handleAttentionSelect = useCallback((item: AttentionItem) => {
+    setAttentionItems((items) => markAttentionRead(items, new Set([item.id])));
+    setAttentionOpen(false);
+    if (agentsRef.current.some((agent) => agent.id === item.agentId)) {
+      selectAgent(item.agentId);
+    }
+  }, [selectAgent]);
+
+  const attentionUnreadCount = useMemo(
+    () => attentionItems.filter((item) => !item.read).length,
+    [attentionItems]
   );
 
   // ---- Derived
@@ -2143,37 +2999,6 @@ function App() {
     return leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
   }, [activeGroupLayout, activePath]);
 
-  const activeAgent = useMemo(
-    () =>
-      activeAgentId
-        ? agents.find((a) => a.id === activeAgentId) ?? null
-        : null,
-    [activeAgentId, agents]
-  );
-  const activeSessionProject = useMemo(
-    () =>
-      activeAgent
-        ? projects.find((project) => project.id === activeAgent.projectId) ??
-          activeProject
-        : activeProject,
-    [activeAgent, activeProject, projects]
-  );
-  const docsProject = useMemo(
-    () =>
-      docsRequest
-        ? projects.find((project) => project.id === docsRequest.projectId) ??
-          activeSessionProject
-        : activeSessionProject,
-    [activeSessionProject, docsRequest, projects]
-  );
-  const docsSession = useMemo(
-    () =>
-      docsRequest?.agentId
-        ? agents.find((agent) => agent.id === docsRequest.agentId) ??
-          activeAgent
-        : activeAgent,
-    [activeAgent, agents, docsRequest]
-  );
   const renameSession = useMemo(
     () =>
       renameSessionId
@@ -2185,7 +3010,33 @@ function App() {
   // ---- Render
 
   return (
-    <div className={`app app-theme-${appTheme}`}>
+    <div
+      className={`app app-theme-${appTheme} ${
+        isElectronRuntime() && showUsageBar ? "app-with-usage-status" : ""
+      } ${!sidebarOpen ? "app-sidebar-collapsed" : ""}`}
+    >
+      {isElectronRuntime() && (
+        <TopBar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          filesOpen={filesOpen}
+          onToggleFiles={() => setFilesOpen((open) => !open)}
+          desktopPetEnabled={desktopPetEnabled}
+          desktopPetAvailable={!isSecondaryWindow}
+          onToggleDesktopPet={() =>
+            handleDesktopPetEnabledChange(!desktopPetEnabled)
+          }
+          settingsOpen={settingsOpen}
+          onToggleSettings={() => setSettingsOpen((open) => !open)}
+          alwaysOnTop={alwaysOnTop}
+          onToggleAlwaysOnTop={toggleAlwaysOnTop}
+          onOpenNewWindow={openNewAppWindow}
+          onQuickOpen={() => setQuickOpen(true)}
+          quickOpenShortcut={commandShortcuts["quick-open"]}
+          onOpenAttention={() => setAttentionOpen(true)}
+          attentionUnreadCount={attentionUnreadCount}
+        />
+      )}
       <Sidebar
         projects={projects}
         agents={agents}
@@ -2201,26 +3052,10 @@ function App() {
         onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
         onNewProject={() => setShowProjectModal(true)}
-        onNewSession={() =>
-          activeProject ? setShowModal(true) : setShowProjectModal(true)
-        }
-        docsOpen={docsOpen}
-        onToggleDocs={() =>
-          setDocsOpen((open) => {
-            if (!open) setDocsRequest(null);
-            return !open;
-          })
-        }
-        alwaysOnTop={alwaysOnTop}
-        onToggleAlwaysOnTop={toggleAlwaysOnTop}
-        desktopPetEnabled={desktopPetEnabled}
-        desktopPetAvailable={!isSecondaryWindow}
-        onToggleDesktopPet={() =>
-          handleDesktopPetEnabledChange(!desktopPetEnabled)
-        }
-        onOpenNewWindow={openNewAppWindow}
-        settingsOpen={settingsOpen}
-        onToggleSettings={() => setSettingsOpen((open) => !open)}
+        onNewSessionForProject={(projectId) => {
+          selectProject(projectId);
+          setShowModal(true);
+        }}
         onRemove={removeAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -2229,6 +3064,8 @@ function App() {
       />
       <TerminalArea
         agents={agents}
+        projects={projects}
+        theme={appTheme}
         layout={activeGroupLayout}
         sessionPins={activeGroup?.sessionPins ?? null}
         activePath={activePath}
@@ -2249,35 +3086,37 @@ function App() {
         onTabContextMenu={(path, agentId, x, y) =>
           setTabContextMenu({ path, agentId, x, y })
         }
+        chatModeAgents={chatModeAgents}
+        onToggleChat={toggleChatMode}
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
         onOpenFolderPath={handleOpenFolderPath}
         onOpenTerminalPath={handleOpenTerminalPath}
       />
-      {docsOpen && (
-        <div className="docs-overlay">
-          <div className="docs-drawer-shell" style={{ width: docsWidth + 7 }}>
-            <div
-              className="docs-resizer"
-              onPointerDown={handleDocsResizeStart}
-              title="Resize docs"
-            />
-            <DocsPanel
-              open={docsOpen}
-              activeProject={docsProject}
-              activeSession={docsSession}
-              width={docsWidth}
-              requestedPath={
-                docsRequest && docsRequest.projectId === docsProject?.id
-                  ? docsRequest.relativePath
-                  : null
-              }
-              requestKey={docsRequest?.key ?? 0}
-              theme={appTheme}
-              onClose={() => setDocsOpen(false)}
-            />
-          </div>
-        </div>
+      {filesOpen && (
+        <aside className="files-shell" style={{ width: filesWidth + 7 }}>
+          <div
+            className="files-resizer"
+            onPointerDown={handleFilesResizeStart}
+            title="Resize file tree"
+          />
+          <FileTreePanel
+            projects={projects}
+            activeProject={activeProject}
+            width={filesWidth}
+            theme={appTheme}
+            onOpenFile={openDocTab}
+            onOpenGitHistory={openGitHistoryTab}
+            onClose={() => setFilesOpen(false)}
+          />
+        </aside>
+      )}
+      {isElectronRuntime() && showUsageBar && (
+        <UsageStatusBar
+          agents={agents}
+          projects={projects}
+          onSelectProject={selectProject}
+        />
       )}
       {settingsOpen && (
         <SettingsModal
@@ -2287,6 +3126,12 @@ function App() {
           desktopPetAvailable={!isSecondaryWindow}
           onDesktopPetEnabledChange={handleDesktopPetEnabledChange}
           onResetDesktopPetPosition={resetDesktopPetPosition}
+          commandShortcuts={commandShortcuts}
+          onCommandShortcutsChange={setCommandShortcuts}
+          disabledTools={disabledTools}
+          onToggleTool={handleToggleTool}
+          showUsageBar={showUsageBar}
+          onShowUsageBarChange={handleShowUsageBarChange}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -2311,6 +3156,7 @@ function App() {
         <NewAgentModal
           project={activeProject}
           defaultName={`Session ${projectAgents.length + 1}`}
+          disabledTools={disabledTools}
           onCancel={() => setShowModal(false)}
           onCreate={(payload) => {
             setShowModal(false);
@@ -2348,6 +3194,27 @@ function App() {
         onSelect={selectAgent}
         onDismiss={dismissToast}
       />
+      {quickOpen && (
+        <QuickOpen
+          items={quickOpenItems}
+          loadingDocuments={quickDocumentsLoading}
+          onSelect={handleQuickOpenSelect}
+          onClose={() => setQuickOpen(false)}
+        />
+      )}
+      {attentionOpen && (
+        <AttentionCenter
+          items={attentionItems}
+          onSelect={handleAttentionSelect}
+          onMarkAllRead={() =>
+            setAttentionItems((items) => markAttentionRead(items))
+          }
+          onClearRead={() =>
+            setAttentionItems((items) => items.filter((item) => !item.read))
+          }
+          onClose={() => setAttentionOpen(false)}
+        />
+      )}
       {imageViewer && (
         <ImageViewer
           path={imageViewer.path}
@@ -2364,6 +3231,11 @@ function App() {
               agent={target}
               project={
                 projects.find((p) => p.id === target.projectId) ?? null
+              }
+              onUpdateAgent={(id, patch) =>
+                setAgents((prev) =>
+                  prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+                )
               }
               onClose={() => setPropertiesAgentId(null)}
             />
@@ -2449,11 +3321,40 @@ function App() {
       {tabContextMenu && (
         <TabContextMenu
           state={tabContextMenu}
-          onClose={() => setTabContextMenu(null)}
-          onCloseTab={() => {
-            closeTab(tabContextMenu.path, tabContextMenu.agentId);
-            setTabContextMenu(null);
+          pinned={
+            !!agents.find((a) => a.id === tabContextMenu.agentId)?.pinned
+          }
+          tabColor={
+            agents.find((a) => a.id === tabContextMenu.agentId)?.tabColor ?? null
+          }
+          canReopen={recentlyClosedTabsRef.current.length > 0}
+          onDismiss={() => setTabContextMenu(null)}
+          onSplit={(direction) =>
+            splitWith(tabContextMenu.agentId, direction)
+          }
+          onTogglePin={() => {
+            const current = agents.find((a) => a.id === tabContextMenu.agentId);
+            setAgentPinned(tabContextMenu.agentId, !current?.pinned);
           }}
+          onReopen={reopenClosedTab}
+          chatMode={chatModeAgents.has(tabContextMenu.agentId)}
+          onToggleChat={() => toggleChatMode(tabContextMenu.agentId)}
+          canChat={toolSupportsChat(
+            agents.find((a) => a.id === tabContextMenu.agentId)?.aiToolId
+          )}
+          onCloseTab={() =>
+            closeTab(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onCloseOthers={() =>
+            closeOtherTabs(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onCloseRight={() =>
+            closeTabsToRight(tabContextMenu.path, tabContextMenu.agentId)
+          }
+          onRename={() => setRenameSessionId(tabContextMenu.agentId)}
+          onSetColor={(color) =>
+            setAgentTabColor(tabContextMenu.agentId, color)
+          }
         />
       )}
     </div>

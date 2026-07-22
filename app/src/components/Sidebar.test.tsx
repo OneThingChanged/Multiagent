@@ -25,17 +25,7 @@ function renderSidebar(
       onRenameSession={() => {}}
       onContextMenu={() => {}}
       onNewProject={() => {}}
-      onNewSession={() => {}}
-      docsOpen={false}
-      onToggleDocs={() => {}}
-      alwaysOnTop={false}
-      onToggleAlwaysOnTop={() => {}}
-      desktopPetEnabled={true}
-      desktopPetAvailable={true}
-      onToggleDesktopPet={() => {}}
-      onOpenNewWindow={() => {}}
-      settingsOpen={false}
-      onToggleSettings={() => {}}
+      onNewSessionForProject={() => {}}
       onRemove={() => {}}
       onDragStart={() => {}}
       onDragEnd={() => {}}
@@ -71,7 +61,7 @@ describe("Sidebar", () => {
     ]);
 
     expect(html).toContain("Empty Project");
-    expect(html).toContain("Select project, then click + to start a session");
+    expect(html).toContain("프로젝트 행의 + 버튼으로 세션을 시작하세요");
   });
 
   it("shows split groups above projects as colored screens", () => {

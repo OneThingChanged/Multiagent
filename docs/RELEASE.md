@@ -1,65 +1,101 @@
-# 릴리즈 & 코드 서명 가이드
+# Release & Code Signing Guide
 
-서명된 인스톨러를 만들어 GitHub Releases에 올리고, 인앱 자동 업데이터가 인식하게 하는 전체 절차. 일반 개발/디버그 빌드는 [BUILD.md](BUILD.md) 참고.
+The full procedure for building signed installers, publishing them to GitHub Releases, and having the in-app auto-updater recognize them. For normal dev/debug builds see [BUILD.md](BUILD.md).
 
-## 자동 업데이터 동작 개요
+## Auto-Updater Overview
 
-- 앱은 `tauri-plugin-updater`로 업데이트를 확인한다.
-- standard endpoint(`tauri.conf.json` → `plugins.updater.endpoints`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest.json`
-- company endpoint(`tauri.company.conf.json`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest-company.json`
-- 즉 설치된 빌드 variant가 **GitHub의 "Latest" 릴리즈에 첨부된 자기 manifest** 를 읽는다.
-- `latest.json`의 `version`이 현재 앱 버전보다 높고, `signature`가 앱에 박힌 **pubkey로 검증**되면 업데이트를 제안한다.
+- The app checks for updates via `tauri-plugin-updater`.
+- standard endpoint (`tauri.conf.json` → `plugins.updater.endpoints`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest.json`
+- company endpoint (`tauri.company.conf.json`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest-company.json`
+- In other words, an installed build variant reads **its own manifest attached to the "Latest" release on GitHub**.
+- If `latest.json`'s `version` is higher than the current app version and the `signature` verifies against the **pubkey baked into the app**, an update is offered.
 
-세 가지가 모두 맞아야 사용자에게 업데이트가 보인다:
-1. 릴리즈가 **Latest로 마킹**돼 있어야 한다 (draft/prerelease면 안 됨)
-2. `latest.json` / `latest-company.json` + `.sig` 자산이 릴리즈에 **첨부**돼 있어야 한다
-3. 빌드가 **올바른 키로 서명**돼 있어야 한다 (pubkey와 짝)
+All three must line up for users to see an update:
+1. The release must be marked **Latest** (not draft/prerelease)
+2. `latest.json` / `latest-company.json` + `.sig` assets must be **attached** to the release
+3. The build must be **signed with the correct key** (paired with the pubkey)
 
-## 빌드 Variant
+## Electron Stable Channel (0.5.31+)
 
-| variant | 제품명 | identifier | updater manifest | 원격 기능 |
+After the official Electron migration, one Latest release maintains both product channels.
+
+| installed state | file queried | next installer |
+|---|---|---|
+| standard Tauri | `latest.json` | standard Electron NSIS |
+| company Tauri | `latest-company.json` | Company Electron NSIS |
+| standard Electron | `latest.yml` | standard Electron NSIS |
+| Company Electron | `latest-company.yml` | Company Electron NSIS |
+
+Build and transition manifest generation order:
+
+```powershell
+cd "K:\AI\MultiAgent\app"
+npm run electron:dist:all
+
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+npm run tauri -- signer sign electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe
+npm run tauri -- signer sign electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe
+npm run release:electron-transition-manifest
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+```
+
+The new Latest must include: both NSIS + blockmaps + portables, `latest.yml`,
+`latest-company.yml`, transition `latest.json`/`latest-company.json` for Tauri, and both
+NSIS `.sig` files. Company Electron uses `com.jintae.multiagent.company.electron` and a
+company-only local-data path, and does not provide Remote·Tunnel.
+
+## Build Variants
+
+| variant | product name | identifier | updater manifest | remote features |
 |---|---|---|---|---|
-| standard | `MultiAgent` | `com.jintae.multiagent` | `latest.json` | 포함 |
-| company | `MultiAgentCompany` | `com.jintae.multiagent.company` | `latest-company.json` | 제외 |
+| standard | `MultiAgent` | `com.jintae.multiagent` | `latest.json` | included |
+| company | `MultiAgentCompany` | `com.jintae.multiagent.company` | `latest-company.json` | excluded |
 
-두 variant는 같은 버전을 쓰되 identifier와 updater endpoint가 다르다. 그래서 사용자가 standard를 설치하면 standard 업데이트만 받고, company를 설치하면 company 업데이트만 받는다.
+Both variants use the same version but different identifiers and updater endpoints. So a
+user who installs standard only gets standard updates, and company only gets company
+updates.
 
-## 서명 키
+## Signing Key
 
-| 항목 | 값 |
+| item | value |
 |---|---|
 | private key | `C:\Users\OneThingChanged\.tauri\multiagent.key` |
 | public key | `C:\Users\OneThingChanged\.tauri\multiagent.key.pub` |
-| 비밀번호 | 없음 (생성 시 `--ci`, 빈 문자열) |
-| pubkey 등록 위치 | `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+| password | none (created with `--ci`, empty string) |
+| pubkey location | `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
 
-- private key는 repo 밖(홈 디렉토리)에 있고 **절대 커밋하지 않는다.**
-- pubkey는 앱에 박혀 배포된다. 빌드의 `.sig`가 이 pubkey로 검증된다.
-- 키 페어 생성(최초 1회 또는 재발급):
+- The private key lives outside the repo (home directory) and is **never committed.**
+- The pubkey is baked into the app and distributed. Build `.sig` files verify against this pubkey.
+- Generating a key pair (first time or re-issue):
 
 ```bash
 cd K:/AI/MultiAgent/app
 npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.key" --ci --force
 ```
 
-> **키를 분실하면** 기존 사용자는 자동 업데이트를 못 받는다 (서명 검증 실패). 새 키를 만들고 `tauri.conf.json`의 pubkey를 교체한 뒤, 사용자는 새 버전을 **수동으로 한 번** 설치해야 한다. (0.3.x → 0.4.0 전환 때 실제로 키를 한 번 교체했음.)
+> **If you lose the key**, existing users cannot receive auto-updates (signature verification fails). After creating a new key and replacing the pubkey in `tauri.conf.json`, users must **manually install once**. (The key was actually replaced once during the 0.3.x → 0.4.0 transition.)
 
-## 릴리즈 절차
+## Release Procedure
 
-### 1. 버전 올리기 (소스 4곳 전부)
+### 1. Bump the Tauri version (3 source spots)
 
-| 파일 | 필드 |
+| file | field |
 |---|---|
-| `app/package.json` | `"version"` |
 | `app/src-tauri/Cargo.toml` | `[package] version` |
 | `app/src-tauri/tauri.conf.json` | `"version"` |
 | `app/src/lib/appInfo.ts` | `APP_VERSION` |
 
-4곳이 어긋나면 빌드 산출물 파일명/표시 버전이 꼬인다. `app/package-lock.json`, `app/src-tauri/Cargo.lock`의 루트 패키지 버전도 최종 커밋에 같이 반영돼야 한다.
+If the 3 spots disagree, Tauri build artifact filenames/displayed versions get crossed. The
+root package version in `app/src-tauri/Cargo.lock` must also be included in the final
+commit. `app/package.json` and `app/package-lock.json` use the Electron test channel
+version (`0.5.x-electron.n`), so they are not matched to Tauri. `write-latest-json.mjs`
+also writes manifests based on the `tauri.conf.json` version.
 
-### 2. 빠른 검증
+### 2. Quick Verification
 
-작은 hotfix라도 릴리즈 전 최소 검증은 이 두 개로 고정한다.
+Even for a small hotfix, the minimum pre-release verification is fixed to these two.
 
 ```powershell
 cd "K:\AI\MultiAgent\app"
@@ -69,11 +105,11 @@ cd "K:\AI\MultiAgent\app\src-tauri"
 cargo test
 ```
 
-### 3. 서명 빌드
+### 3. Signed Build
 
-private key를 환경변수로 넘겨 빌드한다. (비밀번호가 없어도 `_PASSWORD=""`를 줘야 프롬프트 없이 진행됨)
+Build with the private key passed as an environment variable. (Even without a password, `_PASSWORD=""` is required to proceed without prompts.)
 
-PowerShell/Codex 환경에서는 아래 블록을 그대로 쓰면 된다. private key는 현재 프로세스 환경변수에만 주입하고, 빌드 후 바로 지운다.
+On PowerShell/Codex environments, use the block below as-is. The private key is injected only into the current process environment and removed right after the build.
 
 ```powershell
 cd "K:\AI\MultiAgent\app"
@@ -86,7 +122,7 @@ Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinu
 if ($code -ne 0) { throw "release build failed: $code" }
 ```
 
-Bash/Git Bash에서는 다음처럼 실행한다.
+On Bash/Git Bash, run:
 
 ```bash
 cd K:/AI/MultiAgent/app
@@ -95,16 +131,16 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 npm run release:build:all
 ```
 
-> `TAURI_SIGNING_PRIVATE_KEY`에는 **키 파일의 내용**을 넣는다(경로 아님). 경로로 넘기는 `TAURI_SIGNING_PRIVATE_KEY_PATH`는 환경에 따라 비밀번호 프롬프트가 떠서 헤드리스에서 멈출 수 있으니 내용 주입 방식을 쓴다.
+> `TAURI_SIGNING_PRIVATE_KEY` takes the **key file contents** (not the path). `TAURI_SIGNING_PRIVATE_KEY_PATH`, which passes a path, can trigger a password prompt depending on the environment and hang headless runs, so use content injection.
 
-성공하면 로그 끝에 `Finished N updater signatures at:` 가 보이고 `.sig` 파일이 생성된다.
+On success, the log ends with `Finished N updater signatures at:` and `.sig` files are generated.
 
-### 4. 산출물
+### 4. Artifacts
 
 ```
 app/src-tauri/target/release/bundle/
-  nsis/MultiAgent_<ver>_x64-setup.exe        ← 메인 인스톨러
-  nsis/MultiAgent_<ver>_x64-setup.exe.sig    ← 서명 (updater용)
+  nsis/MultiAgent_<ver>_x64-setup.exe        ← main installer
+  nsis/MultiAgent_<ver>_x64-setup.exe.sig    ← signature (for updater)
   nsis/MultiAgentCompany_<ver>_x64-setup.exe
   nsis/MultiAgentCompany_<ver>_x64-setup.exe.sig
   msi/MultiAgent_<ver>_x64_en-US.msi
@@ -115,49 +151,48 @@ app/src-tauri/target/release/bundle/
   latest-company.json
 ```
 
-### 5. latest manifest 작성
+### 5. Writing the latest Manifest
 
-`.sig` 파일의 **내용 전체**를 `signature`에 넣는다.
+Put the **entire contents** of the `.sig` file into `signature`.
 
 ```json
 {
   "version": "0.4.5",
-  "notes": "이번 릴리즈 요약",
+  "notes": "Release summary",
   "pub_date": "2026-06-13T13:30:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "<nsis setup.exe.sig 파일 내용 그대로>",
+      "signature": "<contents of the nsis setup.exe.sig file, verbatim>",
       "url": "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/MultiAgent_<ver>_x64-setup.exe"
     }
   }
 }
 ```
 
-- `signature`는 NSIS **setup.exe.sig** 의 내용 (msi 것과 헷갈리지 말 것)
-- `url`은 그 릴리즈의 setup.exe 다운로드 주소
-- `npm run release:build:all`은 두 variant를 빌드하고 `latest.json`, `latest-company.json`을 bundle 폴더에 같이 작성한다. 둘 중 하나라도 서명/manifest가 없으면 실패한다.
-- 수동 재작성만 필요하면 `npm run release:manifests`
-
-### 6. 커밋 / 태그 / 푸시
+- `signature` is the contents of the NSIS **setup.exe.sig** (do not confuse with the msi one)
+- `url` is that release's setup.exe download address
+- `npm run release:build:all` builds both variants and writes `latest.json` and `latest-company.json` into the bundle folder as well. It fails if either signature/manifest is missing.
+- To rewrite only the manifests manually: `npm run release:manifests`
+### 6. Commit / Tag / Push
 
 ```bash
 cd K:/AI/MultiAgent
 git add -A
-git commit -m "Release <ver> - <요약>"
+git commit -m "Release <ver> - <summary>"
 git tag v<ver>
 git push origin main
 git push origin v<ver>
 ```
 
-> push가 SSL 오류(`unable to get local issuer certificate`)로 막히면 한 번만:
+> If push fails with an SSL error (`unable to get local issuer certificate`), run once:
 > `git config --global http.sslBackend schannel`
 
-### 7. GitHub 릴리즈 게시
+### 7. Publish the GitHub Release
 
-핵심: **draft로 두지 말고 바로 publish + Latest 마킹.** (0.4.4·0.4.5가 draft로 만들어져 업데이터가 못 보던 사고가 있었음.)
+Key point: **do not keep it as a draft — publish immediately + mark Latest.** (There was an incident where 0.4.4/0.4.5 stayed as drafts and the updater could not see them.)
 
 ```bash
-gh release create v<ver> --title "v<ver> — <제목>" --notes "..." \
+gh release create v<ver> --title "v<ver> — <title>" --notes "..." \
   --latest \
   app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe \
   app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe.sig \
@@ -171,36 +206,36 @@ gh release create v<ver> --title "v<ver> — <제목>" --notes "..." \
   app/src-tauri/target/release/bundle/latest-company.json
 ```
 
-이미 만들어진 릴리즈에 자산만 갱신/추가할 때:
+To update/add assets on an existing release:
 
 ```bash
-gh release upload v<ver> --clobber <파일들...>
+gh release upload v<ver> --clobber <files...>
 gh release edit v<ver> --draft=false --latest
 ```
 
-### 8. 검증
+### 8. Verify
 
 ```bash
-# Latest 태그가 이번 버전인가
+# Does the Latest tag point to this version?
 gh api repos/OneThingChanged/Multiagent/releases/latest --jq '.tag_name'
-# 자산이 다 있나 (standard/company setup.exe, .sig, msi, .sig, latest*.json)
+# Are all assets there? (standard/company setup.exe, .sig, msi, .sig, latest*.json)
 gh release view v<ver> --json assets --jq '.assets[].name'
-# latest.json 버전 확인 (CDN 캐시 우회: 버전 직접 URL)
+# Check the latest.json version (bypass CDN cache: version-direct URL)
 curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/latest.json" | grep version
 curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/latest-company.json" | grep version
 ```
 
-> `/releases/latest/download/latest.json`(업데이터가 보는 경로)은 GitHub CDN 캐시 때문에 publish 직후 몇 분간 옛 버전을 줄 수 있다. 버전 직접 URL이 맞으면 정상이고, 몇 분 뒤 캐시가 갱신된다.
+> `/releases/latest/download/latest.json` (the path the updater reads) may serve the old version for a few minutes after publishing due to GitHub CDN caching. If the version-direct URL is correct, all is well; the cache refreshes within minutes.
 
-## 자주 빠뜨리는 함정 (체크리스트)
+## Common Pitfalls (Checklist)
 
-- [ ] 버전 소스 4곳과 lockfile 루트 버전이 모두 갱신됐나
-- [ ] `TAURI_SIGNING_PRIVATE_KEY`(+빈 PASSWORD) 주고 `npm run release:build:all` 했나 → 두 variant `.sig` 생성 확인
-- [ ] `latest.json` / `latest-company.json`의 signature가 각 variant의 **NSIS setup.exe.sig** 내용인가
-- [ ] 릴리즈가 **draft 아님 + Latest 마킹**인가
-- [ ] standard/company 자산(setup.exe, setup.exe.sig, msi, msi.sig, latest*.json)을 다 올렸나
-- [ ] `gh api .../releases/latest`가 이번 태그를 가리키나
+- [ ] Are all 3 Tauri version sources and the Cargo.lock root version bumped?
+- [ ] Did you run `npm run release:build:all` with `TAURI_SIGNING_PRIVATE_KEY` (+ empty PASSWORD)? → both variants' `.sig` generated?
+- [ ] Is the `signature` in `latest.json` / `latest-company.json` the contents of each variant's **NSIS setup.exe.sig**?
+- [ ] Is the release **not a draft + marked Latest**?
+- [ ] Did you upload all standard/company assets (setup.exe, setup.exe.sig, msi, msi.sig, latest*.json)?
+- [ ] Does `gh api .../releases/latest` point to this tag?
 
-## 미서명 경고
+## Unsigned Warning
 
-코드 서명 인증서(EV/OV)는 없으므로 첫 실행 시 Windows SmartScreen 경고가 뜬다 ("추가 정보 → 실행"). 이건 위 updater 서명(키 기반 무결성 검증)과는 별개다.
+There is no code signing certificate (EV/OV), so Windows SmartScreen warns on first launch ("More info → Run anyway"). This is separate from the updater signing above (key-based integrity verification).

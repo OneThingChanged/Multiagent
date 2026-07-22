@@ -1,74 +1,98 @@
-# 토큰 사용량 집계
+# Usage Accounting & Account Rate Limits
 
-세션·프로젝트별 토큰 사용량을 집계해 `usage.db`에 저장하는 기능. 현재 사용량 화면은 별도 Usage 서버가 아니라 [MONITOR.md](MONITOR.md)의 단일 Dashboard 서버(`/api/usage/*`) 안에서 제공한다. 집계 구현 파일: `app/src-tauri/src/usage.rs`.
+A feature that aggregates per-session/per-project token usage into `usage.db`. The usage screen is currently served inside the single Dashboard server (`/api/usage/*`) from [MONITOR.md](MONITOR.md), not a separate Usage server. The aggregation implementations are `app/src-tauri/src/usage.rs` (Tauri) and `app/electron/services/usage-service.mjs` (Electron).
 
-## 데이터 소스
+Separately from token totals, the Electron app shows per-period limits of Codex/Claude accounts on the bottom status bar. Token usage is cumulative per-session/project statistics; account limits are the latest usage-rate snapshots reported by the account. Codex limits come from session transcripts; Claude limits come from the OAuth usage endpoint.
 
-CLI transcript JSONL을 파싱해 토큰 수치를 읽는다 (앱은 PTY로 CLI를 띄울 뿐 API 응답을 못 봄).
+## Data Sources
 
-| 도구 | 경로 | 읽는 필드 |
+CLI transcript JSONL is parsed for token figures (the app only launches CLIs via PTY and never sees API responses).
+
+| tool | path | fields read |
 |---|---|---|
-| Claude | `~/.claude/projects/**/*.jsonl` | `message.usage`의 `input_tokens`·`output_tokens`·`cache_creation_input_tokens`·`cache_read_input_tokens`, `message.model`, `timestamp`, `cwd` |
-| Codex | `~/.codex/sessions/**/*.jsonl` | `payload.type=="token_count"`의 `payload.info.last_token_usage`(input/output/cached_input/reasoning_output/total), `session_meta`/`turn_context`의 `payload.model`·`payload.id` |
+| Claude | `~/.claude/projects/**/*.jsonl` | `input_tokens`·`output_tokens`·`cache_creation_input_tokens`·`cache_read_input_tokens` in `message.usage`, `message.model`, `timestamp`, `cwd` |
+| Codex | `~/.codex/sessions/**/*.jsonl` | `payload.info.last_token_usage` of `payload.type=="token_count"` (input/output/cached_input/reasoning_output/total), `payload.model`·`payload.id` of `session_meta`/`turn_context` |
 
-**중복 방지(source_key)** — 같은 record를 다시 읽어도 합계가 안 늘게 deterministic key 사용:
+## Electron Account Rate-Limit Status Bar
+
+Codex transcripts' `token_count.rate_limits` can include per-limit-ID usage rates, periods, reset times, and plan info. Claude transcripts lack this, so instead the `five_hour`·`seven_day`·`limits[]` from the OAuth usage endpoint response are read. When the Electron backend observes this metadata, it stores the latest snapshot in `usage_rate_limits` (common Codex/Claude schema).
+
+- The bottom of the app shows the default limit and (Claude) per-model limits as independent items. However, Codex keeps only the representative limit (`limit_id="codex"`); per-model weekly limits of the form `codex_<model>` are neither stored nor shown (e.g., GPT-5.3-Codex-Spark)
+- Each item provides usage rate, a progress bar, and time remaining until reset
+- Clicking an item shows all limit windows, last refresh time, plan, and extra-usage availability
+- 70%+ usage is warning color, 90%+ is danger color
+- Auto-refreshes after a hook `done` event; the status bar refresh button re-checks manually
+- First lookup and manual refresh only scan the last 1MiB of the newest transcript, avoiding repeated full reads of large sessions
+
+Claude transcripts' `message.usage` works for token totals but does not include per-period account limit snapshots like Codex's `token_count.rate_limits`. So Claude limits are filled by **querying the usage endpoint directly with Claude Code's OAuth credentials**, not from transcripts.
+
+- Calls `GET https://api.anthropic.com/api/oauth/usage` with `claudeAiOauth.accessToken` from `~/.claude/.credentials.json` (`anthropic-beta: oauth-2025-04-20`). If the token is expired or the file is missing, it silently skips and keeps the last snapshot.
+- The response's `five_hour` (5-hour) and `seven_day` (weekly) are stored as one `limit_id="claude"` row's primary/secondary window, and model-scoped limits in `limits[]` (e.g., `weekly_scoped` / Fable·Opus) are stored as separate `claude:<kind>:<model>` rows. Same `usage_rate_limits` schema and status bar UI as Codex.
+- Refreshes with a minimum 60s throttle: automatically after a Claude session's hook `done`, and forcibly on status bar refresh and app start.
+
+SSH remote sessions are excluded from local-credential/transcript-based account limit lookups.
+
+**Dedup (source_key)** — a deterministic key so re-reading the same record never grows totals:
 - Claude: `claude:<session_id>:<requestId|message.id|uuid>`
-- Codex: `codex:<session_id>:<timestamp>:<누적 total_tokens>`
+- Codex: `codex:<session_id>:<timestamp>:<cumulative total_tokens>`
+## Collection Flow
 
-## 수집 흐름
+Extends the hook flow for automatic ingestion.
 
-hook 흐름을 확장해서 자동 적재한다.
+1. `notify.ps1` reads `session_id`·`transcript_path`·`cwd` from every hook's stdin and forwards them to `/event`
+2. `session-start` → `usage.note_session(agent_id, session_id)` (track active sessions)
+3. `done` → `usage.ingest_agent(agent_id, transcript_path)` → parse on a background thread
+4. `ingest_file`: incrementally parses only after the **last offset** recorded in `usage_sources` (resets offset to 0 on file truncate/ownership mismatch)
+5. Idempotent load via `INSERT ... ON CONFLICT(source_key)`
 
-1. `notify.ps1`이 모든 hook의 stdin에서 `session_id`·`transcript_path`·`cwd`를 읽어 `/event`로 전달
-2. `session-start` → `usage.note_session(agent_id, session_id)` (활성 세션 추적)
-3. `done` → `usage.ingest_agent(agent_id, transcript_path)` → 백그라운드 스레드로 파싱
-4. `ingest_file`: `usage_sources`에 기록된 **마지막 offset 이후만** 증분 파싱 (파일 truncate/소유 불일치 시 offset 0으로 리셋)
-5. `INSERT ... ON CONFLICT(source_key)`로 멱등 적재
+Manual reindex: the dashboard **Reindex** button or `usage_ingest_now` → `ingest_known_now()` scans all claude/codex sessions in the catalog.
 
-수동 재색인: 대시보드 **Reindex** 버튼 또는 `usage_ingest_now` → `ingest_known_now()`가 카탈로그의 모든 claude/codex 세션을 스캔.
-
-## 저장 (SQLite)
+## Storage (SQLite)
 
 `<app_local_data_dir>/usage.db` (`%LOCALAPPDATA%\com.jintae.multiagent\usage.db`).
 
-**usage_events** — 적재된 토큰 이벤트:
+**usage_events** — ingested token events:
 `id, source_key(UNIQUE), ts, project_id, project_name, agent_id, agent_name, session_id, tool, model, cwd, source_path, source_offset, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_output_tokens, total_tokens, raw_kind`
-(인덱스: ts / (project_id,ts) / (agent_id,ts) / (session_id,ts))
+(indexes: ts / (project_id,ts) / (agent_id,ts) / (session_id,ts))
 
-**usage_sources** — 파일별 증분 진행 상태:
+**usage_sources** — per-file incremental progress:
 `source_path(PK), tool, session_id, last_offset, last_size, updated_at`
 
-> 원본 transcript가 삭제·로테이션돼도 적재된 통계는 usage.db에 남는다.
+**usage_rate_limits** — latest snapshots of account limits observed by Electron:
+`limit_id(PK), tool, used_percent, window_minutes, resets_at, updated_at, raw_json`
 
-## Dashboard 연동
+> Loaded statistics remain in usage.db even if source transcripts are deleted/rotated.
 
-Dashboard 서버는 `127.0.0.1:4421` 기본 포트를 사용하며, 설정 → **Dashboard** 탭에서 관리한다. Usage 데이터는 같은 서버의 `Usage` 화면과 `/api/usage/*` API로 표시된다.
+## Dashboard Integration
+
+The Dashboard server uses default port `127.0.0.1:4421` and is managed in Settings → **Dashboard** tab. Usage data is shown on the same server's `Usage` screen and `/api/usage/*` API.
 
 ### API
 
-| 경로 | 쿼리 | 반환 |
+| path | query | returns |
 |---|---|---|
-| `GET /api/usage/summary` | `range`, `projectId?` | 합계 카드(input/output/cache/reasoning/total/events) |
-| `GET /api/usage/projects` | `range` | 프로젝트별 합계 + 세션 수 (사용량 0인 프로젝트도 포함) |
-| `GET /api/usage/sessions` | `range`, `projectId?` | 세션별 합계 (tool/model 포함) |
-| `GET /api/usage/timeseries` | `range`, `bucket=hour\|day`, `projectId?` | 시간 버킷별 추이 |
-| `GET /api/usage/recent` | `range`, `limit`, `projectId?` | 최근 이벤트 |
-| `POST /api/usage/reindex` | — | 즉시 재색인 `{files, events, errors}` |
+| `GET /api/usage/summary` | `range`, `projectId?` | totals cards (input/output/cache/reasoning/total/events) |
+| `GET /api/usage/projects` | `range` | per-project totals + session counts (includes zero-usage projects) |
+| `GET /api/usage/sessions` | `range`, `projectId?` | per-session totals (tool/model included) |
+| `GET /api/usage/timeseries` | `range`, `bucket=hour\|day`, `projectId?` | trend per time bucket |
+| `GET /api/usage/recent` | `range`, `limit`, `projectId?` | recent events |
+| `POST /api/usage/reindex` | — | immediate reindex `{files, events, errors}` |
 
 `range`: `today` / `week` / `month` / `all`.
 
-### 화면
+### Screens
 
-Dashboard의 `Usage` 화면에서 범위 버튼(오늘/7일/30일/전체), Reindex, 요약 카드, 프로젝트/세션/최근 이벤트/타임라인 테이블을 제공한다.
+The Dashboard's `Usage` screen provides range buttons (today/7 days/30 days/all), Reindex, summary cards, and project/session/recent events/timeline tables.
 
-## 카탈로그 동기화
+## Catalog Sync
 
-`sync_usage_catalog`(프론트 → Rust)가 프로젝트(`id/name/folder`)와 에이전트(`id/projectId/name/folder/aiToolId/lastSessionId`) 메타데이터를 `UsageHub.catalog`에 보관. 적재 시 당시 이름/프로젝트를 `usage_events`에도 같이 저장해, 나중에 프로젝트명을 바꿔도 과거 통계의 이름은 보존된다.
+`sync_usage_catalog` (frontend → Rust) keeps project (`id/name/folder`) and agent (`id/projectId/name/folder/aiToolId/lastSessionId`) metadata in `UsageHub.catalog`. The name/project at ingest time are also stored on `usage_events`, so renaming a project later preserves the names in past statistics.
 
-## 관련 Tauri 커맨드
+## Related Tauri Commands
 
 `sync_usage_catalog` / `usage_ingest_now` / `resolve_cli_session` / `relink_cli_session`.
 
-`start_usage_server` / `stop_usage_server` / `usage_server_status` / `usage_config_get` / `usage_config_set`은 이전 별도 Usage 서버용 legacy command로 남아 있지만, 현재 UI에서는 단일 Dashboard 서버를 사용한다.
+`start_usage_server` / `stop_usage_server` / `usage_server_status` / `usage_config_get` / `usage_config_set` remain as legacy commands for the previous standalone Usage server, but the current UI uses the single Dashboard server.
 
-(`resolve_cli_session`·`relink_cli_session`은 transcript 위치 탐색 로직을 세션 resume 재등록 기능과 공유한다. [RESUME.md](RESUME.md) 참고.)
+(`resolve_cli_session`·`relink_cli_session` share the transcript location search logic with the session resume relink feature. See [RESUME.md](RESUME.md).)
+

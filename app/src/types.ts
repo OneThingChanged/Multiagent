@@ -2,8 +2,49 @@ import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
 import type { SerializeAddon } from "@xterm/addon-serialize";
+import type {
+  SpawnTerminalResult,
+  TerminalDataPayload,
+} from "./platform/ipcContract";
 
-export type AgentStatus = "idle" | "starting" | "running" | "working" | "exited";
+export type AgentRuntimeStatus =
+  | "idle"
+  | "starting"
+  | "running"
+  | "exited"
+  | "unreachable";
+
+export type AgentWorkStatus =
+  | "unknown"
+  | "idle"
+  | "working"
+  | "waiting"
+  | "blocked"
+  | "done";
+
+export type AgentActivitySource = "hook" | "process" | "terminal" | "recovery";
+
+export type AgentActivity = {
+  workStatus: AgentWorkStatus;
+  source: AgentActivitySource;
+  receivedAt: number;
+  stateStartedAt: number;
+  providerSessionId?: string;
+  hookEventName?: string;
+  lastPrompt?: string;
+  toolName?: string;
+  toolInput?: string;
+  interactiveQuestion?: string;
+  lastAssistantMessage?: string;
+};
+
+// Compatibility status used by the existing UI and remote dashboard contract.
+// It is derived from runtimeStatus + activity by lib/agentActivity.ts.
+export type AgentStatus =
+  | AgentRuntimeStatus
+  | "working"
+  | "waiting"
+  | "blocked";
 
 export type AiTool = {
   id: string;
@@ -32,6 +73,21 @@ export const AI_TOOLS: AiTool[] = [
     dangerousFlag: "--dangerously-bypass-approvals-and-sandbox",
   },
   {
+    id: "qwen",
+    label: "Qwen",
+    icon: "◆",
+    iconColor: "#615ced",
+    command: "qwen",
+    dangerousFlag: "--yolo",
+  },
+  {
+    id: "cline",
+    label: "Cline",
+    icon: "◈",
+    iconColor: "#3aa0ff",
+    command: "cline",
+  },
+  {
     id: "none",
     label: "Shell only",
     icon: "$",
@@ -40,8 +96,19 @@ export const AI_TOOLS: AiTool[] = [
   },
 ];
 
+// The chat (conversation) view is only wired for CLIs that write a decodable
+// JSONL transcript. Others (qwen, cline, none, …) are terminal-only — hide the
+// chat toggle entirely for them.
+export function toolSupportsChat(aiToolId: string | null | undefined): boolean {
+  return aiToolId === "codex" || aiToolId === "claude";
+}
+
 export function toolForId(id: string): AiTool {
-  return AI_TOOLS.find((t) => t.id === id) ?? AI_TOOLS[2];
+  return (
+    AI_TOOLS.find((t) => t.id === id) ??
+    AI_TOOLS.find((t) => t.id === "none") ??
+    AI_TOOLS[AI_TOOLS.length - 1]
+  );
 }
 
 // A reusable SSH connection target. Stored in its own localStorage registry
@@ -78,7 +145,15 @@ export type Agent = {
   aiToolId: string;
   aiLabel: string;
   dangerous: boolean;
+  // Codex only: skip the forced --no-alt-screen so the TUI runs on the
+  // alternate screen (its own internal scrolling). Applies from next spawn.
+  useAltScreen?: boolean;
+  // Tab customization (right-click tab menu).
+  pinned?: boolean;
+  tabColor?: string;
   status: AgentStatus;
+  runtimeStatus?: AgentRuntimeStatus;
+  activity?: AgentActivity;
   createdAt: number;
   lastSessionId?: string;
   // Derived from the owning project at load time (not persisted on the agent).
@@ -93,6 +168,9 @@ export type StoredAgent = {
   folder: string;
   aiToolId: string;
   dangerous?: boolean;
+  useAltScreen?: boolean;
+  pinned?: boolean;
+  tabColor?: string;
   createdAt: number;
   lastSessionId?: string;
   // Legacy fields kept for one-time migration on load.
@@ -122,6 +200,13 @@ export type TerminalEntry = {
   el: HTMLDivElement;
   opened: boolean;
   spawned: boolean;
+  spawnPromise: Promise<SpawnTerminalResult> | null;
+  attached: boolean;
+  lastSequence: number;
+  syncing: boolean;
+  pendingOutput: TerminalDataPayload[];
+  restoreScrollbackOnAttach: boolean;
+  restoredScrollback: boolean;
 };
 
 export type NewAgentPayload = {

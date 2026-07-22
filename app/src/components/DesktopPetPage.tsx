@@ -4,8 +4,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, invoke, listen } from "../platform/runtime";
 import type { DesktopPetUpdate } from "../lib/desktopPet";
 import "./DesktopPetPage.css";
 
@@ -172,7 +171,14 @@ export function DesktopPetPage() {
                 <span className="desktop-pet-work-question">
                   {item.question || "질문 정보 없음"}
                 </span>
-                <span className="desktop-pet-work-tool">{item.tool}</span>
+                <span className="desktop-pet-work-tool">
+                  {item.tool}
+                  {item.workStatus === "waiting"
+                    ? " · 대기"
+                    : item.workStatus === "blocked"
+                      ? " · 확인"
+                      : ""}
+                </span>
               </button>
             ))}
           </div>

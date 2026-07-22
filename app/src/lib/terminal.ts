@@ -1,13 +1,15 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, listen } from "../platform/runtime";
+import { isElectronRuntime } from "../platform/electronBridge";
 import {
   isPermissionGranted,
   requestPermission,
-} from "@tauri-apps/plugin-notification";
+} from "../platform/plugins";
 import { Terminal } from "@xterm/xterm";
 import type { ILink, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import type { DropZone, TerminalEntry } from "../types";
 import { loadAppTheme, type AppThemeId } from "./appTheme";
 
@@ -145,6 +147,31 @@ export async function notifyDone({
   onActivate?: () => void;
 }) {
   try {
+    const notificationKey = `multiagent:${projectName}:${sessionName}`;
+    if (isElectronRuntime()) {
+      let removeClickListener: (() => void) | null = null;
+      if (onActivate) {
+        removeClickListener = await listen<{ notificationKey?: string }>(
+          "native-notification:clicked",
+          (event) => {
+            if (event.payload?.notificationKey !== notificationKey) return;
+            removeClickListener?.();
+            removeClickListener = null;
+            onActivate();
+          }
+        );
+        window.setTimeout(() => {
+          removeClickListener?.();
+          removeClickListener = null;
+        }, 60 * 60 * 1000);
+      }
+      await invoke("show_native_notification", {
+        title: `${projectName} / ${sessionName}`,
+        body: "작업이 끝났어요",
+        notificationKey,
+      });
+      return;
+    }
     let granted = await isPermissionGranted();
     if (!granted) granted = (await requestPermission()) === "granted";
     if (!granted) return;
@@ -152,7 +179,7 @@ export async function notifyDone({
       `${projectName} / ${sessionName}`,
       {
         body: "작업이 끝났어요",
-        tag: `multiagent:${projectName}:${sessionName}`,
+        tag: notificationKey,
       }
     );
     notification.onclick = () => {
@@ -685,6 +712,28 @@ function buildLogicalLine(
   return { text: text.replace(/\s+$/, ""), cellMap };
 }
 
+// Read the OSC 8 hyperlink at a buffer cell. Codex/others emit links whose
+// visible text is a label (not the URL), so the regex scan misses them; xterm
+// parses OSC 8 natively and stores the real URL on the cell's extended attrs.
+function oscUrlAtCell(term: Terminal, row: number, col: number): string | null {
+  try {
+    const line = term.buffer.active.getLine(row);
+    // getCell returns a CellData instance at runtime; extended.urlId is private.
+    const cell = line?.getCell(col) as unknown as {
+      hasExtendedAttrs?: () => boolean;
+      extended?: { urlId?: number };
+    } | undefined;
+    if (cell?.hasExtendedAttrs?.() && cell.extended?.urlId) {
+      const service = (term as TerminalWithPrivateCore)._core?._oscLinkService;
+      const uri = service?.getLinkData?.(cell.extended.urlId)?.uri;
+      if (typeof uri === "string" && uri.trim()) return uri.trim();
+    }
+  } catch {
+    // Private xterm shape drifted — fall back to the visible-text regex scan.
+  }
+  return null;
+}
+
 export function findTerminalLinkAtMouseEvent(
   term: Terminal,
   event: MouseEvent
@@ -721,6 +770,11 @@ export function findTerminalLinkAtMouseEvent(
     Math.max(0, Math.ceil(y / (contentHeight / term.rows)) - 1)
   );
   const row = term.buffer.active.viewportY + viewportRow;
+
+  // OSC 8 first — the authoritative URL even when the visible text is a label.
+  const osc = oscUrlAtCell(term, row, col);
+  if (osc) return { kind: "url", text: osc };
+
   const logical = buildLogicalLine(term, row);
   if (!logical) return null;
 
@@ -885,6 +939,12 @@ export function createEntry(
     windowsPty: isWindows
       ? { backend: "conpty", buildNumber: 22000 }
       : undefined,
+    // Open xterm's natively-parsed OSC 8 hyperlinks in the browser (the
+    // capture-phase handler in PaneSlot covers the mouse-tracking case).
+    linkHandler: {
+      activate: (_event, uri) => openTerminalUrl(uri),
+      allowNonHttpProtocols: false,
+    },
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -892,6 +952,14 @@ export function createEntry(
   term.loadAddon(search);
   const serialize = new SerializeAddon();
   term.loadAddon(serialize);
+  // Align xterm's character-width table with modern wcwidth (Unicode 11+).
+  // Without this, xterm defaults to the Unicode 6 tables where emoji and some
+  // symbols count as 1 cell, while CLI TUIs (e.g. Cline, which renders with
+  // Node's wcwidth) treat them as 2 — the mismatch drifts the cursor and makes
+  // output look shifted. Activating v11 keeps both sides in agreement.
+  const unicode11 = new Unicode11Addon();
+  term.loadAddon(unicode11);
+  term.unicode.activeVersion = "11";
   registerUrlLinkProvider(term, openTerminalUrl);
   if (onMarkdownPath) {
     registerMarkdownLinkProvider(
@@ -935,14 +1003,30 @@ export function createEntry(
       !event.altKey &&
       !event.metaKey;
 
-    if (isPlainCtrlKey && event.key.toLowerCase() === "c") {
+    const isCtrlShiftKey =
+      event.type === "keydown" &&
+      event.ctrlKey &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey;
+
+    if (
+      (isPlainCtrlKey || isCtrlShiftKey) &&
+      event.key.toLowerCase() === "c"
+    ) {
       event.preventDefault();
       const selectedText = term.hasSelection() ? term.getSelection() : "";
       if (selectedText) {
-        navigator.clipboard
-          .writeText(selectedText)
+        const write = isElectronRuntime()
+          ? invoke("clipboard_write_text", { text: selectedText })
+          : navigator.clipboard.writeText(selectedText);
+        write
           .then(() => term.clearSelection())
           .catch(() => {});
+      } else if (isPlainCtrlKey) {
+        // No selection means the conventional terminal interrupt, including
+        // Claude Code. Copying a selection still takes precedence.
+        invoke("write_pty", { id, data: "\x03" }).catch(() => {});
       }
       return false;
     }
@@ -958,10 +1042,15 @@ export function createEntry(
       return false;
     }
 
-    if (isPlainCtrlKey && event.key.toLowerCase() === "v") {
+    if (
+      (isPlainCtrlKey || isCtrlShiftKey) &&
+      event.key.toLowerCase() === "v"
+    ) {
       event.preventDefault();
-      navigator.clipboard
-        .readText()
+      const read = isElectronRuntime()
+        ? invoke<string>("clipboard_read_text")
+        : navigator.clipboard.readText();
+      read
         .then((text) => {
           if (text && text.length > 0) {
             term.paste(text);
@@ -977,7 +1066,22 @@ export function createEntry(
     return true;
   });
 
-  return { term, fit, search, serialize, el, opened: false, spawned: false };
+  return {
+    term,
+    fit,
+    search,
+    serialize,
+    el,
+    opened: false,
+    spawned: false,
+    spawnPromise: null,
+    attached: false,
+    lastSequence: 0,
+    syncing: false,
+    pendingOutput: [],
+    restoreScrollbackOnAttach: false,
+    restoredScrollback: false,
+  };
 }
 
 type TerminalPrivateCore = {
@@ -986,6 +1090,9 @@ type TerminalPrivateCore = {
       ydisp: number;
     };
     scrollLines: (disp: number, suppressScrollEvent?: boolean) => void;
+  };
+  _oscLinkService?: {
+    getLinkData?: (linkId: number) => { uri?: string } | undefined;
   };
   refresh?: (start: number, end: number) => void;
 };

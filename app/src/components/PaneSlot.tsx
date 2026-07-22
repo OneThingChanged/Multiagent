@@ -1,6 +1,17 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { toolForId } from "../types";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { invoke } from "../platform/runtime";
+import { electronBridge, isElectronRuntime } from "../platform/electronBridge";
+import type {
+  SpawnTerminalResult,
+  TerminalReplay,
+} from "../platform/ipcContract";
+import { toolForId, toolSupportsChat } from "../types";
 import { buildSpawnArgs } from "../lib/spawn";
 import type {
   Agent,
@@ -10,9 +21,26 @@ import type {
   DropZone,
   LeafNode,
   Path,
+  Project,
   TerminalEntry,
 } from "../types";
+import type { AppThemeId } from "../lib/appTheme";
 import { activeAgentInLeaf, pathEq } from "../lib/layout";
+import {
+  docFileExtension,
+  docTabBasename,
+  isDocTabId,
+  parseDocTabId,
+} from "../lib/docTabs";
+import {
+  isGitHistoryTabId,
+  parseGitHistoryTabId,
+  gitHistoryTabTitle,
+} from "../lib/gitHistoryTabs";
+import { DocViewer } from "./DocViewer";
+import { GitHistoryView } from "./GitHistoryView";
+import { ChatView } from "./ChatView";
+import { TerminalContextMenu } from "./Menus";
 import {
   clampTerminalFontSize,
   computeDropZone,
@@ -30,6 +58,10 @@ import {
   formatDroppedPathForTerminal,
   hasExternalFiles,
 } from "../lib/fileDrop";
+import {
+  beginTerminalSync,
+  completeTerminalSync,
+} from "../lib/terminalDelivery";
 
 function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
@@ -45,6 +77,8 @@ type PendingTabDrag = {
 
 export type RenderCtx = {
   agents: Agent[];
+  projects: Project[];
+  theme: AppThemeId;
   sessionPins: Record<string, string> | null;
   activePath: Path | null;
   dragState: DragState | null;
@@ -61,7 +95,13 @@ export type RenderCtx = {
   onDropTargetChange: (t: DropTargetState | null) => void;
   onDrop: (from: string, target: string, zone: DropZone) => void;
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
-  onOpenMarkdownPath: (agentId: string, path: string) => void;
+  chatModeAgents: Set<string>;
+  onToggleChat: (agentId: string) => void;
+  onOpenMarkdownPath: (
+    agentId: string,
+    path: string,
+    external?: boolean
+  ) => void;
   onOpenImagePath: (agentId: string, path: string) => void;
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;
@@ -79,12 +119,46 @@ export function PaneSlot({
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
+  const [termMenu, setTermMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+  } | null>(null);
   const active = pathEq(path, ctx.activePath);
-  const activeAgentId = activeAgentInLeaf(leaf);
+  const activeTabId = activeAgentInLeaf(leaf);
+  const activeDocId = activeTabId && isDocTabId(activeTabId) ? activeTabId : null;
+  const activeGitHistoryId =
+    activeTabId && isGitHistoryTabId(activeTabId) ? activeTabId : null;
+  const activeAgentId = activeDocId || activeGitHistoryId ? null : activeTabId;
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
+  // Chat vs terminal view is a per-session preference held in App, so the
+  // toggle, tab context menu, and re-opening a session all stay in sync.
+  const chatMode = activeAgentId ? ctx.chatModeAgents.has(activeAgentId) : false;
   const { termsRef, setAgentStatus, setAgentSessionId } = ctx;
+
+  // When the terminal becomes visible again (chat/doc → terminal), xterm's
+  // viewport can end up at the top after the re-show/refit — snap it back to
+  // the bottom (latest output), which is what a terminal should show.
+  useEffect(() => {
+    if (chatMode || activeDocId || !activeAgentId) return;
+    const entry = termsRef.current.get(activeAgentId);
+    if (!entry) return;
+    const scroll = () => {
+      try {
+        entry.term.scrollToBottom();
+      } catch {
+        /* terminal disposed */
+      }
+    };
+    const raf = requestAnimationFrame(scroll);
+    const timer = window.setTimeout(scroll, 60);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [chatMode, activeDocId, activeAgentId, termsRef]);
 
   // Latest-agent ref read inside the spawn effect; lets that effect depend
   // only on agent.id (not on status, which flips often).
@@ -122,7 +196,7 @@ export function PaneSlot({
     if (!entry.opened) {
       entry.term.open(entry.el);
       entry.opened = true;
-      if (freshlyCreated) {
+      if (freshlyCreated && !isElectronRuntime()) {
         const saved = loadScrollback(agentId);
         if (saved) {
           entry.term.write(saved);
@@ -137,6 +211,90 @@ export function PaneSlot({
     let lastCols = 0;
     let lastRows = 0;
     let debounceTimer: number | undefined;
+    let disposed = false;
+    let attachStarted = false;
+
+    const restoreSavedScrollback = (target: TerminalEntry) => {
+      if (
+        target.restoredScrollback ||
+        !target.restoreScrollbackOnAttach
+      ) return;
+      const saved = loadScrollback(agentId);
+      if (saved) {
+        target.term.write(saved);
+        target.term.write(
+          "\r\n\x1b[2m--- restored from previous session ---\x1b[0m\r\n"
+        );
+      }
+      target.restoredScrollback = true;
+      target.restoreScrollbackOnAttach = false;
+    };
+
+    const attachElectronView = async (
+      target: TerminalEntry,
+      cols: number,
+      rows: number
+    ) => {
+      beginTerminalSync(target);
+      let spawnResult: SpawnTerminalResult = { reattached: true };
+      if (!target.spawned) {
+        target.spawned = true;
+        const cur = activeAgentRef.current;
+        if (!cur || cur.id !== agentId) return;
+        target.spawnPromise = (async () => {
+          const { initCommand, ssh, cwd } = await buildSpawnArgs(
+            cur,
+            ctx.sessionPins,
+            setAgentSessionId
+          );
+          return invoke<SpawnTerminalResult>("spawn_pty", {
+            id: agentId,
+            shell: null,
+            cwd,
+            initCommand,
+            aiToolId: cur.aiToolId,
+            ssh,
+            cols,
+            rows,
+          });
+        })();
+      }
+      if (target.spawnPromise) {
+        const pendingSpawn = target.spawnPromise;
+        spawnResult = await pendingSpawn;
+        if (target.spawnPromise === pendingSpawn) target.spawnPromise = null;
+        if (spawnResult.cancelled) {
+          target.spawned = false;
+          target.syncing = false;
+          return;
+        }
+        target.restoreScrollbackOnAttach = !spawnResult.reattached;
+      }
+      if (disposed) return;
+
+      restoreSavedScrollback(target);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const replay = await invoke<TerminalReplay>("attach_terminal", {
+          id: agentId,
+          afterSequence: target.lastSequence,
+        });
+        if (disposed) {
+          await invoke("detach_terminal", { id: agentId }).catch(() => {});
+          return;
+        }
+        target.attached = true;
+        const result = completeTerminalSync(
+          target,
+          replay,
+          (data) => target.term.write(data)
+        );
+        if (result !== "gap") {
+          await invoke("resize_pty", { id: agentId, cols, rows }).catch(() => {});
+          return;
+        }
+      }
+      throw new Error("터미널 출력 동기화를 완료하지 못했습니다.");
+    };
 
     const apply = () => {
       const e = termsRef.current.get(agentId);
@@ -150,7 +308,29 @@ export function PaneSlot({
       const { cols, rows } = e.term;
       if (cols < 2 || rows < 2) return;
 
-      if (!e.spawned) {
+      if (isElectronRuntime()) {
+        if (!attachStarted) {
+          attachStarted = true;
+          lastCols = cols;
+          lastRows = rows;
+          void attachElectronView(e, cols, rows).catch((err) => {
+            if (disposed) return;
+            e.spawned = false;
+            e.spawnPromise = null;
+            e.attached = false;
+            e.syncing = false;
+            e.term.write(`\r\n\x1b[31mspawn/attach failed: ${err}\x1b[0m\r\n`);
+            setAgentStatus(agentId, "exited");
+          });
+        } else if (
+          e.attached &&
+          (cols !== lastCols || rows !== lastRows)
+        ) {
+          lastCols = cols;
+          lastRows = rows;
+          invoke("resize_pty", { id: agentId, cols, rows }).catch(() => {});
+        }
+      } else if (!e.spawned) {
         e.spawned = true;
         lastCols = cols;
         lastRows = rows;
@@ -210,7 +390,9 @@ export function PaneSlot({
       return findTerminalLinkAtMouseEvent(targetEntry.term, event);
     };
 
-    const openTerminalLink = (link: TerminalMouseLink) => {
+    // external = Ctrl/Cmd held → open with the OS/web browser instead of the
+    // in-app doc tab (matches the HTML doc-tab Ctrl+click behavior).
+    const openTerminalLink = (link: TerminalMouseLink, external: boolean) => {
       const targetEntry = termsRef.current.get(agentId);
       targetEntry?.term.clearSelection();
       switch (link.kind) {
@@ -218,7 +400,7 @@ export function PaneSlot({
           openTerminalUrl(link.text);
           break;
         case "markdown":
-          ctx.onOpenMarkdownPath(agentId, link.text);
+          ctx.onOpenMarkdownPath(agentId, link.text, external);
           break;
         case "image":
           ctx.onOpenImagePath(agentId, link.text);
@@ -253,7 +435,7 @@ export function PaneSlot({
       pendingLinkClick = null;
       stopTerminalMouseEvent(event);
       if (sameTerminalLink(terminalLinkAt(event), pending)) {
-        openTerminalLink(pending);
+        openTerminalLink(pending, event.ctrlKey || event.metaKey);
       }
     };
 
@@ -364,6 +546,12 @@ export function PaneSlot({
     });
 
     return () => {
+      disposed = true;
+      entry!.attached = false;
+      if (isElectronRuntime() && attachStarted) {
+        beginTerminalSync(entry!);
+        invoke("detach_terminal", { id: agentId }).catch(() => {});
+      }
       ro.disconnect();
       window.clearTimeout(debounceTimer);
       container.removeEventListener("mousedown", linkMouseDownHandler, {
@@ -400,6 +588,25 @@ export function PaneSlot({
     return () => cancelAnimationFrame(raf);
   }, [active, activeAgent?.id, termsRef]);
 
+  // Right-click on the terminal → copy/paste menu. Text selection still uses
+  // Shift+drag (xterm forces local selection while a mouse-tracking TUI like
+  // Claude is capturing plain drags); this menu just makes copy/paste
+  // discoverable once something is selected.
+  const onTerminalContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!activeAgentId) return;
+    const entry = termsRef.current.get(activeAgentId);
+    if (!entry) return;
+    // Let a right-click on a terminal link fall through to its own handler.
+    if (findTerminalLinkAtMouseEvent(entry.term, event.nativeEvent)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setTermMenu({
+      x: event.clientX,
+      y: event.clientY,
+      hasSelection: entry.term.hasSelection(),
+    });
+  };
+
   const dragFrom = ctx.dragState?.fromAgentId ?? null;
   const overlayZone =
     ctx.dropTarget && ctx.dropTarget.leafId === leaf.id
@@ -415,7 +622,11 @@ export function PaneSlot({
     if (!activeAgentId) return false;
     const entry = ctx.termsRef.current.get(activeAgentId);
     if (!entry) return false;
-    const text = extractDroppedFilePaths(dataTransfer)
+    const bridge = electronBridge();
+    const text = extractDroppedFilePaths(
+      dataTransfer,
+      bridge ? (file) => bridge.getPathForFile(file) : undefined
+    )
       .map(formatDroppedPathForTerminal)
       .filter(Boolean)
       .join(" ");
@@ -436,6 +647,14 @@ export function PaneSlot({
     e: ReactPointerEvent<HTMLDivElement>,
     tabAgentId: string
   ) => {
+    if (e.button === 1) {
+      // Middle-click closes the tab (browser-style). preventDefault stops the
+      // Windows middle-click autoscroll cursor.
+      e.preventDefault();
+      e.stopPropagation();
+      ctx.onCloseTab(path, tabAgentId);
+      return;
+    }
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("button")) return;
     e.stopPropagation();
@@ -565,6 +784,91 @@ export function PaneSlot({
     >
       <div className="pane-tabs">
         {leaf.tabs.map((tabAgentId) => {
+          if (isDocTabId(tabAgentId)) {
+            const isActive = tabAgentId === activeTabId;
+            const isDragging = dragFrom === tabAgentId;
+            const relativePath =
+              parseDocTabId(tabAgentId)?.relativePath ?? tabAgentId;
+            const ext = docFileExtension(tabAgentId);
+            return (
+              <div
+                key={tabAgentId}
+                className={`pane-tab pane-tab-doc ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
+                draggable={false}
+                onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressNextTabClickRef.current) {
+                    suppressNextTabClickRef.current = false;
+                    e.preventDefault();
+                    return;
+                  }
+                  ctx.onSelectTab(path, tabAgentId);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
+                }}
+                title={relativePath}
+              >
+                <span className={`tab-doc-icon tab-doc-icon-${ext || "file"}`}>
+                  {ext ? ext.toUpperCase().slice(0, 4) : "FILE"}
+                </span>
+                <span className="tab-name">{docTabBasename(tabAgentId)}</span>
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.onCloseTab(path, tabAgentId);
+                  }}
+                  title="Close tab"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
+          if (isGitHistoryTabId(tabAgentId)) {
+            const isActive = tabAgentId === activeTabId;
+            const isDragging = dragFrom === tabAgentId;
+            return (
+              <div
+                key={tabAgentId}
+                className={`pane-tab pane-tab-doc ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
+                draggable={false}
+                onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressNextTabClickRef.current) {
+                    suppressNextTabClickRef.current = false;
+                    e.preventDefault();
+                    return;
+                  }
+                  ctx.onSelectTab(path, tabAgentId);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
+                }}
+                title={gitHistoryTabTitle(tabAgentId)}
+              >
+                <span className="tab-doc-icon tab-doc-icon-git">GIT</span>
+                <span className="tab-name">{gitHistoryTabTitle(tabAgentId)}</span>
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.onCloseTab(path, tabAgentId);
+                  }}
+                  title="Close tab"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
           const tabAgent = ctx.agents.find((a) => a.id === tabAgentId);
           if (!tabAgent) return null;
           const isActive = tabAgentId === activeAgentId;
@@ -575,6 +879,14 @@ export function PaneSlot({
               key={tabAgentId}
               className={`pane-tab ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
               draggable={false}
+              style={
+                tabAgent.tabColor
+                  ? ({
+                      ["--tab-color" as string]: tabAgent.tabColor,
+                    } as React.CSSProperties)
+                  : undefined
+              }
+              data-tab-colored={tabAgent.tabColor ? "" : undefined}
               onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
               onClick={(e) => {
                 e.stopPropagation();
@@ -592,6 +904,11 @@ export function PaneSlot({
               }}
               title={tabAgent.name}
             >
+              {tabAgent.pinned && (
+                <span className="tab-pin" title="고정된 탭">
+                  📌
+                </span>
+              )}
               <span
                 className="tab-tool-icon"
                 style={{ color: tool.iconColor }}
@@ -617,10 +934,117 @@ export function PaneSlot({
             </div>
           );
         })}
+        {activeAgentId && toolSupportsChat(activeAgent?.aiToolId) && (
+          <button
+            className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              // Focus this pane too — otherwise an inactive pane's chat view
+              // never polls (it gates on `active`) and stays "loading".
+              ctx.setActivePath(path);
+              ctx.onToggleChat(activeAgentId);
+            }}
+            title={chatMode ? "터미널 뷰로 전환" : "대화(채팅) 뷰로 전환"}
+          >
+            {chatMode ? "⌗ 터미널" : "💬 대화"}
+          </button>
+        )}
       </div>
-      <div ref={bodyRef} className="pane-body" />
+      {/* Keep the xterm host mounted even while a doc tab or chat view is active
+          so the terminal attach/detach lifecycle and buffered DOM stay intact. */}
+      <div
+        ref={bodyRef}
+        className="pane-body"
+        style={
+          activeDocId || activeGitHistoryId || (chatMode && activeAgentId)
+            ? { display: "none" }
+            : undefined
+        }
+        onContextMenu={onTerminalContextMenu}
+      />
+      {activeDocId && (
+        <DocViewer
+          docId={activeDocId}
+          project={
+            ctx.projects.find(
+              (p) => p.id === parseDocTabId(activeDocId)?.projectId
+            ) ?? null
+          }
+          theme={ctx.theme}
+        />
+      )}
+      {activeGitHistoryId && (
+        <GitHistoryView
+          tabId={activeGitHistoryId}
+          project={
+            ctx.projects.find(
+              (p) => p.id === parseGitHistoryTabId(activeGitHistoryId)?.projectId
+            ) ?? null
+          }
+        />
+      )}
+      {chatMode && activeAgentId && !activeDocId && toolSupportsChat(activeAgent?.aiToolId) && (
+        <ChatView
+          agentId={activeAgentId}
+          active={active}
+          theme={ctx.theme}
+          agentStatus={activeAgent?.status ?? "running"}
+          sessionId={
+            activeAgent?.activity?.providerSessionId ?? activeAgent?.lastSessionId ?? undefined
+          }
+          question={activeAgent?.activity?.interactiveQuestion ?? null}
+          assistantMessage={activeAgent?.activity?.lastAssistantMessage ?? null}
+        />
+      )}
       {overlayZone && (
         <div className={`drop-overlay drop-overlay-${overlayZone}`} />
+      )}
+      {termMenu && (
+        <TerminalContextMenu
+          x={termMenu.x}
+          y={termMenu.y}
+          hasSelection={termMenu.hasSelection}
+          onClose={() => setTermMenu(null)}
+          onCopy={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            const text = entry?.term.hasSelection()
+              ? entry.term.getSelection()
+              : "";
+            setTermMenu(null);
+            if (!text) return;
+            const write = isElectronRuntime()
+              ? invoke("clipboard_write_text", { text })
+              : navigator.clipboard.writeText(text);
+            write.then(() => entry?.term.clearSelection()).catch(() => {});
+          }}
+          onPaste={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            setTermMenu(null);
+            if (!entry) return;
+            const read = isElectronRuntime()
+              ? invoke<string>("clipboard_read_text")
+              : navigator.clipboard.readText();
+            read
+              .then((text) => {
+                if (text) {
+                  entry.term.focus();
+                  entry.term.paste(text);
+                }
+              })
+              .catch(() => {});
+          }}
+          onSelectAll={() => {
+            const entry = activeAgentId
+              ? termsRef.current.get(activeAgentId)
+              : null;
+            setTermMenu(null);
+            entry?.term.selectAll();
+          }}
+        />
       )}
     </div>
   );

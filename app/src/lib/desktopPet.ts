@@ -1,4 +1,5 @@
 import type { Agent, Project } from "../types";
+import { isAgentActivelyWorking } from "./agentActivity";
 
 export const LS_DESKTOP_PET_ENABLED = "multiagent.desktopPetEnabled.v1";
 
@@ -18,6 +19,7 @@ export type DesktopPetWorkingItem = {
   projectName: string;
   agentName: string;
   tool: string;
+  workStatus?: "working" | "waiting" | "blocked";
   question: string | null;
 };
 
@@ -51,7 +53,13 @@ export function saveDesktopPetEnabled(enabled: boolean) {
 export function buildDesktopPetUpdate(
   agents: Pick<
     Agent,
-    "id" | "name" | "projectId" | "aiToolId" | "status" | "lastSessionId"
+    | "id"
+    | "name"
+    | "projectId"
+    | "aiToolId"
+    | "status"
+    | "lastSessionId"
+    | "activity"
   >[],
   projects: Pick<Project, "id" | "name">[],
   questions: Record<string, string>,
@@ -59,8 +67,11 @@ export function buildDesktopPetUpdate(
 ): DesktopPetUpdate {
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const workingBySession = new Map<string, DesktopPetWorkingItem>();
-  for (const agent of agents.filter((candidate) => candidate.status === "working")) {
-    const sessionKey = agent.lastSessionId?.trim() || agent.id;
+  for (const agent of agents.filter((candidate) => isAgentActivelyWorking(candidate))) {
+    const sessionKey =
+      agent.activity?.providerSessionId?.trim() ||
+      agent.lastSessionId?.trim() ||
+      agent.id;
     if (workingBySession.has(sessionKey)) continue;
     workingBySession.set(sessionKey, {
       agentId: agent.id,
@@ -72,7 +83,18 @@ export function buildDesktopPetUpdate(
           : agent.aiToolId === "codex"
             ? "Codex"
             : "Shell",
-      question: questions[agent.id]?.trim() || null,
+      workStatus:
+        agent.activity?.workStatus === "waiting" ||
+        agent.activity?.workStatus === "blocked"
+          ? agent.activity.workStatus
+          : agent.status === "waiting" || agent.status === "blocked"
+            ? agent.status
+            : "working",
+      question:
+        agent.activity?.interactiveQuestion?.trim() ||
+        questions[agent.id]?.trim() ||
+        agent.activity?.lastPrompt?.trim() ||
+        null,
     });
   }
   const workingItems = [...workingBySession.values()];
@@ -83,9 +105,16 @@ export function buildDesktopPetUpdate(
         (agent) =>
       agent.status === "starting" ||
       agent.status === "running" ||
-      agent.status === "working"
+      agent.status === "working" ||
+      agent.status === "waiting" ||
+      agent.status === "blocked"
       )
-      .map((agent) => agent.lastSessionId?.trim() || agent.id)
+      .map(
+        (agent) =>
+          agent.activity?.providerSessionId?.trim() ||
+          agent.lastSessionId?.trim() ||
+          agent.id
+      )
   ).size;
   const workingSessionKeys = new Set(workingBySession.keys());
   const completionBySession = new Map<string, DesktopPetCompletion>();
@@ -120,7 +149,10 @@ export function buildDesktopPetUpdate(
 }
 
 export function completionForAgent(
-  agent: Pick<Agent, "id" | "name" | "projectId" | "lastSessionId">,
+  agent: Pick<
+    Agent,
+    "id" | "name" | "projectId" | "lastSessionId" | "activity"
+  >,
   projects: Pick<Project, "id" | "name">[],
   question?: string | null
 ): DesktopPetCompletion {
@@ -128,7 +160,10 @@ export function completionForAgent(
   return {
     key: `${Date.now()}-${crypto.randomUUID()}`,
     agentId: agent.id,
-    sessionKey: agent.lastSessionId?.trim() || agent.id,
+    sessionKey:
+      agent.activity?.providerSessionId?.trim() ||
+      agent.lastSessionId?.trim() ||
+      agent.id,
     title: `${project?.name || "Unknown project"} / ${agent.name}`,
     body: question ? `완료 · ${question.trim()}` : "작업이 끝났어요",
     question: question?.trim() || null,

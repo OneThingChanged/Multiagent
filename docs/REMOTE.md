@@ -1,96 +1,111 @@
-# 원격 접속
+# Remote PWA
 
-데스크탑에서 돌고 있는 AI 세션을 **외부 브라우저**에서 보고 조작하는 기능. 별도 설치 없이 URL 접속 → GitHub 로그인 → 승인된 계정만 사용. 백엔드는 `app/src-tauri/src/remote.rs`, 웹 클라이언트는 `remote_page.html`(메인) / `remote_login.html`(로그인).
+A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet browser and giving short commands. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the installable PWA screen.
 
-## 전체 흐름
+Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands in main IPC, and exclude `electron/remote-pwa/**` from packaging.
 
+## Overall Flow
+
+```text
+[Phone PWA] ──HTTPS──> Cloudflare Tunnel ──> [My PC] 127.0.0.1:<port>
+     │                                                   │
+     ├─ GitHub login + account approval                  ├─ session/hook/recent output query
+     ├─ status/question/completion alerts                └─ short input to the selected PTY
+     └─ home screen install
 ```
-[외부 브라우저] ──HTTPS──> Cloudflare Tunnel ──> [내 PC] axum 서버(0.0.0.0:port)
-                              GitHub 로그인 + 승인 검증           │
-                                                          PTY 스트림 / 입력 (WebSocket)
-```
 
-## 로컬 서버
+The Remote server does not listen on an external NIC; it binds to loopback only. Phone access uses the HTTPS tunnel URL. The local URL is for preview/diagnostics on the desktop PC.
 
-- **axum** 서버, `0.0.0.0:<port>` 바인드 (LAN 노출)
-- 포트: `RemoteConfig.server_port` (0이면 랜덤). named tunnel을 쓸 땐 대시보드의 service URL 포트와 일치시켜야 함
-- 상태는 `RemoteHub`에 보관 (PTY broadcast 채널, 세션, 승인 목록, 설정)
+## Remote Screen Layout
 
-### 엔드포인트
+- **Monitor**: separates working · needs-answer · done · waiting · inactive sessions into lanes, with status counts at a glance
+- **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts, showing multiple terminals at once
+- **Sessions**: per-project session list with status filters and search; the selected terminal is shown large
+- Mobile Screens switch to pane tabs instead of small splits, and navigation lists appear as a slide menu
+- Latest user request, interactive question, recent terminal output
+- Send instructions/question answers to the active session from a Screen pane or Session detail
+- `Ctrl/⌘ + Enter` to send, copy recent output
+- Browser **Install app / Add to Home Screen** support
+- While the PWA is running, completion/new questions appear as service worker notifications
+- Offline, only the app shell opens; session API/input are network-only
 
-| 경로 | 설명 |
+Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. Full PTY emulation, file editing, screen sharing, and a background Push server are not in the MVP.
+
+## HTTP Endpoints
+
+| path | description |
 |---|---|
-| `GET /` | 인증되면 `remote_page.html`, 아니면 `remote_login.html` |
-| `GET /api/agents` | 활성 세션 목록 JSON |
-| `GET /api/view` | 프로젝트 + 세션 뷰 상태 JSON |
-| `GET /ws?id=<agentId>` | 세션 PTY 출력 스트림(바이너리) + 입력/리사이즈(JSON) |
-| `POST /auth/start` | GitHub Device Flow 시작 (device/user code 발급) |
-| `POST /auth/poll` | Device Flow 폴링 (토큰 수령 → 사용자 확인) |
-| `GET /auth/mode` | 로그인 방식 반환 `{ web: bool }` (web flow 설정 여부) |
-| `GET /auth/login` | OAuth 웹 flow: GitHub authorize로 리다이렉트 (CSRF state) |
-| `GET /auth/callback` | OAuth 콜백: code 교환 → 세션 발급 → `/`로 |
-| `GET /auth/me` | 현재 세션 사용자/승인 상태 |
-| `POST /auth/logout` | 세션 쿠키 무효화 |
+| `GET /` | PWA main screen for approved users |
+| `GET /login` | GitHub web/Device Flow login screen |
+| `GET /manifest.webmanifest` | PWA install manifest |
+| `GET /sw.js` | offline shell / notification service worker |
+| `GET /api/state` | projects, sessions, hooks, recent output state |
+| `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
+| `GET /auth/mode` | returns web/device mode based on OAuth config |
+| `POST /auth/start` | start GitHub Device Flow |
+| `POST /auth/poll` | Device Flow token/user check |
+| `GET /auth/github` | start GitHub OAuth redirect for fixed domains |
+| `GET /auth/github/callback` | OAuth callback and session cookie issue |
+| `POST /auth/logout` | expire the session cookie |
 
-WebSocket 메시지:
-- 서버→웹: 바이너리(PTY 출력), `{"type":"resize","cols","rows"}`(크기), `{"type":"error","message"}`
-- 웹→서버: `{"type":"input","data"}` (입력만; **크기는 보내지 않음** — 데스크탑이 PTY 크기의 주인)
+State syncs every 1.6 seconds, dropping to 5 seconds for a hidden PWA. Terminal output in Remote payloads is limited to the latest 24,000 chars per session.
+
+## GitHub Auth & Approval
+
+### Quick tunnel
+
+Setting only the GitHub OAuth App's **Client ID** uses Device Flow. The phone shows a one-time code and you authenticate at `github.com/login/device`, so no callback URL edits are needed when the tunnel URL changes.
+
+### Named tunnel
+
+Setting Client ID + Client Secret + Public hostname uses the normal web redirect login. Register the OAuth App callback URL as:
+
+```text
+https://<public-hostname>/auth/github/callback
+```
+
+After login, you must still pass these approval rules.
+
+- Owner: matches the GitHub username in Settings → allowed immediately
+- Approved: accounts approved in desktop Settings → Remote PWA
+- Pending: logged in but waiting for desktop approval
+- Revoke: removing from the approval list rejects further requests even with a valid signed cookie
+
+Session cookies are `HttpOnly`, `SameSite=Lax`, 7-day expiry. `Secure` is also applied for HTTPS tunnel requests. The signing key changes on server restart, requiring a new login.
 
 ## Cloudflare Tunnel
 
-`cloudflared.exe`를 최초 1회 자동 다운로드(`<app_local_data_dir>/cloudflared.exe`, GitHub latest)해서 실행. Windows에서 `CREATE_NO_WINDOW`로 숨겨 띄움.
+- Quick: with an empty token, `cloudflared tunnel --url <local-url> --no-autoupdate`
+- Named: with a token, `cloudflared tunnel run --token <token>`
+- On Windows, if the executable is missing, the official GitHub Latest `cloudflared-windows-amd64.exe` is auto-downloaded to the local data folder.
+- Downloads stream to a temp file, reject responses under 1MB, then atomically rename.
+- Startup waits up to 45 seconds for an actual public URL or named tunnel connection log before returning success.
 
-| 모드 | 조건 | 명령 | URL |
-|---|---|---|---|
-| **Quick tunnel** | `tunnel_token` 비어있음 | `cloudflared tunnel --url http://127.0.0.1:<port> --no-autoupdate` | `https://<랜덤>.trycloudflare.com` (켤 때마다 바뀜) |
-| **Named tunnel** | `tunnel_token` 설정됨 | `cloudflared tunnel run --token <token>` | `https://<public_hostname>` (고정) |
+Stored in the Standard local data folder as `remote-config.json`, `remote-access.json`, `cloudflared.exe`. The Client Secret and tunnel token are never sent to the browser.
 
-- quick: stdout/stderr에서 `*.trycloudflare.com` URL 파싱 (최대 45초 대기)
-- named: `Registered tunnel connection` 로그를 기다린 뒤 `public_hostname`으로 URL 구성. Cloudflare Zero Trust → Networks → Tunnels에서 만든 토큰 + Public hostname(service: `http://localhost:<server_port>`) 필요
-- 유동 IP여도 OK: cloudflared가 바깥으로 연결을 거는 구조라 포트포워딩·DDNS 불필요
+## Security Boundaries
 
-## 인증 (GitHub)
+- The server listens on `127.0.0.1` only; external exposure goes through Cloudflare HTTPS.
+- All APIs check login + approval. Only direct loopback requests are allowed without approval, for local diagnostics.
+- PTY input allows same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB, and exited sessions are rejected.
+- PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
+- The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
+- Even if a Company renderer is compromised, main re-blocks Remote·Tunnel calls in the disabled command set.
 
-`client_secret` + `public_hostname`이 **둘 다** 설정되면 **웹 flow**(리다이렉트 1번), 아니면 **Device Flow**(코드 입력). quick tunnel처럼 주소가 바뀌는 환경은 Device Flow가 적합.
+## Setup Order
 
-- **Device Flow**: `/auth/start` → `github.com/login/device/code`(scope `read:user`) → 사용자가 코드 입력 → `/auth/poll`이 토큰 수령 → `api.github.com/user`로 username 확인
-- **웹 flow**: `/auth/login` → GitHub authorize(redirect `https://<public_hostname>/auth/callback`, CSRF state 10분) → `/auth/callback`에서 `client_secret`으로 code 교환
-- **세션 쿠키**: `ma_session=<uuid>`, HttpOnly·SameSite=Lax, **7일**. `RemoteHub.sessions`에 보관
-- `client_secret`은 로컬에만 저장되고 브라우저로 절대 안 나감
+1. In Standard app Settings → **Remote PWA**, enter the GitHub Client ID and Owner, then save.
+2. **Start** the local Remote server.
+3. **Start tunnel** to issue an HTTPS address. First run may take a while due to the cloudflared download.
+4. Open the HTTPS address on your phone and log in with GitHub.
+5. If not the Owner, approve the approval request on the desktop.
+6. Choose **Install app / Add to Home Screen** from the browser menu and enable notification permission.
 
-## 계정 승인제
+The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens and **SESSIONS** opens individual sessions. On mobile, the monitor/screens/sessions/question buttons at the bottom open the same navigation menu.
 
-로그인은 누구나 되지만 **터미널 사용은 승인된 계정만**.
+## Remaining Extensions
 
-| 레벨 | 의미 |
-|---|---|
-| Owner | `RemoteConfig.owner`와 일치(대소문자 무시) — 승인 없이 항상 허용 |
-| Approved | `AccessStore.approved`에 있음 |
-| Pending | 로그인했지만 승인 대기 (터미널 접근 불가) |
-| Unknown | 첫 로그인 → 자동으로 pending 등록 |
-
-- 새 요청 시 데스크탑에 `remote:access-request` 이벤트 → 토스트 + 알림음
-- 설정 → Remote에서 **승인/거절/해제**. 해제 시 그 사용자의 **살아있는 세션도 즉시 종료**
-- 저장: `<app_local_data_dir>/remote-access.json` (앱 재시작에도 유지)
-
-## 웹 클라이언트 (독립 뷰어)
-
-- 좌측 사이드바: 프로젝트별 세션 목록 + 상태점(running 초록 / working 노랑 펄스 / exited 회색)
-- 세션 클릭 → **브라우저 로컬 탭**으로 열림 (데스크탑 화면은 안 바뀜). 여러 세션 탭으로 전환
-- 같은 세션이면 입력·출력이 데스크탑과 공유됨 (PTY가 하나라 본질적). 단 "어느 세션을 보는지"는 데스크탑과 독립
-- 터미널 크기: 웹은 resize를 보내지 않고 데스크탑이 정한 cols/rows를 그대로 따라감 → 줄바꿈이 데스크탑과 동일하고 서로 화면을 깨뜨리지 않음
-- xterm.js, 폰트·색상은 데스크탑 앱과 동일
-
-## 설정/명령
-
-데스크탑 설정 → **Remote** 탭에서 서버 Start/Stop, 터널 Start/Stop, URL 복사, GitHub OAuth(client_id/secret), Owner, named tunnel(token/hostname/port), 승인 관리.
-
-주요 Tauri 커맨드: `start_remote_server` / `stop_remote_server` / `remote_server_status` / `start_tunnel` / `stop_tunnel` / `tunnel_status` / `remote_config_get` / `remote_config_set` / `remote_access_list` / `remote_access_approve` / `remote_access_revoke` / `sync_remote_agents` / `sync_remote_view`.
-
-설정 저장: `<app_local_data_dir>/remote-config.json`.
-
-## 보안 메모
-
-- 통신은 Cloudflare가 TLS 종단(HTTPS). 내부 localhost 구간은 평문 HTTP지만 외부 노출 안 됨
-- 외부 공개 URL이라도 GitHub 로그인 + 승인을 통과해야 함. URL만으로는 접근 불가
-- LAN 직접 접속(`http://<lan-ip>:<port>?token=...`)도 가능 — 레거시 토큰 경로
+- Web Push/VAPID that works even when the browser is fully closed
+- Server→PWA delta stream or WebSocket to remove polling
+- Explicit control APIs like session pause/resume
+- Sync interval adjustment based on network/battery state
