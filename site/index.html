@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MultiAgent — 여러 AI 에이전트 터미널을 한 화면에</title>
+<meta name="description" content="Codex · Claude · Shell 등 여러 AI 에이전트 터미널 세션을 프로젝트 단위로 관리하는 데스크톱 앱. 탭 · 분할 패널 · Markdown 문서 뷰어. 무료 · MIT." />
+<meta property="og:title" content="OneThingChanged MultiAgent" />
+<meta property="og:description" content="여러 AI 에이전트 터미널을 한 워크스페이스에서 관리" />
+<meta property="og:type" content="website" />
+<link rel="icon" type="image/png" href="assets/icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div class="scanlines" aria-hidden="true"></div>
+<div class="dotgrid" aria-hidden="true"></div>
+
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <a class="nav-brand" href="#top">
+    <img src="assets/icon.png" alt="" width="28" height="28" />
+    <span>MultiAgent</span>
+  </a>
+  <nav class="nav-links">
+    <a href="#features" data-ko="기능" data-en="Features">기능</a>
+    <a href="#layout" data-ko="구성" data-en="Layout">구성</a>
+    <a href="#download" data-ko="다운로드" data-en="Download">다운로드</a>
+    <a href="https://github.com/OneThingChanged/Multiagent" target="_blank" rel="noopener">GitHub ↗</a>
+  </nav>
+  <button class="lang-toggle" id="langToggle" aria-label="Toggle language">
+    <span class="on">KO</span><span>EN</span>
+  </button>
+</header>
+
+<!-- ============ HERO ============ -->
+<main id="top">
+<section class="hero">
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <div class="term-badge">
+        <span class="dot"></span>
+        <span data-ko="Windows 데스크톱 · Tauri · 무료 · 오픈소스" data-en="Windows desktop · Tauri · Free · Open source">Windows 데스크톱 · Tauri · 무료 · 오픈소스</span>
+      </div>
+
+      <h1 class="hero-title">
+        <span data-ko="여러 AI 에이전트를" data-en="Every AI agent,">여러 AI 에이전트를</span><br />
+        <span class="accent" data-ko="한 화면에서." data-en="one workspace.">한 화면에서.</span>
+      </h1>
+
+      <p class="hero-sub" data-ko="Codex · Claude · Shell 같은 터미널 에이전트를 프로젝트 단위로 묶어 관리합니다. 사이드바 · 탭 · 분할 패널 · Markdown 문서 뷰어를 하나의 데스크톱 앱에."
+         data-en="Group terminal agents like Codex, Claude, and Shell by project. Sidebar, tabs, split panes, and a Markdown doc viewer — all in one desktop app.">
+        Codex · Claude · Shell 같은 터미널 에이전트를 프로젝트 단위로 묶어 관리합니다. 사이드바 · 탭 · 분할 패널 · Markdown 문서 뷰어를 하나의 데스크톱 앱에.
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary" id="heroDownload" href="https://github.com/OneThingChanged/Multiagent/releases/latest" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4 6.3 11.7l1.4-1.4L11 13.6V3h1zM5 19h14v2H5z"/></svg>
+          <span data-ko="Windows용 다운로드" data-en="Download for Windows">Windows용 다운로드</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/OneThingChanged/Multiagent" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49v-1.7c-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.82c0 .27.18.59.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+
+      <div class="hero-meta" id="heroMeta">
+        <span class="meta-item"><span class="k" data-ko="버전" data-en="Version">버전</span> <b id="metaVersion">…</b></span>
+        <span class="meta-sep">/</span>
+        <span class="meta-item"><span class="k" data-ko="용량" data-en="Size">용량</span> <b id="metaSize">…</b></span>
+        <span class="meta-sep">/</span>
+        <span class="meta-item">Windows · x64</span>
+      </div>
+    </div>
+
+    <!-- terminal / split-pane mock -->
+    <div class="term-mock" aria-hidden="true">
+      <div class="term-bar"><span></span><span></span><span></span><em>MultiAgent — my-project</em></div>
+      <div class="term-body">
+        <div class="pane">
+          <div class="pane-tab">codex ✳</div>
+          <p><span class="p">›</span> analyze repo structure</p>
+          <p class="dim">scanning 128 files…</p>
+          <p class="ok">✓ done in 2.4s</p>
+        </div>
+        <div class="pane">
+          <div class="pane-tab">claude ✳</div>
+          <p><span class="p">›</span> write tests</p>
+          <p class="dim">generating spec…</p>
+          <p class="blink">▍</p>
+        </div>
+        <div class="pane wide">
+          <div class="pane-tab">shell</div>
+          <p><span class="p">$</span> npm run tauri dev</p>
+          <p class="ok">ready · localhost:24420</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section id="features" class="section">
+  <div class="section-head">
+    <span class="section-kicker" data-ko="기능" data-en="Features">기능</span>
+    <h2 data-ko="창을 바꾸지 않고, 세션을 넘나들다" data-en="Move between sessions without switching windows">창을 바꾸지 않고, 세션을 넘나들다</h2>
+  </div>
+
+  <div class="feat-grid">
+    <article class="feat">
+      <div class="feat-ico">◱</div>
+      <h3 data-ko="프로젝트 단위 세션" data-en="Sessions by project">프로젝트 단위 세션</h3>
+      <p data-ko="프로젝트를 먼저 등록하고, 그 트리 아래에서 별명 있는 세션을 만들고 전환합니다. 목록은 접고 펼칠 수 있어요." data-en="Register a project first, then create and switch named sessions in its tree. Collapse and expand each list.">프로젝트를 먼저 등록하고, 그 트리 아래에서 별명 있는 세션을 만들고 전환합니다. 목록은 접고 펼칠 수 있어요.</p>
+    </article>
+    <article class="feat">
+      <div class="feat-ico">▦</div>
+      <h3 data-ko="탭 · 분할 패널" data-en="Tabs & split panes">탭 · 분할 패널</h3>
+      <p data-ko="터미널을 탭으로 관리하고, 2개 이상의 패널로 분할해 여러 세션을 동시에 봅니다. 드래그 앤 드롭으로 위치 조정." data-en="Manage terminals as tabs and split into 2+ panes to watch sessions at once. Rearrange by drag and drop.">터미널을 탭으로 관리하고, 2개 이상의 패널로 분할해 여러 세션을 동시에 봅니다. 드래그 앤 드롭으로 위치 조정.</p>
+    </article>
+    <article class="feat">
+      <div class="feat-ico">⊟</div>
+      <h3 data-ko="Screen 그룹" data-en="Screen groups">Screen 그룹</h3>
+      <p data-ko="사이드바 SCREENS에서 Screen 1 (A+B+C) 형태로 분할 그룹을 확인하고 정확한 화면으로 전환. 중복 레이아웃은 시작 시 자동 복구." data-en="View split groups like Screen 1 (A+B+C) in the sidebar and jump to the exact layout. Duplicate layouts auto-repair on startup.">사이드바 SCREENS에서 Screen 1 (A+B+C) 형태로 분할 그룹을 확인하고 정확한 화면으로 전환. 중복 레이아웃은 시작 시 자동 복구.</p>
+    </article>
+    <article class="feat">
+      <div class="feat-ico">⌘</div>
+      <h3 data-ko="터미널 조작" data-en="Terminal controls">터미널 조작</h3>
+      <p data-ko="Ctrl+C 선택 복사 · Ctrl+V 붙여넣기 · Ctrl+휠로 글자 크기 확대/축소. 익숙한 방식 그대로." data-en="Ctrl+C copies the selection, Ctrl+V pastes, Ctrl+wheel zooms text. Just what you'd expect.">Ctrl+C 선택 복사 · Ctrl+V 붙여넣기 · Ctrl+휠로 글자 크기 확대/축소. 익숙한 방식 그대로.</p>
+    </article>
+    <article class="feat">
+      <div class="feat-ico">▤</div>
+      <h3 data-ko="Markdown 문서 패널" data-en="Markdown docs panel">Markdown 문서 패널</h3>
+      <p data-ko="오른쪽 Docs 패널에서 List · Tree · Hide 모드로 문서 탐색. 터미널에 출력된 .md 경로를 클릭해 바로 열기." data-en="Browse docs in the right panel with List, Tree, and Hide modes. Click .md paths printed in the terminal to open them.">오른쪽 Docs 패널에서 List · Tree · Hide 모드로 문서 탐색. 터미널에 출력된 .md 경로를 클릭해 바로 열기.</p>
+    </article>
+    <article class="feat">
+      <div class="feat-ico">◐</div>
+      <h3 data-ko="테마 · 업데이트" data-en="Themes & updates">테마 · 업데이트</h3>
+      <p data-ko="Soft · GitHub · Warm · Light 앱 테마. GitHub Releases 기반 수동 업데이트 확인. 그룹을 Codex/Claude 세션 ID에 고정." data-en="Soft, GitHub, Warm, and Light themes. Manual update check via GitHub Releases. Pin a group to Codex/Claude session IDs.">Soft · GitHub · Warm · Light 앱 테마. GitHub Releases 기반 수동 업데이트 확인. 그룹을 Codex/Claude 세션 ID에 고정.</p>
+    </article>
+  </div>
+</section>
+
+<!-- ============ LAYOUT ============ -->
+<section id="layout" class="section">
+  <div class="section-head">
+    <span class="section-kicker" data-ko="구성" data-en="Layout">구성</span>
+    <h2 data-ko="세 개의 영역, 하나의 흐름" data-en="Three regions, one flow">세 개의 영역, 하나의 흐름</h2>
+  </div>
+  <div class="layout-grid">
+    <div class="layout-col">
+      <div class="layout-label">01 — Left</div>
+      <h3 data-ko="사이드바" data-en="Sidebar">사이드바</h3>
+      <p data-ko="접이식 프로젝트/세션 트리, Markdown 패널 토글, 설정, 새 세션 추가." data-en="Collapsible project/session tree, Markdown panel toggle, settings, and new-session button.">접이식 프로젝트/세션 트리, Markdown 패널 토글, 설정, 새 세션 추가.</p>
+    </div>
+    <div class="layout-col mid">
+      <div class="layout-label">02 — Center</div>
+      <h3 data-ko="작업 영역" data-en="Workspace">작업 영역</h3>
+      <p data-ko="탭과 분할 터미널 패널. 드래그로 재배치하고 Screen 그룹으로 전환." data-en="Tabbed and split terminal panes. Rearrange by drag, switch by Screen group.">탭과 분할 터미널 패널. 드래그로 재배치하고 Screen 그룹으로 전환.</p>
+    </div>
+    <div class="layout-col">
+      <div class="layout-label">03 — Right</div>
+      <h3 data-ko="Docs 패널" data-en="Docs panel">Docs 패널</h3>
+      <p data-ko="프로젝트 Markdown 문서 목록과 렌더링 미리보기. 터미널 영역과 크기 조절 가능." data-en="Project Markdown list and rendered preview. Resizable against the terminal area.">프로젝트 Markdown 문서 목록과 렌더링 미리보기. 터미널 영역과 크기 조절 가능.</p>
+    </div>
+  </div>
+  <div class="stack-note">
+    <span data-ko="스택" data-en="Stack">스택</span>
+    <code>Tauri 2 · React · TypeScript · Rust</code>
+  </div>
+</section>
+
+<!-- ============ DOWNLOAD ============ -->
+<section id="download" class="section download">
+  <div class="section-head">
+    <span class="section-kicker" data-ko="다운로드" data-en="Download">다운로드</span>
+    <h2 data-ko="설치하고 첫 세션 만들기" data-en="Install and open your first session">설치하고 첫 세션 만들기</h2>
+    <p class="dl-version" id="dlVersionLine" data-ko="최신 버전을 불러오는 중…" data-en="Loading latest release…">최신 버전을 불러오는 중…</p>
+  </div>
+
+  <div class="dl-grid">
+    <a class="dl-card recommended" id="dlSetup" href="https://github.com/OneThingChanged/Multiagent/releases/latest" target="_blank" rel="noopener">
+      <span class="dl-tag" data-ko="추천" data-en="Recommended">추천</span>
+      <h3 data-ko="설치 버전 (Setup)" data-en="Installer (Setup)">설치 버전 (Setup)</h3>
+      <p data-ko="설치 마법사로 설치하고 자동 업데이트를 받습니다." data-en="Install with the wizard and get automatic updates.">설치 마법사로 설치하고 자동 업데이트를 받습니다.</p>
+      <div class="dl-file"><span class="dl-name" id="setupName">MultiAgent-Setup.exe</span><span class="dl-size" id="setupSize">—</span></div>
+    </a>
+    <a class="dl-card" id="dlPortable" href="https://github.com/OneThingChanged/Multiagent/releases/latest" target="_blank" rel="noopener">
+      <span class="dl-tag ghost" data-ko="무설치" data-en="Portable">무설치</span>
+      <h3 data-ko="포터블 버전 (Portable)" data-en="Portable">포터블 버전 (Portable)</h3>
+      <p data-ko="설치 없이 실행 파일 하나로 바로 사용합니다." data-en="Run directly from a single executable — no install.">설치 없이 실행 파일 하나로 바로 사용합니다.</p>
+      <div class="dl-file"><span class="dl-name" id="portableName">MultiAgent-Portable.exe</span><span class="dl-size" id="portableSize">—</span></div>
+    </a>
+  </div>
+
+  <div class="dl-foot">
+    <a href="https://github.com/OneThingChanged/Multiagent/releases" target="_blank" rel="noopener" data-ko="모든 릴리스 보기 ↗" data-en="All releases ↗">모든 릴리스 보기 ↗</a>
+    <span class="meta-sep">·</span>
+    <span data-ko="Codex CLI, Claude CLI 등 사용할 에이전트는 별도로 설치되어 있어야 합니다." data-en="Agent CLIs such as Codex or Claude must be installed separately.">Codex CLI, Claude CLI 등 사용할 에이전트는 별도로 설치되어 있어야 합니다.</span>
+  </div>
+</section>
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="footer-brand">
+    <img src="assets/icon.png" alt="" width="24" height="24" />
+    <span>MultiAgent</span>
+  </div>
+  <div class="footer-links">
+    <a href="https://github.com/OneThingChanged/Multiagent" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/OneThingChanged/Multiagent/releases" target="_blank" rel="noopener" data-ko="릴리스" data-en="Releases">릴리스</a>
+    <a href="https://github.com/OneThingChanged/Multiagent/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+  </div>
+  <div class="footer-copy">© <span id="year"></span> OneThingChanged · MIT</div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>
