@@ -647,6 +647,14 @@ export function PaneSlot({
     e: ReactPointerEvent<HTMLDivElement>,
     tabAgentId: string
   ) => {
+    if (e.button === 1) {
+      // Middle-click closes the tab (browser-style). preventDefault stops the
+      // Windows middle-click autoscroll cursor.
+      e.preventDefault();
+      e.stopPropagation();
+      ctx.onCloseTab(path, tabAgentId);
+      return;
+    }
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("button")) return;
     e.stopPropagation();
