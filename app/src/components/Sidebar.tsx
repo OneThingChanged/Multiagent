@@ -122,6 +122,7 @@ export function Sidebar({
   activeGroupId,
   activeAgentId,
   inGroupAgentIds,
+  detachedAgentIds,
   dragState,
   onSelectProject,
   onSelect,
@@ -143,6 +144,7 @@ export function Sidebar({
   activeGroupId: string | null;
   activeAgentId: string | null;
   inGroupAgentIds: Set<string>;
+  detachedAgentIds: Set<string>;
   dragState: DragState | null;
   onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
@@ -506,6 +508,7 @@ export function Sidebar({
     compact: boolean
   ) => {
     const inGroup = inGroupAgentIds.has(a.id);
+    const isDetached = detachedAgentIds.has(a.id);
     const isDragging = dragState?.fromAgentId === a.id;
     const isActiveGroup = groupId === activeGroupId;
     const screen = screenByAgentId.get(a.id);
@@ -521,6 +524,7 @@ export function Sidebar({
           isDragging ? "agent-dragging" : "",
           multi ? "agent-grouped" : "",
           multi && isActiveGroup ? "agent-grouped-active" : "",
+          isDetached ? "agent-detached" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -534,8 +538,12 @@ export function Sidebar({
           e.preventDefault();
           e.stopPropagation();
         }}
-        onPointerDown={(e) => startSessionPointer(a.id, e)}
+        onPointerDown={(e) => {
+          if (isDetached) return;
+          startSessionPointer(a.id, e);
+        }}
         onDoubleClick={(e) => {
+          if (isDetached) return;
           if ((e.target as HTMLElement).closest("button")) return;
           pendingSessionClickRef.current = null;
           e.preventDefault();
@@ -543,6 +551,7 @@ export function Sidebar({
           onRenameSession(a.id);
         }}
         onContextMenu={(e) => {
+          if (isDetached) return;
           pendingSessionClickRef.current = null;
           e.preventDefault();
           onContextMenu(a.id, e.clientX, e.clientY);
@@ -587,6 +596,14 @@ export function Sidebar({
               PIN
             </span>
           )}
+          {isDetached && (
+            <span
+              className="agent-detached-badge"
+              title="다른 창에서 사용중"
+            >
+              다른 창
+            </span>
+          )}
           {a.dangerous && (
             <span
               className="agent-danger"
@@ -595,16 +612,18 @@ export function Sidebar({
               !
             </span>
           )}
-          <button
-            className="close-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove(a.id);
-            }}
-            title="Remove session"
-          >
-            x
-          </button>
+          {!isDetached && (
+            <button
+              className="close-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove(a.id);
+              }}
+              title="Remove session"
+            >
+              x
+            </button>
+          )}
         </div>
         {!compact && (
           <div className="agent-folder" title={a.lastSessionId ?? ""}>

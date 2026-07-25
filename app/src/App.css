@@ -2233,6 +2233,23 @@ body,
   line-height: 1.2;
 }
 
+.agent-detached {
+  opacity: 0.45;
+  pointer-events: auto;
+}
+
+.agent-detached-badge {
+  flex-shrink: 0;
+  color: var(--app-muted);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 .project-ssh-badge {
   flex-shrink: 0;
   color: var(--app-accent);

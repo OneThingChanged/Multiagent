@@ -329,11 +329,16 @@ export function UsageStatusBar({
           ))
         )}
       </div>
-      <ResourceMonitor agents={agents} projects={projects} />
+      <ResourceMonitor
+        agents={agents}
+        projects={projects}
+        onRefreshUsage={() => load(true)}
+      />
       <PortsMonitor
         agents={agents}
         projects={projects}
         onSelectProject={onSelectProject}
+        onRefreshUsage={() => load(true)}
       />
       <button
         type="button"

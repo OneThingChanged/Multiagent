@@ -92,7 +92,30 @@ Additional command groups (details in each document):
 - **Remote** ([REMOTE.md](REMOTE.md)): `start/stop_remote_server`, `remote_server_status`, `start/stop_tunnel`, `tunnel_status`, `remote_config_get/set`, `remote_access_list/approve/revoke`, `sync_remote_agents`, `sync_remote_view`
 - **Dashboard** ([MONITOR.md](MONITOR.md)): `sync_monitor_state`, `start/stop_monitor_server`, `monitor_server_status`, `monitor_config_get/set` — session monitoring and the Usage screen served by a single local server
 - **Usage accounting** ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)): `sync_usage_catalog`, `usage_ingest_now`, `resolve_cli_session`, `relink_cli_session` (the `start/stop_usage_server` family are legacy commands for the previous standalone Usage server)
-- **Window**: `show_main_window`, new window/always-on-top related
+- **Window**: `show_main_window`, `open_new_app_window`, `get_detached_agents`, new window/always-on-top related
+
+#### Session detach (새 창에서 열기)
+
+The main process maintains a `detachedAgents` map (`agentId → webContents.id`) that tracks which secondary window owns each detached session.
+
+**Detach flow:**
+1. Renderer calls `open_new_app_window({ agentId })` — the caller first removes the agent from its own groups via `groupOps.removeAgentFromLayout`
+2. Main process checks `detachedAgents`: if the agent is already owned by a different window, that window is focused instead (defense against double-open)
+3. A new `BrowserWindow` is created with `secondary: true, openAgentId`. The secondary window starts with empty groups and its sidebar shows only the owned session
+4. The main process registers `detachedAgents.set(agentId, newWindow.webContents.id)` and sends a `session-detached` event to the calling window
+5. The calling window adds the agent to `detachedAgentIds` state → sidebar shows the agent with a dimmed **"다른 창"** badge, click/rename/context-menu disabled, close button hidden
+
+**Reattach flow (secondary window closed):**
+1. The `webContents.on("destroyed")` handler removes all entries from `detachedAgents` owned by that window
+2. A `sessions-reattached` event is broadcast to all remaining windows
+3. Each window removes the released agents from `detachedAgentIds` → sidebar badge disappears, session becomes interactive again
+
+**Defense layers:**
+- Main process `detachedAgents` map blocks duplicate detach (focuses owner window instead)
+- Sidebar hides detached agents from interaction (badge + disabled handlers)
+- `selectAgent`, `openAsTab`, `splitWith`, `selectScreen` all check `detachedAgentIdsRef` before opening
+
+**IPC contract additions:** `get_detached_agents` (command), `session-detached` / `sessions-reattached` (delivered events)
 
 
 ### State (`AppState`)

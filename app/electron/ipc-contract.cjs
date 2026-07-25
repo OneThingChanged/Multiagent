@@ -11,6 +11,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "confirm_close",
   "show_main_window",
   "open_new_app_window",
+  "get_detached_agents",
   "set_desktop_pet_enabled",
   "update_desktop_pet",
   "desktop_pet_snapshot",
@@ -122,6 +123,8 @@ const DELIVERED_EVENTS = Object.freeze([
   "agent:hook-event",
   "native-notification:clicked",
   "update:progress",
+  "session-detached",
+  "sessions-reattached",
 ]);
 
 const EMITTED_EVENTS = Object.freeze([

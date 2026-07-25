@@ -147,6 +147,8 @@ let closeFallback = null;
 let closeSmokeStartedAt = null;
 /** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null, ready: boolean}>} */
 const runtimeByWebContents = new Map();
+/** @type {Map<string, number>} agentId → webContents.id of the secondary window that owns it */
+const detachedAgents = new Map();
 /** @type {Map<string, {id: string, name: string, process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null, aiToolId: string, cwd: string | null, ssh: unknown, filter: CodexScrollbackFilter | PassThroughTerminalFilter, buffer: import('./services/terminal-stream.mjs').SequencedTerminalBuffer, subscribers: Set<number>}>} */
 const ptys = new Map();
 const terminalSessions = new TerminalSessionService({
@@ -553,21 +555,21 @@ function installNavigationPolicy(win) {
 
 function sendEventToAll(eventName, payload) {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
       win.webContents.send("multiagent:event", eventName, payload);
     }
   }
 }
 
 function sendEvent(win, eventName, payload) {
-  if (win && !win.isDestroyed()) {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
     win.webContents.send("multiagent:event", eventName, payload);
   }
 }
 
 function sendEventToWebContentsId(webContentsId, eventName, payload) {
   const target = BrowserWindow.getAllWindows().find(
-    (win) => !win.isDestroyed() && win.webContents.id === webContentsId
+    (win) => !win.isDestroyed() && !win.webContents.isDestroyed() && win.webContents.id === webContentsId
   );
   if (target) sendEvent(target, eventName, payload);
 }
@@ -627,6 +629,9 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     open_agent_id: openAgentId,
     ready: false,
   });
+  if (secondary && openAgentId) {
+    detachedAgents.set(openAgentId, win.webContents.id);
+  }
   installNavigationPolicy(win);
   // The application menu is removed, which also drops its accelerators.
   // Restore the developer ones here (Ctrl+R is intentionally NOT rebound —
@@ -646,6 +651,17 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
   win.webContents.on("destroyed", () => {
     terminalSessions.detachView(webContentsId);
     runtimeByWebContents.delete(webContentsId);
+    // Release any sessions this window owned and notify remaining windows.
+    const released = [];
+    for (const [agentId, ownerWcId] of detachedAgents) {
+      if (ownerWcId === webContentsId) {
+        detachedAgents.delete(agentId);
+        released.push(agentId);
+      }
+    }
+    if (released.length > 0) {
+      sendEventToAll("sessions-reattached", { agentIds: released });
+    }
   });
   if (!bridgeSmoke) win.once("ready-to-show", () => win.show());
 
@@ -2797,9 +2813,38 @@ async function invokeCommand(event, command, rawArgs) {
     case "show_main_window":
       showMainWindow();
       return null;
-    case "open_new_app_window":
-      createAppWindow({ secondary: true, openAgentId: asString(args.agentId) || null });
+    case "open_new_app_window": {
+      const agentId = asString(args.agentId) || null;
+      if (agentId) {
+        const ownerWcId = detachedAgents.get(agentId);
+        if (ownerWcId && ownerWcId !== event.sender.id) {
+          // Already detached to another window — bring it to front instead.
+          const ownerWin = BrowserWindow.getAllWindows().find(
+            (w) => !w.isDestroyed() && w.webContents.id === ownerWcId
+          );
+          if (ownerWin) {
+            if (ownerWin.isMinimized()) ownerWin.restore();
+            ownerWin.show();
+            ownerWin.focus();
+          }
+          return null;
+        }
+      }
+      createAppWindow({ secondary: true, openAgentId: agentId });
+      // Notify the calling window so it can hide the session immediately.
+      if (agentId) {
+        sendEventToWebContentsId(event.sender.id, "session-detached", { agentId });
+      }
       return null;
+    }
+    case "get_detached_agents": {
+      const callerId = event.sender.id;
+      const result = {};
+      for (const [agentId, wcId] of detachedAgents) {
+        if (wcId !== callerId) result[agentId] = wcId;
+      }
+      return result;
+    }
     case "set_desktop_pet_enabled": {
       const win = ensurePetWindow();
       if (args.enabled) {

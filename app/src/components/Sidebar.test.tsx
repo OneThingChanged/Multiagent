@@ -18,6 +18,7 @@ function renderSidebar(
       activeGroupId={activeGroupId}
       activeAgentId={null}
       inGroupAgentIds={new Set()}
+      detachedAgentIds={new Set()}
       dragState={null}
       onSelectProject={() => {}}
       onSelect={() => {}}

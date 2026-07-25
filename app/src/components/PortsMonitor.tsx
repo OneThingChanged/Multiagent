@@ -21,10 +21,12 @@ export function PortsMonitor({
   agents,
   projects,
   onSelectProject,
+  onRefreshUsage,
 }: {
   agents: Agent[];
   projects: Project[];
   onSelectProject: (projectId: string) => void;
+  onRefreshUsage?: () => void | Promise<void>;
 }) {
   const [result, setResult] = useState<PortsResult | null>(null);
   const [open, setOpen] = useState(false);
@@ -124,11 +126,11 @@ export function PortsMonitor({
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await load();
+      await Promise.all([load(), onRefreshUsage?.()]);
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [load, onRefreshUsage]);
 
   const addressOf = (entry: PortEntry) => `${entry.connect_host}:${entry.port}`;
 

@@ -30,7 +30,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - **`+` button next to the Projects title**: new project (pin, new window, pet, settings, Quick Open, and notification buttons all moved to the top bar)
 - **Session right-click**: context menu
   - Switch (jump to current group) / add as tab / split right / split down
-  - **Open in new window** — launches a new MultiAgent window and selects that session. If the same session is already running in another window, the session lock prevents duplicate execution
+  - **Open in new window** — detaches the session into a new MultiAgent window. The session is removed from the current window's terminal area and shown in the sidebar with a dimmed **"다른 창"** badge (click, rename, and context menu are disabled). The new window's sidebar shows only the detached session. Closing the new window automatically releases the session back to the main window (badge removed, session clickable again). If the session is already detached to another window, that window is brought to the front instead of opening a duplicate
   - Rename session alias
   - **Restart session** — re-spawn an exited session (resume included)
   - **Deactivate session** — for a running session that is **not visible on screen**, kills only the PTY to free resources. Selecting it again restarts it with resume (visible sessions are deactivated-disabled)

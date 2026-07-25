@@ -573,6 +573,10 @@ function App() {
   const [groups, setGroups] = useState<Group[]>(
     bootIsSecondary ? [] : boot.groups
   );
+  // Sessions detached to other windows — hidden from this window's sidebar.
+  const [detachedAgentIds, setDetachedAgentIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
   );
@@ -682,6 +686,7 @@ function App() {
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
+  const detachedAgentIdsRef = useRef<Set<string>>(new Set());
   const projectsRef = useRef<Project[]>([]);
   const groupsRef = useRef<Group[]>([]);
   const activeProjectIdRef = useRef<string | null>(null);
@@ -806,6 +811,35 @@ function App() {
     };
   }, [isSecondaryWindow, runtimeFlags]);
 
+  // Track sessions detached to other windows so we can hide them from the
+  // sidebar and prevent double-opening.
+  useEffect(() => {
+    if (!runtimeFlags) return;
+    let cancelled = false;
+    invoke<Record<string, number>>("get_detached_agents")
+      .then((map) => {
+        if (cancelled) return;
+        setDetachedAgentIds(new Set(Object.keys(map)));
+      })
+      .catch(() => {});
+    const unsubs: Array<() => void> = [];
+    listen<{ agentId: string }>("session-detached", (e) => {
+      setDetachedAgentIds((prev) => {
+        const next = new Set(prev);
+        next.add(e.payload.agentId);
+        return next;
+      });
+    }).then((fn) => { if (cancelled) fn(); else unsubs.push(fn); });
+    listen<{ agentIds: string[] }>("sessions-reattached", (e) => {
+      setDetachedAgentIds((prev) => {
+        const next = new Set(prev);
+        for (const id of e.payload.agentIds) next.delete(id);
+        return next;
+      });
+    }).then((fn) => { if (cancelled) fn(); else unsubs.push(fn); });
+    return () => { cancelled = true; unsubs.forEach((fn) => fn()); };
+  }, [runtimeFlags]);
+
   useEffect(() => {
     if (!runtimeFlags) return;
     syncSharedStateFromStorage();
@@ -833,6 +867,35 @@ function App() {
   useEffect(() => {
     agentsRef.current = agents;
   }, [agents]);
+
+  useEffect(() => {
+    detachedAgentIdsRef.current = detachedAgentIds;
+  }, [detachedAgentIds]);
+
+  // Prune detached agents from groups so they don't linger in the terminal
+  // area after being opened in another window.
+  useEffect(() => {
+    if (detachedAgentIds.size === 0) return;
+    setGroups((prev) => {
+      let changed = false;
+      let next = prev;
+      for (const id of detachedAgentIds) {
+        const pruned = groupOps.removeAgentFromLayout(
+          { groups: next, activeGroupId: activeGroupIdRef.current, activePath: activePathRef.current },
+          id
+        );
+        if (pruned.groups !== next) {
+          changed = true;
+          next = pruned.groups;
+          activeGroupIdRef.current = pruned.activeGroupId;
+          activePathRef.current = pruned.activePath;
+          setActiveGroupId(pruned.activeGroupId);
+          setActivePath(pruned.activePath);
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [detachedAgentIds]);
 
   useEffect(() => {
     if (!runtimeFlags || isSecondaryWindow) return;
@@ -1345,7 +1408,27 @@ function App() {
   }, [pushToast]);
 
   const openNewAppWindow = useCallback((agentId?: string | null) => {
-    invoke("open_new_app_window", { agentId: agentId ?? null }).catch((error) => {
+    const id = agentId ?? null;
+    // Remove the session from this window's groups so it doesn't appear in
+    // two windows at once.
+    if (id) {
+      setGroups((prev) => {
+        const next = groupOps.removeAgentFromLayout(
+          {
+            groups: prev,
+            activeGroupId: activeGroupIdRef.current,
+            activePath: activePathRef.current,
+          },
+          id
+        );
+        activeGroupIdRef.current = next.activeGroupId;
+        activePathRef.current = next.activePath;
+        setActiveGroupId(next.activeGroupId);
+        setActivePath(next.activePath);
+        return next.groups;
+      });
+    }
+    invoke("open_new_app_window", { agentId: id }).catch((error) => {
       pushToast("", "새 창", `새 창을 열 수 없습니다: ${String(error)}`);
     });
   }, [pushToast]);
@@ -1848,6 +1931,8 @@ function App() {
 
   const selectAgent = useCallback(
     (agentId: string) => {
+      // Block opening a session that is detached to another window.
+      if (detachedAgentIdsRef.current.has(agentId)) return;
       const agent = activateAgentProject(agentId);
       const current = agentsRef.current.find((a) => a.id === agentId);
       if (current?.status === "exited") {
@@ -1863,6 +1948,7 @@ function App() {
 
   const selectScreen = useCallback(
     (groupId: string, agentId: string) => {
+      if (detachedAgentIdsRef.current.has(agentId)) return;
       activateAgentProject(agentId);
       applyGroupOp((state) =>
         groupOps.selectGroup(state, groupId, agentId)
@@ -1903,6 +1989,7 @@ function App() {
 
   const openAsTab = useCallback(
     (agentId: string) => {
+      if (detachedAgentIdsRef.current.has(agentId)) return;
       const agent = activateAgentProject(agentId);
       applyGroupOp((s) =>
         groupOps.openAsTab(
@@ -1917,6 +2004,7 @@ function App() {
 
   const splitWith = useCallback(
     (agentId: string, direction: "h" | "v") => {
+      if (detachedAgentIdsRef.current.has(agentId)) return;
       const agent = activateAgentProject(agentId);
       applyGroupOp((s) =>
         groupOps.splitWith(
@@ -3008,6 +3096,26 @@ function App() {
     return leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
   }, [activeGroupLayout, activePath]);
 
+  // Sidebar filtering: secondary windows show only their owned session;
+  // the main window shows all sessions (detached ones get a badge in Sidebar).
+  const sidebarAgents = useMemo(() => {
+    if (isSecondaryWindow) {
+      const ownedId = runtimeFlags?.open_agent_id;
+      return ownedId ? agents.filter((a) => a.id === ownedId) : [];
+    }
+    return agents;
+  }, [agents, isSecondaryWindow, runtimeFlags]);
+
+  const sidebarProjects = useMemo(() => {
+    if (isSecondaryWindow) {
+      const ownedId = runtimeFlags?.open_agent_id;
+      if (!ownedId) return [];
+      const ownedAgent = agents.find((a) => a.id === ownedId);
+      return ownedAgent ? projects.filter((p) => p.id === ownedAgent.projectId) : [];
+    }
+    return projects;
+  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+
   const renameSession = useMemo(
     () =>
       renameSessionId
@@ -3047,13 +3155,14 @@ function App() {
         />
       )}
       <Sidebar
-        projects={projects}
-        agents={agents}
+        projects={sidebarProjects}
+        agents={sidebarAgents}
         groups={groups}
         activeProjectId={activeProjectId}
         activeGroupId={activeGroupId}
         activeAgentId={activeAgentId}
         inGroupAgentIds={inGroupAgentIds}
+        detachedAgentIds={detachedAgentIds}
         dragState={dragState}
         onSelectProject={selectProject}
         onSelect={selectAgent}

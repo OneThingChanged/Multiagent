@@ -41,9 +41,11 @@ type ProjectGroup = {
 export function ResourceMonitor({
   agents,
   projects,
+  onRefreshUsage,
 }: {
   agents: Agent[];
   projects: Project[];
+  onRefreshUsage?: () => void | Promise<void>;
 }) {
   const [usage, setUsage] = useState<ResourceUsageResult | null>(null);
   const [open, setOpen] = useState(false);
@@ -140,11 +142,11 @@ export function ResourceMonitor({
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await load();
+      await Promise.all([load(), onRefreshUsage?.()]);
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [load, onRefreshUsage]);
 
   return (
     <div className="resource-monitor" ref={rootRef}>

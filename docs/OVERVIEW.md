@@ -91,7 +91,7 @@ The Electron app also preserves per-period account rate limits observed from Cod
 | Ports monitor | 🔌 on the right of the status bar — open TCP ports attributed per project (session child processes/command-line paths), open in browser, copy address, kill process, External collapsed section |
 | Left sidebar collapse | ⫞ toggle in the top bar, state persisted |
 | Auto updates | Settings → About → Check; downloads, installs, and restarts after signature verification ([RELEASE.md](RELEASE.md)) |
-| Multi-window | open a new window (top bar) |
+| Multi-window | detach a session into a new window (sidebar context menu or top bar). Detached sessions show a "다른 창" badge in the origin window; closing the secondary window releases the session back. Duplicate-open is prevented by the main process ownership map |
 | Always on top | always-on-top toggle (top bar pin) |
 | Themes | Soft / GitHub / Warm / Light (shared across app, terminal, Docs) |
 | Persistence | localStorage (projects/agents/groups/view/theme/…) + local JSON/SQLite (remote/usage). groups stores the current list authoritatively and auto-normalizes legacy duplicates preferring Screens |
