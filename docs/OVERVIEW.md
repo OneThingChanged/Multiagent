@@ -46,7 +46,7 @@ Switch / add as tab / split right·down / rename alias / **Restart session** / *
 | feature | description |
 |---|---|
 | Working/Done detection | Claude/Codex hooks (UserPromptSubmit/Stop) → local HTTP → status dot (yellow pulse / green) |
-| Notifications | on completion: in-app toast + OS notification + **notification sound** (system sound / custom file / off, chosen in Settings) |
+| Notifications | on completion: in-app toast + optional OS notification + **notification sound** (system sound / custom file / Korean TTS / off, chosen in Settings). OS notifications are silent while an app sound is enabled to prevent duplicate audio |
 | Desktop Pet | an always-on-top, non-focusable pet window showing idle/working/done plus working/completed counts. Clicking the working badge shows session·tool·latest question; clicking an item/completion balloon jumps to that session |
 | Session resume | capture session_id via SessionStart hook → `codex resume`/`claude --resume` on next run ([RESUME.md](RESUME.md)) |
 | Scrollback restore | save scrollback just before exit → restore on restart |

@@ -5263,6 +5263,17 @@ body.files-resizing .files-resizer::after {
   margin-top: 8px;
 }
 
+.app-sound-tts-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-input-bg, var(--app-bg));
+  color: var(--app-fg);
+}
+
 .app-pet-settings-card {
   padding-top: 4px;
 }

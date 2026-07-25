@@ -74,7 +74,7 @@ import {
 } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
-import { playNotificationSound } from "./lib/notificationSound";
+import { playNotificationSound, loadNotificationSound, shouldSilenceOsNotification } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
 import {
   AGENT_ACTIVITY_STALE_AFTER_MS,
@@ -1609,27 +1609,34 @@ function App() {
                 : "작업이 끝났습니다.",
               createdAt: nextAgent.activity?.receivedAt || Date.now(),
             });
-            playNotificationSound();
+            playNotificationSound(
+              loadNotificationSound(),
+              `${projectName} ${currentAgent.name} 작업이 끝났어요`
+            );
             pushToast(currentAgent.id, title, "작업이 끝났어요");
             // When the app isn't focused, flash the taskbar so the user notices
             // (clicking the taskbar brings the app forward, where the in-app
             // toast is clickable to jump to the session). The always-on-top
             // popup window was removed — on some Windows setups it grabbed focus
             // and froze terminal input.
-            getCurrentWindow()
-              .isFocused()
-              .then((focused) => {
-                if (focused) return;
-                getCurrentWindow()
-                  .requestUserAttention(UserAttentionType.Critical)
-                  .catch(() => {});
-                notifyDone({
-                  projectName,
-                  sessionName: currentAgent.name,
-                  onActivate: () => selectAgentRef.current?.(currentAgent.id),
-                }).catch(() => {});
-              })
-              .catch(() => {});
+            const soundConfig = loadNotificationSound();
+            if (soundConfig.osNotification !== false) {
+              getCurrentWindow()
+                .isFocused()
+                .then((focused) => {
+                  if (focused) return;
+                  getCurrentWindow()
+                    .requestUserAttention(UserAttentionType.Critical)
+                    .catch(() => {});
+                  notifyDone({
+                    projectName,
+                    sessionName: currentAgent.name,
+                    silent: shouldSilenceOsNotification(soundConfig),
+                    onActivate: () => selectAgentRef.current?.(currentAgent.id),
+                  }).catch(() => {});
+                })
+                .catch(() => {});
+            }
           }
         }
         setAgents((cur) =>

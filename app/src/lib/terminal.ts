@@ -140,10 +140,12 @@ export function saveTerminalFontSize(fontSize: number) {
 export async function notifyDone({
   projectName,
   sessionName,
+  silent,
   onActivate,
 }: {
   projectName: string;
   sessionName: string;
+  silent?: boolean;
   onActivate?: () => void;
 }) {
   try {
@@ -169,6 +171,7 @@ export async function notifyDone({
         title: `${projectName} / ${sessionName}`,
         body: "작업이 끝났어요",
         notificationKey,
+        silent: silent ?? false,
       });
       return;
     }
@@ -180,6 +183,7 @@ export async function notifyDone({
       {
         body: "작업이 끝났어요",
         tag: notificationKey,
+        silent: silent ?? false,
       }
     );
     notification.onclick = () => {

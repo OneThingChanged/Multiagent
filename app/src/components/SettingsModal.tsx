@@ -20,6 +20,7 @@ import {
   loadNotificationSound,
   saveNotificationSound,
   playNotificationSound,
+  DEFAULT_TTS_MESSAGE,
   type NotificationSoundConfig,
   type NotificationSoundMode,
 } from "../lib/notificationSound";
@@ -34,6 +35,7 @@ import { toolForId } from "../types";
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
   { id: "system", label: "System" },
   { id: "custom", label: "Custom" },
+  { id: "tts", label: "TTS" },
   { id: "off", label: "Off" },
 ];
 
@@ -1070,6 +1072,19 @@ export function SettingsModal({
               </button>
             </div>
           )}
+          {sound.mode === "tts" && (
+            <div className="app-sound-custom-row">
+              <input
+                type="text"
+                className="app-sound-tts-input"
+                value={sound.ttsMessage ?? DEFAULT_TTS_MESSAGE}
+                placeholder={DEFAULT_TTS_MESSAGE}
+                onChange={(e) =>
+                  applySound({ ...sound, ttsMessage: e.target.value })
+                }
+              />
+            </div>
+          )}
           <div className="app-sound-actions">
             <button
               className="btn-secondary app-sound-test-btn"
@@ -1079,6 +1094,16 @@ export function SettingsModal({
               Test
             </button>
           </div>
+          <label className="app-checkbox-row">
+            <input
+              type="checkbox"
+              checked={sound.osNotification !== false}
+              onChange={(e) =>
+                applySound({ ...sound, osNotification: e.target.checked })
+              }
+            />
+            Windows 알림 표시 (소리 중복 방지: 앱 사운드가 켜져 있으면 무음)
+          </label>
         </div>
 
         <div className="app-settings-section">
