@@ -5,8 +5,12 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
-import type { TextFileResult } from "../platform/ipcContract";
+import type { TextFileResult, DocAssetResult } from "../platform/ipcContract";
 import { docKindForPath, parseDocTabId, type DocKind } from "../lib/docTabs";
+import {
+  htmlNeedsAssetInlining,
+  inlineHtmlAssets,
+} from "../lib/htmlAssets";
 
 function joinFolderPath(folder: string, relativePath: string) {
   return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
@@ -93,11 +97,27 @@ export function DocViewer({
           relativePath,
         });
         if (cancelled) return;
-        setState(
-          kind === "markdown"
-            ? { phase: "markdown", content }
-            : { phase: "html", content }
-        );
+        if (kind === "markdown") {
+          setState({ phase: "markdown", content });
+          return;
+        }
+        // HTML renders in a srcDoc iframe (about:srcdoc), so relative images,
+        // css url()s and linked stylesheets can't resolve on their own. Inline
+        // local assets (scoped to the project root) so they display.
+        let html = content;
+        if (htmlNeedsAssetInlining(content)) {
+          html = await inlineHtmlAssets(content, {
+            htmlRelative: relativePath,
+            readAsset: (containerRelative, ref) =>
+              invoke<DocAssetResult>("read_doc_asset", {
+                folder,
+                containerRelative,
+                ref,
+              }).catch(() => null),
+          });
+        }
+        if (cancelled) return;
+        setState({ phase: "html", content: html });
         return;
       }
       if (kind === "image") {

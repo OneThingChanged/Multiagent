@@ -1,6 +1,6 @@
 # Remote PWA
 
-A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet browser and giving short commands. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the installable PWA screen.
+A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet browser, giving short commands, and viewing local project Markdown/HTML documents. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the installable PWA screen.
 
 Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands in main IPC, and exclude `electron/remote-pwa/**` from packaging.
 
@@ -10,6 +10,7 @@ Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands i
 [Phone PWA] ──HTTPS──> Cloudflare Tunnel ──> [My PC] 127.0.0.1:<port>
      │                                                   │
      ├─ GitHub login + account approval                  ├─ session/hook/recent output query
+     ├─ Markdown/HTML document browser                   ├─ sandboxed local project document read
      ├─ status/question/completion alerts                └─ short input to the selected PTY
      └─ home screen install
 ```
@@ -21,6 +22,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Monitor**: separates working · needs-answer · done · waiting · inactive sessions into lanes, with status counts at a glance
 - **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts, showing multiple terminals at once
 - **Sessions**: per-project session list with status filters and search; the selected terminal is shown large
+- **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - Mobile Screens switch to pane tabs instead of small splits, and navigation lists appear as a slide menu
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
@@ -41,6 +43,8 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /sw.js` | offline shell / notification service worker |
 | `GET /api/state` | projects, sessions, hooks, recent output state |
 | `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
+| `GET /api/docs?projectId=...` | list up to 500 Markdown/HTML documents under one synchronized local project |
+| `GET /api/docs/read?projectId=...&path=...` | read one Markdown/HTML document inside that project (2MB limit) |
 | `GET /auth/mode` | returns web/device mode based on OAuth config |
 | `POST /auth/start` | start GitHub Device Flow |
 | `POST /auth/poll` | Device Flow token/user check |
@@ -87,6 +91,8 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 
 - The server listens on `127.0.0.1` only; external exposure goes through Cloudflare HTTPS.
 - All APIs check login + approval. Only direct loopback requests are allowed without approval, for local diagnostics.
+- Document paths are resolved against a synchronized local project root. Absolute paths, `..` traversal outside the project, symbolic-link escapes, unsupported extensions, files over 2MB, and SSH projects are rejected. Dependency/build/cache folders are skipped while listing.
+- Markdown raw HTML is escaped before rendering. HTML previews use an iframe without `allow-scripts` or `allow-same-origin`, so document scripts and parent-window access are blocked.
 - PTY input allows same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB, and exited sessions are rejected.
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
@@ -101,7 +107,9 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 5. If not the Owner, approve the approval request on the desktop.
 6. Choose **Install app / Add to Home Screen** from the browser menu and enable notification permission.
 
-The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens and **SESSIONS** opens individual sessions. On mobile, the monitor/screens/sessions/question buttons at the bottom open the same navigation menu.
+The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, and **Documents** opens the local project document browser. On mobile, the monitor/screens/sessions/documents/question buttons at the bottom provide the same navigation.
+
+Document browsing is local-project only. SSH project files and relative HTML assets such as external CSS/images are not transferred in this version; self-contained HTML and inline styles render normally.
 
 ## Remaining Extensions
 

@@ -3722,6 +3722,108 @@ body.files-resizing .files-resizer::after {
   color: var(--docs-muted);
 }
 
+/* File-type filter chips */
+.file-tree-kindfilter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 10px 7px;
+  border-bottom: 1px solid var(--docs-border);
+  flex-shrink: 0;
+}
+.file-tree-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--docs-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--docs-muted);
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease;
+}
+.file-tree-kind-chip:hover {
+  border-color: var(--docs-muted);
+  color: var(--docs-text);
+  transform: translateY(-1px);
+}
+.file-tree-kind-chip:active {
+  transform: translateY(0);
+}
+.file-tree-kind-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: box-shadow 0.15s ease;
+}
+.file-tree-kind-md .file-tree-kind-dot {
+  background: var(--docs-inline-code-border);
+}
+.file-tree-kind-image .file-tree-kind-dot {
+  background: #38a169;
+}
+.file-tree-kind-code .file-tree-kind-dot {
+  background: #3182ce;
+}
+.file-tree-kind-html .file-tree-kind-dot {
+  background: #dd6b20;
+}
+.file-tree-kind-chip-on {
+  color: var(--docs-heading);
+  font-weight: 600;
+}
+.file-tree-kind-md.file-tree-kind-chip-on {
+  border-color: var(--docs-inline-code-border);
+  background: var(--docs-inline-code-bg);
+}
+.file-tree-kind-image.file-tree-kind-chip-on {
+  border-color: #2f855a;
+  background: rgba(47, 133, 90, 0.18);
+}
+.file-tree-kind-code.file-tree-kind-chip-on {
+  border-color: #2b6cb0;
+  background: rgba(49, 130, 206, 0.18);
+}
+.file-tree-kind-html.file-tree-kind-chip-on {
+  border-color: #c2410c;
+  background: rgba(234, 88, 12, 0.18);
+}
+.file-tree-kind-chip-on .file-tree-kind-dot {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
+}
+.file-tree-kind-clear {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--docs-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.file-tree-kind-clear:hover {
+  background: var(--docs-bg-soft);
+  color: var(--docs-error);
+}
+
 .file-tree-body {
   flex: 1;
   min-height: 0;

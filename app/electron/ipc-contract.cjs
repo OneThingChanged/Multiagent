@@ -52,6 +52,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "delete_path",
   "resolve_terminal_path",
   "read_image_data_url",
+  "read_doc_asset",
   "play_system_sound",
   "read_audio_file",
   "clipboard_read_text",
@@ -217,6 +218,11 @@ function assertInvokeRequest(command, rawArgs) {
     case "delete_path":
       assertPathString(args.folder, "folder");
       assertPathString(args.relativePath, "relative path");
+      break;
+    case "read_doc_asset":
+      assertPathString(args.folder, "folder");
+      assertPathString(args.containerRelative, "container relative path");
+      assertPathString(args.ref, "asset reference");
       break;
     case "rename_path":
       assertPathString(args.folder, "folder");

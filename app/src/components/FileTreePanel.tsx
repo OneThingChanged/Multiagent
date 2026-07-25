@@ -77,15 +77,96 @@ function toEntry(raw: DirectoryEntry): FileTreeEntry {
   };
 }
 
+const IMAGE_EXT_SET = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "ico",
+]);
+
+const CODE_EXT_SET = new Set([
+  "c",
+  "cpp",
+  "cc",
+  "cxx",
+  "h",
+  "hpp",
+  "hh",
+  "hxx",
+  "cs",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "py",
+  "pyw",
+  "rs",
+  "go",
+  "java",
+  "kt",
+  "kts",
+  "swift",
+  "rb",
+  "php",
+  "pl",
+  "lua",
+  "sh",
+  "bash",
+  "zsh",
+  "bat",
+  "cmd",
+  "ps1",
+  "sql",
+  "json",
+  "jsonc",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
+  "ini",
+  "conf",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "vue",
+  "svelte",
+  "astro",
+]);
+
 function fileIconClass(name: string) {
   const dot = name.lastIndexOf(".");
   const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
   if (ext === "md" || ext === "markdown") return "file-tree-icon-md";
   if (ext === "html" || ext === "htm") return "file-tree-icon-html";
-  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico"].includes(ext)) {
-    return "file-tree-icon-image";
-  }
+  if (IMAGE_EXT_SET.has(ext)) return "file-tree-icon-image";
   return "file-tree-icon-file";
+}
+
+// Sidebar file-type filter categories.
+type FileKind = "md" | "image" | "code" | "html";
+
+const FILE_KINDS: { id: FileKind; label: string; title: string }[] = [
+  { id: "md", label: "MD", title: "마크다운" },
+  { id: "image", label: "이미지", title: "이미지" },
+  { id: "code", label: "코드", title: "코드" },
+  { id: "html", label: "HTML", title: "HTML" },
+];
+
+export function fileKindOf(name: string): FileKind | null {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+  if (ext === "md" || ext === "markdown") return "md";
+  if (ext === "html" || ext === "htm") return "html";
+  if (IMAGE_EXT_SET.has(ext)) return "image";
+  if (CODE_EXT_SET.has(ext)) return "code";
+  return null;
 }
 
 function parentPath(relativePath: string) {
@@ -245,6 +326,27 @@ export function FileTreePanel({
   const [filterResult, setFilterResult] = useState<FilterResult | null>(null);
   const [filterLoading, setFilterLoading] = useState(false);
   const filterRunRef = useRef(0);
+
+  // File-type filter chips (empty set = show everything).
+  const [kindFilter, setKindFilter] = useState<Set<FileKind>>(() => new Set());
+  const kindFiltering = kindFilter.size > 0;
+  const matchesKind = useCallback(
+    (entry: FileTreeEntry) => {
+      if (!kindFiltering) return true;
+      if (entry.isDir) return true;
+      const kind = fileKindOf(entry.name);
+      return kind !== null && kindFilter.has(kind);
+    },
+    [kindFilter, kindFiltering]
+  );
+  const toggleKind = useCallback((kind: FileKind) => {
+    setKindFilter((current) => {
+      const next = new Set(current);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }, []);
 
   // ---- Git status ----
   const [gitFiles, setGitFiles] = useState<Map<string, GitStatusLetter>>(
@@ -478,6 +580,7 @@ export function FileTreePanel({
       const entries = dirCache.get(relative);
       if (!entries) return;
       for (const entry of entries) {
+        if (!matchesKind(entry)) continue;
         rows.push({ entry, depth });
         if (entry.isDir && expanded.has(entry.relativePath)) {
           walk(entry.relativePath, depth + 1);
@@ -486,7 +589,7 @@ export function FileTreePanel({
     };
     walk("", 0);
     return rows;
-  }, [dirCache, expanded]);
+  }, [dirCache, expanded, matchesKind]);
 
   // "Find files" — debounced client-side BFS reusing/filling dirCache.
   useEffect(() => {
@@ -535,7 +638,10 @@ export function FileTreePanel({
         for (const entry of entries) {
           if (entry.isDir) {
             queue.push(entry.relativePath);
-          } else if (entry.name.toLowerCase().includes(query)) {
+          } else if (
+            entry.name.toLowerCase().includes(query) &&
+            matchesKind(entry)
+          ) {
             matches.push(entry);
             if (matches.length >= FILTER_MAX_RESULTS) break;
           }
@@ -546,7 +652,7 @@ export function FileTreePanel({
       setFilterLoading(false);
     }, FILTER_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [dirCache, filter, folder]);
+  }, [dirCache, filter, folder, matchesKind]);
 
   // ---- Context menu actions ----
 
@@ -898,6 +1004,39 @@ export function FileTreePanel({
               }
             }}
           />
+        </div>
+      )}
+
+      {view === "files" && (
+        <div className="file-tree-kindfilter">
+          {FILE_KINDS.map((kind) => {
+            const on = kindFilter.has(kind.id);
+            return (
+              <button
+                key={kind.id}
+                type="button"
+                className={`file-tree-kind-chip file-tree-kind-${kind.id}${
+                  on ? " file-tree-kind-chip-on" : ""
+                }`}
+                onClick={() => toggleKind(kind.id)}
+                title={on ? `${kind.title} 필터 해제` : `${kind.title}만 보기`}
+                aria-pressed={on}
+              >
+                <span className="file-tree-kind-dot" />
+                <span className="file-tree-kind-label">{kind.label}</span>
+              </button>
+            );
+          })}
+          {kindFilter.size > 0 && (
+            <button
+              type="button"
+              className="file-tree-kind-clear"
+              onClick={() => setKindFilter(new Set())}
+              title="필터 모두 해제"
+            >
+              ×
+            </button>
+          )}
         </div>
       )}
 

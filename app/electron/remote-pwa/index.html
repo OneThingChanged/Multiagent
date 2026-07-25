@@ -71,6 +71,11 @@
           <span><strong>Monitor</strong><small>전체 세션 상태</small></span>
           <b id="totalCount">0</b>
         </button>
+        <button class="overview-button documents-button" id="documentsButton" type="button">
+          <span class="overview-icon">▤</span>
+          <span><strong>Documents</strong><small>Markdown · HTML 보기</small></span>
+          <b id="documentProjectCount">0</b>
+        </button>
 
         <label class="search-box">
           <span aria-hidden="true">⌕</span>
@@ -121,6 +126,46 @@
           </div>
           <div class="screen-pane-tabs" id="screenPaneTabs" aria-label="모바일 Screen 패널"></div>
           <div class="screen-layout" id="screenLayout"></div>
+        </section>
+
+        <section class="documents-view" id="documentsView" hidden>
+          <div class="view-head">
+            <div>
+              <span class="eyebrow">PROJECT DOCUMENTS</span>
+              <h2>문서</h2>
+              <p>PC의 로컬 프로젝트에 있는 Markdown과 HTML 파일을 안전하게 미리봅니다.</p>
+            </div>
+          </div>
+          <div class="documents-toolbar">
+            <label>
+              <span>프로젝트</span>
+              <select id="documentProjectSelect" aria-label="문서 프로젝트 선택"></select>
+            </label>
+            <label class="document-search">
+              <span aria-hidden="true">⌕</span>
+              <input id="documentSearchInput" type="search" placeholder="파일명 또는 경로 검색" autocomplete="off">
+            </label>
+            <button class="small-button" id="refreshDocumentsButton" type="button">새로고침</button>
+          </div>
+          <div class="documents-layout">
+            <aside class="document-list-pane" aria-label="프로젝트 문서 목록">
+              <div class="document-list-meta"><strong id="documentListTitle">문서</strong><span id="documentListCount">0</span></div>
+              <div class="document-list" id="documentList"></div>
+              <p class="empty-state" id="documentEmptyState">프로젝트를 선택하세요.</p>
+            </aside>
+            <section class="document-preview">
+              <div class="document-preview-head">
+                <div>
+                  <strong id="documentName">문서를 선택하세요</strong>
+                  <span id="documentPath"></span>
+                </div>
+                <span class="document-kind" id="documentKind" hidden></span>
+              </div>
+              <div class="document-message" id="documentMessage">왼쪽 목록에서 Markdown 또는 HTML 파일을 선택하세요.</div>
+              <article class="document-markdown" id="documentMarkdown" hidden></article>
+              <iframe class="document-html" id="documentHtml" sandbox title="HTML 문서 미리보기" hidden></iframe>
+            </section>
+          </div>
         </section>
 
         <section class="session-view" id="sessionView" hidden>
@@ -185,6 +230,7 @@
       <button class="active" id="mobileMonitorButton" type="button"><span>▦</span>모니터</button>
       <button id="mobileScreensButton" type="button"><span>▥</span>스크린 <i id="mobileScreenBadge" hidden>0</i></button>
       <button id="mobileSessionsButton" type="button"><span>●</span>세션</button>
+      <button id="mobileDocumentsButton" type="button"><span>▤</span>문서</button>
       <button id="mobileQuestionsButton" type="button"><span>?</span>질문 <i id="mobileQuestionBadge" hidden>0</i></button>
     </nav>
 

@@ -96,10 +96,13 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("/manifest.webmanifest");
     expect(pageBody).toContain("Remote Monitor");
     expect(pageBody).toContain("SCREENS");
+    expect(pageBody).toContain('id="documentsView"');
     expect(appScriptBody).toContain("function renderScreen()");
     expect(appScriptBody).toContain("function renderMonitor()");
+    expect(appScriptBody).toContain("function renderDocuments()");
     expect(stylesBody).toContain(".monitor-board");
     expect(stylesBody).toContain(".screen-layout");
+    expect(stylesBody).toContain(".documents-layout");
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
@@ -118,6 +121,71 @@ describe("Electron dashboard server", () => {
     expect(loginBody).toContain("MultiAgent Remote");
     expect(loginBody).toContain('id="startLogin"');
     expect(loginBody).toContain('id="deviceCode"');
+  });
+
+  it("lists and reads sandboxed Markdown/HTML project documents", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-docs-"));
+    roots.push(root);
+    const projectRoot = path.join(root, "project");
+    fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), "<h1>Preview</h1><script>throw new Error('blocked')</script>");
+    fs.writeFileSync(path.join(projectRoot, "notes.txt"), "not allowed");
+    fs.writeFileSync(path.join(projectRoot, "node_modules", "hidden.md"), "# hidden");
+    fs.writeFileSync(path.join(root, "outside.md"), "# outside");
+    fs.writeFileSync(path.join(projectRoot, "docs", "large.md"), Buffer.alloc(2 * 1024 * 1024 + 1, 65));
+
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => false,
+    });
+    services.push(service);
+    service.config.server_port = 0;
+    service.syncView({
+      projects: [
+        { id: "local", name: "Local", folder: projectRoot },
+        { id: "ssh", name: "SSH", folder: "/remote/project", sshHostId: "host-1" },
+      ],
+      agents: [],
+      groups: [],
+    });
+    const status = await service.start();
+
+    const listResponse = await fetch(`${status.url}/api/docs?projectId=local`);
+    const list = await listResponse.json();
+    const markdown = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "docs/README.md" })}`,
+    ).then((response) => response.json());
+    const html = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "docs/preview.html" })}`,
+    ).then((response) => response.json());
+    const traversal = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "../outside.md" })}`,
+    );
+    const unsupported = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "notes.txt" })}`,
+    );
+    const oversized = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "docs/large.md" })}`,
+    );
+    const ssh = await fetch(`${status.url}/api/docs?projectId=ssh`);
+
+    expect(listResponse.status).toBe(200);
+    expect(list.documents.map((document) => document.path)).toEqual([
+      "docs/large.md",
+      "docs/preview.html",
+      "docs/README.md",
+    ]);
+    expect(list.documents.some((document) => document.path.includes("node_modules"))).toBe(false);
+    expect(markdown).toMatchObject({ kind: "markdown", path: "docs/README.md", content: "# Remote 문서\n" });
+    expect(html.kind).toBe("html");
+    expect(html.content).toContain("<script>");
+    expect(traversal.status).toBe(403);
+    expect(unsupported.status).toBe(415);
+    expect(oversized.status).toBe(413);
+    expect(ssh.status).toBe(409);
   });
 
   it("accepts same-origin JSON input and blocks cross-origin commands", async () => {
@@ -155,13 +223,23 @@ describe("Electron dashboard server", () => {
   it("serves the full Remote PWA + chat/input from the local Dashboard when providers are given", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-dash-pwa-"));
     roots.push(root);
+    fs.mkdirSync(path.join(root, "docs"));
+    fs.writeFileSync(path.join(root, "docs", "local.md"), "# Local dashboard");
     const writes = [];
     const service = new LocalDashboardService({
       title: "Monitor",
       defaultPort: 0,
       baseDir: root,
       configName: "monitor.json",
-      stateProvider: () => ({ pwa: true, agents: [], view: { projects: [], agents: [], groups: [] } }),
+      stateProvider: () => ({
+        pwa: true,
+        agents: [],
+        view: {
+          projects: [{ id: "local-project", name: "Local", folder: root }],
+          agents: [],
+          groups: [],
+        },
+      }),
       providers: {
         writePty: (id, data) => { writes.push({ id, data }); return true; },
         chatProvider: (id) => ({ blocks: [{ role: "user", kind: "text", text: `hi ${id}` }], missing: false }),
@@ -180,6 +258,8 @@ describe("Electron dashboard server", () => {
     expect(state.pwa).toBe(true);
     const chat = await fetch(`${status.url}/api/chat?id=agent-9`).then((r) => r.json());
     expect(chat.blocks[0].text).toBe("hi agent-9");
+    const docs = await fetch(`${status.url}/api/docs?projectId=local-project`).then((r) => r.json());
+    expect(docs.documents).toContainEqual({ name: "local.md", path: "docs/local.md", kind: "markdown" });
     const input = await fetch(`${status.url}/api/input`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: status.url },

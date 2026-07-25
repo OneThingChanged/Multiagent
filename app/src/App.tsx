@@ -904,6 +904,7 @@ function App() {
         id: p.id,
         name: p.name,
         folder: p.folder,
+        sshHostId: p.sshHostId,
       })),
       agents: agents.map((a) => ({
         id: a.id,
@@ -964,6 +965,7 @@ function App() {
         id: p.id,
         name: p.name,
         folder: p.folder,
+        sshHostId: p.sshHostId,
       })),
       agents: agents.map((a) => ({
         id: a.id,

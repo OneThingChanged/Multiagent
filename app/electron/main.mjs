@@ -90,6 +90,8 @@ const IMAGE_MIME = new Map([
   [".svg", "image/svg+xml"],
   [".ico", "image/x-icon"],
 ]);
+// Text assets an HTML doc tab may inline (currently just stylesheets).
+const DOC_ASSET_TEXT_EXTS = new Set([".css"]);
 const SHARED_WORKSPACE_KEYS = new Set([
   "multiagent.projects.v1",
   "multiagent.agents.v1",
@@ -762,7 +764,7 @@ function createTray() {
     Menu.buildFromTemplate([
       { label: "MultiAgent 열기", click: () => showMainWindow() },
       { type: "separator" },
-      { label: "종료", click: () => closeEverything() },
+      { label: "종료", click: () => requestGracefulClose() },
     ])
   );
   tray.on("click", () => showMainWindow());
@@ -798,6 +800,17 @@ function closeEverything() {
     console.log(`[electron-smoke] MULTIAGENT_ELECTRON_CLOSE_OK ${Date.now() - closeSmokeStartedAt}ms`);
   }
   app.quit();
+}
+
+/** Ask the renderer to save running sessions, then close. Falls back to a hard
+ *  close if the renderer does not call confirm_close within the timeout. */
+function requestGracefulClose() {
+  if (forceClosing) return;
+  sendEventToAll("app:close-requested", null);
+  closeFallback = setTimeout(() => {
+    closeFallback = null;
+    closeEverything();
+  }, 5000);
 }
 
 function findExecutableOnPath(name) {
@@ -2581,6 +2594,75 @@ async function readImageDataUrl(requested, folder) {
   return `data:${mime};base64,${data.toString("base64")}`;
 }
 
+function stripDocAssetRef(raw) {
+  let r = asString(raw).trim();
+  if (r.length >= 2) {
+    const first = r[0];
+    const last = r[r.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      r = r.slice(1, -1).trim();
+    }
+  }
+  if (/^file:/i.test(r)) {
+    // file:// URL -> local path via the standard parser (handles encoding,
+    // strips query/fragment). A malformed URL yields "" -> null downstream.
+    try {
+      r = decodeURIComponent(new URL(r).pathname || "");
+    } catch {
+      return "";
+    }
+  } else {
+    const q = r.indexOf("?");
+    const h = r.indexOf("#");
+    const cut = q >= 0 && h >= 0 ? Math.min(q, h) : q >= 0 ? q : h;
+    if (cut >= 0) r = r.slice(0, cut);
+  }
+  return r.trim();
+}
+
+// Read a local asset referenced by an HTML doc tab, resolved relative to the
+// directory of `containerRelative` (a project-relative file path). Strictly
+// sandboxed to the project root via isInside — returns null for anything
+// outside, missing, or of an unsupported type so the reference renders as-is.
+async function readDocAsset(folder, containerRelative, refArg) {
+  const ref = stripDocAssetRef(refArg);
+  if (!ref) return null;
+  const root = fs.realpathSync(asString(folder));
+  const baseDir = path.join(
+    root,
+    path.dirname(asString(containerRelative) || ".")
+  );
+  const joined = path.resolve(baseDir, ref);
+  if (!fs.existsSync(joined)) return null;
+  let resolved;
+  try {
+    resolved = fs.realpathSync(joined);
+  } catch {
+    return null;
+  }
+  if (!isInside(root, resolved)) return null;
+  const ext = path.extname(resolved).toLowerCase();
+  const relativePath = path.relative(root, resolved).split(path.sep).join("/");
+  const imgMime = IMAGE_MIME.get(ext);
+  if (imgMime) {
+    const stats = await fsPromises.stat(resolved);
+    if (!stats.isFile() || stats.size > MAX_IMAGE_BYTES) return null;
+    const data = await fsPromises.readFile(resolved);
+    return {
+      kind: "data",
+      dataUrl: `data:${imgMime};base64,${data.toString("base64")}`,
+      relativePath,
+    };
+  }
+  if (DOC_ASSET_TEXT_EXTS.has(ext)) {
+    const stats = await fsPromises.stat(resolved);
+    if (!stats.isFile() || stats.size > MAX_DOC_BYTES) return null;
+    const text = await fsPromises.readFile(resolved, "utf8");
+    return { kind: "text", text, relativePath };
+  }
+  return null;
+}
+
 async function openPath(target) {
   const error = await shell.openPath(target);
   if (error) throw new Error(error);
@@ -2847,6 +2929,8 @@ async function invokeCommand(event, command, rawArgs) {
       return resolveTerminalPath(asString(args.folder), asString(args.path));
     case "read_image_data_url":
       return readImageDataUrl(args.path, args.folder);
+    case "read_doc_asset":
+      return readDocAsset(args.folder, args.containerRelative, args.ref);
     case "play_system_sound":
       shell.beep();
       return null;
@@ -3030,7 +3114,7 @@ async function invokeCommand(event, command, rawArgs) {
       }
       updaterLifecycle.record("relaunch-requested");
       app.relaunch();
-      closeEverything();
+      requestGracefulClose();
       return null;
     default:
       throw new Error(`Electron에서 아직 지원하지 않는 command: ${command}`);

@@ -14,6 +14,8 @@ const ui = {
   sidebarToggle: $("#sidebarToggle"),
   sidebarBackdrop: $("#sidebarBackdrop"),
   overviewButton: $("#overviewButton"),
+  documentsButton: $("#documentsButton"),
+  documentProjectCount: $("#documentProjectCount"),
   searchInput: $("#searchInput"),
   screensSection: $("#screensSection"),
   screenCount: $("#screenCount"),
@@ -32,6 +34,20 @@ const ui = {
   screenPaneTabs: $("#screenPaneTabs"),
   screenLayout: $("#screenLayout"),
   screenOpenSession: $("#screenOpenSession"),
+  documentsView: $("#documentsView"),
+  documentProjectSelect: $("#documentProjectSelect"),
+  documentSearchInput: $("#documentSearchInput"),
+  refreshDocumentsButton: $("#refreshDocumentsButton"),
+  documentListTitle: $("#documentListTitle"),
+  documentListCount: $("#documentListCount"),
+  documentList: $("#documentList"),
+  documentEmptyState: $("#documentEmptyState"),
+  documentName: $("#documentName"),
+  documentPath: $("#documentPath"),
+  documentKind: $("#documentKind"),
+  documentMessage: $("#documentMessage"),
+  documentMarkdown: $("#documentMarkdown"),
+  documentHtml: $("#documentHtml"),
   sessionView: $("#sessionView"),
   detailStatus: $("#detailStatus"),
   detailName: $("#detailName"),
@@ -65,6 +81,7 @@ const ui = {
   mobileMonitorButton: $("#mobileMonitorButton"),
   mobileScreensButton: $("#mobileScreensButton"),
   mobileSessionsButton: $("#mobileSessionsButton"),
+  mobileDocumentsButton: $("#mobileDocumentsButton"),
   mobileQuestionsButton: $("#mobileQuestionsButton"),
   mobileScreenBadge: $("#mobileScreenBadge"),
   mobileQuestionBadge: $("#mobileQuestionBadge"),
@@ -86,11 +103,14 @@ const initialUrl = new URL(location.href);
 let activeFilter = FILTERS.includes(initialUrl.searchParams.get("filter"))
   ? initialUrl.searchParams.get("filter")
   : "all";
-let selection = initialUrl.searchParams.get("screen")
+let selection = initialUrl.searchParams.get("docs")
+  ? { type: "documents", id: initialUrl.searchParams.get("docs") }
+  : initialUrl.searchParams.get("screen")
   ? { type: "screen", id: initialUrl.searchParams.get("screen") }
   : initialUrl.searchParams.get("agent")
     ? { type: "session", id: initialUrl.searchParams.get("agent") }
     : { type: "monitor", id: null };
+let selectedDocumentPath = initialUrl.searchParams.get("file") || null;
 let returnScreenId = null;
 let mobilePaneId = null;
 let deferredInstallPrompt = null;
@@ -101,6 +121,14 @@ let screenRenderKey = "";
 let previousActivity = new Map();
 const leafTabSelection = new Map();
 const screenDrafts = new Map();
+const documentLists = new Map();
+const documentListLoads = new Map();
+let documentContent = null;
+let documentContentKey = "";
+let documentContentLoading = false;
+let documentContentError = "";
+let documentProjectsRenderKey = "";
+let documentListRenderKey = "";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -243,6 +271,12 @@ function projectMap() {
   return new Map((remoteState.view?.projects || []).map((project) => [project.id, project]));
 }
 
+function localDocumentProjects() {
+  return (remoteState.view?.projects || []).filter((project) => (
+    text(project?.id) && text(project?.folder) && !text(project?.sshHostId)
+  ));
+}
+
 function allAgents() {
   const result = new Map();
   for (const agent of remoteState.view?.agents || []) {
@@ -360,8 +394,14 @@ function updateUrl() {
   const url = new URL(location.href);
   url.searchParams.delete("agent");
   url.searchParams.delete("screen");
+  url.searchParams.delete("docs");
+  url.searchParams.delete("file");
   if (selection.type === "session") url.searchParams.set("agent", selection.id);
   if (selection.type === "screen") url.searchParams.set("screen", selection.id);
+  if (selection.type === "documents") {
+    url.searchParams.set("docs", selection.id);
+    if (selectedDocumentPath) url.searchParams.set("file", selectedDocumentPath);
+  }
   if (activeFilter === "all") url.searchParams.delete("filter");
   else url.searchParams.set("filter", activeFilter);
   history.replaceState(null, "", url);
@@ -387,6 +427,7 @@ function renderSummary() {
   ui.idleCount.textContent = String(counts.idle);
   ui.offlineCount.textContent = String(counts.offline);
   ui.totalCount.textContent = String(allAgents().length);
+  ui.documentProjectCount.textContent = String(localDocumentProjects().length);
   ui.mobileQuestionBadge.textContent = String(counts.attention);
   ui.mobileQuestionBadge.hidden = counts.attention === 0;
   const screens = screenGroups();
@@ -449,6 +490,7 @@ function renderNavigation() {
   ui.sessionList.replaceChildren(sessionFragment);
   ui.emptyState.hidden = agents.length !== 0;
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
+  ui.documentsButton.classList.toggle("selected", selection.type === "documents");
 }
 
 function renderMonitor() {
@@ -718,19 +760,419 @@ function renderSession() {
   ui.backToScreenButton.hidden = !canReturn;
 }
 
+function documentInlineMarkdown(value) {
+  const tokens = [];
+  const stash = (html) => {
+    const token = `\u0000DOC${tokens.length}\u0000`;
+    tokens.push(html);
+    return token;
+  };
+  let source = String(value ?? "");
+  source = source.replace(/`([^`\n]+)`/g, (_match, code) => stash(`<code>${escapeHtml(code)}</code>`));
+  source = source.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (match, label, href) => {
+    const target = String(href).trim();
+    if (/^https?:\/\//i.test(target)) {
+      return stash(`<a href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+    }
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(target) && /\.(?:md|markdown|html|htm)(?:[#?].*)?$/i.test(target)) {
+      return stash(`<a href="#" data-document-link="${escapeHtml(target)}">${escapeHtml(label)}</a>`);
+    }
+    return match;
+  });
+  let output = escapeHtml(source)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,!?:;])/g, "$1<em>$2</em>");
+  output = output.replace(/\u0000DOC(\d+)\u0000/g, (_match, index) => tokens[Number(index)] || "");
+  return output;
+}
+
+function markdownTableCells(line) {
+  const trimmed = String(line).trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownTableDivider(line) {
+  const cells = markdownTableCells(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function documentMarkdownToHtml(value) {
+  const lines = String(value ?? "").split(/\r?\n/);
+  const output = [];
+  let listType = null;
+  const closeList = () => {
+    if (!listType) return;
+    output.push(`</${listType}>`);
+    listType = null;
+  };
+  const startsBlock = (index) => {
+    const line = lines[index] || "";
+    const next = lines[index + 1] || "";
+    return !line.trim()
+      || /^(```|~~~)/.test(line.trim())
+      || /^(#{1,6})\s+/.test(line)
+      || /^\s*([-*+]|\d+\.)\s+/.test(line)
+      || /^\s*>\s?/.test(line)
+      || /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)
+      || (line.includes("|") && isMarkdownTableDivider(next));
+  };
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      closeList();
+      index += 1;
+      continue;
+    }
+
+    const fence = trimmed.match(/^(```|~~~)\s*([^\s]*)/);
+    if (fence) {
+      closeList();
+      const marker = fence[1];
+      const code = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith(marker)) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const language = fence[2] ? ` data-language="${escapeHtml(fence[2])}"` : "";
+      output.push(`<pre><code${language}>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      output.push(`<h${level}>${documentInlineMarkdown(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      closeList();
+      output.push("<hr>");
+      index += 1;
+      continue;
+    }
+
+    if (line.includes("|") && isMarkdownTableDivider(lines[index + 1] || "")) {
+      closeList();
+      const headers = markdownTableCells(line);
+      index += 2;
+      const rows = [];
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+        rows.push(markdownTableCells(lines[index]));
+        index += 1;
+      }
+      output.push("<table><thead><tr>");
+      for (const header of headers) output.push(`<th>${documentInlineMarkdown(header)}</th>`);
+      output.push("</tr></thead><tbody>");
+      for (const row of rows) {
+        output.push("<tr>");
+        for (let cellIndex = 0; cellIndex < headers.length; cellIndex += 1) {
+          output.push(`<td>${documentInlineMarkdown(row[cellIndex] || "")}</td>`);
+        }
+        output.push("</tr>");
+      }
+      output.push("</tbody></table>");
+      continue;
+    }
+
+    const unordered = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (unordered || ordered) {
+      const nextListType = unordered ? "ul" : "ol";
+      if (listType !== nextListType) {
+        closeList();
+        listType = nextListType;
+        output.push(`<${listType}>`);
+      }
+      let item = (unordered || ordered)[1];
+      const task = item.match(/^\[([ xX])\]\s+(.*)$/);
+      if (task) {
+        item = `<input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ${documentInlineMarkdown(task[2])}`;
+      } else {
+        item = documentInlineMarkdown(item);
+      }
+      output.push(`<li>${item}</li>`);
+      index += 1;
+      continue;
+    }
+
+    closeList();
+    if (/^\s*>\s?/.test(line)) {
+      const quote = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quote.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      output.push(`<blockquote>${quote.map(documentInlineMarkdown).join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    const paragraph = [trimmed];
+    index += 1;
+    while (index < lines.length && !startsBlock(index)) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    output.push(`<p>${documentInlineMarkdown(paragraph.join(" "))}</p>`);
+  }
+  closeList();
+  return output.join("");
+}
+
+async function apiError(response) {
+  try {
+    const body = await response.json();
+    return body.error || `HTTP ${response.status}`;
+  } catch {
+    return `HTTP ${response.status}`;
+  }
+}
+
+function documentKey(projectId, relativePath) {
+  return `${projectId}\u0000${relativePath}`;
+}
+
+async function loadDocumentList(projectId, { force = false } = {}) {
+  if (!projectId || (!force && documentLists.has(projectId))) return;
+  if (documentListLoads.has(projectId)) return documentListLoads.get(projectId);
+  if (force) documentLists.delete(projectId);
+  const promise = (async () => {
+    try {
+      const query = new URLSearchParams({ projectId });
+      const response = await fetch(`/api/docs?${query}`, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error(await apiError(response));
+      const result = await response.json();
+      documentLists.set(projectId, {
+        documents: Array.isArray(result.documents) ? result.documents : [],
+        truncated: Boolean(result.truncated),
+        error: "",
+      });
+      if (selection.type === "documents" && selection.id === projectId) {
+        const documents = documentLists.get(projectId).documents;
+        if (!documents.some((document) => document.path === selectedDocumentPath)) {
+          selectedDocumentPath = documents[0]?.path || null;
+          documentContent = null;
+          documentContentKey = "";
+        }
+      }
+    } catch (error) {
+      documentLists.set(projectId, { documents: [], truncated: false, error: error.message });
+    } finally {
+      documentListLoads.delete(projectId);
+      if (selection.type === "documents" && selection.id === projectId) {
+        renderDocuments();
+        updateUrl();
+      }
+    }
+  })();
+  documentListLoads.set(projectId, promise);
+  renderDocuments();
+  return promise;
+}
+
+async function loadDocument(projectId, relativePath, { force = false } = {}) {
+  if (!projectId || !relativePath) return;
+  const key = documentKey(projectId, relativePath);
+  if (!force && documentContentKey === key && (documentContent || documentContentError || documentContentLoading)) return;
+  documentContentKey = key;
+  documentContentLoading = true;
+  documentContentError = "";
+  if (force || documentContent?.path !== relativePath) documentContent = null;
+  renderDocumentPreview();
+  try {
+    const query = new URLSearchParams({ projectId, path: relativePath });
+    const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) throw new Error(await apiError(response));
+    const result = await response.json();
+    if (documentContentKey !== key) return;
+    documentContent = result;
+  } catch (error) {
+    if (documentContentKey !== key) return;
+    documentContent = null;
+    documentContentError = error.message;
+  } finally {
+    if (documentContentKey === key) {
+      documentContentLoading = false;
+      renderDocumentPreview();
+    }
+  }
+}
+
+function renderDocumentPreview() {
+  const relativePath = selectedDocumentPath;
+  const key = relativePath && selection.type === "documents"
+    ? documentKey(selection.id, relativePath)
+    : "";
+  ui.documentMarkdown.hidden = true;
+  ui.documentHtml.hidden = true;
+  ui.documentKind.hidden = true;
+
+  if (!relativePath) {
+    ui.documentName.textContent = "문서를 선택하세요";
+    ui.documentPath.textContent = "";
+    ui.documentMessage.hidden = false;
+    ui.documentMessage.textContent = "왼쪽 목록에서 Markdown 또는 HTML 파일을 선택하세요.";
+    return;
+  }
+  ui.documentName.textContent = relativePath.split("/").pop() || relativePath;
+  ui.documentPath.textContent = relativePath;
+  if (documentContentKey !== key || documentContentLoading) {
+    ui.documentMessage.hidden = false;
+    ui.documentMessage.textContent = "문서를 불러오는 중…";
+    return;
+  }
+  if (documentContentError) {
+    ui.documentMessage.hidden = false;
+    ui.documentMessage.textContent = `문서를 열지 못했습니다: ${documentContentError}`;
+    return;
+  }
+  if (!documentContent) {
+    ui.documentMessage.hidden = false;
+    ui.documentMessage.textContent = "문서를 불러오지 못했습니다.";
+    return;
+  }
+
+  ui.documentMessage.hidden = true;
+  ui.documentKind.hidden = false;
+  ui.documentKind.textContent = documentContent.kind === "html" ? "HTML · SANDBOX" : "MARKDOWN";
+  const renderKey = `${key}\u0000${documentContent.modifiedAt || ""}\u0000${documentContent.size || 0}`;
+  if (documentContent.kind === "html") {
+    ui.documentHtml.hidden = false;
+    if (ui.documentHtml.dataset.renderKey !== renderKey) {
+      ui.documentHtml.dataset.renderKey = renderKey;
+      ui.documentHtml.srcdoc = documentContent.content || "";
+    }
+  } else {
+    ui.documentMarkdown.hidden = false;
+    if (ui.documentMarkdown.dataset.renderKey !== renderKey) {
+      ui.documentMarkdown.dataset.renderKey = renderKey;
+      ui.documentMarkdown.innerHTML = documentMarkdownToHtml(documentContent.content || "");
+      ui.documentMarkdown.scrollTop = 0;
+    }
+  }
+}
+
+function renderDocuments() {
+  const projects = localDocumentProjects();
+  const projectsRenderKey = JSON.stringify(projects.map((project) => [project.id, project.name]));
+  if (documentProjectsRenderKey !== projectsRenderKey) {
+    documentProjectsRenderKey = projectsRenderKey;
+    const optionFragment = document.createDocumentFragment();
+    for (const project of projects) {
+      const option = make("option", "", text(project.name || project.id));
+      option.value = project.id;
+      optionFragment.appendChild(option);
+    }
+    ui.documentProjectSelect.replaceChildren(optionFragment);
+  }
+  if (selection.type === "documents") ui.documentProjectSelect.value = selection.id;
+  ui.documentProjectSelect.disabled = projects.length === 0;
+  ui.refreshDocumentsButton.disabled = projects.length === 0;
+
+  const project = projects.find((candidate) => candidate.id === selection.id);
+  if (!project) {
+    ui.documentListTitle.textContent = "문서";
+    ui.documentListCount.textContent = "0";
+    if (documentListRenderKey !== "no-project") {
+      documentListRenderKey = "no-project";
+      ui.documentList.replaceChildren();
+    }
+    ui.documentEmptyState.hidden = false;
+    ui.documentEmptyState.textContent = projects.length
+      ? "프로젝트를 선택하세요."
+      : "Remote에서 볼 수 있는 로컬 프로젝트가 없습니다.";
+    selectedDocumentPath = null;
+    renderDocumentPreview();
+    return;
+  }
+
+  ui.documentListTitle.textContent = text(project.name || project.id);
+  const cached = documentLists.get(project.id);
+  if (!cached) {
+    const loadingKey = `loading:${project.id}`;
+    if (documentListRenderKey !== loadingKey) {
+      documentListRenderKey = loadingKey;
+      ui.documentList.replaceChildren();
+    }
+    ui.documentListCount.textContent = "…";
+    ui.documentEmptyState.hidden = false;
+    ui.documentEmptyState.textContent = "문서 목록을 불러오는 중…";
+    void loadDocumentList(project.id);
+    renderDocumentPreview();
+    return;
+  }
+
+  const query = ui.documentSearchInput.value.trim().toLowerCase();
+  const visible = cached.documents.filter((document) => !query || document.path.toLowerCase().includes(query));
+  ui.documentListCount.textContent = cached.truncated
+    ? `${visible.length}/${cached.documents.length}+`
+    : String(visible.length);
+  const listRenderKey = JSON.stringify([
+    project.id,
+    query,
+    selectedDocumentPath,
+    cached.error,
+    visible.map((document) => [document.path, document.kind]),
+  ]);
+  if (documentListRenderKey !== listRenderKey) {
+    documentListRenderKey = listRenderKey;
+    const fragment = document.createDocumentFragment();
+    for (const document of visible) {
+      const button = make("button", "document-row");
+      button.type = "button";
+      button.dataset.kind = document.kind;
+      button.classList.toggle("selected", document.path === selectedDocumentPath);
+      const icon = make("span", "document-row-icon", document.kind === "html" ? "HTML" : "MD");
+      const copy = make("span", "document-row-copy");
+      copy.append(make("strong", "", document.name), make("small", "", document.path));
+      button.append(icon, copy);
+      button.addEventListener("click", () => {
+        selectedDocumentPath = document.path;
+        documentContent = null;
+        documentContentKey = "";
+        documentContentError = "";
+        renderDocuments();
+        updateUrl();
+        void loadDocument(project.id, document.path);
+      });
+      fragment.appendChild(button);
+    }
+    ui.documentList.replaceChildren(fragment);
+  }
+  ui.documentEmptyState.hidden = visible.length > 0 && !cached.error;
+  ui.documentEmptyState.textContent = cached.error
+    ? `문서 목록을 불러오지 못했습니다: ${cached.error}`
+    : (query ? "검색된 문서가 없습니다." : "Markdown 또는 HTML 문서가 없습니다.");
+  renderDocumentPreview();
+  if (selectedDocumentPath && documentContentKey !== documentKey(project.id, selectedDocumentPath)) {
+    void loadDocument(project.id, selectedDocumentPath);
+  }
+}
+
 function renderSelection() {
   ui.monitorView.hidden = selection.type !== "monitor";
   ui.screenView.hidden = selection.type !== "screen";
+  ui.documentsView.hidden = selection.type !== "documents";
   ui.sessionView.hidden = selection.type !== "session";
   if (selection.type === "monitor") renderMonitor();
   if (selection.type === "screen") renderScreen();
+  if (selection.type === "documents") renderDocuments();
   if (selection.type === "session") renderSession();
   syncTerminal();
   syncSessionView();
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
+  ui.documentsButton.classList.toggle("selected", selection.type === "documents");
   ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor" && activeFilter !== "attention");
   ui.mobileScreensButton.classList.toggle("active", selection.type === "screen");
   ui.mobileSessionsButton.classList.toggle("active", selection.type === "session");
+  ui.mobileDocumentsButton.classList.toggle("active", selection.type === "documents");
   ui.mobileQuestionsButton.classList.toggle("active", selection.type === "monitor" && activeFilter === "attention");
 }
 
@@ -771,6 +1213,30 @@ function selectSession(id, fromScreenId = null) {
   if (!agentMap().has(id)) return;
   selection = { type: "session", id };
   returnScreenId = fromScreenId;
+  updateUrl();
+  renderNavigation();
+  renderSelection();
+  closeSidebar();
+}
+
+function selectDocuments(projectId = null) {
+  const projects = localDocumentProjects();
+  const id = projects.some((project) => project.id === projectId)
+    ? projectId
+    : projects[0]?.id;
+  if (!id) {
+    showToast("Remote에서 볼 수 있는 로컬 프로젝트가 없습니다.");
+    return;
+  }
+  const projectChanged = selection.type !== "documents" || selection.id !== id;
+  selection = { type: "documents", id };
+  returnScreenId = null;
+  if (projectChanged) {
+    selectedDocumentPath = null;
+    documentContent = null;
+    documentContentKey = "";
+    documentContentError = "";
+  }
   updateUrl();
   renderNavigation();
   renderSelection();
@@ -1491,6 +1957,11 @@ function processActivityNotifications(agents) {
 function validateSelection() {
   if (selection.type === "session" && !agentMap().has(selection.id)) selection = { type: "monitor", id: null };
   if (selection.type === "screen" && !screenGroups().some((screen) => screen.id === selection.id)) selection = { type: "monitor", id: null };
+  if (selection.type === "documents" && !localDocumentProjects().some((project) => project.id === selection.id)) {
+    const fallback = localDocumentProjects()[0];
+    selection = fallback ? { type: "documents", id: fallback.id } : { type: "monitor", id: null };
+    selectedDocumentPath = null;
+  }
 }
 
 async function fetchState({ quiet = false } = {}) {
@@ -1572,6 +2043,7 @@ async function registerServiceWorker() {
 }
 
 ui.overviewButton.addEventListener("click", () => selectMonitor("all"));
+ui.documentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
 ui.summaryGrid.addEventListener("click", (event) => {
   const card = event.target.closest("[data-summary-filter]");
   if (card) selectMonitor(card.dataset.summaryFilter);
@@ -1586,6 +2058,68 @@ ui.filters.addEventListener("click", (event) => {
 ui.searchInput.addEventListener("input", () => {
   renderNavigation();
   if (selection.type === "monitor") renderMonitor();
+});
+ui.documentProjectSelect.addEventListener("change", () => selectDocuments(ui.documentProjectSelect.value));
+ui.documentSearchInput.addEventListener("input", () => {
+  if (selection.type === "documents") renderDocuments();
+});
+ui.refreshDocumentsButton.addEventListener("click", async () => {
+  if (selection.type !== "documents") return;
+  const projectId = selection.id;
+  const previousPath = selectedDocumentPath;
+  ui.refreshDocumentsButton.disabled = true;
+  try {
+    await loadDocumentList(projectId, { force: true });
+    const documents = documentLists.get(projectId)?.documents || [];
+    const nextPath = documents.some((document) => document.path === previousPath)
+      ? previousPath
+      : documents[0]?.path;
+    selectedDocumentPath = nextPath || null;
+    if (selectedDocumentPath) await loadDocument(projectId, selectedDocumentPath, { force: true });
+    else renderDocuments();
+    updateUrl();
+  } finally {
+    ui.refreshDocumentsButton.disabled = false;
+  }
+});
+ui.documentMarkdown.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-document-link]");
+  if (!link || selection.type !== "documents" || !selectedDocumentPath) return;
+  event.preventDefault();
+  let target = String(link.dataset.documentLink || "").replaceAll("\\", "/").split(/[?#]/)[0];
+  try { target = decodeURIComponent(target); } catch {}
+  if (!target || target.startsWith("/") || /^[a-z]:/i.test(target)) {
+    showToast("프로젝트 안의 상대 문서 링크만 열 수 있습니다.");
+    return;
+  }
+  const parts = selectedDocumentPath.split("/");
+  parts.pop();
+  for (const part of target.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!parts.length) {
+        showToast("프로젝트 밖의 문서는 열 수 없습니다.");
+        return;
+      }
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  const resolved = parts.join("/");
+  const match = (documentLists.get(selection.id)?.documents || [])
+    .find((document) => document.path.toLowerCase() === resolved.toLowerCase());
+  if (!match) {
+    showToast("링크된 문서를 목록에서 찾을 수 없습니다.");
+    return;
+  }
+  selectedDocumentPath = match.path;
+  documentContent = null;
+  documentContentKey = "";
+  documentContentError = "";
+  renderDocuments();
+  updateUrl();
+  void loadDocument(selection.id, match.path);
 });
 ui.sidebarToggle.addEventListener("click", () => {
   // Mobile: open/close the drawer. Tablet/desktop: collapse the fixed sidebar.
@@ -1735,6 +2269,7 @@ ui.logoutButton.addEventListener("click", async () => {
 ui.mobileMonitorButton.addEventListener("click", () => selectMonitor("all"));
 ui.mobileScreensButton.addEventListener("click", () => openSidebar(ui.screensSection));
 ui.mobileSessionsButton.addEventListener("click", () => openSidebar(ui.filters));
+ui.mobileDocumentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
 ui.mobileQuestionsButton.addEventListener("click", () => selectMonitor("attention"));
 
 addEventListener("beforeinstallprompt", (event) => {

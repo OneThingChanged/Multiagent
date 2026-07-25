@@ -20,6 +20,26 @@ load();setInterval(load,1500);
 </script></body></html>`;
 
 const REMOTE_PWA_DIR = fileURLToPath(new URL("../remote-pwa/", import.meta.url));
+const REMOTE_DOCUMENT_EXTENSIONS = new Map([
+  [".md", "markdown"],
+  [".markdown", "markdown"],
+  [".html", "html"],
+  [".htm", "html"],
+]);
+const REMOTE_DOCUMENT_SKIPPED_DIRS = new Set([
+  ".cache",
+  ".git",
+  ".next",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+]);
+const MAX_REMOTE_DOCUMENT_FILES = 500;
+const MAX_REMOTE_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const REMOTE_PWA_ASSETS = new Map([
   ["/", { file: "index.html", type: "text/html; charset=utf-8", cache: "no-store" }],
   ["/login", { file: "login.html", type: "text/html; charset=utf-8", cache: "no-store" }],
@@ -129,6 +149,130 @@ function sendJson(response, status, value, headers = {}) {
     ...headers,
   });
   response.end(body);
+}
+
+class RemoteDocumentError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function documentProjects(snapshot) {
+  const viewProjects = snapshot?.view?.projects;
+  if (Array.isArray(viewProjects)) return viewProjects;
+  return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+}
+
+function documentProjectRoot(snapshot, projectId) {
+  const id = String(projectId || "").trim();
+  const project = documentProjects(snapshot).find((candidate) => String(candidate?.id || "") === id);
+  if (!project) throw new RemoteDocumentError(404, "프로젝트를 찾을 수 없습니다.");
+  if (project.sshHostId) {
+    throw new RemoteDocumentError(409, "SSH 프로젝트의 원격 파일 보기는 아직 지원하지 않습니다.");
+  }
+  const folder = String(project.folder || "").trim();
+  if (!folder) throw new RemoteDocumentError(404, "프로젝트 폴더가 없습니다.");
+  let root;
+  try {
+    root = fs.realpathSync(folder);
+  } catch {
+    throw new RemoteDocumentError(404, "프로젝트 폴더를 찾을 수 없습니다.");
+  }
+  if (!fs.statSync(root).isDirectory()) {
+    throw new RemoteDocumentError(404, "프로젝트 폴더를 찾을 수 없습니다.");
+  }
+  return { project, root };
+}
+
+function isInsideDocumentRoot(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function collectRemoteDocuments(root, directory, output) {
+  if (output.length >= MAX_REMOTE_DOCUMENT_FILES) return;
+  let entries;
+  try {
+    entries = await fsPromises.readdir(directory, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    if (output.length >= MAX_REMOTE_DOCUMENT_FILES) return;
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (!REMOTE_DOCUMENT_SKIPPED_DIRS.has(entry.name.toLowerCase())) {
+        await collectRemoteDocuments(root, absolute, output);
+      }
+      continue;
+    }
+    // Deliberately ignore symbolic links so a project cannot expose a file
+    // outside its root through an otherwise harmless-looking docs path.
+    if (!entry.isFile()) continue;
+    const kind = REMOTE_DOCUMENT_EXTENSIONS.get(path.extname(entry.name).toLowerCase());
+    if (!kind) continue;
+    output.push({
+      name: entry.name,
+      path: path.relative(root, absolute).split(path.sep).join("/"),
+      kind,
+    });
+  }
+}
+
+async function listRemoteDocuments(snapshot, projectId) {
+  const { project, root } = documentProjectRoot(snapshot, projectId);
+  const documents = [];
+  await collectRemoteDocuments(root, root, documents);
+  return {
+    project: { id: project.id, name: project.name },
+    documents,
+    limit: MAX_REMOTE_DOCUMENT_FILES,
+    truncated: documents.length >= MAX_REMOTE_DOCUMENT_FILES,
+  };
+}
+
+async function readRemoteDocument(snapshot, projectId, requestedPath) {
+  const { project, root } = documentProjectRoot(snapshot, projectId);
+  const raw = String(requestedPath || "").trim().replaceAll("\\", "/");
+  if (!raw || path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)) {
+    throw new RemoteDocumentError(400, "올바른 상대 문서 경로가 필요합니다.");
+  }
+  const candidate = path.resolve(root, ...raw.split("/"));
+  if (!isInsideDocumentRoot(root, candidate)) {
+    throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
+  }
+  let resolved;
+  try {
+    resolved = fs.realpathSync(candidate);
+  } catch {
+    throw new RemoteDocumentError(404, "문서 파일을 찾을 수 없습니다.");
+  }
+  if (!isInsideDocumentRoot(root, resolved)) {
+    throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
+  }
+  const kind = REMOTE_DOCUMENT_EXTENSIONS.get(path.extname(resolved).toLowerCase());
+  if (!kind) throw new RemoteDocumentError(415, "Markdown과 HTML 파일만 열 수 있습니다.");
+  const stats = await fsPromises.stat(resolved);
+  if (!stats.isFile()) throw new RemoteDocumentError(404, "문서 파일을 찾을 수 없습니다.");
+  if (stats.size > MAX_REMOTE_DOCUMENT_BYTES) {
+    throw new RemoteDocumentError(413, "2MB보다 큰 문서는 Remote에서 열 수 없습니다.");
+  }
+  return {
+    project: { id: project.id, name: project.name },
+    name: path.basename(resolved),
+    path: path.relative(root, resolved).split(path.sep).join("/"),
+    kind,
+    size: stats.size,
+    modifiedAt: stats.mtime.toISOString(),
+    content: await fsPromises.readFile(resolved, "utf8"),
+  };
+}
+
+function sendRemoteDocumentError(response, error) {
+  const status = Number.isInteger(error?.status) ? error.status : 500;
+  sendJson(response, status, { error: error?.message || "문서를 불러오지 못했습니다." });
 }
 
 async function readJson(request, maxBytes = 64 * 1024) {
@@ -269,6 +413,26 @@ export class LocalDashboardService {
           }
           if (request.method === "GET" && url.pathname === "/api/stream") {
             streamTerminalResponse(request, response, String(url.searchParams.get("id") || "").trim(), p);
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/docs") {
+            try {
+              sendJson(response, 200, await listRemoteDocuments(this.snapshot(), url.searchParams.get("projectId")));
+            } catch (error) {
+              sendRemoteDocumentError(response, error);
+            }
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/docs/read") {
+            try {
+              sendJson(response, 200, await readRemoteDocument(
+                this.snapshot(),
+                url.searchParams.get("projectId"),
+                url.searchParams.get("path"),
+              ));
+            } catch (error) {
+              sendRemoteDocumentError(response, error);
+            }
             return;
           }
           // The PWA shell + assets (index at "/", app.js, xterm, styles, sw…).
@@ -660,6 +824,29 @@ export class RemoteDashboardService {
             sendJson(response, 200, result);
           } catch (error) {
             sendJson(response, 500, { error: error.message, blocks: [] });
+          }
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/docs") {
+          try {
+            sendJson(response, 200, await listRemoteDocuments(
+              { view: this.view },
+              url.searchParams.get("projectId"),
+            ));
+          } catch (error) {
+            sendRemoteDocumentError(response, error);
+          }
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/docs/read") {
+          try {
+            sendJson(response, 200, await readRemoteDocument(
+              { view: this.view },
+              url.searchParams.get("projectId"),
+              url.searchParams.get("path"),
+            ));
+          } catch (error) {
+            sendRemoteDocumentError(response, error);
           }
           return;
         }
