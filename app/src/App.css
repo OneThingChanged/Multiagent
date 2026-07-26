@@ -2401,7 +2401,7 @@ body,
   text-overflow: ellipsis;
 }
 
-.close-btn {
+.deactivate-btn {
   background: transparent;
   border: none;
   color: var(--app-muted);
@@ -2412,11 +2412,11 @@ body,
   opacity: 0;
   transition: opacity 0.1s;
 }
-.agent-item:hover .close-btn {
+.agent-item:hover .deactivate-btn {
   opacity: 1;
 }
-.close-btn:hover {
-  color: var(--app-danger);
+.deactivate-btn:hover {
+  color: var(--app-accent);
 }
 
 .empty-hint {
@@ -4850,9 +4850,9 @@ body.files-resizing .files-resizer::after {
   background-image: linear-gradient(
     105deg,
     transparent 0%,
-    rgba(248, 81, 73, 0.05) 28%,
-    rgba(248, 81, 73, 0.22) 50%,
-    rgba(248, 81, 73, 0.05) 72%,
+    rgba(57, 197, 207, 0.05) 28%,
+    rgba(57, 197, 207, 0.22) 50%,
+    rgba(57, 197, 207, 0.05) 72%,
     transparent 100%
   );
   background-position: 100% 0;
@@ -4865,9 +4865,9 @@ body.files-resizing .files-resizer::after {
   height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--app-danger);
-  box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.18),
-    0 0 8px rgba(248, 81, 73, 0.7);
+  background: #39c5cf;
+  box-shadow: 0 0 0 2px rgba(57, 197, 207, 0.18),
+    0 0 8px rgba(57, 197, 207, 0.72);
   animation: agent-completion-dot-pulse 1.5s ease-in-out infinite;
 }
 

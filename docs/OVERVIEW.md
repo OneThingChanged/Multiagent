@@ -40,7 +40,7 @@ A desktop app that manages multiple AI agent (Claude Code, Codex) terminal sessi
 | SSH remote sessions | connect a project to a registered SSH host → sessions run on the remote machine (Windows remotes get status dots + resume; see the dedicated entry below) |
 
 ### Session Management (context menu)
-Switch / add as tab / split right·down / rename alias / **Restart session** / **Deactivate session** (only when not visible; kills just the PTY to free resources) / **Relink to current session** (finds the newest on-disk session and updates the resume target) / pin·unpin group sessions / **Properties** (session ID, creation time, tool, folder, etc.). Project right-click: rename / delete / properties.
+Switch / add as tab / split right·down / rename alias / **Deactivate session** (removes it from the screen and kills only the PTY while keeping the sidebar entry) / **Relink to current session** (finds the newest on-disk session and updates the resume target) / **Delete session** (confirmation required) / pin·unpin group sessions / **Properties** (session ID, creation time, tool, folder, etc.). The sidebar `×` deactivates rather than deletes. Project right-click: rename / delete / properties.
 
 ### Status & Notifications
 | feature | description |

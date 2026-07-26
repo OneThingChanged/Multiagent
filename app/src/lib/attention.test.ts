@@ -53,6 +53,30 @@ describe("attention items", () => {
     expect(markAgentCompletionRead(next, "missing")).toBe(next);
   });
 
+  it("limits sidebar completion markers to eligible running agents", () => {
+    const active = {
+      ...item("2", "completed"),
+      agentId: "active-agent",
+      sessionKey: "active-session",
+      dedupeKey: "completed:active-session",
+    };
+    const inactive = {
+      ...item("3", "completed"),
+      agentId: "inactive-agent",
+      sessionKey: "inactive-session",
+      dedupeKey: "completed:inactive-session",
+    };
+
+    expect(
+      Array.from(
+        unreadCompletedAgentIds(
+          [active, inactive],
+          new Set(["active-agent"])
+        )
+      )
+    ).toEqual(["active-agent"]);
+  });
+
   it("bounds retained history", () => {
     let items: AttentionItem[] = [];
     for (let index = 0; index < MAX_ATTENTION_ITEMS + 10; index += 1) {

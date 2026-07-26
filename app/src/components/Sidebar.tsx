@@ -132,7 +132,7 @@ export function Sidebar({
   onContextMenu,
   onNewProject,
   onNewSessionForProject,
-  onRemove,
+  onDeactivate,
   onDragStart,
   onDragEnd,
   onReorderProject,
@@ -157,7 +157,7 @@ export function Sidebar({
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
   onNewSessionForProject: (projectId: string) => void;
-  onRemove: (id: string) => void;
+  onDeactivate: (id: string) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
   onReorderProject: (draggedId: string, targetId: string, before: boolean) => void;
@@ -630,12 +630,13 @@ export function Sidebar({
           )}
           {!isDetached && !sessionPickerMode && (
             <button
-              className="close-btn"
+              className="deactivate-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                onRemove(a.id);
+                onDeactivate(a.id);
               }}
-              title="Remove session"
+              title="세션 비활성화"
+              aria-label={`${a.name} 세션 비활성화`}
             >
               x
             </button>

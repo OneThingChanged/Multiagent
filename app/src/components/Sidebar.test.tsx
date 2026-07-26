@@ -34,7 +34,7 @@ function renderSidebar(
       onContextMenu={() => {}}
       onNewProject={() => {}}
       onNewSessionForProject={() => {}}
-      onRemove={() => {}}
+      onDeactivate={() => {}}
       onDragStart={() => {}}
       onDragEnd={() => {}}
       onReorderProject={() => {}}
@@ -189,5 +189,16 @@ describe("Sidebar", () => {
     expect(html).toContain("agent-completion-unread");
     expect(html).toContain("읽지 않은 작업 완료");
     expect(html.match(/agent-completion-dot/g)).toHaveLength(1);
+  });
+
+  it("uses the sidebar x action only to deactivate a session", () => {
+    const projects: Project[] = [
+      { id: "project-a", name: "Project A", folder: "K:\\AI\\A", createdAt: 1 },
+    ];
+    const html = renderSidebar(projects, [agent("session-a", "project-a")]);
+
+    expect(html).toContain('title="세션 비활성화"');
+    expect(html).toContain('aria-label="SESSION-A 세션 비활성화"');
+    expect(html).not.toContain("Remove session");
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ContextMenu, TabContextMenu } from "./Menus";
 
 describe("ContextMenu", () => {
-  it("offers opening a session in a new window", () => {
+  it("offers opening and explicitly deleting a session", () => {
     const html = renderToStaticMarkup(
       <ContextMenu
         state={{ agentId: "agent-1", x: 0, y: 0 }}
@@ -11,7 +11,6 @@ describe("ContextMenu", () => {
         canPlaceInActive={false}
         isSessionLocked={false}
         canPinSession={false}
-        canRestart={false}
         canDeactivate={false}
         onClose={() => {}}
         onAction={() => {}}
@@ -19,6 +18,8 @@ describe("ContextMenu", () => {
     );
 
     expect(html).toContain("새 창에서 열기");
+    expect(html).toContain("세션 삭제");
+    expect(html).toContain("ctx-item-danger");
   });
 });
 

@@ -30,7 +30,6 @@ import type {
   DropTargetState,
   DropZone,
   Group,
-  LayoutNode,
   NewAgentPayload,
   NewProjectPayload,
   Path,
@@ -1586,7 +1585,10 @@ function App() {
             projectsRef.current.find((project) => project.id === nextAgent.projectId)
               ?.name || "Unknown project";
           setAttentionItems((items) =>
-            removeSessionAttention(items, sessionKey)
+            markAgentCompletionRead(
+              removeSessionAttention(items, sessionKey),
+              id
+            )
           );
           if (nextWorkStatus === "waiting" || nextWorkStatus === "blocked") {
             const kind: AttentionKind = nextWorkStatus;
@@ -1923,11 +1925,9 @@ function App() {
   // Stop a running session's PTY process to free CPU/memory, but keep it
   // in the list (and its lastSessionId). Selecting it again respawns/resumes.
   const deactivateAgent = useCallback(async (id: string) => {
-    if (isElectronRuntime()) {
-      await invoke("terminal_session_action", { id, action: "sleep" }).catch(() => {});
-    } else {
-      await invoke("kill_pty", { id }).catch(() => {});
-    }
+    // Remove the pane before stopping the PTY. Otherwise the still-mounted
+    // terminal can observe the exit and immediately try to spawn again.
+    applyGroupOp((state) => groupOps.removeAgentFromLayout(state, id));
     const entry = termsRef.current.get(id);
     if (entry) {
       try {
@@ -1940,7 +1940,18 @@ function App() {
         a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
       )
     );
-    applyGroupOp((state) => groupOps.removeAgentFromLayout(state, id));
+    if (isElectronRuntime()) {
+      await invoke("terminal_session_action", { id, action: "sleep" }).catch(() => {});
+    } else {
+      await invoke("kill_pty", { id }).catch(() => {});
+    }
+    // The PTY exit event may race this action and temporarily mark the agent
+    // as exited/running. Deactivation is authoritative, so settle on idle.
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
+      )
+    );
   }, [applyGroupOp]);
 
   const selectAgent = useCallback(
@@ -2470,6 +2481,19 @@ function App() {
 
   const removeAgent = useCallback(
     async (id: string) => {
+      const agent = agentsRef.current.find((candidate) => candidate.id === id);
+      if (!agent) return;
+      if (detachedAgentIdsRef.current.has(id)) {
+        window.alert(
+          "다른 작업창에서 사용 중인 세션입니다. 해당 창에서 먼저 비활성화해 주세요."
+        );
+        return;
+      }
+      const ok = window.confirm(
+        `"${agent.name}" 세션을 삭제할까요?\n실행 중인 프로세스를 종료하고 MultiAgent 목록에서 제거합니다.\n이 동작은 되돌릴 수 없습니다.`
+      );
+      if (!ok) return;
+
       removedAgentIdsRef.current.add(id);
       await invoke(
         isElectronRuntime() ? "terminal_session_action" : "kill_pty",
@@ -2653,10 +2677,10 @@ function App() {
       else if (action === "rename") setRenameSessionId(id);
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
-      else if (action === "restart") {
-        void restartAgent(id).then(() => requestSelectAgent(id));
-      } else if (action === "deactivate") {
+      else if (action === "deactivate") {
         void deactivateAgent(id);
+      } else if (action === "delete") {
+        void removeAgent(id);
       } else if (action === "relink") {
         relinkSession(id);
       } else if (action === "properties") {
@@ -2671,8 +2695,8 @@ function App() {
       splitWith,
       pinContextGroupSessions,
       clearContextGroupSessionPins,
-      restartAgent,
       deactivateAgent,
+      removeAgent,
       relinkSession,
     ]
   );
@@ -3177,8 +3201,18 @@ function App() {
     [attentionItems]
   );
   const unreadCompletionAgentIds = useMemo(
-    () => unreadCompletedAgentIds(attentionItems),
-    [attentionItems]
+    () => {
+      const runningAgentIds = new Set(
+        agents
+          .filter((agent) => {
+            const runtimeStatus = runtimeStatusOf(agent);
+            return runtimeStatus === "running" || runtimeStatus === "starting";
+          })
+          .map((agent) => agent.id)
+      );
+      return unreadCompletedAgentIds(attentionItems, runningAgentIds);
+    },
+    [agents, attentionItems]
   );
 
   // ---- Derived
@@ -3212,24 +3246,6 @@ function App() {
     () => (activeGroupLayout ? collectAgentIds(activeGroupLayout) : new Set<string>()),
     [activeGroupLayout]
   );
-
-  // Sessions actually shown on screen right now: each leaf's active tab in
-  // the active group. Used to block deactivating a visible session (its
-  // pane would immediately respawn it).
-  const visibleAgentIds = useMemo(() => {
-    const set = new Set<string>();
-    const walk = (node: LayoutNode | null) => {
-      if (!node) return;
-      if (node.type === "leaf") {
-        const id = activeAgentInLeaf(node);
-        if (id) set.add(id);
-      } else {
-        node.children.forEach(walk);
-      }
-    };
-    walk(activeGroupLayout);
-    return set;
-  }, [activeGroupLayout]);
 
   const activeAgentId = useMemo(() => {
     if (!activeGroupLayout || !activePath) return null;
@@ -3308,7 +3324,7 @@ function App() {
           selectProject(projectId);
           setShowModal(true);
         }}
-        onRemove={removeAgent}
+        onDeactivate={deactivateAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onReorderProject={reorderProject}
@@ -3539,18 +3555,11 @@ function App() {
           canPlaceInActive={canPlaceContextAgentInActiveGroup}
           isSessionLocked={!!contextGroup?.sessionLocked}
           canPinSession={canPinContextGroupSession}
-          canRestart={
-            agents.find((a) => a.id === contextMenu.agentId)?.status ===
-            "exited"
-          }
           canDeactivate={(() => {
             const s = agents.find(
               (a) => a.id === contextMenu.agentId
             )?.status;
-            const running =
-              s === "running" || s === "working" || s === "starting";
-            // Only when not currently displayed, to avoid an immediate respawn.
-            return running && !visibleAgentIds.has(contextMenu.agentId);
+            return s === "running" || s === "working" || s === "starting";
           })()}
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}

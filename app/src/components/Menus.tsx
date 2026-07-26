@@ -255,7 +255,6 @@ export function ContextMenu({
   canPlaceInActive,
   isSessionLocked,
   canPinSession,
-  canRestart,
   canDeactivate,
   onClose,
   onAction,
@@ -265,7 +264,6 @@ export function ContextMenu({
   canPlaceInActive: boolean;
   isSessionLocked: boolean;
   canPinSession: boolean;
-  canRestart: boolean;
   canDeactivate: boolean;
   onClose: () => void;
   onAction: (
@@ -321,13 +319,6 @@ export function ContextMenu({
         </button>
         <button
           className="ctx-item"
-          onClick={() => onAction("restart")}
-          disabled={!canRestart}
-        >
-          세션 재시작
-        </button>
-        <button
-          className="ctx-item"
           onClick={() => onAction("deactivate")}
           disabled={!canDeactivate}
         >
@@ -335,6 +326,13 @@ export function ContextMenu({
         </button>
         <button className="ctx-item" onClick={() => onAction("relink")}>
           현재 세션으로 재등록
+        </button>
+        <div className="ctx-separator" />
+        <button
+          className="ctx-item ctx-item-danger"
+          onClick={() => onAction("delete")}
+        >
+          세션 삭제
         </button>
         <div className="ctx-separator" />
         <button

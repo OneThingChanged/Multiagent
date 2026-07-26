@@ -175,7 +175,7 @@ export function SessionPropertiesModal({
               </label>
             )}
             <div className="session-props-toggle-note">
-              변경은 세션을 재시작하면 적용됩니다 (우클릭 → 세션 재시작)
+              변경은 세션을 비활성화한 뒤 다시 열면 적용됩니다
             </div>
           </div>
         )}

@@ -33,13 +33,13 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
   - Switch (jump to current group) / add as tab / split right / split down
   - **Open in new window** — transfers the session into a new, equal workspace window. It is removed from the current Screen and shown as **"사용 중"** in every other window. All windows expose the same project/session creation, filtering, rename, drag, and context-menu features. Closing the owning window releases its sessions so any remaining/new workspace can claim them
   - Rename session alias
-  - **Restart session** — re-spawn an exited session (resume included)
-  - **Deactivate session** — for a running session that is **not visible on screen**, kills only the PTY to free resources. Selecting it again restarts it with resume (visible sessions are deactivated-disabled)
+  - **Deactivate session** — removes the session from the current screen and kills only the PTY to free resources while keeping it in the sidebar. Selecting it again restarts it with resume
   - **Relink to current session** (현재 세션으로 재등록) — finds the newest on-disk session for that tool+folder and updates the resume target (`lastSessionId`) (recovery when the session ID was lost, e.g. hook errors)
+  - **Delete session** — after a confirmation/cancel dialog, stops the PTY and permanently removes the session from the MultiAgent sidebar/layout/storage
   - Pin group to current sessions / unpin group sessions
   - **Properties** — name, project, tool, status, session ID, creation time, folder, agent ID + edit toggles: **Dangerous mode** (skip-permissions flag), **Alt-screen mode** (Codex only — when on, runs on the alternate screen so re-render truncation disappears, but the conversation does not remain in terminal scrollback). Toggle changes apply from session restart
 - **Project right-click**: rename / **Properties** (folder, session count, created/opened times, project ID) / **Delete project** (after confirmation, cleans up sessions, PTYs, and scrollback)
-- **× button**: permanently delete a session (PTY kill + remove from sidebar/layout/storage)
+- **× button**: deactivate the session without deleting it. The session remains in the sidebar and can be resumed by selecting it again
 - **Drag**: drag sessions from any expanded project onto panes to use the drop-zone system (sessions from other projects can also be placed on the same screen)
 
 ### Sidebar Visuals
@@ -48,7 +48,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - Active group members: light blue background + left bar
 - Active tab session of the active leaf: deep blue background
 - Pinned group members: `PIN` badge next to the name
-- Unread completed work: animated red-tinted background sweep + red dot. Opening that session from the sidebar or its tab marks the completion as read and removes both effects
+- Unread completed work on a running/starting session: animated cyan-tinted background sweep + cyan dot. Inactive/exited sessions keep their Attention Center history without lighting up the sidebar. Opening the active session from the sidebar/tab, or starting new work in that session, marks the previous completion as read and removes both effects
 - Between groups: thin gray divider
 - Session item: status dot / tool icon / alias / dangerous `!` / close `x` (one line)
 

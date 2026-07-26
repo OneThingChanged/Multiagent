@@ -41,10 +41,18 @@ export function markAttentionRead(items: AttentionItem[], ids?: Set<string>) {
   );
 }
 
-export function unreadCompletedAgentIds(items: AttentionItem[]): Set<string> {
+export function unreadCompletedAgentIds(
+  items: AttentionItem[],
+  eligibleAgentIds?: ReadonlySet<string>
+): Set<string> {
   return new Set(
     items
-      .filter((item) => item.kind === "completed" && !item.read)
+      .filter(
+        (item) =>
+          item.kind === "completed" &&
+          !item.read &&
+          (!eligibleAgentIds || eligibleAgentIds.has(item.agentId))
+      )
       .map((item) => item.agentId)
   );
 }
