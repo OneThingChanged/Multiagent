@@ -41,10 +41,11 @@ Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 ```
 
-The new Latest must include: both NSIS + blockmaps + portables, `latest.yml`,
+The new Latest must include: both NSIS installers + blockmaps, `latest.yml`,
 `latest-company.yml`, transition `latest.json`/`latest-company.json` for Tauri, and both
-NSIS `.sig` files. Company Electron uses `com.jintae.multiagent.company.electron` and a
-company-only local-data path, and does not provide Remote·Tunnel.
+NSIS `.sig` files. Portable executables are not built or published. Company Electron uses
+`com.jintae.multiagent.company.electron` and a company-only local-data path, and does not
+provide Remote·Tunnel.
 
 ## Build Variants
 

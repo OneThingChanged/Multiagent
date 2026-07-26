@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AI_TOOLS, toolForId } from "../types";
 import type { NewAgentPayload, Project } from "../types";
 import { folderTail } from "../lib/path";
+import { defaultAiToolId } from "../lib/projectCreation";
 
 export function NewAgentModal({
   project,
@@ -21,7 +22,9 @@ export function NewAgentModal({
     (t) => t.id === "none" || !disabledTools.includes(t.id)
   );
   const [name, setName] = useState(defaultName);
-  const [aiToolId, setAiToolId] = useState<string>(visibleTools[0]?.id ?? AI_TOOLS[0].id);
+  const [aiToolId, setAiToolId] = useState<string>(() =>
+    defaultAiToolId(disabledTools)
+  );
   const [dangerous, setDangerous] = useState(false);
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!selectedTool.dangerousFlag;

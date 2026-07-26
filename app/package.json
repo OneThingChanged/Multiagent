@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.69",
+  "version": "0.5.70",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -16,13 +16,11 @@
     "electron:lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs",
     "electron:single-instance-smoke": "node scripts/electron-single-instance-smoke.mjs",
     "electron:packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged",
-    "electron:portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable",
     "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
     "electron:company-packaged-smoke": "node scripts/electron-packaged-smoke.mjs --company",
     "electron:company-packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged --company",
-    "electron:company-portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable --company",
     "electron:pack": "npm run build && electron-builder --dir",
-    "electron:dist": "npm run build && electron-builder --win nsis portable",
+    "electron:dist": "npm run build && electron-builder --win nsis",
     "electron:dist:company": "node scripts/build-electron-company.mjs",
     "electron:dist:all": "node scripts/build-electron-all.mjs",
     "tauri": "tauri",
@@ -93,15 +91,11 @@
     "win": {
       "icon": "src-tauri/icons/icon.ico",
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     },
     "nsis": {
       "artifactName": "MultiAgent-Electron-Setup-${version}-${arch}.${ext}"
-    },
-    "portable": {
-      "artifactName": "MultiAgent-Electron-Portable-${version}-${arch}.${ext}"
     },
     "publish": [
       {

@@ -37,6 +37,7 @@ npm run electron:dev
 Electron also uses Vite `4420`, with auxiliary HMR port `4422`. For installer/security/PTY verification commands and migration criteria, see [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md).
 
 Electron installers are built separately for standard and company.
+Only NSIS installers are produced; portable executables are intentionally not built.
 
 | variant | command | updater metadata |
 |---|---|---|

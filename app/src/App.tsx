@@ -133,6 +133,10 @@ import {
   saveDesktopPetEnabled,
   type DesktopPetCompletion,
 } from "./lib/desktopPet";
+import {
+  buildNewProjectWithDefaultAgent,
+  defaultAiToolId,
+} from "./lib/projectCreation";
 
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -2186,22 +2190,17 @@ function App() {
   // ---- Agent CRUD (side effects + layout via groupOps)
 
   const createProject = useCallback((payload: NewProjectPayload) => {
-    const id = crypto.randomUUID();
-    const sshHostId = payload.sshHostId?.trim() || undefined;
-    const project: Project = {
-      id,
-      name: payload.name.trim() || "Project",
-      folder: payload.folder.trim(),
-      createdAt: Date.now(),
-      lastOpenedAt: Date.now(),
-      sshHostId,
-      remoteFolder: sshHostId ? payload.remoteFolder?.trim() || undefined : undefined,
-    };
+    const { project, agent } = buildNewProjectWithDefaultAgent(
+      payload,
+      defaultAiToolId(disabledTools)
+    );
     setProjects((prev) => [project, ...prev]);
-    setActiveProjectId(id);
-    setActiveGroupId(null);
-    setActivePath(null);
-  }, []);
+    setAgents((prev) => [...prev, agent]);
+    setActiveProjectId(project.id);
+    applyGroupOp((state) =>
+      groupOps.addNewAgent(state, agent.id, project.id)
+    );
+  }, [applyGroupOp, disabledTools]);
 
   const reorderProject = useCallback(
     (draggedId: string, targetId: string, before: boolean) => {

@@ -28,7 +28,7 @@ A desktop app that manages multiple AI agent (Claude Code, Codex) terminal sessi
 ### Sessions & Layout
 | feature | description |
 |---|---|
-| Project/session model | register a project → create aliased sessions inside a collapsible tree |
+| Project/session model | register a project → start its first session immediately → add aliased sessions inside a collapsible tree |
 | Multi-tab / splits | multiple tabs per pane, 2+ h/v panes per Screen with nested splits, resize via handles |
 | Groups | sessions joined by splits form one group — clicking any member shows the whole group. A session belongs to exactly one group globally |
 | Split Screen summary | above the sidebar's `This PC`/project tree, shows `Screen N (A+B+C)`, with the same-color `SN` badge on cross-project members. Rows jump directly by Screen ID, not session search |

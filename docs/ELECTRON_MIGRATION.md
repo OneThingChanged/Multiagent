@@ -211,10 +211,8 @@ npm run electron:packaged-lifecycle-smoke
 npm run electron:dist
 npm run electron:dist:company
 npm run electron:dist:all
-npm run electron:portable-lifecycle-smoke
 npm run electron:company-packaged-smoke
 npm run electron:company-packaged-lifecycle-smoke
-npm run electron:company-portable-lifecycle-smoke
 ```
 
 Automated verification scope:
@@ -234,7 +232,7 @@ install size is a clear cost of the Electron migration.
 
 ## Remaining Real-Use Checks Before Migration
 
-1. NSIS/portable install on two separate Windows PCs, Defender/SmartScreen, `node-pty` check
+1. NSIS install on two separate Windows PCs, Defender/SmartScreen, `node-pty` check
 2. Run real Codex/Claude for 8+ hours and check scrollback/memory/resume
 3. Verify hook working/done/session-start on Windows and POSIX SSH hosts
 4. Verify OAuth pending/approve/revoke and long input over a Cloudflare public URL

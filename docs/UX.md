@@ -22,7 +22,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - **Top search box**: filter by project/session name. A project-name match shows all sessions of that project; a session-name match shows only that session. Auto-expands while searching
 - **Project `>`/`v` button**: collapse/expand the session list
 - **Project left-click**: activate the project + show the first session group (expands if collapsed)
-- New projects with no sessions yet also appear in the list. When expanded, a `Select project, then click + to start a session` guide shows, and the top `+` creates the first session
+- Creating a project also creates and starts `Session 1`, so the project remains visible when `Active only` is enabled
 - **Project drag**: drag up/down in the sidebar to reorder projects
 - **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf
 - **Session double-click**: rename alias popup
@@ -62,7 +62,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 
 ## New Project / Session Modals
 
-- **New Project**: enter a project name and root folder. This folder becomes the session cwd and the Docs scan root
+- **New Project**: enter a project name and root folder. This folder becomes the session cwd and the Docs scan root; `Session 1` is created immediately with the first enabled agent tool
   - **Run on remote host (SSH)** toggle: when on, instead of a folder, pick a registered SSH host (dropdown) and enter a **remote folder**. This project's sessions run over SSH on that machine (register hosts first in Settings → SSH Hosts)
 - **New Session**: creates a session inside the active project
 - **Session alias**: the name shown in the sidebar/tabs/Docs subtitle

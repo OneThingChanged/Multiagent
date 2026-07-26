@@ -19,10 +19,6 @@ module.exports = {
     ...base.nsis,
     artifactName: "MultiAgentCompany-Electron-Setup-${version}-${arch}.${ext}",
   },
-  portable: {
-    ...base.portable,
-    artifactName: "MultiAgentCompany-Electron-Portable-${version}-${arch}.${ext}",
-  },
   publish: [
     {
       provider: "github",

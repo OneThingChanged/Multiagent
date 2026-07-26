@@ -23,4 +23,4 @@ run(npm, ["run", "build"], {
   ...process.env,
   VITE_MULTIAGENT_VARIANT: "company",
 });
-run(builder, ["--win", "nsis", "portable", "--config", "electron-builder.company.cjs"]);
+run(builder, ["--win", "nsis", "--config", "electron-builder.company.cjs"]);

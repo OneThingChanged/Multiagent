@@ -35,8 +35,10 @@ const first = launch();
 let second = null;
 let output = "";
 let settled = false;
+let successTimer = null;
 
 function cleanup() {
+  if (successTimer) clearTimeout(successTimer);
   if (second && !second.killed) second.kill();
   if (!first.killed) first.kill();
   try {
@@ -51,6 +53,23 @@ const timeout = setTimeout(() => {
   console.error(`single-instance smoke timeout\n${output}`);
   process.exitCode = 1;
 }, 15_000);
+
+function finish(code) {
+  if (settled) return;
+  settled = true;
+  clearTimeout(timeout);
+  const mainWindowCreations =
+    output.match(/\[electron\] main window created/g)?.length ?? 0;
+  if (code === 0 && output.includes(marker) && mainWindowCreations === 1) {
+    console.log("[electron-smoke] single-instance smoke passed");
+  } else {
+    process.exitCode = 1;
+    console.error(
+      `single-instance smoke failed (${code}, mainWindows=${mainWindowCreations})\n${output}`
+    );
+  }
+  cleanup();
+}
 
 first.stdout.on("data", (chunk) => {
   const text = chunk.toString();
@@ -67,24 +86,17 @@ first.stdout.on("data", (chunk) => {
       process.stderr.write(part);
     });
   }
+  if (text.includes(marker) && !successTimer) {
+    // The marker proves the owner received the second-instance event. Give the
+    // losing process a moment to finish, then let the harness own teardown so
+    // the assertion does not depend on Electron's asynchronous quit timing.
+    successTimer = setTimeout(() => finish(0), 1_000);
+  }
 });
 first.stderr.on("data", (chunk) => {
   output += chunk.toString();
   process.stderr.write(chunk);
 });
 first.on("exit", (code) => {
-  if (settled) return;
-  settled = true;
-  clearTimeout(timeout);
-  const mainWindowCreations =
-    output.match(/\[electron\] main window created/g)?.length ?? 0;
-  if (code === 0 && output.includes(marker) && mainWindowCreations === 1) {
-    console.log("[electron-smoke] single-instance smoke passed");
-  } else {
-    process.exitCode = 1;
-    console.error(
-      `single-instance smoke failed (${code}, mainWindows=${mainWindowCreations})\n${output}`
-    );
-  }
-  cleanup();
+  finish(code ?? 1);
 });

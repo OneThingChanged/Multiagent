@@ -219,9 +219,6 @@ if (!singleInstanceLockAcquired) {
   app.on("second-instance", () => {
     if (singleInstanceSmoke) {
       console.log("[electron-smoke] MULTIAGENT_ELECTRON_SINGLE_INSTANCE_OK");
-      // Keep the owner alive long enough for the losing process to finish its
-      // lock request and exit; closing synchronously can release the lock mid-call.
-      setTimeout(() => closeEverything(), 750);
     } else {
       showMainWindow();
     }
