@@ -26,8 +26,8 @@ export function createTerminalHandlers({
       terminalSessions.close(args.id, "close");
       return null;
     }],
-    ["confirm_close", () => {
-      return confirmClose();
+    ["confirm_close", (event) => {
+      return confirmClose(event.sender.id);
     }],
   ]);
 

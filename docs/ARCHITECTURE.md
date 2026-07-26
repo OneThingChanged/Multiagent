@@ -86,36 +86,28 @@ K:\AI\MultiAgent\
 | `play_system_sound` / `read_audio_file` | — / path | notification sound (system beep / custom file bytes) |
 | `set_desktop_pet_enabled` | enabled | show/hide the main-process Desktop Pet window pre-created in setup |
 | `update_desktop_pet` / `desktop_pet_snapshot` | update / — | caches pet state payload + delivers window events / initial state query |
-| `reset_desktop_pet_position` | — | moves the pet to the default bottom-right position of the main window's monitor |
+| `reset_desktop_pet_position` | — | moves the pet to the default bottom-right position of the most recently focused workspace monitor |
 
 Additional command groups (details in each document):
 - **Remote** ([REMOTE.md](REMOTE.md)): `start/stop_remote_server`, `remote_server_status`, `start/stop_tunnel`, `tunnel_status`, `remote_config_get/set`, `remote_access_list/approve/revoke`, `sync_remote_agents`, `sync_remote_view`
 - **Dashboard** ([MONITOR.md](MONITOR.md)): `sync_monitor_state`, `start/stop_monitor_server`, `monitor_server_status`, `monitor_config_get/set` — session monitoring and the Usage screen served by a single local server
 - **Usage accounting** ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)): `sync_usage_catalog`, `usage_ingest_now`, `resolve_cli_session`, `relink_cli_session` (the `start/stop_usage_server` family are legacy commands for the previous standalone Usage server)
-- **Window**: `show_main_window`, `open_new_app_window`, `get_detached_agents`, new window/always-on-top related
+- **Window**: `show_main_window`, `open_new_app_window`, `get_detached_agents`, `get_agent_window_usage`, `claim_agent_for_window`, new window/always-on-top related
 
-#### Session detach (새 창에서 열기)
+#### Peer workspace windows and session ownership
 
-The main process maintains a `detachedAgents` map (`agentId → webContents.id`) that tracks which secondary window owns each detached session.
+The Electron main process and system tray are the persistent application shell. Every visible `BrowserWindow` is an equal workspace window with the same project/session controls; there is no parent/secondary renderer role.
 
-**Detach flow:**
-1. Renderer calls `open_new_app_window({ agentId })` — the caller first removes the agent from its own groups via `groupOps.removeAgentFromLayout`
-2. Main process checks `detachedAgents`: if the agent is already owned by a different window, that window is focused instead (defense against double-open)
-3. A new `BrowserWindow` is created with `secondary: true, openAgentId`. The secondary window starts with empty groups and its sidebar shows only the owned session
-4. The main process registers `detachedAgents.set(agentId, newWindow.webContents.id)` and sends a `session-detached` event to the calling window
-5. The calling window adds the agent to `detachedAgentIds` state → sidebar shows the agent with a dimmed **"다른 창"** badge, click/rename/context-menu disabled, close button hidden
+- Each workspace receives a stable `workspaceWindowId`. Its Screen tree and active view use `multiagent.workspace.<id>.groups.v1` / `multiagent.workspace.<id>.view.v1`, so one window never overwrites another window's layout
+- Projects, sessions, hooks, and PTYs remain process-wide. A main-process ownership map (`agentId → webContents.id`, still named `detachedAgents` internally for compatibility) prevents two windows from controlling one live session
+- `claim_agent_for_window` is used by every workspace before selection. `spawn_pty`/`attach_terminal` also enforce the same ownership in the main process as a race-condition defense
+- Opening a session in a new window atomically transfers ownership, removes it from the caller's layout, and marks it **"사용 중"** in every other window
+- Natural PTY exit, deactivate/close, or workspace destruction releases ownership. A live PTY orphaned by a closed window remains in the main process and can be claimed and reattached by another workspace
+- Closing the final workspace does not quit Electron. The tray remains; opening it recreates the most recently focused workspace ID and reattaches its live PTYs
+- One workspace is transparently elected coordinator for singleton UI-to-service mirrors (Desktop Pet, Remote, Monitor, Usage). If it closes, the main process elects another and emits `workspace:coordinator-changed`; this role does not change window capabilities
+- Tray Exit/update/relaunch broadcasts `app:close-requested` to every workspace and waits for every renderer's `confirm_close` before final process shutdown (5-second fallback remains)
 
-**Reattach flow (secondary window closed):**
-1. The `webContents.on("destroyed")` handler removes all entries from `detachedAgents` owned by that window
-2. A `sessions-reattached` event is broadcast to all remaining windows
-3. Each window removes the released agents from `detachedAgentIds` → sidebar badge disappears, session becomes interactive again
-
-**Defense layers:**
-- Main process `detachedAgents` map blocks duplicate detach (focuses owner window instead)
-- Sidebar hides detached agents from interaction (badge + disabled handlers)
-- `selectAgent`, `openAsTab`, `splitWith`, `selectScreen` all check `detachedAgentIdsRef` before opening
-
-**IPC contract additions:** `get_detached_agents` (command), `session-detached` / `sessions-reattached` (delivered events)
+**IPC contract:** `runtime_flags` returns `workspace_window`, `workspace_window_id`, and `coordinator`; window/session commands remain `open_new_app_window`, `get_detached_agents`, `get_agent_window_usage`, and `claim_agent_for_window`. Ownership events remain `session-detached` / `sessions-reattached`.
 
 
 ### State (`AppState`)
@@ -322,8 +314,9 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.projects.v1` — `StoredProject[]` (project name, folder, last used time, optional `sshHostId`/`remoteFolder`)
 - `multiagent.sshHosts.v1` — `SshHost[]` (SSH host registry: label/host/user/port?/identityFile?/extraOptions?/remoteOs?/authMethod?/preferCmdShim?)
 - `multiagent.agents.v1` — `StoredAgent[]` (session meta + projectId)
-- `multiagent.groups.v1` — `Group[]` (tree + optional projectId + `sessionPins`/`sessionLocked`)
-- `multiagent.view.v1` — `{ activeProjectId, activeGroupId, activePath }`
+- `multiagent.workspace.<workspaceWindowId>.groups.v1` — that peer window's `Group[]` Screen tree
+- `multiagent.workspace.<workspaceWindowId>.view.v1` — that peer window's `{ activeProjectId, activeGroupId, activePath }`
+- `multiagent.groups.v1` / `multiagent.view.v1` — legacy single-window layout keys, copied once into the first peer workspace
 - `multiagent.appTheme.v1` — global theme (`soft`/`github`/`warm`/`light`)
 - `multiagent.docsTheme.v1` — legacy Docs-only theme key. Kept for compatibility while the new key is read/written
 - `multiagent.filesWidth.v1` / `multiagent.filesOpen.v1` — file tree sidebar width/open state (old `multiagent.docsWidth.v1` unused)
@@ -332,6 +325,7 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.sidebarOpen.v1` — left sidebar collapsed state (default open)
 - `multiagent.terminalFontSize.v1` — xterm font size
 - `multiagent.notificationSound.v1` — notification sound settings (mode + customPath)
+- `multiagent.attentionItems.v1` — waiting/blocked/completed/stale attention history. Unread `completed` items derive the sidebar completion sweep/red dot; opening the agent marks only its completed items read
 - `multiagent.desktopPetEnabled.v1` — Desktop Pet visibility (default true)
 - `multiagent.scrollback.<agentId>.v1` — per-session scrollback snapshot (for restart restore)
 - (migration) `multiagent.layout.v1` — old single tree. Converted to a single group on first load, then deleted

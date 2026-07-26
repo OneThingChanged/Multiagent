@@ -59,7 +59,7 @@ function finish(code) {
   settled = true;
   clearTimeout(timeout);
   const mainWindowCreations =
-    output.match(/\[electron\] main window created/g)?.length ?? 0;
+    output.match(/\[electron\] workspace window created/g)?.length ?? 0;
   if (code === 0 && output.includes(marker) && mainWindowCreations === 1) {
     console.log("[electron-smoke] single-instance smoke passed");
   } else {
@@ -75,7 +75,7 @@ first.stdout.on("data", (chunk) => {
   const text = chunk.toString();
   output += text;
   process.stdout.write(text);
-  if (!second && text.includes("[electron] main window created")) {
+  if (!second && text.includes("[electron] workspace window created")) {
     second = launch();
     second.stdout.on("data", (part) => {
       output += part.toString();

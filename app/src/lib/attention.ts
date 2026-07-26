@@ -41,6 +41,33 @@ export function markAttentionRead(items: AttentionItem[], ids?: Set<string>) {
   );
 }
 
+export function unreadCompletedAgentIds(items: AttentionItem[]): Set<string> {
+  return new Set(
+    items
+      .filter((item) => item.kind === "completed" && !item.read)
+      .map((item) => item.agentId)
+  );
+}
+
+export function markAgentCompletionRead(
+  items: AttentionItem[],
+  agentId: string
+): AttentionItem[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (
+      item.agentId !== agentId ||
+      item.kind !== "completed" ||
+      item.read
+    ) {
+      return item;
+    }
+    changed = true;
+    return { ...item, read: true };
+  });
+  return changed ? next : items;
+}
+
 function isAttentionItem(value: unknown): value is AttentionItem {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<AttentionItem>;

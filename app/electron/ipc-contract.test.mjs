@@ -9,6 +9,8 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("attach_terminal");
     expect(contract.INVOKE_COMMANDS).toContain("detach_terminal");
     expect(contract.INVOKE_COMMANDS).toContain("terminal_session_action");
+    expect(contract.INVOKE_COMMANDS).toContain("get_agent_window_usage");
+    expect(contract.INVOKE_COMMANDS).toContain("claim_agent_for_window");
   });
 
   it("validates terminal cursors, actions and write bounds", () => {
@@ -24,6 +26,12 @@ describe("Electron IPC contract", () => {
     expect(() => contract.assertInvokeRequest("write_pty", {
       id: "agent", data: "x".repeat(1024 * 1024 + 1),
     })).toThrow("1 MiB");
+    expect(contract.assertInvokeRequest("claim_agent_for_window", {
+      agentId: "agent",
+    })).toMatchObject({ agentId: "agent" });
+    expect(() => contract.assertInvokeRequest("claim_agent_for_window", {
+      agentId: "",
+    })).toThrow("agent id");
   });
 
   it("rejects commands and emitted events outside the contract", () => {

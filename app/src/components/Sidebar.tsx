@@ -123,6 +123,7 @@ export function Sidebar({
   activeAgentId,
   inGroupAgentIds,
   detachedAgentIds,
+  unreadCompletedAgentIds,
   dragState,
   onSelectProject,
   onSelect,
@@ -136,6 +137,8 @@ export function Sidebar({
   onDragEnd,
   onReorderProject,
   onProjectContextMenu,
+  sessionPickerMode = false,
+  detachedLabel = "다른 창",
 }: {
   projects: Project[];
   agents: Agent[];
@@ -145,6 +148,7 @@ export function Sidebar({
   activeAgentId: string | null;
   inGroupAgentIds: Set<string>;
   detachedAgentIds: Set<string>;
+  unreadCompletedAgentIds: Set<string>;
   dragState: DragState | null;
   onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
@@ -158,6 +162,8 @@ export function Sidebar({
   onDragEnd: () => void;
   onReorderProject: (draggedId: string, targetId: string, before: boolean) => void;
   onProjectContextMenu: (projectId: string, x: number, y: number) => void;
+  sessionPickerMode?: boolean;
+  detachedLabel?: string;
 }) {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => loadExpandedProjects(projects)
@@ -463,6 +469,7 @@ export function Sidebar({
     const handleMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pending.pointerId) return;
       if (
+        !sessionPickerMode &&
         !pending.dragging &&
         Math.hypot(moveEvent.clientX - pending.x, moveEvent.clientY - pending.y) >
           4
@@ -509,6 +516,7 @@ export function Sidebar({
   ) => {
     const inGroup = inGroupAgentIds.has(a.id);
     const isDetached = detachedAgentIds.has(a.id);
+    const hasUnreadCompletion = unreadCompletedAgentIds.has(a.id);
     const isDragging = dragState?.fromAgentId === a.id;
     const isActiveGroup = groupId === activeGroupId;
     const screen = screenByAgentId.get(a.id);
@@ -525,6 +533,7 @@ export function Sidebar({
           multi ? "agent-grouped" : "",
           multi && isActiveGroup ? "agent-grouped-active" : "",
           isDetached ? "agent-detached" : "",
+          hasUnreadCompletion ? "agent-completion-unread" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -543,7 +552,7 @@ export function Sidebar({
           startSessionPointer(a.id, e);
         }}
         onDoubleClick={(e) => {
-          if (isDetached) return;
+          if (isDetached || sessionPickerMode) return;
           if ((e.target as HTMLElement).closest("button")) return;
           pendingSessionClickRef.current = null;
           e.preventDefault();
@@ -551,7 +560,7 @@ export function Sidebar({
           onRenameSession(a.id);
         }}
         onContextMenu={(e) => {
-          if (isDetached) return;
+          if (isDetached || sessionPickerMode) return;
           pendingSessionClickRef.current = null;
           e.preventDefault();
           onContextMenu(a.id, e.clientX, e.clientY);
@@ -580,6 +589,13 @@ export function Sidebar({
           >
             {a.name}
           </span>
+          {hasUnreadCompletion && (
+            <span
+              className="agent-completion-dot"
+              title="작업 완료 · 클릭해서 확인"
+              aria-label="읽지 않은 작업 완료"
+            />
+          )}
           {screen && (
             <span
               className="agent-screen-badge"
@@ -599,9 +615,9 @@ export function Sidebar({
           {isDetached && (
             <span
               className="agent-detached-badge"
-              title="다른 창에서 사용중"
+              title="다른 창에서 사용 중"
             >
-              다른 창
+              {detachedLabel}
             </span>
           )}
           {a.dangerous && (
@@ -612,7 +628,7 @@ export function Sidebar({
               !
             </span>
           )}
-          {!isDetached && (
+          {!isDetached && !sessionPickerMode && (
             <button
               className="close-btn"
               onClick={(e) => {
@@ -661,6 +677,10 @@ export function Sidebar({
           .join(" ")}
         draggable={false}
         onDragStart={(e) => {
+          if (sessionPickerMode) {
+            e.preventDefault();
+            return;
+          }
           if ((e.target as HTMLElement).closest(".project-session-list")) {
             e.preventDefault();
             e.stopPropagation();
@@ -711,8 +731,9 @@ export function Sidebar({
       >
         <div
           className="project-row"
-          draggable
+          draggable={!sessionPickerMode}
           onContextMenu={(e) => {
+            if (sessionPickerMode) return;
             if (
               (e.target as HTMLElement).closest("button.project-caret-btn")
             ) {
@@ -743,16 +764,18 @@ export function Sidebar({
               <span className="project-ssh-badge">SSH</span>
             )}
           </button>
-          <button
-            className="project-add-session-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNewSessionForProject(project.id);
-            }}
-            title={`${project.name}에 새 세션`}
-          >
-            +
-          </button>
+          {!sessionPickerMode && (
+            <button
+              className="project-add-session-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNewSessionForProject(project.id);
+              }}
+              title={`${project.name}에 새 세션`}
+            >
+              +
+            </button>
+          )}
         </div>
         {expanded && (
           <ul className="project-session-list">
@@ -785,7 +808,9 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="project-tree">
         <div className="sidebar-section-heading">
-          <div className="sidebar-section-title">Projects</div>
+          <div className="sidebar-section-title">
+            {sessionPickerMode ? "Projects · 세션 선택" : "Projects"}
+          </div>
           <button
             className={`section-action-btn active-only-btn ${
               activeOnly ? "active-only-on" : ""

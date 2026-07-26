@@ -60,6 +60,11 @@ async function run(name, envName, marker, timeoutMs = 12_000) {
 }
 
 await run("close", "MULTIAGENT_ELECTRON_CLOSE_SMOKE", "MULTIAGENT_ELECTRON_CLOSE_OK");
+await run(
+  "workspace",
+  "MULTIAGENT_ELECTRON_WORKSPACE_SMOKE",
+  "MULTIAGENT_ELECTRON_WORKSPACE_TRAY_OK"
+);
 await run("security", "MULTIAGENT_ELECTRON_SECURITY_SMOKE", "MULTIAGENT_ELECTRON_SECURITY_OK");
 const mode = packaged ? "packaged" : "source";
 console.log(`[electron-smoke] MULTIAGENT_ELECTRON_LIFECYCLE_OK (${mode})`);

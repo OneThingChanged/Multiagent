@@ -24,13 +24,14 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - **Project left-click**: activate the project + show the first session group (expands if collapsed)
 - Creating a project also creates and starts `Session 1`, so the project remains visible when `Active only` is enabled
 - **Project drag**: drag up/down in the sidebar to reorder projects
-- **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf
+- **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf and clears its unread completion highlight
 - **Session double-click**: rename alias popup
 - **Hovering a project row shows a `+` button on the right** — clicking activates that project and immediately opens the new session modal
-- **`+` button next to the Projects title**: new project (pin, new window, pet, settings, Quick Open, and notification buttons all moved to the top bar)
+- **Dot button next to the Projects title**: toggle between all sessions and active sessions only. Every workspace window has the same control
+- **`+` button next to the Projects title**: new project in the current workspace window (pin, new window, pet, settings, Quick Open, and notification buttons all moved to the top bar)
 - **Session right-click**: context menu
   - Switch (jump to current group) / add as tab / split right / split down
-  - **Open in new window** — detaches the session into a new MultiAgent window. The session is removed from the current window's terminal area and shown in the sidebar with a dimmed **"다른 창"** badge (click, rename, and context menu are disabled). The new window's sidebar shows only the detached session. Closing the new window automatically releases the session back to the main window (badge removed, session clickable again). If the session is already detached to another window, that window is brought to the front instead of opening a duplicate
+  - **Open in new window** — transfers the session into a new, equal workspace window. It is removed from the current Screen and shown as **"사용 중"** in every other window. All windows expose the same project/session creation, filtering, rename, drag, and context-menu features. Closing the owning window releases its sessions so any remaining/new workspace can claim them
   - Rename session alias
   - **Restart session** — re-spawn an exited session (resume included)
   - **Deactivate session** — for a running session that is **not visible on screen**, kills only the PTY to free resources. Selecting it again restarts it with resume (visible sessions are deactivated-disabled)
@@ -47,6 +48,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - Active group members: light blue background + left bar
 - Active tab session of the active leaf: deep blue background
 - Pinned group members: `PIN` badge next to the name
+- Unread completed work: animated red-tinted background sweep + red dot. Opening that session from the sidebar or its tab marks the completion as read and removes both effects
 - Between groups: thin gray divider
 - Session item: status dot / tool icon / alias / dangerous `!` / close `x` (one line)
 
@@ -205,9 +207,10 @@ Setting values are stored in localStorage and local JSON, persisting to the next
 
 ## Window Close / Full Exit
 
-- In Electron, clicking **X hides the main window to the system tray**; PTYs keep running and no resume is needed. Launching the app again activates the existing process instead of creating a second instance
+- In Electron, clicking **X closes only that workspace window**. The Electron main process, tray, and PTYs stay alive; closing the final workspace therefore does not quit the app
+- Tray click reopens the most recently focused workspace layout and reattaches its live PTYs. Tray → **새 작업창** opens a separate blank peer window
 - **Tray → Exit**, an ordinary relaunch, and an updater install all run the same graceful-save handshake
-- The renderer records every running agent ID, saves the workspace/scrollback, and sends `/quit\r` to running Codex/Claude sessions before the process exits
+- Every open workspace records its running agents, saves its own layout/scrollback, and sends `/quit\r` to its Codex/Claude sessions. Electron waits for every workspace confirmation before exiting
 - An updater install starts only after that save handshake completes. If the renderer does not answer, the main process uses a 5-second fallback; if launching the installer fails, the app returns to its usable state
 - Next app run shows **Reopen previous sessions**. Confirming it starts the saved agents with `codex resume <id>` / `claude --resume <id>`
 - See [RESUME.md](RESUME.md) for full behavior and limits
@@ -261,8 +264,8 @@ app removes it from the restore targets.
 
 ## Desktop Pet
 
-- At app start, the pet native window is first created hidden; after the main UI is ready, the sidebar's saved **pet visibility** toggle is applied, and then the main MultiAgent window is finally shown/focused. This prevents the state where only the pet is in front and the main window is hidden behind
-- The pet is bound to the same process as the main app. Quitting the main app or starting an update install terminates the whole process including the pet; the pet never remains alone. New window processes do not get duplicate pets
+- At app start, the pet native window is first created hidden; after the elected workspace coordinator is ready, the saved **pet visibility** toggle is applied and a workspace is focused
+- The pet is bound to the tray process. Tray Exit or an update install terminates the whole process including the pet; peer workspace windows never create duplicate pets
 - The pet window is `focusable(false)` and does not create a new window at completion; it only changes the CSS state of the existing window. So it never steals keyboard focus from the active terminal
 - idle is a sleeping face, running is an awake face, working is a typing animation, done is a jump + completion balloon
 - Per session, a `…N` badge shows while working and a `✓N` badge for unseen completions; both can show at once. The same `lastSessionId` is counted only once, and a completed session that starts working again moves from completed to working

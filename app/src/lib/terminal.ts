@@ -138,11 +138,13 @@ export function saveTerminalFontSize(fontSize: number) {
 }
 
 export async function notifyDone({
+  agentId,
   projectName,
   sessionName,
   silent,
   onActivate,
 }: {
+  agentId?: string;
   projectName: string;
   sessionName: string;
   silent?: boolean;
@@ -168,6 +170,7 @@ export async function notifyDone({
         }, 60 * 60 * 1000);
       }
       await invoke("show_native_notification", {
+        agentId,
         title: `${projectName} / ${sessionName}`,
         body: "작업이 끝났어요",
         notificationKey,
@@ -190,7 +193,7 @@ export async function notifyDone({
       notification.close();
       // Bring the app forward AND jump to the session that fired the
       // notification (onActivate navigates to its group).
-      invoke("show_main_window").catch(() => {});
+      invoke("show_main_window", { agentId: agentId ?? null }).catch(() => {});
       onActivate?.();
     };
   } catch {}

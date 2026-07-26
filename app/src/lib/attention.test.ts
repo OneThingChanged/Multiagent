@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  markAgentCompletionRead,
   markAttentionRead,
   MAX_ATTENTION_ITEMS,
   removeSessionAttention,
+  unreadCompletedAgentIds,
   upsertAttentionItem,
   type AttentionItem,
 } from "./attention";
@@ -25,6 +27,30 @@ describe("attention items", () => {
     const items = [item("1"), item("2", "completed")];
     expect(removeSessionAttention(items, "session").map((entry) => entry.kind))
       .toEqual(["completed"]);
+  });
+
+  it("tracks unread completions by agent and acknowledges only that agent", () => {
+    const completed = {
+      ...item("2", "completed"),
+      agentId: "agent-2",
+      sessionKey: "session-2",
+    };
+    const alreadyRead = {
+      ...item("3", "completed"),
+      agentId: "agent-3",
+      sessionKey: "session-3",
+      read: true,
+    };
+    const items = [item("1"), completed, alreadyRead];
+
+    expect(Array.from(unreadCompletedAgentIds(items))).toEqual(["agent-2"]);
+
+    const next = markAgentCompletionRead(items, "agent-2");
+    expect(next[0]).toBe(items[0]);
+    expect(next[1].read).toBe(true);
+    expect(next[2]).toBe(items[2]);
+    expect(unreadCompletedAgentIds(next).size).toBe(0);
+    expect(markAgentCompletionRead(next, "missing")).toBe(next);
   });
 
   it("bounds retained history", () => {

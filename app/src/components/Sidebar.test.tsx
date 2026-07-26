@@ -7,7 +7,13 @@ function renderSidebar(
   projects: Project[],
   agents: Agent[] = [],
   groups: Group[] = [],
-  activeGroupId: string | null = null
+  activeGroupId: string | null = null,
+  options: {
+    detachedAgentIds?: Set<string>;
+    unreadCompletedAgentIds?: Set<string>;
+    sessionPickerMode?: boolean;
+    detachedLabel?: string;
+  } = {}
 ) {
   return renderToStaticMarkup(
     <Sidebar
@@ -18,7 +24,8 @@ function renderSidebar(
       activeGroupId={activeGroupId}
       activeAgentId={null}
       inGroupAgentIds={new Set()}
-      detachedAgentIds={new Set()}
+      detachedAgentIds={options.detachedAgentIds ?? new Set()}
+      unreadCompletedAgentIds={options.unreadCompletedAgentIds ?? new Set()}
       dragState={null}
       onSelectProject={() => {}}
       onSelect={() => {}}
@@ -32,6 +39,8 @@ function renderSidebar(
       onDragEnd={() => {}}
       onReorderProject={() => {}}
       onProjectContextMenu={() => {}}
+      sessionPickerMode={options.sessionPickerMode}
+      detachedLabel={options.detachedLabel}
     />
   );
 }
@@ -138,5 +147,47 @@ describe("Sidebar", () => {
 
     expect(html).not.toContain("SCREENS");
     expect(html).not.toContain(">S1</span>");
+  });
+
+  it("shows management controls and unavailable sessions in picker mode", () => {
+    const projects: Project[] = [
+      { id: "project-a", name: "Project A", folder: "K:\\AI\\A", createdAt: 1 },
+    ];
+    const html = renderSidebar(
+      projects,
+      [agent("available", "project-a"), agent("busy", "project-a")],
+      [],
+      null,
+      {
+        detachedAgentIds: new Set(["busy"]),
+        sessionPickerMode: true,
+        detachedLabel: "사용 중",
+      }
+    );
+
+    expect(html).toContain("Projects · 세션 선택");
+    expect(html).toContain("AVAILABLE");
+    expect(html).toContain("BUSY");
+    expect(html).toContain("사용 중");
+    expect(html).toContain('title="New project"');
+    expect(html).toContain('title="활성 세션만 보기"');
+    expect(html).not.toContain('title="Remove session"');
+  });
+
+  it("marks sessions with unread completed work", () => {
+    const projects: Project[] = [
+      { id: "project-a", name: "Project A", folder: "K:\\AI\\A", createdAt: 1 },
+    ];
+    const html = renderSidebar(
+      projects,
+      [agent("done", "project-a"), agent("read", "project-a")],
+      [],
+      null,
+      { unreadCompletedAgentIds: new Set(["done"]) }
+    );
+
+    expect(html).toContain("agent-completion-unread");
+    expect(html).toContain("읽지 않은 작업 완료");
+    expect(html.match(/agent-completion-dot/g)).toHaveLength(1);
   });
 });

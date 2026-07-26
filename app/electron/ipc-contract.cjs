@@ -12,6 +12,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "show_main_window",
   "open_new_app_window",
   "get_detached_agents",
+  "get_agent_window_usage",
+  "claim_agent_for_window",
   "set_desktop_pet_enabled",
   "update_desktop_pet",
   "desktop_pet_snapshot",
@@ -128,6 +130,7 @@ const DELIVERED_EVENTS = Object.freeze([
   "update:progress",
   "session-detached",
   "sessions-reattached",
+  "workspace:coordinator-changed",
 ]);
 
 const EMITTED_EVENTS = Object.freeze([
@@ -184,6 +187,15 @@ function assertInvokeRequest(command, rawArgs) {
     case "detach_terminal":
     case "kill_pty":
       assertId(args);
+      break;
+    case "claim_agent_for_window":
+      if (
+        typeof args.agentId !== "string" ||
+        args.agentId.trim().length < 1 ||
+        args.agentId.length > 256
+      ) {
+        throw new TypeError("Electron window agent id must be a non-empty string");
+      }
       break;
     case "terminal_session_action":
       assertId(args);

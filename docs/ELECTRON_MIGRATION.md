@@ -84,24 +84,23 @@ Korean prompt survives to the HTTP event.
 
 ## Phase 4 — App Lifecycle & Data Migration
 
-The window close listener was decoupled from the PTY event effect. Clicking the main window X processes in this order:
+The system tray/main process now outlives every equal workspace window. Clicking a workspace X destroys only that renderer and releases its session ownership while PTYs continue in the main process. Tray Exit/update/relaunch processes in this order:
 
-1. Store running agent IDs
-2. Save the localStorage snapshot
-3. Send explicit `quit` action to Codex/Claude sessions
-4. Serialize xterm scrollback
-5. `confirm_close` to Electron main
-6. Kill all PTYs, Dashboard, Remote, Tunnel, Pet windows, and the app process
+1. Broadcast the close request to every workspace
+2. Each workspace stores running agent IDs and its window-specific Screen/view
+3. Each workspace sends explicit `quit` to its owned Codex/Claude sessions and serializes xterm scrollback
+4. Wait for every workspace's `confirm_close`
+5. Kill all PTYs, Dashboard, Remote, Tunnel, Pet/workspace windows, and the tray process
 
 Auto close smoke results are about 40–60ms (fixture with no active agents), and the old
 5-second fallback wait did not occur. If closed before the renderer is ready, main cleans
 up immediately.
 
 Tauri and Electron use the shared workspace at
-`%LOCALAPPDATA%\com.jintae.multiagent\storage-export.json`. Projects, sessions, screen
-groups, and the SSH host registry merge on first entry by stable id, and afterwards the
+`%LOCALAPPDATA%\com.jintae.multiagent\storage-export.json`. Projects, sessions,
+and the SSH host registry merge on first entry by stable id, and afterwards the
 latest shared snapshot is applied via per-runtime revision markers. UI/runtime state like
-pet position, theme, current selection, reopen lists, and terminal scrollback, plus SSH
+per-window Screen layouts, pet position, theme, current selection, reopen lists, and terminal scrollback, plus SSH
 passwords, are not shared. Running PTYs are not shared either; only the stored
 `lastSessionId` is resumed on the other runtime.
 

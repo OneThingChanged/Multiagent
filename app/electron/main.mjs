@@ -14,6 +14,7 @@ import {
 } from "electron";
 import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawn, spawnSync } from "node:child_process";
@@ -52,6 +53,10 @@ import {
 import { UsageService } from "./services/usage-service.mjs";
 import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
+import {
+  buildWindowSessionUsage,
+  claimWindowSession,
+} from "./services/window-session-ownership.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
@@ -74,6 +79,9 @@ const bridgeSmoke = process.env.MULTIAGENT_ELECTRON_BRIDGE_SMOKE === "1" ||
   process.argv.includes("--multiagent-bridge-smoke");
 const closeSmoke = process.env.MULTIAGENT_ELECTRON_CLOSE_SMOKE === "1" ||
   process.argv.includes("--multiagent-close-smoke");
+const workspaceSmoke =
+  process.env.MULTIAGENT_ELECTRON_WORKSPACE_SMOKE === "1" ||
+  process.argv.includes("--multiagent-workspace-smoke");
 const securitySmoke = process.env.MULTIAGENT_ELECTRON_SECURITY_SMOKE === "1" ||
   process.argv.includes("--multiagent-security-smoke");
 const singleInstanceSmoke =
@@ -141,8 +149,8 @@ const preloadContractArguments = [
   `--multiagent-emitted-events=${ipcContract.EMITTED_EVENTS.join(",")}`,
 ];
 
-/** @type {BrowserWindow | null} */
-let mainWindow = null;
+/** @type {BrowserWindow | null} Initial window reference used only by smoke tests. */
+let initialWindow = null;
 /** @type {BrowserWindow | null} */
 let petWindow = null;
 /** @type {import('electron').Tray | null} */
@@ -150,9 +158,15 @@ let tray = null;
 let forceClosing = false;
 let closeCoordinator = null;
 let closeSmokeStartedAt = null;
-/** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null, ready: boolean}>} */
+let workspaceSmokeStarted = false;
+/** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
+const workspaceWindows = new Map();
+/** @type {number | null} Renderer elected for singleton background UI sync. */
+let coordinatorWebContentsId = null;
+let lastWorkspaceWindowId = "primary";
+/** @type {Map<number, {workspace_window: boolean, workspace_window_id: string | null, coordinator: boolean, open_agent_id: string | null, ready: boolean}>} */
 const runtimeByWebContents = new Map();
-/** @type {Map<string, number>} agentId → webContents.id of the secondary window that owns it */
+/** @type {Map<string, number>} agentId → webContents.id of the workspace window that owns it */
 const detachedAgents = new Map();
 /** @type {Map<string, {id: string, name: string, process: import('node-pty').IPty, initTimer: NodeJS.Timeout | null, aiToolId: string, cwd: string | null, ssh: unknown, filter: CodexScrollbackFilter | PassThroughTerminalFilter, buffer: import('./services/terminal-stream.mjs').SequencedTerminalBuffer, subscribers: Set<number>}>} */
 const ptys = new Map();
@@ -163,6 +177,10 @@ const terminalSessions = new TerminalSessionService({
   },
   broadcastExit(payload) {
     sendEventToAll("pty:exit", payload);
+    const ownerId = detachedAgents.get(payload.id);
+    if (ownerId !== undefined) {
+      releaseAgentFromWindow(payload.id, ownerId);
+    }
   },
   onSessionsChanged({ reason, ids }) {
     // Preserve the last live set across app shutdown. Normal per-session exits
@@ -204,6 +222,36 @@ const transcriptMissUntil = new Map();
 app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", userDataOverride);
+const workspaceRegistryPath = path.join(
+  app.getPath("userData"),
+  "workspace-window.json"
+);
+try {
+  const savedWorkspace = JSON.parse(
+    fs.readFileSync(workspaceRegistryPath, "utf8")
+  );
+  if (
+    typeof savedWorkspace?.lastWorkspaceWindowId === "string" &&
+    /^[A-Za-z0-9._-]{1,128}$/.test(savedWorkspace.lastWorkspaceWindowId)
+  ) {
+    lastWorkspaceWindowId = savedWorkspace.lastWorkspaceWindowId;
+  }
+} catch {}
+
+function rememberWorkspaceWindowId(workspaceWindowId) {
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(workspaceWindowId)) return;
+  lastWorkspaceWindowId = workspaceWindowId;
+  try {
+    fs.mkdirSync(path.dirname(workspaceRegistryPath), { recursive: true });
+    fs.writeFileSync(
+      workspaceRegistryPath,
+      JSON.stringify({ version: 1, lastWorkspaceWindowId }),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn("[electron] workspace window registry write failed", error);
+  }
+}
 // Production instances share localStorage, hook files, and session ownership.
 // A second process would race those stores and can make resume appear broken.
 // electron:dev uses a separate userData profile, so it can run beside the
@@ -220,7 +268,7 @@ if (!singleInstanceLockAcquired) {
     if (singleInstanceSmoke) {
       console.log("[electron-smoke] MULTIAGENT_ELECTRON_SINGLE_INSTANCE_OK");
     } else {
-      showMainWindow();
+      showWorkspaceWindow();
     }
   });
 }
@@ -434,6 +482,7 @@ autoUpdater.on("update-downloaded", (info) => {
 closeCoordinator = new CloseCoordinator({
   onRequest() {
     sendEventToAll("app:close-requested", null);
+    return [...workspaceWindows.keys()];
   },
   onComplete(action, trigger) {
     completeCloseAction(action, trigger);
@@ -444,7 +493,7 @@ closeCoordinator = new CloseCoordinator({
       action,
       message: error instanceof Error ? error.message : String(error),
     });
-    showMainWindow();
+    showWorkspaceWindow();
   },
 });
 
@@ -618,6 +667,38 @@ function sendEventToAll(eventName, payload) {
   }
 }
 
+function sendEventToOtherWindows(excludedWebContentsId, eventName, payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (
+      !win.isDestroyed() &&
+      !win.webContents.isDestroyed() &&
+      win.webContents.id !== excludedWebContentsId
+    ) {
+      win.webContents.send("multiagent:event", eventName, payload);
+    }
+  }
+}
+
+function claimAgentForWindow(agentId, webContentsId) {
+  const previousOwner = detachedAgents.get(agentId);
+  const claimed = claimWindowSession({
+    agentId,
+    callerViewId: webContentsId,
+    detachedAgents,
+  });
+  if (claimed && previousOwner !== webContentsId) {
+    sendEventToOtherWindows(webContentsId, "session-detached", { agentId });
+  }
+  return claimed;
+}
+
+function releaseAgentFromWindow(agentId, webContentsId) {
+  if (detachedAgents.get(agentId) !== webContentsId) return false;
+  detachedAgents.delete(agentId);
+  sendEventToAll("sessions-reattached", { agentIds: [agentId] });
+  return true;
+}
+
 function sendEvent(win, eventName, payload) {
   if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
     win.webContents.send("multiagent:event", eventName, payload);
@@ -656,9 +737,52 @@ const DEFAULT_TITLEBAR_OVERLAY = {
   height: TITLEBAR_HEIGHT,
 };
 
-function createAppWindow({ secondary = false, openAgentId = null } = {}) {
+function setWorkspaceCoordinator(webContentsId) {
+  coordinatorWebContentsId = webContentsId ?? null;
+  for (const [id, win] of workspaceWindows) {
+    const runtime = runtimeByWebContents.get(id);
+    if (!runtime) continue;
+    const coordinator = id === coordinatorWebContentsId;
+    if (runtime.coordinator === coordinator) continue;
+    runtime.coordinator = coordinator;
+    sendEvent(win, "workspace:coordinator-changed", { coordinator });
+  }
+}
+
+function electWorkspaceCoordinator() {
+  if (
+    coordinatorWebContentsId !== null &&
+    workspaceWindows.has(coordinatorWebContentsId)
+  ) {
+    return;
+  }
+  const nextId = workspaceWindows.keys().next().value;
+  setWorkspaceCoordinator(
+    typeof nextId === "number" ? nextId : null
+  );
+}
+
+function focusWorkspaceWindow(win) {
+  if (!win || win.isDestroyed()) return false;
+  if (win.isMinimized()) win.restore();
+  if (process.platform === "win32") win.setSkipTaskbar(false);
+  win.show();
+  win.focus();
+  const runtime = runtimeByWebContents.get(win.webContents.id);
+  if (runtime?.workspace_window_id) {
+    rememberWorkspaceWindowId(runtime.workspace_window_id);
+  }
+  return true;
+}
+
+function createAppWindow({
+  workspaceWindowId = randomUUID(),
+  openAgentId = null,
+  restoreWorkspace = false,
+  resumeWorkspace = false,
+} = {}) {
   const win = new BrowserWindow({
-    title: secondary ? "MultiAgent — Window" : "MultiAgent Electron",
+    title: "MultiAgent",
     width: 1200,
     height: 800,
     minWidth: 760,
@@ -681,14 +805,22 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     },
   });
 
-  runtimeByWebContents.set(win.webContents.id, {
-    secondary_window: secondary,
+  const webContentsId = win.webContents.id;
+  runtimeByWebContents.set(webContentsId, {
+    workspace_window: true,
+    workspace_window_id: workspaceWindowId,
+    coordinator: coordinatorWebContentsId === null,
     open_agent_id: openAgentId,
     ready: false,
   });
-  if (secondary && openAgentId) {
-    detachedAgents.set(openAgentId, win.webContents.id);
+  workspaceWindows.set(webContentsId, win);
+  if (coordinatorWebContentsId === null) {
+    coordinatorWebContentsId = webContentsId;
   }
+  if (openAgentId) {
+    detachedAgents.set(openAgentId, webContentsId);
+  }
+  rememberWorkspaceWindowId(workspaceWindowId);
   installNavigationPolicy(win);
   // The application menu is removed, which also drops its accelerators.
   // Restore the developer ones here (Ctrl+R is intentionally NOT rebound —
@@ -704,10 +836,16 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
       win.webContents.reload();
     }
   });
-  const webContentsId = win.webContents.id;
+  win.on("focus", () => {
+    rememberWorkspaceWindowId(workspaceWindowId);
+  });
   win.webContents.on("destroyed", () => {
     terminalSessions.detachView(webContentsId);
+    workspaceWindows.delete(webContentsId);
     runtimeByWebContents.delete(webContentsId);
+    if (closeCoordinator?.isPending()) {
+      closeCoordinator.confirm(webContentsId);
+    }
     // Release any sessions this window owned and notify remaining windows.
     const released = [];
     for (const [agentId, ownerWcId] of detachedAgents) {
@@ -719,25 +857,19 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     if (released.length > 0) {
       sendEventToAll("sessions-reattached", { agentIds: released });
     }
+    if (coordinatorWebContentsId === webContentsId) {
+      coordinatorWebContentsId = null;
+      electWorkspaceCoordinator();
+    }
   });
   if (!bridgeSmoke && !singleInstanceSmoke) {
     win.once("ready-to-show", () => win.show());
   }
 
-  if (!secondary) {
-    // Closing the main window hides it to the system tray instead of quitting;
-    // the app keeps running (sessions stay alive) and is fully closed only via
-    // the tray's "종료" item (which sets forceClosing → closeEverything).
-    win.on("close", (event) => {
-      if (forceClosing) return;
-      event.preventDefault();
-      win.hide();
-      if (process.platform === "win32") win.setSkipTaskbar(true);
-    });
-  }
-
   void loadRenderer(win, {
-    secondaryWindow: secondary ? "1" : null,
+    workspaceWindowId,
+    restoreWorkspace: restoreWorkspace ? "1" : null,
+    resumeWorkspace: resumeWorkspace ? "1" : null,
     openAgentId,
   }).catch((error) => {
     console.error("[electron] renderer load failed:", error);
@@ -748,8 +880,14 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
 
 function positionPet() {
   if (!petWindow || petWindow.isDestroyed()) return;
-  const display = mainWindow && !mainWindow.isDestroyed()
-    ? screen.getDisplayMatching(mainWindow.getBounds())
+  const referenceWindow =
+    [...workspaceWindows.values()].find(
+      (win) =>
+        runtimeByWebContents.get(win.webContents.id)?.workspace_window_id ===
+        lastWorkspaceWindowId
+    ) ?? workspaceWindows.values().next().value;
+  const display = referenceWindow && !referenceWindow.isDestroyed()
+    ? screen.getDisplayMatching(referenceWindow.getBounds())
     : screen.getPrimaryDisplay();
   const { x, y, width, height } = display.workArea;
   petWindow.setBounds({
@@ -787,7 +925,9 @@ function ensurePetWindow() {
   installNavigationPolicy(petWindow);
   const petWebContentsId = petWindow.webContents.id;
   runtimeByWebContents.set(petWebContentsId, {
-    secondary_window: true,
+    workspace_window: false,
+    workspace_window_id: null,
+    coordinator: false,
     open_agent_id: null,
     ready: false,
   });
@@ -810,16 +950,31 @@ function ensurePetWindow() {
   return petWindow;
 }
 
-function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  if (process.platform === "win32") mainWindow.setSkipTaskbar(false);
-  mainWindow.show();
-  mainWindow.focus();
+function showWorkspaceWindow(agentId = null) {
+  const ownerId = agentId ? detachedAgents.get(agentId) : null;
+  if (ownerId) {
+    const owner = workspaceWindows.get(ownerId);
+    if (focusWorkspaceWindow(owner)) return owner;
+  }
+  const last = [...workspaceWindows.values()].find(
+    (win) =>
+      runtimeByWebContents.get(win.webContents.id)?.workspace_window_id ===
+      lastWorkspaceWindowId
+  );
+  if (focusWorkspaceWindow(last)) return last;
+  const first = workspaceWindows.values().next().value;
+  if (focusWorkspaceWindow(first)) return first;
+  return createAppWindow({
+    workspaceWindowId: lastWorkspaceWindowId,
+    openAgentId: agentId,
+    restoreWorkspace: true,
+    resumeWorkspace: !terminalSessions.keys().next().done,
+  });
 }
 
-// System tray: keeps the app resident after the window is closed. Left-click
-// reopens the window; right-click → "종료" fully quits.
+// System tray is the only persistent application shell. Every visible
+// BrowserWindow is an equal workspace; closing the last one leaves this tray
+// process and all PTYs alive.
 function createTray() {
   if (tray && !tray.isDestroyed()) return tray;
   let image;
@@ -832,13 +987,21 @@ function createTray() {
   tray.setToolTip(runtimeVariant.displayName || "MultiAgent");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "MultiAgent 열기", click: () => showMainWindow() },
+      { label: "MultiAgent 열기", click: () => showWorkspaceWindow() },
+      {
+        label: "새 작업창",
+        click: () =>
+          createAppWindow({
+            workspaceWindowId: randomUUID(),
+            restoreWorkspace: false,
+          }),
+      },
       { type: "separator" },
       { label: "종료", click: () => requestGracefulClose() },
     ])
   );
-  tray.on("click", () => showMainWindow());
-  tray.on("double-click", () => showMainWindow());
+  tray.on("click", () => showWorkspaceWindow());
+  tray.on("double-click", () => showWorkspaceWindow());
   return tray;
 }
 
@@ -2844,7 +3007,8 @@ async function importTauriStorage() {
 const terminalHandlers = createTerminalHandlers({
   terminalSessions,
   spawnPty,
-  confirmClose: () => closeCoordinator?.confirm() ?? false,
+  confirmClose: (webContentsId) =>
+    closeCoordinator?.confirm(webContentsId) ?? false,
 });
 
 async function invokeCommand(event, command, rawArgs) {
@@ -2853,14 +3017,41 @@ async function invokeCommand(event, command, rawArgs) {
     throw new Error("Company 빌드에서는 Remote와 Tunnel 기능을 사용할 수 없습니다.");
   }
   if (terminalHandlers.has(command)) {
-    return terminalHandlers.invoke(event, command, args);
+    const runtime = runtimeByWebContents.get(event.sender.id);
+    const ownershipCommands = new Set([
+      "spawn_pty",
+      "attach_terminal",
+      "terminal_session_action",
+      "write_pty",
+      "resize_pty",
+      "kill_pty",
+    ]);
+    if (
+      runtime?.workspace_window &&
+      ownershipCommands.has(command) &&
+      !claimAgentForWindow(args.id, event.sender.id)
+    ) {
+      throw new Error("이 세션은 다른 작업창에서 사용 중입니다.");
+    }
+    const result = await terminalHandlers.invoke(event, command, args);
+    if (
+      (command === "kill_pty" ||
+        (command === "terminal_session_action" &&
+          (args.action === "sleep" || args.action === "close"))) &&
+      runtime?.workspace_window
+    ) {
+      releaseAgentFromWindow(args.id, event.sender.id);
+    }
+    return result;
   }
   switch (command) {
     case "runtime_flags":
       return {
         ...(runtimeByWebContents.get(event.sender.id) ?? {
-        secondary_window: false,
-        open_agent_id: null,
+          workspace_window: false,
+          workspace_window_id: null,
+          coordinator: false,
+          open_agent_id: null,
         }),
         build_variant: runtimeVariant.id,
         remote_enabled: runtimeVariant.remoteEnabled,
@@ -2869,17 +3060,60 @@ async function invokeCommand(event, command, rawArgs) {
       const runtime = runtimeByWebContents.get(event.sender.id);
       if (runtime) runtime.ready = true;
       if (closeSmoke) console.log("[electron-smoke] renderer ready for close test");
-      if (closeSmoke && eventSenderWindow(event) === mainWindow && closeSmokeStartedAt === null) {
+      if (closeSmoke && eventSenderWindow(event) === initialWindow && closeSmokeStartedAt === null) {
         setTimeout(() => {
-          if (!mainWindow || mainWindow.isDestroyed()) return;
+          if (!initialWindow || initialWindow.isDestroyed()) return;
           closeSmokeStartedAt = Date.now();
           requestGracefulClose("quit");
+        }, 100);
+      }
+      if (
+        workspaceSmoke &&
+        !workspaceSmokeStarted &&
+        eventSenderWindow(event) === initialWindow
+      ) {
+        workspaceSmokeStarted = true;
+        const closingWindow = initialWindow;
+        const closingRuntime = runtimeByWebContents.get(event.sender.id);
+        const expectedWorkspaceId = closingRuntime?.workspace_window_id;
+        setTimeout(() => {
+          if (!closingWindow || closingWindow.isDestroyed()) return;
+          closingWindow.destroy();
+          setTimeout(() => {
+            if (workspaceWindows.size !== 0 || forceClosing) {
+              console.error(
+                `[electron-smoke] workspace close failed windows=${workspaceWindows.size} forceClosing=${forceClosing}`
+              );
+              app.exit(1);
+              return;
+            }
+            const reopened = showWorkspaceWindow();
+            reopened.webContents.once("did-finish-load", () => {
+              const runtime = runtimeByWebContents.get(
+                reopened.webContents.id
+              );
+              if (
+                runtime?.workspace_window &&
+                runtime.workspace_window_id === expectedWorkspaceId
+              ) {
+                console.log(
+                  "[electron-smoke] MULTIAGENT_ELECTRON_WORKSPACE_TRAY_OK"
+                );
+                closeEverything();
+              } else {
+                console.error(
+                  `[electron-smoke] workspace reopen failed expected=${expectedWorkspaceId} actual=${runtime?.workspace_window_id}`
+                );
+                app.exit(1);
+              }
+            });
+          }, 150);
         }, 100);
       }
       return null;
     }
     case "show_main_window":
-      showMainWindow();
+      showWorkspaceWindow(asString(args.agentId) || null);
       return null;
     case "open_new_app_window": {
       const agentId = asString(args.agentId) || null;
@@ -2898,11 +3132,18 @@ async function invokeCommand(event, command, rawArgs) {
           return null;
         }
       }
-      createAppWindow({ secondary: true, openAgentId: agentId });
-      // Notify the calling window so it can hide the session immediately.
-      if (agentId) {
-        sendEventToWebContentsId(event.sender.id, "session-detached", { agentId });
-      }
+      createAppWindow({
+        workspaceWindowId: randomUUID(),
+        openAgentId: agentId,
+        restoreWorkspace: false,
+      });
+      // The new peer owns the transferred session. Notify the caller so its
+      // local layout prunes the session immediately.
+      if (agentId) sendEventToWebContentsId(
+        event.sender.id,
+        "session-detached",
+        { agentId }
+      );
       return null;
     }
     case "get_detached_agents": {
@@ -2912,6 +3153,21 @@ async function invokeCommand(event, command, rawArgs) {
         if (wcId !== callerId) result[agentId] = wcId;
       }
       return result;
+    }
+    case "get_agent_window_usage": {
+      return buildWindowSessionUsage({
+        detachedAgents,
+        callerViewId: event.sender.id,
+      });
+    }
+    case "claim_agent_for_window": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (!runtime?.workspace_window) {
+        throw new Error("작업창에서만 세션을 선택할 수 있습니다.");
+      }
+      const agentId = asString(args.agentId);
+      const claimed = claimAgentForWindow(agentId, event.sender.id);
+      return { claimed };
     }
     case "set_desktop_pet_enabled": {
       const win = ensurePetWindow();
@@ -3071,8 +3327,9 @@ async function invokeCommand(event, command, rawArgs) {
         silent: Boolean(args.silent),
       });
       notification.on("click", () => {
-        showMainWindow();
-        sendEvent(mainWindow, "native-notification:clicked", {
+        const agentId = asString(args.agentId) || null;
+        const target = showWorkspaceWindow(agentId);
+        sendEvent(target, "native-notification:clicked", {
           notificationKey: asString(args.notificationKey),
         });
       });
@@ -3259,6 +3516,11 @@ ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
   assertTrustedSender(_event);
   const name = asString(eventName);
   assertAllowed(emittedSet, name, "event emission");
+  if (name === "desktop-pet:activate") {
+    showWorkspaceWindow(asString(payload?.agentId) || null);
+  } else if (name === "desktop-pet:close-requested") {
+    petWindow?.hide();
+  }
   sendEventToAll(name, payload);
 });
 
@@ -3266,8 +3528,7 @@ app.on("before-quit", (event) => {
   if (
     singleInstanceLockAcquired &&
     !forceClosing &&
-    mainWindow &&
-    !mainWindow.isDestroyed()
+    workspaceWindows.size > 0
   ) {
     event.preventDefault();
     requestGracefulClose("quit");
@@ -3292,16 +3553,12 @@ app.on("before-quit", (event) => {
   void tunnelService.stop();
 });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+// The tray owns the application lifetime. No workspace windows is a normal
+// background state, not a request to terminate PTYs or services.
+app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    mainWindow = createAppWindow();
-  } else {
-    showMainWindow();
-  }
+  showWorkspaceWindow();
 });
 
 console.log(
@@ -3327,14 +3584,19 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
   await loadSshSecrets();
   if (monitorService.config.enabled) await monitorService.start().catch(console.error);
   if (usageDashboard.config.enabled) await usageDashboard.start().catch(console.error);
-  mainWindow = createAppWindow();
-  console.log(`[electron] main window created id=${mainWindow.id}`);
+  initialWindow = createAppWindow({
+    workspaceWindowId: lastWorkspaceWindowId,
+    restoreWorkspace: true,
+  });
+  console.log(
+    `[electron] workspace window created id=${initialWindow.id} workspace=${lastWorkspaceWindowId}`
+  );
   if (bridgeSmoke) {
-    mainWindow.webContents.once("did-finish-load", async () => {
+    initialWindow.webContents.once("did-finish-load", async () => {
       const id = "electron-bridge-smoke";
       const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
       try {
-        await mainWindow.webContents.executeJavaScript(`
+        await initialWindow.webContents.executeJavaScript(`
           new Promise(async (resolve, reject) => {
             const id = ${JSON.stringify(id)};
             const marker = ${JSON.stringify(marker)};
@@ -3389,14 +3651,14 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
     });
   }
   if (securitySmoke) {
-    mainWindow.webContents.once("did-finish-load", async () => {
-      const original = mainWindow.webContents.getURL();
-      await mainWindow.webContents.executeJavaScript(
+    initialWindow.webContents.once("did-finish-load", async () => {
+      const original = initialWindow.webContents.getURL();
+      await initialWindow.webContents.executeJavaScript(
         `location.href = "data:text/html,<h1>untrusted</h1>"; true`
       );
       setTimeout(async () => {
-        const current = mainWindow.webContents.getURL();
-        const bridgePresent = await mainWindow.webContents
+        const current = initialWindow.webContents.getURL();
+        const bridgePresent = await initialWindow.webContents
           .executeJavaScript("Boolean(window.multiAgentElectron)")
           .catch(() => false);
         if (current === original && bridgePresent) {

@@ -28,6 +28,7 @@ export class CloseCoordinator {
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
     this.pendingAction = null;
+    this.pendingConfirmations = new Set();
     this.fallbackTimer = null;
     this.completing = false;
   }
@@ -47,7 +48,12 @@ export class CloseCoordinator {
     }
     if (alreadyPending) return true;
 
-    this.onRequest();
+    const confirmations = this.onRequest();
+    this.pendingConfirmations = new Set(
+      confirmations && Symbol.iterator in Object(confirmations)
+        ? confirmations
+        : []
+    );
     this.fallbackTimer = this.setTimer(() => {
       this.fallbackTimer = null;
       try {
@@ -60,7 +66,11 @@ export class CloseCoordinator {
     return true;
   }
 
-  confirm() {
+  confirm(confirmationId) {
+    if (this.pendingConfirmations.size > 0) {
+      if (!this.pendingConfirmations.delete(confirmationId)) return false;
+      if (this.pendingConfirmations.size > 0) return true;
+    }
     return this.complete("renderer");
   }
 
@@ -73,9 +83,11 @@ export class CloseCoordinator {
     try {
       this.onComplete(action, trigger);
       this.pendingAction = null;
+      this.pendingConfirmations.clear();
       return true;
     } catch (error) {
       this.pendingAction = null;
+      this.pendingConfirmations.clear();
       this.completing = false;
       this.onFailure(error, action);
       throw error;
@@ -85,6 +97,7 @@ export class CloseCoordinator {
   cancel() {
     this.#clearFallback();
     this.pendingAction = null;
+    this.pendingConfirmations.clear();
     this.completing = false;
   }
 

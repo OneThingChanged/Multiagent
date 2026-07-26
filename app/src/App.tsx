@@ -17,9 +17,7 @@ import "./App.css";
 
 import {
   LS_AGENTS,
-  LS_GROUPS,
   LS_PROJECTS,
-  LS_VIEW,
   toolForId,
   toolSupportsChat,
 } from "./types";
@@ -49,9 +47,7 @@ import {
   activeAgentInLeaf,
   collectAgentIds,
   findLeafPath,
-  firstLeafPath,
   getAt,
-  groupOf,
   setLeafActiveTab,
   updateGroup,
 } from "./lib/layout";
@@ -70,7 +66,6 @@ import {
 import {
   loadBootstrap,
   loadStoredView,
-  normalizeStoredGroups,
 } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
@@ -95,9 +90,11 @@ import {
 } from "./lib/commandRegistry";
 import {
   loadAttentionItems,
+  markAgentCompletionRead,
   markAttentionRead,
   removeSessionAttention,
   saveAttentionItems,
+  unreadCompletedAgentIds,
   upsertAttentionItem,
   type AttentionItem,
   type AttentionKind,
@@ -137,6 +134,10 @@ import {
   buildNewProjectWithDefaultAgent,
   defaultAiToolId,
 } from "./lib/projectCreation";
+import {
+  migrateLegacyWorkspaceStorage,
+  workspaceWindowContext,
+} from "./lib/workspaceWindow";
 
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -182,10 +183,17 @@ type TerminalPathResolution = {
 };
 
 type RuntimeFlags = {
-  secondary_window: boolean;
+  workspace_window: boolean;
+  workspace_window_id: string | null;
+  coordinator: boolean;
   open_agent_id?: string | null;
   build_variant?: "standard" | "company";
   remote_enabled?: boolean;
+};
+
+type AgentWindowUsage = {
+  in_use_agent_ids: string[];
+  owned_agent_ids: string[];
 };
 
 function readLocalStorageValue(key: string) {
@@ -290,20 +298,16 @@ function mergeProjectsFromStorage(
   removedIds: Set<string>
 ) {
   const currentById = new Map(current.map((project) => [project.id, project]));
-  const seen = new Set<string>();
   const merged: Project[] = [];
   for (const item of stored) {
     if (!item.id || removedIds.has(item.id)) continue;
     const project = projectFromStored(item, currentById.get(item.id));
     if (!project) continue;
-    seen.add(project.id);
     merged.push(project);
   }
-  for (const project of current) {
-    if (!seen.has(project.id) && !removedIds.has(project.id)) {
-      merged.push(project);
-    }
-  }
+  // A storage event comes from a peer workspace after its synchronous write,
+  // so the stored catalog is authoritative here. Re-appending missing local
+  // rows would resurrect projects deleted in another window.
   return sameJson(
     current.map(storedProjectFromProject),
     merged.map(storedProjectFromProject)
@@ -357,101 +361,20 @@ function mergeAgentsFromStorage(
   removedIds: Set<string>
 ) {
   const currentById = new Map(current.map((agent) => [agent.id, agent]));
-  const seen = new Set<string>();
   const merged: Agent[] = [];
   for (const item of stored) {
     if (!item.id || removedIds.has(item.id)) continue;
     const agent = agentFromStored(item, projects, currentById.get(item.id));
     if (!agent) continue;
-    seen.add(agent.id);
     merged.push(agent);
   }
-  for (const agent of current) {
-    if (!seen.has(agent.id) && !removedIds.has(agent.id)) {
-      merged.push(agent);
-    }
-  }
+  // As with projects, absence in the peer-written catalog represents deletion.
   return sameJson(
     current.map(storedAgentFromAgent),
     merged.map(storedAgentFromAgent)
   )
     ? current
     : merged;
-}
-
-function groupContainsRemovedAgent(group: Group, removedIds: Set<string>) {
-  if (removedIds.size === 0) return false;
-  try {
-    const ids = collectAgentIds(group.layout);
-    return Array.from(removedIds).some((id) => ids.has(id));
-  } catch {
-    return true;
-  }
-}
-
-function mergeGroupsFromStorage(
-  current: Group[],
-  stored: Group[],
-  agents: Agent[],
-  removedAgentIds: Set<string>,
-  preferredGroupId: string | null
-) {
-  const availableAgents = agents.filter(
-    (agent) => !removedAgentIds.has(agent.id)
-  );
-  const normalized = normalizeStoredGroups(
-    stored.filter(
-      (group) => !groupContainsRemovedAgent(group, removedAgentIds)
-    ),
-    new Set(availableAgents.map((agent) => agent.id)),
-    new Map(availableAgents.map((agent) => [agent.id, agent.projectId])),
-    preferredGroupId
-  );
-  return sameJson(current, normalized) ? current : normalized;
-}
-
-function selectedAgentId(
-  groups: Group[],
-  groupId: string | null,
-  path: Path | null
-) {
-  if (!groupId || !path) return null;
-  const group = groups.find((candidate) => candidate.id === groupId);
-  if (!group) return null;
-  const node = getAt(group.layout, path);
-  return node?.type === "leaf" ? activeAgentInLeaf(node) : null;
-}
-
-function reconcileGroupSelection(
-  groups: Group[],
-  groupId: string | null,
-  path: Path | null,
-  preferredAgentId: string | null
-) {
-  const currentGroup = groups.find((candidate) => candidate.id === groupId);
-  if (currentGroup) {
-    if (path && getAt(currentGroup.layout, path)) {
-      return { groupId: currentGroup.id, path };
-    }
-    const preferredPath = preferredAgentId
-      ? findLeafPath(currentGroup.layout, preferredAgentId)
-      : null;
-    return {
-      groupId: currentGroup.id,
-      path: preferredPath ?? firstLeafPath(currentGroup.layout),
-    };
-  }
-
-  const replacement = preferredAgentId
-    ? groupOf(groups, preferredAgentId)
-    : null;
-  if (!replacement) return { groupId: null, path: null };
-  return {
-    groupId: replacement.id,
-    path:
-      findLeafPath(replacement.layout, preferredAgentId!) ??
-      firstLeafPath(replacement.layout),
-  };
 }
 
 function clampFilesWidth(width: number) {
@@ -529,7 +452,12 @@ type ReopenPending = {
   count: number;
 };
 
-function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
+function computeInitialReopen(
+  boot: Bootstrap,
+  viewKey: string,
+  enabled: boolean
+): ReopenPending | null {
+  if (!enabled) return null;
   // Reopen every session that was running at the last close (recorded in
   // LS_REOPEN_AGENTS), not just the previously-active group. loadBootstrap
   // starts with no active group, so read the saved view for which group to show.
@@ -543,7 +471,7 @@ function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
   const existing = new Set(boot.agents.map((a) => a.id));
   const agentIds = remembered.filter((id) => existing.has(id));
   if (agentIds.length === 0) return null;
-  const view = loadStoredView(boot.groups);
+  const view = loadStoredView(boot.groups, viewKey);
   return {
     agentIds,
     groupId: view.activeGroupId,
@@ -554,32 +482,34 @@ function computeInitialReopen(boot: Bootstrap): ReopenPending | null {
 }
 
 function App() {
+  const workspace = workspaceWindowContext();
+  migrateLegacyWorkspaceStorage(workspace);
   // One-shot bootstrap: read localStorage exactly once at mount.
   const bootstrapRef = useRef<Bootstrap | null>(null);
-  if (!bootstrapRef.current) bootstrapRef.current = loadBootstrap();
+  if (!bootstrapRef.current) {
+    bootstrapRef.current = loadBootstrap({
+      groupsKey: workspace.groupsKey,
+      viewKey: workspace.viewKey,
+      migrateLegacyLayout: workspace.restore,
+    });
+  }
   const boot = bootstrapRef.current;
 
-  // Secondary windows own their screens/activation instead of mirroring the main
-  // window's. runtime_flags arrives async, but the load URL carries the flag
-  // synchronously — we need it before seeding groups state, so read it here.
-  const bootIsSecondary =
-    typeof location !== "undefined" &&
-    new URLSearchParams(location.search).get("secondaryWindow") === "1";
-
   const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
-    computeInitialReopen(boot)
+    computeInitialReopen(boot, workspace.viewKey, workspace.restore)
   );
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
-  // Secondary windows start with no screens; the open_agent_id effect seeds a
-  // solo screen for the session they were opened with. They never adopt the
-  // main window's shared groups.
-  const [groups, setGroups] = useState<Group[]>(
-    bootIsSecondary ? [] : boot.groups
-  );
-  // Sessions detached to other windows — hidden from this window's sidebar.
+  const [groups, setGroups] = useState<Group[]>(boot.groups);
+  // Sessions detached to other windows — kept visible but unavailable here.
   const [detachedAgentIds, setDetachedAgentIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [inUseAgentIds, setInUseAgentIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [ownedAgentIds, setOwnedAgentIds] = useState<Set<string>>(
     () => new Set()
   );
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
@@ -588,10 +518,10 @@ function App() {
   // When a reopen prompt is pending, don't restore the active group yet (that
   // would auto-spawn its sessions) — wait for the user's answer.
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
-    bootIsSecondary || pendingReopen ? null : boot.activeGroupId
+    pendingReopen || !workspace.resumeLive ? null : boot.activeGroupId
   );
   const [activePath, setActivePath] = useState<Path | null>(
-    bootIsSecondary || pendingReopen ? null : boot.activePath
+    pendingReopen || !workspace.resumeLive ? null : boot.activePath
   );
 
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -686,12 +616,16 @@ function App() {
     loadCommandShortcuts
   );
   const [runtimeFlags, setRuntimeFlags] = useState<RuntimeFlags | null>(null);
-  const isSecondaryWindow = !!runtimeFlags?.secondary_window;
+  const isCoordinatorWindow = runtimeFlags?.coordinator ?? workspace.restore;
   const remoteEnabled = runtimeFlags?.remote_enabled ?? !IS_COMPANY_BUILD;
 
   const termsRef = useRef<Map<string, TerminalEntry>>(new Map());
   const agentsRef = useRef<Agent[]>([]);
+  const catalogAgentIdsRef = useRef<Set<string>>(
+    new Set(boot.agents.map((agent) => agent.id))
+  );
   const detachedAgentIdsRef = useRef<Set<string>>(new Set());
+  const ownedAgentIdsRef = useRef<Set<string>>(new Set());
   const projectsRef = useRef<Project[]>([]);
   const groupsRef = useRef<Group[]>([]);
   const activeProjectIdRef = useRef<string | null>(null);
@@ -700,8 +634,10 @@ function App() {
   const alwaysOnTopRef = useRef(alwaysOnTop);
   const storedProjectsJsonRef = useRef(readLocalStorageValue(LS_PROJECTS));
   const storedAgentsJsonRef = useRef(readLocalStorageValue(LS_AGENTS));
-  const storedGroupsJsonRef = useRef(readLocalStorageValue(LS_GROUPS));
-  const storedViewJsonRef = useRef(readLocalStorageValue(LS_VIEW));
+  const storedGroupsJsonRef = useRef(
+    readLocalStorageValue(workspace.groupsKey)
+  );
+  const storedViewJsonRef = useRef(readLocalStorageValue(workspace.viewKey));
   const remoteAgentsJsonRef = useRef<string | null>(null);
   const remoteViewJsonRef = useRef<string | null>(null);
   const monitorStateJsonRef = useRef<string | null>(null);
@@ -717,7 +653,6 @@ function App() {
   const syncSharedStateFromStorage = useCallback(() => {
     const projectsRaw = readLocalStorageValue(LS_PROJECTS);
     const agentsRaw = readLocalStorageValue(LS_AGENTS);
-    const groupsRaw = readLocalStorageValue(LS_GROUPS);
 
     let nextProjects = projectsRef.current;
     if (projectsRaw !== storedProjectsJsonRef.current) {
@@ -735,7 +670,6 @@ function App() {
       }
     }
 
-    let nextAgents = agentsRef.current;
     if (agentsRaw !== storedAgentsJsonRef.current) {
       const storedAgents = parseStoredArray<StoredAgent>(agentsRaw);
       const merged = mergeAgentsFromStorage(
@@ -746,44 +680,8 @@ function App() {
       );
       storedAgentsJsonRef.current = agentsRaw;
       if (merged !== agentsRef.current) {
-        nextAgents = merged;
         agentsRef.current = merged;
         setAgents(merged);
-      }
-    }
-
-    // Secondary windows keep their own screens/activation — sync projects and
-    // agents (shared, live PTYs) but never adopt the main window's groups.
-    if (bootIsSecondary) return;
-
-    if (groupsRaw !== storedGroupsJsonRef.current) {
-      const storedGroups = parseStoredArray<Group>(groupsRaw);
-      const previousAgentId = selectedAgentId(
-        groupsRef.current,
-        activeGroupIdRef.current,
-        activePathRef.current
-      );
-      const merged = mergeGroupsFromStorage(
-        groupsRef.current,
-        storedGroups,
-        nextAgents,
-        removedAgentIdsRef.current,
-        activeGroupIdRef.current
-      );
-      storedGroupsJsonRef.current = groupsRaw;
-      if (merged !== groupsRef.current) {
-        groupsRef.current = merged;
-        setGroups(merged);
-        const selection = reconcileGroupSelection(
-          merged,
-          activeGroupIdRef.current,
-          activePathRef.current,
-          previousAgentId
-        );
-        activeGroupIdRef.current = selection.groupId;
-        activePathRef.current = selection.path;
-        setActiveGroupId(selection.groupId);
-        setActivePath(selection.path);
       }
     }
   }, []);
@@ -795,7 +693,13 @@ function App() {
         if (!cancelled) setRuntimeFlags(flags);
       })
       .catch(() => {
-        if (!cancelled) setRuntimeFlags({ secondary_window: false });
+        if (!cancelled) {
+          setRuntimeFlags({
+            workspace_window: true,
+            workspace_window_id: workspace.id,
+            coordinator: true,
+          });
+        }
       });
     return () => {
       cancelled = true;
@@ -803,9 +707,34 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    listen<{ coordinator?: boolean }>(
+      "workspace:coordinator-changed",
+      (event) => {
+        if (cancelled) return;
+        setRuntimeFlags((current) =>
+          current
+            ? { ...current, coordinator: !!event.payload?.coordinator }
+            : current
+        );
+      }
+    )
+      .then((remove) => {
+        if (cancelled) remove();
+        else unsubscribe = remove;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!runtimeFlags) return;
     invoke("renderer_ready").catch(() => {});
-    if (isSecondaryWindow) return;
+    if (!isCoordinatorWindow) return;
     const persist = () => persistStorageSnapshot().catch(() => {});
     persist();
     const interval = window.setInterval(persist, 3000);
@@ -814,10 +743,10 @@ function App() {
       window.clearInterval(interval);
       window.removeEventListener("beforeunload", persist);
     };
-  }, [isSecondaryWindow, runtimeFlags]);
+  }, [isCoordinatorWindow, runtimeFlags]);
 
-  // Track sessions detached to other windows so we can hide them from the
-  // sidebar and prevent double-opening.
+  // Track sessions detached to other windows so the sidebar can label them
+  // unavailable and prevent double-opening.
   useEffect(() => {
     if (!runtimeFlags) return;
     let cancelled = false;
@@ -834,6 +763,13 @@ function App() {
         next.add(e.payload.agentId);
         return next;
       });
+      setOwnedAgentIds((current) => {
+        if (!current.has(e.payload.agentId)) return current;
+        const next = new Set(current);
+        next.delete(e.payload.agentId);
+        ownedAgentIdsRef.current = next;
+        return next;
+      });
     }).then((fn) => { if (cancelled) fn(); else unsubs.push(fn); });
     listen<{ agentIds: string[] }>("sessions-reattached", (e) => {
       setDetachedAgentIds((prev) => {
@@ -847,12 +783,34 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags) return;
+    let cancelled = false;
+    const refresh = () => {
+      invoke<AgentWindowUsage>("get_agent_window_usage")
+        .then((usage) => {
+          if (!cancelled) {
+            setInUseAgentIds(new Set(usage.in_use_agent_ids ?? []));
+            const owned = new Set(usage.owned_agent_ids ?? []);
+            ownedAgentIdsRef.current = owned;
+            setOwnedAgentIds(owned);
+          }
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [runtimeFlags]);
+
+  useEffect(() => {
+    if (!runtimeFlags) return;
     syncSharedStateFromStorage();
     const onStorage = (event: StorageEvent) => {
       if (
         event.key === LS_PROJECTS ||
-        event.key === LS_AGENTS ||
-        event.key === LS_GROUPS
+        event.key === LS_AGENTS
       ) {
         syncSharedStateFromStorage();
       }
@@ -871,6 +829,27 @@ function App() {
 
   useEffect(() => {
     agentsRef.current = agents;
+    const nextIds = new Set(agents.map((agent) => agent.id));
+    const removedIds = [...catalogAgentIdsRef.current].filter(
+      (agentId) => !nextIds.has(agentId)
+    );
+    catalogAgentIdsRef.current = nextIds;
+    if (removedIds.length === 0) return;
+    setGroups((previous) => {
+      let state: groupOps.GroupState = {
+        groups: previous,
+        activeGroupId: activeGroupIdRef.current,
+        activePath: activePathRef.current,
+      };
+      for (const agentId of removedIds) {
+        state = groupOps.removeAgentFromLayout(state, agentId);
+      }
+      activeGroupIdRef.current = state.activeGroupId;
+      activePathRef.current = state.activePath;
+      setActiveGroupId(state.activeGroupId);
+      setActivePath(state.activePath);
+      return state.groups;
+    });
   }, [agents]);
 
   useEffect(() => {
@@ -903,17 +882,17 @@ function App() {
   }, [detachedAgentIds]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || !isCoordinatorWindow) return;
     // Showing the always-on-top pet can move the main window behind the current
     // foreground app on some Windows setups. Make the main window the final
     // startup action so launching MultiAgent never appears to open only the pet.
     invoke("set_desktop_pet_enabled", { enabled: desktopPetEnabled })
       .catch(() => {})
       .finally(() => invoke("show_main_window").catch(() => {}));
-  }, [desktopPetEnabled, isSecondaryWindow, runtimeFlags]);
+  }, [desktopPetEnabled, isCoordinatorWindow, runtimeFlags]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || !isCoordinatorWindow) return;
     const update = buildDesktopPetUpdate(
       agents,
       projects,
@@ -928,15 +907,15 @@ function App() {
     agents,
     desktopPetCompletions,
     desktopPetQuestions,
-    isSecondaryWindow,
+    isCoordinatorWindow,
     projects,
     runtimeFlags,
   ]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || !isCoordinatorWindow) return;
     pruneScrollback(new Set(agentsRef.current.map((agent) => agent.id)));
-  }, [isSecondaryWindow, runtimeFlags]);
+  }, [isCoordinatorWindow, runtimeFlags]);
 
   useEffect(() => {
     groupsRef.current = groups;
@@ -945,7 +924,7 @@ function App() {
   // Mirror agent metadata into the Rust remote hub so the remote web
   // client can list sessions and show live status.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
+    if (!runtimeFlags || !isCoordinatorWindow || !remoteEnabled) return;
     const projectNames = new Map(projects.map((p) => [p.id, p.name]));
     const payload = {
       agents: agents.map((a) => ({
@@ -960,13 +939,13 @@ function App() {
     if (remoteAgentsJsonRef.current === json) return;
     remoteAgentsJsonRef.current = json;
     invoke("sync_remote_agents", payload).catch(() => {});
-  }, [agents, isSecondaryWindow, projects, remoteEnabled, runtimeFlags]);
+  }, [agents, isCoordinatorWindow, projects, remoteEnabled, runtimeFlags]);
 
   // Mirror projects, sessions, and the read-only Screen layout so the remote
   // client can offer the same Screen/session navigation as the desktop app.
   // Remote selection remains independent and never changes the desktop view.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || !remoteEnabled) return;
+    if (!runtimeFlags || !isCoordinatorWindow || !remoteEnabled) return;
     const payload = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -998,13 +977,13 @@ function App() {
     agents,
     groups,
     activeGroupId,
-    isSecondaryWindow,
+    isCoordinatorWindow,
     remoteEnabled,
     runtimeFlags,
   ]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || !isCoordinatorWindow) return;
     const payload = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -1018,16 +997,17 @@ function App() {
         folder: a.folder,
         aiToolId: a.aiToolId,
         lastSessionId: a.lastSessionId ?? null,
+        runtimeStatus: runtimeStatusOf(a),
       })),
     };
     const json = JSON.stringify(payload);
     if (usageCatalogJsonRef.current === json) return;
     usageCatalogJsonRef.current = json;
     invoke("sync_usage_catalog", payload).catch(() => {});
-  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+  }, [projects, agents, isCoordinatorWindow, runtimeFlags]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags || !isCoordinatorWindow) return;
     const payload = {
       projects: projects.map((p) => ({
         id: p.id,
@@ -1068,7 +1048,7 @@ function App() {
     activeProjectId,
     activeGroupId,
     activePath,
-    isSecondaryWindow,
+    isCoordinatorWindow,
     runtimeFlags,
   ]);
 
@@ -1119,33 +1099,30 @@ function App() {
   }, [agents]);
 
   useEffect(() => {
-    // Secondary windows must not overwrite the shared screen layout — that would
-    // sync their activation into the main window and pollute restore-on-launch.
-    if (bootIsSecondary) return;
     writeLocalStorageIfChanged(
       storedGroupsJsonRef,
-      LS_GROUPS,
+      workspace.groupsKey,
       JSON.stringify(groups)
     );
-  }, [groups]);
+  }, [groups, workspace.groupsKey]);
 
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow || bootIsSecondary) return;
+    if (!runtimeFlags) return;
     // While the startup reopen prompt is open we deliberately hold activeGroupId
     // at null; don't persist that, or we'd lose the group to reopen.
     if (pendingReopen) return;
     writeLocalStorageIfChanged(
       storedViewJsonRef,
-      LS_VIEW,
+      workspace.viewKey,
       JSON.stringify({ activeProjectId, activeGroupId, activePath })
     );
   }, [
     activeProjectId,
     activeGroupId,
     activePath,
-    isSecondaryWindow,
     runtimeFlags,
     pendingReopen,
+    workspace.viewKey,
   ]);
 
   useEffect(() => {
@@ -1358,6 +1335,10 @@ function App() {
     });
   }, []);
 
+  const acknowledgeAgentCompletion = useCallback((agentId: string) => {
+    setAttentionItems((items) => markAgentCompletionRead(items, agentId));
+  }, []);
+
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -1441,11 +1422,11 @@ function App() {
   // Clicking a completion surface focuses the app and jumps to the session.
   // The desktop pet itself is non-focusable, so it must explicitly focus main.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags) return;
     let cancelled = false;
     const unsubscribes: Array<() => void> = [];
     const activate = (agentId?: string) => {
-      invoke("show_main_window").catch(() => {});
+      invoke("show_main_window", { agentId: agentId ?? null }).catch(() => {});
       if (agentId) selectAgentRef.current?.(agentId);
     };
     const track = (unsubscribe: () => void) => {
@@ -1472,7 +1453,7 @@ function App() {
       cancelled = true;
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [handleDesktopPetEnabledChange, isSecondaryWindow, runtimeFlags]);
+  }, [handleDesktopPetEnabledChange, runtimeFlags]);
 
   // ---- PTY + hook event listeners
 
@@ -1567,7 +1548,7 @@ function App() {
       );
     }).then(track);
 
-    if (remoteEnabled) {
+    if (remoteEnabled && isCoordinatorWindow) {
       listen<{ login: string }>("remote:access-request", (e) => {
         if (cancelled) return;
         playNotificationSound();
@@ -1697,33 +1678,40 @@ function App() {
                 : "작업이 끝났습니다.",
               createdAt: nextAgent.activity?.receivedAt || Date.now(),
             });
-            playNotificationSound(
-              loadNotificationSound(),
-              `${projectName} ${currentAgent.name} 작업이 끝났어요`
-            );
-            pushToast(currentAgent.id, title, "작업이 끝났어요");
-            // When the app isn't focused, flash the taskbar so the user notices
-            // (clicking the taskbar brings the app forward, where the in-app
-            // toast is clickable to jump to the session). The always-on-top
-            // popup window was removed — on some Windows setups it grabbed focus
-            // and froze terminal input.
-            const soundConfig = loadNotificationSound();
-            if (soundConfig.osNotification !== false) {
-              getCurrentWindow()
-                .isFocused()
-                .then((focused) => {
-                  if (focused) return;
-                  getCurrentWindow()
-                    .requestUserAttention(UserAttentionType.Critical)
-                    .catch(() => {});
-                  notifyDone({
-                    projectName,
-                    sessionName: currentAgent.name,
-                    silent: shouldSilenceOsNotification(soundConfig),
-                    onActivate: () => selectAgentRef.current?.(currentAgent.id),
-                  }).catch(() => {});
-                })
-                .catch(() => {});
+            // Hook events are process-wide, but completion sounds/toasts belong
+            // only to the workspace that owns the session. Every peer still
+            // receives the unread sidebar marker through AttentionItems.
+            if (
+              !isElectronRuntime() ||
+              ownedAgentIdsRef.current.has(currentAgent.id)
+            ) {
+              playNotificationSound(
+                loadNotificationSound(),
+                `${projectName} ${currentAgent.name} 작업이 끝났어요`
+              );
+              pushToast(currentAgent.id, title, "작업이 끝났어요");
+              // When the owning workspace isn't focused, flash its taskbar icon
+              // and route the native notification back to the owner.
+              const soundConfig = loadNotificationSound();
+              if (soundConfig.osNotification !== false) {
+                getCurrentWindow()
+                  .isFocused()
+                  .then((focused) => {
+                    if (focused) return;
+                    getCurrentWindow()
+                      .requestUserAttention(UserAttentionType.Critical)
+                      .catch(() => {});
+                    notifyDone({
+                      agentId: currentAgent.id,
+                      projectName,
+                      sessionName: currentAgent.name,
+                      silent: shouldSilenceOsNotification(soundConfig),
+                      onActivate: () =>
+                        selectAgentRef.current?.(currentAgent.id),
+                    }).catch(() => {});
+                  })
+                  .catch(() => {});
+              }
             }
           }
         }
@@ -1739,7 +1727,7 @@ function App() {
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [pushAttention, pushToast]);
+  }, [isCoordinatorWindow, pushAttention, pushToast, remoteEnabled]);
 
   // A lost Stop hook must not leave the UI and desktop pet spinning forever.
   // Keep the detailed activity for diagnostics, but degrade stale work to the
@@ -1789,7 +1777,7 @@ function App() {
   // listeners. That prevents an effect cleanup race from leaving Electron to
   // wait for its fallback timeout during shutdown.
   useEffect(() => {
-    if (!runtimeFlags || isSecondaryWindow) return;
+    if (!runtimeFlags) return;
     let closing = false;
     let unsubscribe: (() => void) | null = null;
     let cancelUnsubscribe: (() => void) | null = null;
@@ -1867,7 +1855,7 @@ function App() {
       unsubscribe?.();
       cancelUnsubscribe?.();
     };
-  }, [isSecondaryWindow, pushToast, remoteEnabled, runtimeFlags]);
+  }, [pushToast, remoteEnabled, runtimeFlags]);
 
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 
@@ -1959,6 +1947,7 @@ function App() {
     (agentId: string) => {
       // Block opening a session that is detached to another window.
       if (detachedAgentIdsRef.current.has(agentId)) return;
+      acknowledgeAgentCompletion(agentId);
       const agent = activateAgentProject(agentId);
       const current = agentsRef.current.find((a) => a.id === agentId);
       if (current?.status === "exited") {
@@ -1969,7 +1958,58 @@ function App() {
       }
       applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
     },
-    [activateAgentProject, applyGroupOp, restartAgent]
+    [
+      acknowledgeAgentCompletion,
+      activateAgentProject,
+      applyGroupOp,
+      restartAgent,
+    ]
+  );
+
+  const requestSelectAgent = useCallback(
+    (agentId: string) => {
+      if (!isElectronRuntime()) {
+        selectAgent(agentId);
+        return;
+      }
+      void invoke<{ claimed: boolean }>("claim_agent_for_window", { agentId })
+        .then(({ claimed }) => {
+          if (!claimed) {
+            setInUseAgentIds((current) => new Set(current).add(agentId));
+            const agent = agentsRef.current.find((item) => item.id === agentId);
+            pushToast(
+              agentId,
+              agent?.name ?? "세션",
+              "이미 다른 창에서 사용 중입니다."
+            );
+            return;
+          }
+          const nextDetached = new Set(detachedAgentIdsRef.current);
+          nextDetached.delete(agentId);
+          detachedAgentIdsRef.current = nextDetached;
+          setDetachedAgentIds(nextDetached);
+          setInUseAgentIds((current) => {
+            const next = new Set(current);
+            next.delete(agentId);
+            return next;
+          });
+          setOwnedAgentIds((current) => {
+            const next = new Set(current).add(agentId);
+            ownedAgentIdsRef.current = next;
+            return next;
+          });
+          selectAgent(agentId);
+        })
+        .catch((error) => {
+          const agent = agentsRef.current.find((item) => item.id === agentId);
+          pushToast(
+            agentId,
+            agent?.name ?? "세션",
+            `세션을 열 수 없습니다: ${String(error)}`
+          );
+        });
+    },
+    [pushToast, selectAgent]
   );
 
   const selectScreen = useCallback(
@@ -1986,16 +2026,16 @@ function App() {
   );
 
   useEffect(() => {
-    selectAgentRef.current = selectAgent;
-  }, [selectAgent]);
+    selectAgentRef.current = requestSelectAgent;
+  }, [requestSelectAgent]);
 
   useEffect(() => {
     const agentId = runtimeFlags?.open_agent_id;
     if (!agentId || openedInitialAgentRef.current === agentId) return;
     if (!agents.some((agent) => agent.id === agentId)) return;
     openedInitialAgentRef.current = agentId;
-    selectAgent(agentId);
-  }, [agents, runtimeFlags, selectAgent]);
+    requestSelectAgent(agentId);
+  }, [agents, requestSelectAgent, runtimeFlags]);
 
   // Selecting a project only marks it active (so the + button targets it and the
   // Docs panel scans its folder). It no longer auto-opens the project's first
@@ -2171,10 +2211,11 @@ function App() {
 
   const setActiveTabInPane = useCallback(
     (path: Path, agentId: string) => {
+      acknowledgeAgentCompletion(agentId);
       activateAgentProject(agentId);
       applyGroupOp((s) => groupOps.setActiveTabInPane(s, path, agentId));
     },
-    [activateAgentProject, applyGroupOp]
+    [acknowledgeAgentCompletion, activateAgentProject, applyGroupOp]
   );
 
   const performDrop = useCallback(
@@ -2194,13 +2235,53 @@ function App() {
       payload,
       defaultAiToolId(disabledTools)
     );
-    setProjects((prev) => [project, ...prev]);
-    setAgents((prev) => [...prev, agent]);
-    setActiveProjectId(project.id);
-    applyGroupOp((state) =>
-      groupOps.addNewAgent(state, agent.id, project.id)
-    );
-  }, [applyGroupOp, disabledTools]);
+    const addProject = () => {
+      setProjects((prev) => [project, ...prev]);
+      setAgents((prev) => [...prev, agent]);
+      setActiveProjectId(project.id);
+      applyGroupOp((state) =>
+        groupOps.addNewAgent(state, agent.id, project.id)
+      );
+    };
+
+    if (!isElectronRuntime()) {
+      addProject();
+      return;
+    }
+
+    // A project immediately creates a live first session, so claim it for this
+    // peer window before TerminalArea can spawn the PTY.
+    void invoke<{ claimed: boolean }>("claim_agent_for_window", {
+      agentId: agent.id,
+    })
+      .then(({ claimed }) => {
+        if (!claimed) {
+          pushToast(
+            "",
+            project.name,
+            "새 프로젝트의 첫 세션 소유권을 확보하지 못했습니다."
+          );
+          return;
+        }
+        setOwnedAgentIds((current) => {
+          const next = new Set(current).add(agent.id);
+          ownedAgentIdsRef.current = next;
+          return next;
+        });
+        addProject();
+      })
+      .catch((error) => {
+        pushToast(
+          "",
+          project.name,
+          `새 프로젝트를 만들 수 없습니다: ${String(error)}`
+        );
+      });
+  }, [
+    applyGroupOp,
+    disabledTools,
+    pushToast,
+  ]);
 
   const reorderProject = useCallback(
     (draggedId: string, targetId: string, before: boolean) => {
@@ -2229,6 +2310,15 @@ function App() {
       const members = agentsRef.current.filter(
         (a) => a.projectId === projectId
       );
+      const foreignMembers = members.filter((agent) =>
+        detachedAgentIdsRef.current.has(agent.id)
+      );
+      if (foreignMembers.length > 0) {
+        window.alert(
+          `다른 작업창에서 사용 중인 세션 ${foreignMembers.length}개가 있습니다. 해당 창에서 세션을 닫거나 비활성화한 뒤 프로젝트를 삭제해 주세요.`
+        );
+        return;
+      }
       const sessionLine =
         members.length > 0
           ? `\n세션 ${members.length}개도 함께 삭제됩니다.`
@@ -2295,27 +2385,59 @@ function App() {
       if (!project) return;
       const id = crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
-
-      setAgents((prev) => [
-        ...prev,
-        {
-          id,
-          projectId: project.id,
-          name: payload.name.trim() || `Session ${prev.length + 1}`,
-          folder: project.folder,
-          aiToolId: tool.id,
-          aiLabel: tool.label,
-          dangerous: payload.dangerous && !!tool.dangerousFlag,
-          status: "starting",
-          runtimeStatus: "starting",
-          createdAt: Date.now(),
-          sshHostId: project.sshHostId,
-          remoteFolder: project.remoteFolder,
-        },
-      ]);
-      applyGroupOp((s) => groupOps.addNewAgent(s, id, project.id));
+      const addAgent = () => {
+        setAgents((prev) => [
+          ...prev,
+          {
+            id,
+            projectId: project.id,
+            name: payload.name.trim() || `Session ${prev.length + 1}`,
+            folder: project.folder,
+            aiToolId: tool.id,
+            aiLabel: tool.label,
+            dangerous: payload.dangerous && !!tool.dangerousFlag,
+            status: "starting",
+            runtimeStatus: "starting",
+            createdAt: Date.now(),
+            sshHostId: project.sshHostId,
+            remoteFolder: project.remoteFolder,
+          },
+        ]);
+        applyGroupOp((s) => groupOps.addNewAgent(s, id, project.id));
+      };
+      if (!isElectronRuntime()) {
+        addAgent();
+        return;
+      }
+      void invoke<{ claimed: boolean }>("claim_agent_for_window", {
+        agentId: id,
+      })
+        .then(({ claimed }) => {
+          if (claimed) {
+            setOwnedAgentIds((current) => {
+              const next = new Set(current).add(id);
+              ownedAgentIdsRef.current = next;
+              return next;
+            });
+            addAgent();
+          }
+          else {
+            pushToast(
+              "",
+              project.name,
+              "새 세션 소유권을 확보하지 못했습니다."
+            );
+          }
+        })
+        .catch((error) => {
+          pushToast(
+            "",
+            project.name,
+            `새 세션을 만들 수 없습니다: ${String(error)}`
+          );
+        });
     },
-    [applyGroupOp]
+    [applyGroupOp, pushToast]
   );
 
   const setAgentStatus = useCallback((id: string, status: AgentStatus) => {
@@ -2523,7 +2645,7 @@ function App() {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
       setContextMenu(null);
-      if (action === "open") selectAgent(id);
+      if (action === "open") requestSelectAgent(id);
       else if (action === "open-new-window") openNewAppWindow(id);
       else if (action === "tab") openAsTab(id);
       else if (action === "split-h") splitWith(id, "h");
@@ -2532,7 +2654,7 @@ function App() {
       else if (action === "pin-session") pinContextGroupSessions(id);
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
       else if (action === "restart") {
-        void restartAgent(id).then(() => selectAgent(id));
+        void restartAgent(id).then(() => requestSelectAgent(id));
       } else if (action === "deactivate") {
         void deactivateAgent(id);
       } else if (action === "relink") {
@@ -2543,7 +2665,7 @@ function App() {
     },
     [
       contextMenu,
-      selectAgent,
+      requestSelectAgent,
       openNewAppWindow,
       openAsTab,
       splitWith,
@@ -2893,14 +3015,6 @@ function App() {
     setPendingReopen(null);
   }, []);
 
-  // Secondary windows never prompt or auto-spawn (the main window owns the
-  // PTYs); just hide the prompt there.
-  useEffect(() => {
-    if (runtimeFlags && isSecondaryWindow && pendingReopen) {
-      setPendingReopen(null);
-    }
-  }, [runtimeFlags, isSecondaryWindow, pendingReopen]);
-
   const setActivePathForPane = useCallback(
     (path: Path | null) => {
       if (!path) {
@@ -3039,7 +3153,7 @@ function App() {
     if (item.kind === "project" && item.projectId) {
       selectProject(item.projectId);
     } else if (item.kind === "session" && item.agentId) {
-      selectAgent(item.agentId);
+      requestSelectAgent(item.agentId);
     } else if (item.kind === "screen" && item.groupId && item.agentId) {
       selectScreen(item.groupId, item.agentId);
     } else if (item.kind === "document" && item.projectId && item.relativePath) {
@@ -3048,18 +3162,22 @@ function App() {
     } else if (item.kind === "command" && item.commandId) {
       executeCommand(item.commandId as CommandId);
     }
-  }, [executeCommand, openDocTab, selectAgent, selectProject, selectScreen]);
+  }, [executeCommand, openDocTab, requestSelectAgent, selectProject, selectScreen]);
 
   const handleAttentionSelect = useCallback((item: AttentionItem) => {
     setAttentionItems((items) => markAttentionRead(items, new Set([item.id])));
     setAttentionOpen(false);
     if (agentsRef.current.some((agent) => agent.id === item.agentId)) {
-      selectAgent(item.agentId);
+      requestSelectAgent(item.agentId);
     }
-  }, [selectAgent]);
+  }, [requestSelectAgent]);
 
   const attentionUnreadCount = useMemo(
     () => attentionItems.filter((item) => !item.read).length,
+    [attentionItems]
+  );
+  const unreadCompletionAgentIds = useMemo(
+    () => unreadCompletedAgentIds(attentionItems),
     [attentionItems]
   );
 
@@ -3119,25 +3237,17 @@ function App() {
     return leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
   }, [activeGroupLayout, activePath]);
 
-  // Sidebar filtering: secondary windows show only their owned session;
-  // the main window shows all sessions (detached ones get a badge in Sidebar).
-  const sidebarAgents = useMemo(() => {
-    if (isSecondaryWindow) {
-      const ownedId = runtimeFlags?.open_agent_id;
-      return ownedId ? agents.filter((a) => a.id === ownedId) : [];
-    }
-    return agents;
-  }, [agents, isSecondaryWindow, runtimeFlags]);
-
-  const sidebarProjects = useMemo(() => {
-    if (isSecondaryWindow) {
-      const ownedId = runtimeFlags?.open_agent_id;
-      if (!ownedId) return [];
-      const ownedAgent = agents.find((a) => a.id === ownedId);
-      return ownedAgent ? projects.filter((p) => p.id === ownedAgent.projectId) : [];
-    }
-    return projects;
-  }, [projects, agents, isSecondaryWindow, runtimeFlags]);
+  // Every workspace window shows the same catalog. Sessions owned by another
+  // peer stay visible but unavailable.
+  const sidebarAgents = agents;
+  const sidebarProjects = projects;
+  const sidebarUnavailableAgentIds = useMemo(() => {
+    return new Set(
+      [...detachedAgentIds, ...inUseAgentIds].filter(
+        (agentId) => !ownedAgentIds.has(agentId)
+      )
+    );
+  }, [detachedAgentIds, inUseAgentIds, ownedAgentIds]);
 
   const renameSession = useMemo(
     () =>
@@ -3162,7 +3272,7 @@ function App() {
           filesOpen={filesOpen}
           onToggleFiles={() => setFilesOpen((open) => !open)}
           desktopPetEnabled={desktopPetEnabled}
-          desktopPetAvailable={!isSecondaryWindow}
+          desktopPetAvailable
           onToggleDesktopPet={() =>
             handleDesktopPetEnabledChange(!desktopPetEnabled)
           }
@@ -3185,10 +3295,11 @@ function App() {
         activeGroupId={activeGroupId}
         activeAgentId={activeAgentId}
         inGroupAgentIds={inGroupAgentIds}
-        detachedAgentIds={detachedAgentIds}
+        detachedAgentIds={sidebarUnavailableAgentIds}
+        unreadCompletedAgentIds={unreadCompletionAgentIds}
         dragState={dragState}
         onSelectProject={selectProject}
-        onSelect={selectAgent}
+        onSelect={requestSelectAgent}
         onSelectScreen={selectScreen}
         onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
@@ -3202,6 +3313,8 @@ function App() {
         onDragEnd={handleDragEnd}
         onReorderProject={reorderProject}
         onProjectContextMenu={onSidebarProjectContextMenu}
+        sessionPickerMode={false}
+        detachedLabel="사용 중"
       />
       <TerminalArea
         agents={agents}
@@ -3223,7 +3336,7 @@ function App() {
         onDragEnd={handleDragEnd}
         onDropTargetChange={setDropTarget}
         onDrop={performDrop}
-        onDropToEmpty={selectAgent}
+        onDropToEmpty={requestSelectAgent}
         onTabContextMenu={(path, agentId, x, y) =>
           setTabContextMenu({ path, agentId, x, y })
         }
@@ -3264,7 +3377,7 @@ function App() {
           theme={appTheme}
           onThemeChange={handleThemeChange}
           desktopPetEnabled={desktopPetEnabled}
-          desktopPetAvailable={!isSecondaryWindow}
+          desktopPetAvailable
           onDesktopPetEnabledChange={handleDesktopPetEnabledChange}
           onResetDesktopPetPosition={resetDesktopPetPosition}
           commandShortcuts={commandShortcuts}
@@ -3276,7 +3389,7 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {pendingReopen && !isSecondaryWindow && (
+      {pendingReopen && (
         <ReopenSessionsModal
           count={pendingReopen.count}
           onYes={confirmReopen}
@@ -3332,7 +3445,7 @@ function App() {
         })()}
       <ToastContainer
         toasts={toasts}
-        onSelect={selectAgent}
+        onSelect={requestSelectAgent}
         onDismiss={dismissToast}
       />
       {quickOpen && (

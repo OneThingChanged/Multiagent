@@ -5,7 +5,10 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { emit, invoke, listen } from "../platform/runtime";
-import type { DesktopPetUpdate } from "../lib/desktopPet";
+import {
+  saveDesktopPetEnabled,
+  type DesktopPetUpdate,
+} from "../lib/desktopPet";
 import "./DesktopPetPage.css";
 
 const IDLE: DesktopPetUpdate = {
@@ -113,6 +116,7 @@ export function DesktopPetPage() {
 
   const closePet = () => {
     setContextMenu(null);
+    saveDesktopPetEnabled(false);
     // Hide this native window directly; cross-webview events are only used to
     // synchronize the main React state and can be delayed on some WebView2
     // versions when the source window is about to disappear.

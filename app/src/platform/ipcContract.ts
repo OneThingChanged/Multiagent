@@ -2,7 +2,8 @@ export type RuntimeCommand =
   | "runtime_flags" | "renderer_ready" | "spawn_pty"
   | "attach_terminal" | "detach_terminal" | "terminal_session_action"
   | "write_pty" | "resize_pty" | "kill_pty" | "confirm_close"
-  | "show_main_window" | "open_new_app_window" | "get_detached_agents" | "set_desktop_pet_enabled"
+  | "show_main_window" | "open_new_app_window" | "get_detached_agents"
+  | "get_agent_window_usage" | "claim_agent_for_window" | "set_desktop_pet_enabled"
   | "update_desktop_pet" | "desktop_pet_snapshot" | "reset_desktop_pet_position"
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
@@ -47,7 +48,8 @@ export type RuntimeEventName =
   | "chat:changed"
   | "app:close-requested" | "app:close-cancelled" | "agent:hook-event"
   | "native-notification:clicked" | "update:progress"
-  | "session-detached" | "sessions-reattached";
+  | "session-detached" | "sessions-reattached"
+  | "workspace:coordinator-changed";
 
 export type RuntimeEmittedEventName =
   | "desktop-pet:activate"

@@ -31,6 +31,20 @@ describe("CloseCoordinator", () => {
     expect(onComplete).toHaveBeenCalledWith("install-update", "renderer");
   });
 
+  it("waits until every workspace renderer confirms", () => {
+    const onComplete = vi.fn();
+    const coordinator = new CloseCoordinator({
+      onRequest: () => [10, 20],
+      onComplete,
+    });
+
+    coordinator.request("quit");
+    expect(coordinator.confirm(10)).toBe(true);
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(coordinator.confirm(20)).toBe(true);
+    expect(onComplete).toHaveBeenCalledWith("quit", "renderer");
+  });
+
   it("falls back after the renderer timeout and can recover from completion failure", () => {
     vi.useFakeTimers();
     const error = new Error("install failed");

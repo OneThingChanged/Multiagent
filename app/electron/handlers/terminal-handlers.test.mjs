@@ -24,5 +24,5 @@ it("routes typed terminal lifecycle commands through the session service", async
   expect(terminalSessions.detach).toHaveBeenCalledWith("a", 42);
   expect(terminalSessions.action).toHaveBeenCalledWith("a", "sleep");
   expect(handlers.invoke(event, "confirm_close", {})).toBe(true);
-  expect(confirmClose).toHaveBeenCalledTimes(1);
+  expect(confirmClose).toHaveBeenCalledWith(42);
 });

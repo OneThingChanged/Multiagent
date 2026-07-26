@@ -4846,6 +4846,60 @@ body.files-resizing .files-resizer::after {
   background: var(--app-drop-bg);
 }
 
+.agent-item.agent-completion-unread {
+  background-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(248, 81, 73, 0.05) 28%,
+    rgba(248, 81, 73, 0.22) 50%,
+    rgba(248, 81, 73, 0.05) 72%,
+    transparent 100%
+  );
+  background-position: 100% 0;
+  background-size: 240% 100%;
+  animation: agent-completion-sweep 2.6s ease-in-out infinite;
+}
+
+.agent-completion-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--app-danger);
+  box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.18),
+    0 0 8px rgba(248, 81, 73, 0.7);
+  animation: agent-completion-dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes agent-completion-sweep {
+  0%,
+  100% {
+    background-position: 100% 0;
+  }
+  50% {
+    background-position: 0 0;
+  }
+}
+
+@keyframes agent-completion-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-item.agent-completion-unread,
+  .agent-completion-dot {
+    animation: none;
+  }
+}
+
 /* Group separator between adjacent group sections */
 .group-separator {
   list-style: none;

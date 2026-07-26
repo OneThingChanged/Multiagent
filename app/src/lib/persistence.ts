@@ -141,31 +141,42 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
 
 export function loadStoredGroups(
   validIds: Set<string>,
-  agentProjectIds: Map<string, string>
+  agentProjectIds: Map<string, string>,
+  storage: {
+    groupsKey?: string;
+    viewKey?: string;
+    migrateLegacyLayout?: boolean;
+  } = {}
 ): Group[] {
+  const groupsKey = storage.groupsKey ?? LS_GROUPS;
+  const viewKey = storage.viewKey ?? LS_VIEW;
   try {
     const legacy = localStorage.getItem(LS_LAYOUT_LEGACY);
-    if (legacy && !localStorage.getItem(LS_GROUPS)) {
+    if (
+      legacy &&
+      (groupsKey === LS_GROUPS || storage.migrateLegacyLayout) &&
+      !localStorage.getItem(groupsKey)
+    ) {
       try {
         const parsed = JSON.parse(legacy) as LayoutNode | null;
         const v = validateLayout(parsed, validIds);
         if (v) {
           const migrated: Group[] = [{ id: crypto.randomUUID(), layout: v }];
-          localStorage.setItem(LS_GROUPS, JSON.stringify(migrated));
+          localStorage.setItem(groupsKey, JSON.stringify(migrated));
         }
       } catch {}
       localStorage.removeItem(LS_LAYOUT_LEGACY);
     }
 
-    const raw = localStorage.getItem(LS_GROUPS);
+    const raw = localStorage.getItem(groupsKey);
     if (!raw) {
       return normalizeStoredGroups([], validIds, agentProjectIds);
     }
     const parsed = JSON.parse(raw) as Group[];
     const groups = normalizeStoredGroups(parsed, validIds, agentProjectIds);
     if (JSON.stringify(parsed) !== JSON.stringify(groups)) {
-      localStorage.setItem(LS_GROUPS, JSON.stringify(groups));
-      repairStoredViewAfterGroupNormalization(parsed, groups);
+      localStorage.setItem(groupsKey, JSON.stringify(groups));
+      repairStoredViewAfterGroupNormalization(parsed, groups, viewKey);
     }
     return groups;
   } catch {
@@ -179,10 +190,11 @@ export function loadStoredGroups(
 
 function repairStoredViewAfterGroupNormalization(
   previousGroups: Group[],
-  normalizedGroups: Group[]
+  normalizedGroups: Group[],
+  viewKey = LS_VIEW
 ) {
   try {
-    const raw = localStorage.getItem(LS_VIEW);
+    const raw = localStorage.getItem(viewKey);
     if (!raw) return;
     const view = JSON.parse(raw) as {
       activeProjectId?: string | null;
@@ -221,7 +233,7 @@ function repairStoredViewAfterGroupNormalization(
     if (!replacementPath) return;
 
     localStorage.setItem(
-      LS_VIEW,
+      viewKey,
       JSON.stringify({
         activeProjectId:
           view.activeProjectId ?? replacement.projectId ?? null,
@@ -344,14 +356,15 @@ function sanitizeSessionPins(
 }
 
 export function loadStoredView(
-  groups: Group[]
+  groups: Group[],
+  viewKey = LS_VIEW
 ): {
   activeProjectId: string | null;
   activeGroupId: string | null;
   activePath: Path | null;
 } {
   try {
-    const raw = localStorage.getItem(LS_VIEW);
+    const raw = localStorage.getItem(viewKey);
     if (!raw) {
       return { activeProjectId: null, activeGroupId: null, activePath: null };
     }
@@ -394,16 +407,23 @@ export type Bootstrap = {
   activePath: Path | null;
 };
 
-export function loadBootstrap(): Bootstrap {
+export function loadBootstrap(
+  storage: {
+    groupsKey?: string;
+    viewKey?: string;
+    migrateLegacyLayout?: boolean;
+  } = {}
+): Bootstrap {
   const rawAgents = readStoredAgents();
   const projects = loadStoredProjects(rawAgents);
   const agents = loadStoredAgents(rawAgents, projects);
   const agentProjectIds = new Map(agents.map((a) => [a.id, a.projectId]));
   const groups = loadStoredGroups(
     new Set(agents.map((a) => a.id)),
-    agentProjectIds
+    agentProjectIds,
+    storage
   );
-  const view = loadStoredView(groups);
+  const view = loadStoredView(groups, storage.viewKey);
   const savedProjectId =
     view.activeProjectId &&
     projects.some((project) => project.id === view.activeProjectId)
@@ -414,7 +434,7 @@ export function loadBootstrap(): Bootstrap {
     agents,
     groups,
     activeProjectId: savedProjectId ?? projects[0]?.id ?? null,
-    activeGroupId: null,
-    activePath: null,
+    activeGroupId: view.activeGroupId,
+    activePath: view.activePath,
   };
 }
