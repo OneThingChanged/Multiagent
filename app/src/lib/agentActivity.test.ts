@@ -5,6 +5,7 @@ import {
   applyAgentHookEvent,
   applyAgentRuntimeStatus,
   deriveAgentStatus,
+  isAgentRuntimeActive,
 } from "./agentActivity";
 
 function agent(status: Agent["status"] = "running"): Agent {
@@ -114,5 +115,21 @@ describe("agent activity state v2", () => {
       runtimeStatus: "starting",
       activity: undefined,
     });
+  });
+
+  it("uses one runtime-active rule for derived work states", () => {
+    expect(isAgentRuntimeActive(agent("running"))).toBe(true);
+    expect(isAgentRuntimeActive({ ...agent("working"), status: "working" }))
+      .toBe(true);
+    expect(isAgentRuntimeActive({ ...agent("idle"), runtimeStatus: "starting" }))
+      .toBe(true);
+    expect(isAgentRuntimeActive(agent("idle"))).toBe(false);
+    expect(
+      isAgentRuntimeActive({
+        ...agent("exited"),
+        status: "exited",
+        runtimeStatus: "exited",
+      })
+    ).toBe(false);
   });
 });

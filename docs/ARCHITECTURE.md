@@ -27,9 +27,15 @@ K:\AI\MultiAgent\
 ├─ docs/                ← these documents
 └─ app/                 ← Tauri project
    ├─ src/              ← frontend (React + TS)
-   │  ├─ App.tsx        ← top-level state, listeners, callbacks
+   │  ├─ App.tsx        ← top-level orchestration, IPC listeners, workspace composition
    │  ├─ types.ts       ← shared types + AI_TOOLS + LS keys
+   │  ├─ hooks/
+   │  │  ├─ useAttentionState.ts          ← attention persistence, dedupe, read/resolve transitions, sidebar derivation
+   │  │  └─ useSessionLifecycleActions.ts ← recover/deactivate/delete/status/session-id actions
    │  ├─ lib/
+   │  │  ├─ agentActivity.ts  ← runtime/work state derivation + shared active-session predicate
+   │  │  ├─ attention.ts      ← pure attention item transitions
+   │  │  ├─ sessionLifecycle.ts ← pure session lifecycle messages/helpers
    │  │  ├─ layout.ts       ← tree operations (getAt/setAt/pruneAgent/…)
    │  │  ├─ persistence.ts  ← localStorage load + bootstrap
    │  │  ├─ appTheme.ts     ← global theme definitions + localStorage save
@@ -179,6 +185,13 @@ appTheme: AppThemeId                // Soft/GitHub/Warm/Light global theme
 projects/agents/groups/view/theme/filesOpen/filesWidth/terminalFontSize are all persisted to localStorage
 ```
 
+`App.tsx` owns orchestration only for attention and session lifecycle. Attention
+storage/derived unread state lives in `useAttentionState`; recover, deactivate,
+delete, runtime-status, and session-id mutations live in
+`useSessionLifecycleActions`. Pure transitions stay in `lib/attention.ts`,
+`lib/agentActivity.ts`, and `lib/sessionLifecycle.ts` so they can be tested
+without rendering the full app.
+
 ### Layout Tree (`LayoutNode`)
 
 ```ts
@@ -187,7 +200,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - Each leaf is one pane. The tabs array = tab order of that pane, activeIndex = currently visible tab
-- agents have tab customization fields `pinned`/`tabColor`, set from the tab context menu and persisted to localStorage. Pinned tabs are excluded from "close others/close to the right". The Codex-only `useAltScreen` is also toggled in session properties (decides whether `--no-alt-screen` is omitted on restart)
+- agents have tab customization fields `pinned`/`tabColor`, set from the tab context menu and persisted to localStorage. Pinned tabs are excluded from "close others/close to the right". The Codex-only `useAltScreen` is also toggled in session properties (decides whether `--no-alt-screen` is omitted the next time the session is activated)
 - tabs entries are usually agent IDs, but **document tabs** are expressed as `doc:<projectId>:<relativePath>` prefix strings (`src/lib/docTabs.ts`). layout/groupOps operations treat strings as opaque so they just work, and `validateLayout` keeps doc ids as valid tabs so they restore after restart. Closing a document tab uses `closeDocTab` (no solo-group rearrangement), and they are removed via `stripDocTabs` before remote/monitor sync
 - Split operations add a new leaf to the current Screen. If the parent split has the same direction it is added as a sibling; otherwise the target leaf is wrapped in a new split, nesting it
 - So one Screen supports 3+ panes like `A+B+C` and nested left-right/top-bottom layouts
@@ -325,7 +338,7 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.sidebarOpen.v1` — left sidebar collapsed state (default open)
 - `multiagent.terminalFontSize.v1` — xterm font size
 - `multiagent.notificationSound.v1` — notification sound settings (mode + customPath)
-- `multiagent.attentionItems.v1` — waiting/blocked/completed/stale attention history. Unread `completed` items derive the sidebar completion sweep/red dot; opening the agent marks only its completed items read
+- `multiagent.attentionItems.v1` — waiting/blocked/completed/stale attention history. Unread `completed` items derive the running-session-only cyan sidebar completion sweep/dot; opening the agent or beginning new work marks its previous completion read
 - `multiagent.desktopPetEnabled.v1` — Desktop Pet visibility (default true)
 - `multiagent.scrollback.<agentId>.v1` — per-session scrollback snapshot (for restart restore)
 - (migration) `multiagent.layout.v1` — old single tree. Converted to a single group on first load, then deleted

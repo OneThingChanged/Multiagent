@@ -76,6 +76,30 @@ export function markAgentCompletionRead(
   return changed ? next : items;
 }
 
+export function markAgentAttentionRead(
+  items: AttentionItem[],
+  agentId: string
+): AttentionItem[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.agentId !== agentId || item.read) return item;
+    changed = true;
+    return { ...item, read: true };
+  });
+  return changed ? next : items;
+}
+
+export function resolveAgentWorkAttention(
+  items: AttentionItem[],
+  agentId: string,
+  sessionKey: string
+): AttentionItem[] {
+  return markAgentCompletionRead(
+    removeSessionAttention(items, sessionKey),
+    agentId
+  );
+}
+
 function isAttentionItem(value: unknown): value is AttentionItem {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<AttentionItem>;

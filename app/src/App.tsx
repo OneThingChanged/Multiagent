@@ -23,8 +23,6 @@ import {
 } from "./types";
 import type {
   Agent,
-  AgentRuntimeStatus,
-  AgentStatus,
   ContextMenuState,
   DragState,
   DropTargetState,
@@ -76,6 +74,7 @@ import {
   applyAgentRuntimeStatus,
   deriveAgentStatus,
   isAgentActivelyWorking,
+  isAgentRuntimeActive,
   runtimeStatusOf,
   type AgentHookEvent,
 } from "./lib/agentActivity";
@@ -88,16 +87,11 @@ import {
   type CommandShortcuts,
 } from "./lib/commandRegistry";
 import {
-  loadAttentionItems,
-  markAgentCompletionRead,
-  markAttentionRead,
-  removeSessionAttention,
-  saveAttentionItems,
-  unreadCompletedAgentIds,
-  upsertAttentionItem,
   type AttentionItem,
   type AttentionKind,
 } from "./lib/attention";
+import { useAttentionState } from "./hooks/useAttentionState";
+import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
 import type { QuickOpenItem } from "./lib/quickOpen";
 import {
   clearScrollback,
@@ -173,8 +167,6 @@ type QuickDocument = {
   relativePath: string;
   name: string;
 };
-
-type AttentionDraft = Omit<AttentionItem, "id" | "read">;
 
 type TerminalPathResolution = {
   kind: "image" | "html" | "markdown" | "folder" | "file";
@@ -608,9 +600,19 @@ function App() {
   const [quickDocuments, setQuickDocuments] = useState<QuickDocument[]>([]);
   const [quickDocumentsLoading, setQuickDocumentsLoading] = useState(false);
   const [attentionOpen, setAttentionOpen] = useState(false);
-  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>(
-    loadAttentionItems
-  );
+  const {
+    items: attentionItems,
+    push: pushAttention,
+    acknowledgeCompletion: acknowledgeAgentCompletion,
+    acknowledgeAgent: acknowledgeAgentAttention,
+    acknowledgeItem: acknowledgeAttentionItem,
+    acknowledgeAll: acknowledgeAllAttention,
+    clearRead: clearReadAttention,
+    beginAgentWork,
+    resolveSession: resolveSessionAttention,
+    unreadCount: attentionUnreadCount,
+    unreadCompletionAgentIds,
+  } = useAttentionState(agents);
   const [commandShortcuts, setCommandShortcuts] = useState<CommandShortcuts>(
     loadCommandShortcuts
   );
@@ -1159,10 +1161,6 @@ function App() {
   }, [appTheme]);
 
   useEffect(() => {
-    saveAttentionItems(attentionItems);
-  }, [attentionItems]);
-
-  useEffect(() => {
     saveCommandShortcuts(commandShortcuts);
   }, [commandShortcuts]);
 
@@ -1318,26 +1316,6 @@ function App() {
     []
   );
 
-  const pushAttention = useCallback((draft: AttentionDraft) => {
-    setAttentionItems((items) => {
-      const existing = items.find((item) => item.dedupeKey === draft.dedupeKey);
-      if (
-        existing &&
-        existing.createdAt === draft.createdAt &&
-        existing.body === draft.body
-      ) return items;
-      return upsertAttentionItem(items, {
-        ...draft,
-        id: `${draft.dedupeKey}:${draft.createdAt}:${crypto.randomUUID()}`,
-        read: false,
-      });
-    });
-  }, []);
-
-  const acknowledgeAgentCompletion = useCallback((agentId: string) => {
-    setAttentionItems((items) => markAgentCompletionRead(items, agentId));
-  }, []);
-
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -1436,13 +1414,7 @@ function App() {
       activate(event.payload?.agentId);
       setDesktopPetCompletions([]);
       if (event.payload?.agentId) {
-        const agentId = event.payload.agentId;
-        setAttentionItems((items) =>
-          markAttentionRead(
-            items,
-            new Set(items.filter((item) => item.agentId === agentId).map((item) => item.id))
-          )
-        );
+        acknowledgeAgentAttention(event.payload.agentId);
       }
     }).then(track).catch(() => {});
     listen("desktop-pet:close-requested", () => {
@@ -1452,7 +1424,11 @@ function App() {
       cancelled = true;
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [handleDesktopPetEnabledChange, runtimeFlags]);
+  }, [
+    acknowledgeAgentAttention,
+    handleDesktopPetEnabledChange,
+    runtimeFlags,
+  ]);
 
   // ---- PTY + hook event listeners
 
@@ -1584,12 +1560,7 @@ function App() {
           const projectName =
             projectsRef.current.find((project) => project.id === nextAgent.projectId)
               ?.name || "Unknown project";
-          setAttentionItems((items) =>
-            markAgentCompletionRead(
-              removeSessionAttention(items, sessionKey),
-              id
-            )
-          );
+          beginAgentWork(id, sessionKey);
           if (nextWorkStatus === "waiting" || nextWorkStatus === "blocked") {
             const kind: AttentionKind = nextWorkStatus;
             const body =
@@ -1666,9 +1637,7 @@ function App() {
               petCompletion,
             ]);
             const sessionKey = petCompletion.sessionKey;
-            setAttentionItems((items) =>
-              removeSessionAttention(items, sessionKey)
-            );
+            resolveSessionAttention(sessionKey);
             pushAttention({
               dedupeKey: `completed:${sessionKey}`,
               kind: "completed",
@@ -1729,7 +1698,14 @@ function App() {
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [isCoordinatorWindow, pushAttention, pushToast, remoteEnabled]);
+  }, [
+    beginAgentWork,
+    isCoordinatorWindow,
+    pushAttention,
+    pushToast,
+    remoteEnabled,
+    resolveSessionAttention,
+  ]);
 
   // A lost Stop hook must not leave the UI and desktop pet spinning forever.
   // Keep the detailed activity for diagnostics, but degrade stale work to the
@@ -1877,6 +1853,21 @@ function App() {
     []
   );
 
+  const {
+    recoverExitedAgent,
+    deactivateAgent,
+    setAgentStatus,
+    setAgentSessionId,
+    removeAgent,
+  } = useSessionLifecycleActions({
+    agentsRef,
+    detachedAgentIdsRef,
+    removedAgentIdsRef,
+    termsRef,
+    setAgents,
+    applyGroupOp,
+  });
+
   const commitGroupState = useCallback((next: groupOps.GroupState) => {
     groupsRef.current = next.groups;
     activeGroupIdRef.current = next.activeGroupId;
@@ -1900,60 +1891,6 @@ function App() {
     return agent;
   }, []);
 
-  const restartAgent = useCallback(async (id: string) => {
-    const wasIdle = agentsRef.current.find((agent) => agent.id === id)?.status === "idle";
-    if (isElectronRuntime()) {
-      await invoke("terminal_session_action", { id, action: "restart" }).catch(() => {});
-    } else {
-      await invoke("kill_pty", { id }).catch(() => {});
-    }
-    const entry = termsRef.current.get(id);
-    if (entry) {
-      entry.term.dispose();
-      termsRef.current.delete(id);
-    }
-    clearScrollback(id);
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? applyAgentRuntimeStatus(a, wasIdle ? "starting" : "idle")
-          : a
-      )
-    );
-  }, []);
-
-  // Stop a running session's PTY process to free CPU/memory, but keep it
-  // in the list (and its lastSessionId). Selecting it again respawns/resumes.
-  const deactivateAgent = useCallback(async (id: string) => {
-    // Remove the pane before stopping the PTY. Otherwise the still-mounted
-    // terminal can observe the exit and immediately try to spawn again.
-    applyGroupOp((state) => groupOps.removeAgentFromLayout(state, id));
-    const entry = termsRef.current.get(id);
-    if (entry) {
-      try {
-        entry.term.dispose();
-      } catch {}
-      termsRef.current.delete(id);
-    }
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
-      )
-    );
-    if (isElectronRuntime()) {
-      await invoke("terminal_session_action", { id, action: "sleep" }).catch(() => {});
-    } else {
-      await invoke("kill_pty", { id }).catch(() => {});
-    }
-    // The PTY exit event may race this action and temporarily mark the agent
-    // as exited/running. Deactivation is authoritative, so settle on idle.
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.id === id ? applyAgentRuntimeStatus(a, "idle") : a
-      )
-    );
-  }, [applyGroupOp]);
-
   const selectAgent = useCallback(
     (agentId: string) => {
       // Block opening a session that is detached to another window.
@@ -1962,7 +1899,7 @@ function App() {
       const agent = activateAgentProject(agentId);
       const current = agentsRef.current.find((a) => a.id === agentId);
       if (current?.status === "exited") {
-        void restartAgent(agentId).then(() => {
+        void recoverExitedAgent(agentId).then(() => {
           applyGroupOp((s) => groupOps.selectAgent(s, agentId, agent?.projectId));
         });
         return;
@@ -1973,7 +1910,7 @@ function App() {
       acknowledgeAgentCompletion,
       activateAgentProject,
       applyGroupOp,
-      restartAgent,
+      recoverExitedAgent,
     ]
   );
 
@@ -2031,9 +1968,9 @@ function App() {
         groupOps.selectGroup(state, groupId, agentId)
       );
       const current = agentsRef.current.find((agent) => agent.id === agentId);
-      if (current?.status === "exited") restartAgent(agentId);
+      if (current?.status === "exited") recoverExitedAgent(agentId);
     },
-    [activateAgentProject, applyGroupOp, restartAgent]
+    [activateAgentProject, applyGroupOp, recoverExitedAgent]
   );
 
   useEffect(() => {
@@ -2449,64 +2386,6 @@ function App() {
         });
     },
     [applyGroupOp, pushToast]
-  );
-
-  const setAgentStatus = useCallback((id: string, status: AgentStatus) => {
-    setAgents((prev) =>
-      prev.map((agent) => {
-        if (agent.id !== id) return agent;
-        if (
-          status === "idle" ||
-          status === "starting" ||
-          status === "running" ||
-          status === "exited" ||
-          status === "unreachable"
-        ) {
-          return applyAgentRuntimeStatus(agent, status as AgentRuntimeStatus);
-        }
-        return { ...agent, runtimeStatus: "running", status };
-      })
-    );
-  }, []);
-
-  const setAgentSessionId = useCallback((id: string, sessionId: string | null) => {
-    setAgents((prev) =>
-      prev.map((agent) =>
-        agent.id === id
-          ? { ...agent, lastSessionId: sessionId || undefined }
-          : agent
-      )
-    );
-  }, []);
-
-  const removeAgent = useCallback(
-    async (id: string) => {
-      const agent = agentsRef.current.find((candidate) => candidate.id === id);
-      if (!agent) return;
-      if (detachedAgentIdsRef.current.has(id)) {
-        window.alert(
-          "다른 작업창에서 사용 중인 세션입니다. 해당 창에서 먼저 비활성화해 주세요."
-        );
-        return;
-      }
-      const ok = window.confirm(
-        `"${agent.name}" 세션을 삭제할까요?\n실행 중인 프로세스를 종료하고 MultiAgent 목록에서 제거합니다.\n이 동작은 되돌릴 수 없습니다.`
-      );
-      if (!ok) return;
-
-      removedAgentIdsRef.current.add(id);
-      await invoke(
-        isElectronRuntime() ? "terminal_session_action" : "kill_pty",
-        isElectronRuntime() ? { id, action: "close" } : { id }
-      ).catch(() => {});
-      const entry = termsRef.current.get(id);
-      entry?.term.dispose();
-      termsRef.current.delete(id);
-      clearScrollback(id);
-      setAgents((prev) => prev.filter((a) => a.id !== id));
-      applyGroupOp((s) => groupOps.removeAgentFromLayout(s, id));
-    },
-    [applyGroupOp]
   );
 
   const renameAgent = useCallback((id: string, name: string) => {
@@ -3189,31 +3068,12 @@ function App() {
   }, [executeCommand, openDocTab, requestSelectAgent, selectProject, selectScreen]);
 
   const handleAttentionSelect = useCallback((item: AttentionItem) => {
-    setAttentionItems((items) => markAttentionRead(items, new Set([item.id])));
+    acknowledgeAttentionItem(item.id);
     setAttentionOpen(false);
     if (agentsRef.current.some((agent) => agent.id === item.agentId)) {
       requestSelectAgent(item.agentId);
     }
-  }, [requestSelectAgent]);
-
-  const attentionUnreadCount = useMemo(
-    () => attentionItems.filter((item) => !item.read).length,
-    [attentionItems]
-  );
-  const unreadCompletionAgentIds = useMemo(
-    () => {
-      const runningAgentIds = new Set(
-        agents
-          .filter((agent) => {
-            const runtimeStatus = runtimeStatusOf(agent);
-            return runtimeStatus === "running" || runtimeStatus === "starting";
-          })
-          .map((agent) => agent.id)
-      );
-      return unreadCompletedAgentIds(attentionItems, runningAgentIds);
-    },
-    [agents, attentionItems]
-  );
+  }, [acknowledgeAttentionItem, requestSelectAgent]);
 
   // ---- Derived
 
@@ -3476,12 +3336,8 @@ function App() {
         <AttentionCenter
           items={attentionItems}
           onSelect={handleAttentionSelect}
-          onMarkAllRead={() =>
-            setAttentionItems((items) => markAttentionRead(items))
-          }
-          onClearRead={() =>
-            setAttentionItems((items) => items.filter((item) => !item.read))
-          }
+          onMarkAllRead={acknowledgeAllAttention}
+          onClearRead={clearReadAttention}
           onClose={() => setAttentionOpen(false)}
         />
       )}
@@ -3556,10 +3412,10 @@ function App() {
           isSessionLocked={!!contextGroup?.sessionLocked}
           canPinSession={canPinContextGroupSession}
           canDeactivate={(() => {
-            const s = agents.find(
-              (a) => a.id === contextMenu.agentId
-            )?.status;
-            return s === "running" || s === "working" || s === "starting";
+            const agent = agents.find(
+              (candidate) => candidate.id === contextMenu.agentId
+            );
+            return agent ? isAgentRuntimeActive(agent) : false;
           })()}
           onClose={() => setContextMenu(null)}
           onAction={onContextAction}

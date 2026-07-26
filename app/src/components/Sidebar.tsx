@@ -17,6 +17,7 @@ import type {
   Project,
 } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
+import { isAgentRuntimeActive } from "../lib/agentActivity";
 import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
@@ -38,17 +39,6 @@ function loadActiveOnly(): boolean {
   } catch {
     return false;
   }
-}
-
-// A session is "active" when its PTY is alive (spawned and not exited).
-function isActiveStatus(status: string): boolean {
-  return (
-    status === "running" ||
-    status === "working" ||
-    status === "waiting" ||
-    status === "blocked" ||
-    status === "starting"
-  );
 }
 
 type MachineGroup = {
@@ -375,7 +365,7 @@ export function Sidebar({
       result = result
         .map((s) => ({
           ...s,
-          members: s.members.filter((m) => isActiveStatus(m.status)),
+          members: s.members.filter(isAgentRuntimeActive),
         }))
         .filter((s) => s.members.length > 0);
       return result.length > 0 ? result : null;

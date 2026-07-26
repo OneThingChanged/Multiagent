@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   markAgentCompletionRead,
+  markAgentAttentionRead,
   markAttentionRead,
   MAX_ATTENTION_ITEMS,
   removeSessionAttention,
+  resolveAgentWorkAttention,
   unreadCompletedAgentIds,
   upsertAttentionItem,
   type AttentionItem,
@@ -75,6 +77,35 @@ describe("attention items", () => {
         )
       )
     ).toEqual(["active-agent"]);
+  });
+
+  it("acknowledges all attention for one agent without touching peers", () => {
+    const first = item("1", "completed");
+    const second = {
+      ...item("2", "waiting"),
+      agentId: "agent-2",
+      sessionKey: "session-2",
+      dedupeKey: "waiting:session-2",
+    };
+
+    const next = markAgentAttentionRead([first, second], "agent");
+    expect(next[0].read).toBe(true);
+    expect(next[1]).toBe(second);
+  });
+
+  it("resolves stale state and old completion when new work starts", () => {
+    const completed = item("1", "completed");
+    const waiting = item("2", "waiting");
+
+    const next = resolveAgentWorkAttention(
+      [completed, waiting],
+      "agent",
+      "session"
+    );
+
+    expect(next).toHaveLength(1);
+    expect(next[0].kind).toBe("completed");
+    expect(next[0].read).toBe(true);
   });
 
   it("bounds retained history", () => {

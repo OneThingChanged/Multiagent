@@ -42,6 +42,13 @@ export function runtimeStatusOf(
   return "running";
 }
 
+export function isAgentRuntimeActive(
+  agent: Pick<Agent, "status" | "runtimeStatus">
+): boolean {
+  const status = runtimeStatusOf(agent);
+  return status === "running" || status === "starting";
+}
+
 export function deriveAgentStatus(
   runtimeStatus: AgentRuntimeStatus,
   activity?: AgentActivity,
