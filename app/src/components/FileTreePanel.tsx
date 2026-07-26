@@ -1757,6 +1757,14 @@ function SourceControlView({
           <button onClick={() => { openDiff(ctx.entry.relative_path, ctx.staged); setCtx(null); }}>
             Diff (외부 프로그램)
           </button>
+          <button onClick={() => {
+            invoke("reveal_local_path", {
+              path: nativeAbsolutePath(folder, ctx.entry.relative_path),
+            }).catch(() => {});
+            setCtx(null);
+          }}>
+            탐색기에서 보기
+          </button>
           <hr />
           <button
             onClick={() => {

@@ -1,9 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Agent } from "../types";
 import {
   addTerminalCompatibilityArgs,
+  buildSpawnArgs,
   resolveLocalToolCommand,
   resolveRemoteToolCommand,
 } from "./spawn";
+
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+vi.mock("../platform/runtime", () => ({ invoke: invokeMock }));
+
+beforeEach(() => {
+  invokeMock.mockReset();
+});
 
 describe("resolveLocalToolCommand", () => {
   it("uses npm .cmd shims for built-in agents on local Windows", () => {
@@ -79,5 +88,71 @@ describe("addTerminalCompatibilityArgs", () => {
     expect(
       addTerminalCompatibilityArgs("codex", "codex resume session-123", true)
     ).toBe("codex resume session-123");
+  });
+});
+
+describe("buildSpawnArgs resume recovery", () => {
+  const agent = {
+    id: "agent-a",
+    projectId: "project-a",
+    name: "A",
+    folder: "C:\\workspace",
+    aiToolId: "codex",
+    aiLabel: "Codex",
+    dangerous: false,
+    status: "idle",
+    createdAt: 1,
+  } as Agent;
+
+  it("recovers a missing localStorage id from the per-agent backend index", async () => {
+    invokeMock.mockResolvedValueOnce("session-from-hook-index");
+    const setAgentSessionId = vi.fn();
+
+    const result = await buildSpawnArgs(agent, null, setAgentSessionId);
+
+    expect(invokeMock).toHaveBeenCalledWith("resolve_cli_session", {
+      aiToolId: "codex",
+      folder: "C:\\workspace",
+      agentId: "agent-a",
+      agentName: "A",
+      preferredSessionId: null,
+    });
+    expect(result.initCommand).toBe(
+      "codex.cmd resume session-from-hook-index --no-alt-screen"
+    );
+    expect(setAgentSessionId).toHaveBeenCalledWith(
+      "agent-a",
+      "session-from-hook-index"
+    );
+  });
+
+  it("keeps a stored resume id when validation is temporarily unavailable", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("temporary scan failure"));
+    const setAgentSessionId = vi.fn();
+
+    const result = await buildSpawnArgs(
+      { ...agent, lastSessionId: "stored-session" },
+      null,
+      setAgentSessionId
+    );
+
+    expect(result.initCommand).toBe(
+      "codex.cmd resume stored-session --no-alt-screen"
+    );
+    expect(setAgentSessionId).not.toHaveBeenCalled();
+  });
+
+  it("does not silently discard an invalid pinned resume target", async () => {
+    invokeMock.mockResolvedValueOnce(null);
+
+    const result = await buildSpawnArgs(
+      { ...agent, lastSessionId: "newer-session" },
+      { "agent-a": "pinned-session" },
+      vi.fn()
+    );
+
+    expect(result.initCommand).toBe(
+      "codex.cmd resume pinned-session --no-alt-screen"
+    );
   });
 });

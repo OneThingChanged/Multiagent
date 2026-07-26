@@ -6,13 +6,14 @@
 - Project **settings** (name·folder) and session **settings** (alias·project·AI tool·dangerous·lastSessionId), **layout** (group/split/tab order·active), **view**, **app theme**, **Docs width**, and **terminal font size** are stored in localStorage
 - Group session pins (`sessionPins`, `sessionLocked`) are also stored with the group data in localStorage
 - However, **the OS processes of terminal sessions cannot be restored**: when the app closes, the PowerShell+Claude/Codex processes die
-- **Codex conversations can resume**: automatic `/quit` on window close → token capture → `codex resume <token>` on next run
+- **Codex conversations can resume**: a graceful full exit/relaunch/update preserves the SessionStart ID and reopens with `codex resume <id>` on the next run. Electron's X button only hides to the tray, keeping the PTY alive
 - **Claude conversations can also resume**: `session_id` capture via SessionStart hook → `claude --resume <id>` on next run. Details in [RESUME.md](RESUME.md)
 - While the app is running, Electron's per-session 512K sequence model in main covers
   renderer reload/hidden pane reattach, and on exit it saves the newest 1,000 xterm lines
   as runtime-local scrollback. But there is no daemon keeping the PTY itself alive after
   the app exits, so this is not a permanent full-output transcript feature. The canonical
   Codex/Claude conversation originals are the provider resume data.
+- Electron journals the current live PTY IDs in `electron-reopen-state.json`, so forced/OS termination can still offer the last known sessions. It does not preserve the killed OS processes themselves; each conversation is recreated through the provider resume command
 
 ### Scrollback on Window Resize
 - xterm reflows automatically when cols change, but output that Codex/Claude **baked in with wrapping based on the previous width** does not re-wrap to the new width. Only new output uses the new width

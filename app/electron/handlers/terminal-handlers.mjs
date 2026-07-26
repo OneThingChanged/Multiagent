@@ -1,7 +1,7 @@
 export function createTerminalHandlers({
   terminalSessions,
   spawnPty,
-  closeEverything,
+  confirmClose,
 }) {
   const handlers = new Map([
     ["spawn_pty", (event, args) => spawnPty(args, event)],
@@ -27,8 +27,7 @@ export function createTerminalHandlers({
       return null;
     }],
     ["confirm_close", () => {
-      closeEverything();
-      return null;
+      return confirmClose();
     }],
   ]);
 

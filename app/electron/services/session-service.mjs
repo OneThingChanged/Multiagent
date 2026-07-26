@@ -147,14 +147,34 @@ export class SessionService {
     return entries;
   }
 
-  async resolve({ aiToolId, folder, preferredSessionId, agentId = null }) {
+  async resolve({
+    aiToolId,
+    folder,
+    preferredSessionId,
+    agentId = null,
+    allowFolderFallback = true,
+  }) {
     const tool = String(aiToolId || "").toLowerCase();
     if (tool !== "codex" && tool !== "claude") return null;
     const preferred = String(preferredSessionId || "").trim();
-    if (agentId && preferred) {
-      const note = this.notes.get(agentId);
-      if (note?.sessionId === preferred && (!note.cwd || sameFolder(note.cwd, folder))) return preferred;
+    const note = agentId ? this.notes.get(agentId) : null;
+    const notedSessionId =
+      note?.sessionId && (!note.cwd || sameFolder(note.cwd, folder))
+        ? String(note.sessionId).trim()
+        : null;
+    if (
+      preferred &&
+      notedSessionId &&
+      notedSessionId.toLowerCase() === preferred.toLowerCase()
+    ) {
+      return notedSessionId;
     }
+    // The per-agent hook index is the only unambiguous recovery source when
+    // localStorage lost its lastSessionId and several agents share one folder.
+    if (!preferred && notedSessionId) {
+      return notedSessionId;
+    }
+    if (!preferred && !allowFolderFallback) return null;
     const entries = await this.scan(tool);
     if (preferred) {
       const exact = entries.find(
@@ -164,6 +184,8 @@ export class SessionService {
       );
       if (exact) return exact.sessionId;
     }
+    if (notedSessionId) return notedSessionId;
+    if (!allowFolderFallback) return null;
     const latest = entries.find((entry) => entry.sessionId && folder && sameFolder(entry.cwd, folder));
     return latest?.sessionId ?? null;
   }
@@ -205,4 +227,3 @@ export class SessionService {
     return { files, events, errors };
   }
 }
-

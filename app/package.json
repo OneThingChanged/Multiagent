@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.68",
+  "version": "0.5.69",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "electron:smoke": "electron electron/pty-smoke.mjs",
     "electron:bridge-smoke": "node scripts/electron-bridge-smoke.mjs",
     "electron:lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs",
+    "electron:single-instance-smoke": "node scripts/electron-single-instance-smoke.mjs",
     "electron:packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged",
     "electron:portable-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --portable",
     "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
@@ -83,6 +84,7 @@
       "dist/**",
       "electron/**",
       "package.json",
+      "src-tauri/icons/icon.ico",
       "node_modules/node-pty/**"
     ],
     "directories": {

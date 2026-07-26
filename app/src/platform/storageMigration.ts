@@ -10,6 +10,7 @@ import type { SharedWorkspaceValues } from "./sharedWorkspace";
 
 const SYNC_REVISION_KEY = "multiagent.sharedWorkspaceRevision.v1";
 const MAX_SNAPSHOT_CHARACTERS = 50 * 1024 * 1024;
+export const LS_REOPEN_AGENTS = "multiagent.reopenAgents.v1";
 
 export type StorageSnapshot = {
   version: 1 | 2;
@@ -55,6 +56,28 @@ export async function persistStorageSnapshot(force = false) {
   await invoke("persist_storage_snapshot", { snapshot });
   localStorage.setItem(SYNC_REVISION_KEY, snapshot.revision ?? "");
   lastPersistedSignature = signature;
+  return true;
+}
+
+export async function syncReopenStateBeforeRender() {
+  const state = await invoke<{
+    version: number;
+    updatedAt?: string | null;
+    agentIds: unknown[];
+  } | null>("reopen_state_get").catch(() => null);
+  if (!state || state.version !== 1 || !Array.isArray(state.agentIds)) {
+    return false;
+  }
+  const agentIds = [
+    ...new Set(
+      state.agentIds
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value && value.length <= 256)
+        .slice(0, 10_000)
+    ),
+  ];
+  localStorage.setItem(LS_REOPEN_AGENTS, JSON.stringify(agentIds));
   return true;
 }
 

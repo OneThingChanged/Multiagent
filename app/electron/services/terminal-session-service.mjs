@@ -8,11 +8,17 @@ const TERMINATING_ACTIONS = new Set(["sleep", "close", "restart"]);
  * cursor when they attach again.
  */
 export class TerminalSessionService {
-  constructor({ sendDataToView, broadcastExit, sessions } = {}) {
+  constructor({
+    sendDataToView,
+    broadcastExit,
+    onSessionsChanged = () => {},
+    sessions,
+  } = {}) {
     this.sessions = sessions ?? new Map();
     this.generations = new Map();
     this.sendDataToView = sendDataToView ?? (() => {});
     this.broadcastExit = broadcastExit ?? (() => {});
+    this.onSessionsChanged = onSessionsChanged;
   }
 
   beginSpawn(id) {
@@ -51,6 +57,7 @@ export class TerminalSessionService {
     }
 
     this.sessions.set(id, entry);
+    this.#notifySessionsChanged("spawn");
     entry.process.onData((data) => {
       if (this.sessions.get(id) !== entry) return;
       entry.onRawData?.(data);
@@ -61,6 +68,7 @@ export class TerminalSessionService {
       if (this.sessions.get(id) !== entry) return;
       this.#publish(entry, entry.filter.finish());
       this.sessions.delete(id);
+      this.#notifySessionsChanged("natural");
       for (const listener of entry.dataListeners) {
         try { listener.onExit?.({ id, exitCode }); } catch { /* listener errors must not break teardown */ }
       }
@@ -137,6 +145,7 @@ export class TerminalSessionService {
     const entry = this.sessions.get(id);
     if (!entry) return false;
     this.sessions.delete(id);
+    this.#notifySessionsChanged(reason);
     entry.closeReason = reason;
     this.#release(entry, true);
     return true;
@@ -175,6 +184,17 @@ export class TerminalSessionService {
       entry.process.kill();
     } catch {
       // The child may already have exited.
+    }
+  }
+
+  #notifySessionsChanged(reason) {
+    try {
+      this.onSessionsChanged({
+        reason,
+        ids: [...this.sessions.keys()],
+      });
+    } catch {
+      // Recovery journaling must never break terminal lifecycle operations.
     }
   }
 }

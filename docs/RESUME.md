@@ -5,12 +5,14 @@ The mechanism for continuing Codex/Claude sessions after closing and reopening t
 ## Scenario
 
 1. User chats/works with a Codex/Claude agent
-2. User clicks the window **X**
-3. The backend intercepts the close and emits an `app:close-requested` event to the frontend
-4. The frontend sends `/quit\r` to all running Codex/Claude agents
+2. User fully exits via **system tray → Exit**, requests a relaunch, or installs an update
+3. The backend emits an `app:close-requested` event to the frontend
+4. The frontend stores the running agent IDs, persists workspace/scrollback, and sends `/quit\r` to all running Codex/Claude agents
 5. The session ID is already stored by the `SessionStart` hook, so the close path only shuts the tools down gracefully
-6. After a short wait, the `confirm_close` command performs the actual exit
-7. Next app run → click that agent in the sidebar → spawn auto-types `codex resume <id>` or `claude --resume <id>` (+ dangerous flag)
+6. After a short wait, the `confirm_close` command performs the selected action (quit/relaunch/update install)
+7. Next app run → confirm **Reopen previous sessions** → spawn uses `codex resume <id>` or `claude --resume <id>` (+ dangerous flag)
+
+Electron's **X button only hides the window to the tray**, so its PTYs remain alive. A production single-instance lock makes a later shortcut launch activate that same process. Tauri keeps its native close-intercept behavior.
 
 ## Window Close Intercept (Rust)
 
@@ -27,6 +29,19 @@ window.on_window_event(move |event| {
 ```
 
 The `confirm_close` command sets the `close_confirmed` flag to true and then calls `window.close()` → the second close event passes through.
+
+## Electron Close Coordinator
+
+Electron routes tray Exit, relaunch, and update install through one close coordinator:
+
+1. emit `app:close-requested` once
+2. wait for the renderer to persist `multiagent.reopenAgents.v1`, workspace state, and scrollback
+3. receive `confirm_close`
+4. execute the pending action
+
+The highest-priority pending action wins (`update install` → `relaunch` → `quit`), preventing a concurrent close request from skipping an update. A 5-second timeout remains as a last-resort hard-close path. A synchronous installer-launch failure emits `app:close-cancelled`, resets the close state, and shows the main window again.
+
+Electron also writes `electron-reopen-state.json` in its userData directory whenever the live PTY set changes. Startup imports this journal before React renders, so a crash, forced termination, or OS shutdown that never reaches the renderer close handler can still offer the last known live sessions. Choosing **No** in the reopen prompt clears both the local prompt state and this journal.
 
 ## Session ID Capture
 
@@ -90,6 +105,6 @@ If the hook never fired (e.g., a broken codex plugin `hooks.json` fails to parse
 
 ## Persistence
 
-`StoredAgent.lastSessionId?: string` is stored in the `multiagent.agents.v1` localStorage key. The legacy fields `lastResumeToken` and `lastClaudeSessionId` are migrated into `lastSessionId` on load.
+`StoredAgent.lastSessionId?: string` is stored in the `multiagent.agents.v1` localStorage key. The legacy fields `lastResumeToken` and `lastClaudeSessionId` are migrated into `lastSessionId` on load. `multiagent.reopenAgents.v1` stores the IDs of PTYs that should be offered for reopening after a full exit; Electron's `electron-reopen-state.json` is the main-process crash-safe backup for that list.
 
 Pinned group sessions are stored in `Group.sessionPins` and `Group.sessionLocked` inside `multiagent.groups.v1`.

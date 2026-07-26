@@ -112,7 +112,10 @@ import {
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
-import { persistStorageSnapshot } from "./platform/storageMigration";
+import {
+  LS_REOPEN_AGENTS,
+  persistStorageSnapshot,
+} from "./platform/storageMigration";
 import { isElectronRuntime } from "./platform/electronBridge";
 import type {
   SpawnTerminalResult,
@@ -514,8 +517,6 @@ function relativeIfInside(folder: string, absolutePath: string): string | null {
 
 // Startup reopen prompt: the previously-active group (with sessions) is restored
 // only after the user confirms, instead of auto-resuming on launch.
-const LS_REOPEN_AGENTS = "multiagent.reopenAgents.v1";
-
 type ReopenPending = {
   agentIds: string[];
   groupId: string | null;
@@ -1787,6 +1788,7 @@ function App() {
     if (!runtimeFlags || isSecondaryWindow) return;
     let closing = false;
     let unsubscribe: (() => void) | null = null;
+    let cancelUnsubscribe: (() => void) | null = null;
     listen<void>("app:close-requested", async () => {
       if (closing) return;
       closing = true;
@@ -1840,8 +1842,28 @@ function App() {
         unsubscribe = remove;
       })
       .catch(() => {});
-    return () => unsubscribe?.();
-  }, [isSecondaryWindow, remoteEnabled, runtimeFlags]);
+    listen<{ action?: string; message?: string }>(
+      "app:close-cancelled",
+      (event) => {
+        closing = false;
+        pushToast(
+          "",
+          "종료 취소",
+          event.payload?.message
+            ? `저장 후 종료를 완료하지 못했습니다: ${event.payload.message}`
+            : "저장 후 종료를 완료하지 못했습니다."
+        );
+      }
+    )
+      .then((remove) => {
+        cancelUnsubscribe = remove;
+      })
+      .catch(() => {});
+    return () => {
+      unsubscribe?.();
+      cancelUnsubscribe?.();
+    };
+  }, [isSecondaryWindow, pushToast, remoteEnabled, runtimeFlags]);
 
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 
@@ -2469,6 +2491,7 @@ function App() {
       invoke<string | null>("relink_cli_session", {
         aiToolId: agent.aiToolId,
         folder,
+        // Tauri can narrow transcript matching by alias; Electron ignores it.
         agentName: agent.name,
       })
         .then((sessionId) => {
@@ -2867,6 +2890,7 @@ function App() {
     } catch {
       // ignore
     }
+    invoke("reopen_state_clear").catch(() => {});
     setPendingReopen(null);
   }, []);
 

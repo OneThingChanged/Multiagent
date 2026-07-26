@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const devUrl = process.env.MULTIAGENT_DEV_URL || "http://127.0.0.1:4420";
 const require = createRequire(import.meta.url);
+const devUserData =
+  process.env.MULTIAGENT_ELECTRON_USER_DATA ||
+  path.join(
+    process.env.LOCALAPPDATA || os.tmpdir(),
+    "com.jintae.multiagent.electron.dev"
+  );
 const electronPath = require("electron");
 const viteBin = path.join(
   path.dirname(require.resolve("vite/package.json")),
@@ -65,6 +72,9 @@ try {
     env: {
       ...process.env,
       MULTIAGENT_DEV_URL: devUrl,
+      // Chromium localStorage/LevelDB cannot be shared safely by two Electron
+      // processes. Workspace registries still merge through storage-export.json.
+      MULTIAGENT_ELECTRON_USER_DATA: devUserData,
       // Distinct server ports so the dev app never collides with an installed
       // (tray-resident) instance holding the defaults — connect to these in dev.
       MULTIAGENT_REMOTE_PORT: process.env.MULTIAGENT_REMOTE_PORT || "18900",

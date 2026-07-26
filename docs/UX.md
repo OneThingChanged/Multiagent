@@ -140,6 +140,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - **Staged / Changes** groups: row hover shows `+`/`−` (stage/unstage) and `↺` (Discard) buttons. Partial staging (`MM`) shows on both sides
 - **Discard**: after a confirmation dialog — modified/deleted (M/D) are restored to the last commit state via `git restore`, untracked (U) goes to the trash, staged-new (A) is unstaged then trashed. May fail if the file is locked by another program (e.g., Unreal Editor)
 - Per-file `+added/−deleted` line counts and status colors, with the 8 most recent commits at the bottom
+- **Right-click context menu**: open / file history / external diff / **reveal in Explorer** / stage-unstage / commit (this file only) / discard / file history popup
 - Refreshes immediately after git actions + 10s polling. Non-repo/git-missing shows guide text. Push is unsupported (use the terminal)
 
 ### File Tree Context Menu
@@ -202,13 +203,13 @@ Setting values are stored in localStorage and local JSON, persisting to the next
 - **EXTERNAL PORTS**: remaining unattributed listeners shown in a collapsed section
 - `0.0.0.0`/`::` wildcard binds are shown as `localhost`. Both IPv4+IPv6 collected, max 200
 
-## Window Close (X button)
+## Window Close / Full Exit
 
-- Clicking close does not exit immediately; the backend blocks once
-- Automatically sends `/quit\r` to all running Codex/Claude agents
-- Waits 2 seconds, capturing the resume token (`codex resume <uuid>`) Codex prints, saved to localStorage
-- Then actually closes the window
-- Next app run → click that agent in the sidebar → starts automatically with `codex resume <token>` → continues the previous session
+- In Electron, clicking **X hides the main window to the system tray**; PTYs keep running and no resume is needed. Launching the app again activates the existing process instead of creating a second instance
+- **Tray → Exit**, an ordinary relaunch, and an updater install all run the same graceful-save handshake
+- The renderer records every running agent ID, saves the workspace/scrollback, and sends `/quit\r` to running Codex/Claude sessions before the process exits
+- An updater install starts only after that save handshake completes. If the renderer does not answer, the main process uses a 5-second fallback; if launching the installer fails, the app returns to its usable state
+- Next app run shows **Reopen previous sessions**. Confirming it starts the saved agents with `codex resume <id>` / `claude --resume <id>`
 - See [RESUME.md](RESUME.md) for full behavior and limits
 ## Keyboard / Copy / Paste / Zoom
 

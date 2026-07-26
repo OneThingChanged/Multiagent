@@ -113,7 +113,6 @@ export async function buildSpawnArgs(
       const candidateSessionId = pinnedSessionId ?? agent.lastSessionId ?? null;
       let sessionId: string | null = null;
       if (
-        candidateSessionId &&
         agent.folder &&
         (agent.aiToolId === "codex" || agent.aiToolId === "claude")
       ) {
@@ -121,17 +120,20 @@ export async function buildSpawnArgs(
           const resolved = await invoke<string | null>("resolve_cli_session", {
             aiToolId: agent.aiToolId,
             folder: agent.folder,
+            agentId: agent.id,
+            // Kept for the Tauri transcript matcher; Electron uses agentId.
             agentName: agent.name,
             preferredSessionId: candidateSessionId,
           });
-          sessionId = resolved ?? null;
+          // A pinned group must never silently start a different conversation.
+          sessionId = resolved ?? pinnedSessionId ?? null;
           if (!pinnedSessionId && agent.lastSessionId !== sessionId) {
             setAgentSessionId(agent.id, sessionId);
           }
         } catch {
-          if (!pinnedSessionId && agent.lastSessionId) {
-            setAgentSessionId(agent.id, null);
-          }
+          // Transcript lookup is a safety check, not permission to discard a
+          // known-good resume target on a temporary filesystem/IPC failure.
+          sessionId = candidateSessionId;
         }
       }
       if (sessionId) {

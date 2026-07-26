@@ -143,3 +143,17 @@ it("graceful quit writes the provider command and keeps the session alive", () =
   expect(pty.kill).not.toHaveBeenCalled();
   expect(service.has("agent-1")).toBe(true);
 });
+
+it("reports the live id set for crash-safe reopen journaling", () => {
+  const onSessionsChanged = vi.fn();
+  const service = new TerminalSessionService({ onSessionsChanged });
+  register(service, "agent-1");
+  register(service, "agent-2");
+  service.close("agent-1", "sleep");
+
+  expect(onSessionsChanged.mock.calls.map(([event]) => event)).toEqual([
+    { reason: "spawn", ids: ["agent-1"] },
+    { reason: "spawn", ids: ["agent-1", "agent-2"] },
+    { reason: "sleep", ids: ["agent-2"] },
+  ]);
+});

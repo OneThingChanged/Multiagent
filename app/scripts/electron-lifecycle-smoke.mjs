@@ -65,10 +65,13 @@ async function run(name, envName, marker, timeoutMs = 12_000) {
       // success signal in portable mode. The smoke environment itself closes
       // the app only after the renderer/security scenario completes.
       const variantMarker = `variant=${company ? "company" : "standard"}`;
+      const packagedResourcesHealthy =
+        portable || !output.includes("[electron] tray init failed");
       if (
         code === 0 &&
         (portable || output.includes(marker)) &&
-        (portable || output.includes(variantMarker))
+        (portable || output.includes(variantMarker)) &&
+        packagedResourcesHealthy
       ) resolve();
       else reject(new Error(`${name} failed (${code})\n${output}`));
     });

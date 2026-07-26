@@ -23,7 +23,9 @@ import electronUpdater from "electron-updater";
 import ipcContract from "./ipc-contract.cjs";
 import runtimeVariantModule from "./runtime-variant.cjs";
 import { createTerminalHandlers } from "./handlers/terminal-handlers.mjs";
+import { CloseCoordinator } from "./services/close-coordinator.mjs";
 import { HookService } from "./services/hook-service.mjs";
+import { ReopenJournal } from "./services/reopen-journal.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import {
   CodexScrollbackFilter,
@@ -74,6 +76,9 @@ const closeSmoke = process.env.MULTIAGENT_ELECTRON_CLOSE_SMOKE === "1" ||
   process.argv.includes("--multiagent-close-smoke");
 const securitySmoke = process.env.MULTIAGENT_ELECTRON_SECURITY_SMOKE === "1" ||
   process.argv.includes("--multiagent-security-smoke");
+const singleInstanceSmoke =
+  process.env.MULTIAGENT_ELECTRON_SINGLE_INSTANCE_SMOKE === "1" ||
+  process.argv.includes("--multiagent-single-instance-smoke");
 const iconPath = path.join(appRoot, "src-tauri", "icons", "icon.ico");
 const packagedRendererUrl = pathToFileURL(path.join(appRoot, "dist", "index.html")).href;
 const MAX_DOC_FILES = 500;
@@ -143,7 +148,7 @@ let petWindow = null;
 /** @type {import('electron').Tray | null} */
 let tray = null;
 let forceClosing = false;
-let closeFallback = null;
+let closeCoordinator = null;
 let closeSmokeStartedAt = null;
 /** @type {Map<number, {secondary_window: boolean, open_agent_id: string | null, ready: boolean}>} */
 const runtimeByWebContents = new Map();
@@ -158,6 +163,19 @@ const terminalSessions = new TerminalSessionService({
   },
   broadcastExit(payload) {
     sendEventToAll("pty:exit", payload);
+  },
+  onSessionsChanged({ reason, ids }) {
+    // Preserve the last live set across app shutdown. Normal per-session exits
+    // keep the journal current; app-quit closes must not erase the reopen set.
+    // Provider `/quit` may also produce a fast natural exit while the renderer
+    // is saving; keep the pre-close journal in that case.
+    if (reason !== "app-quit" && !closeCoordinator?.isPending()) {
+      try {
+        reopenJournal.write(ids);
+      } catch (error) {
+        console.warn("[electron] reopen journal write failed", error);
+      }
+    }
   },
 });
 /** @type {Map<string, string>} */
@@ -186,6 +204,32 @@ const transcriptMissUntil = new Map();
 app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", userDataOverride);
+// Production instances share localStorage, hook files, and session ownership.
+// A second process would race those stores and can make resume appear broken.
+// electron:dev uses a separate userData profile, so it can run beside the
+// installed app while still enforcing one process per profile.
+const singleInstanceLockAcquired = app.requestSingleInstanceLock({
+  variant: runtimeVariant.id,
+});
+if (!singleInstanceLockAcquired) {
+  forceClosing = true;
+  // Exit immediately before this losing instance opens SQLite or hook files.
+  app.exit(0);
+} else {
+  app.on("second-instance", () => {
+    if (singleInstanceSmoke) {
+      console.log("[electron-smoke] MULTIAGENT_ELECTRON_SINGLE_INSTANCE_OK");
+      // Keep the owner alive long enough for the losing process to finish its
+      // lock request and exit; closing synchronously can release the lock mid-call.
+      setTimeout(() => closeEverything(), 750);
+    } else {
+      showMainWindow();
+    }
+  });
+}
+const reopenJournal = new ReopenJournal(
+  path.join(app.getPath("userData"), "electron-reopen-state.json")
+);
 if (process.platform === "win32") {
   app.setAppUserModelId(runtimeVariant.appUserModelId);
 }
@@ -389,6 +433,22 @@ autoUpdater.on("error", (error) => {
 });
 autoUpdater.on("update-downloaded", (info) => {
   updaterLifecycle.record("update-downloaded", info?.version ?? null);
+});
+closeCoordinator = new CloseCoordinator({
+  onRequest() {
+    sendEventToAll("app:close-requested", null);
+  },
+  onComplete(action, trigger) {
+    completeCloseAction(action, trigger);
+  },
+  onFailure(error, action) {
+    console.error(`[electron] ${action} close action failed`, error);
+    sendEventToAll("app:close-cancelled", {
+      action,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    showMainWindow();
+  },
 });
 
 const diagnosticsService = new DiagnosticsService({
@@ -663,7 +723,9 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
       sendEventToAll("sessions-reattached", { agentIds: released });
     }
   });
-  if (!bridgeSmoke) win.once("ready-to-show", () => win.show());
+  if (!bridgeSmoke && !singleInstanceSmoke) {
+    win.once("ready-to-show", () => win.show());
+  }
 
   if (!secondary) {
     // Closing the main window hides it to the system tray instead of quitting;
@@ -672,11 +734,6 @@ function createAppWindow({ secondary = false, openAgentId = null } = {}) {
     win.on("close", (event) => {
       if (forceClosing) return;
       event.preventDefault();
-      // Lifecycle smoke drives a real close via mainWindow.close(); honor it.
-      if (closeSmokeStartedAt !== null) {
-        closeEverything();
-        return;
-      }
       win.hide();
       if (process.platform === "win32") win.setSkipTaskbar(true);
     });
@@ -804,10 +861,7 @@ function allocateRemotePort(id) {
 function closeEverything() {
   if (forceClosing) return;
   forceClosing = true;
-  if (closeFallback) {
-    clearTimeout(closeFallback);
-    closeFallback = null;
-  }
+  closeCoordinator?.cancel();
   terminalSessions.closeAll("app-quit");
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.destroy();
@@ -818,15 +872,32 @@ function closeEverything() {
   app.quit();
 }
 
+function completeCloseAction(action, trigger) {
+  if (action === "install-update") {
+    forceClosing = true;
+    updaterLifecycle.record("install-requested", trigger);
+    updaterLifecycle.armInstallWatchdog();
+    try {
+      autoUpdater.quitAndInstall(false, true);
+      return;
+    } catch (error) {
+      updaterLifecycle.clearInstallWatchdog();
+      updaterLifecycle.record("install-launch-failed", error);
+      forceClosing = false;
+      throw error;
+    }
+  }
+  if (action === "relaunch") {
+    app.relaunch();
+  }
+  closeEverything();
+}
+
 /** Ask the renderer to save running sessions, then close. Falls back to a hard
  *  close if the renderer does not call confirm_close within the timeout. */
-function requestGracefulClose() {
-  if (forceClosing) return;
-  sendEventToAll("app:close-requested", null);
-  closeFallback = setTimeout(() => {
-    closeFallback = null;
-    closeEverything();
-  }, 5000);
+function requestGracefulClose(action = "quit") {
+  if (forceClosing) return false;
+  return closeCoordinator?.request(action) ?? false;
 }
 
 function findExecutableOnPath(name) {
@@ -2776,7 +2847,7 @@ async function importTauriStorage() {
 const terminalHandlers = createTerminalHandlers({
   terminalSessions,
   spawnPty,
-  closeEverything,
+  confirmClose: () => closeCoordinator?.confirm() ?? false,
 });
 
 async function invokeCommand(event, command, rawArgs) {
@@ -2805,7 +2876,7 @@ async function invokeCommand(event, command, rawArgs) {
         setTimeout(() => {
           if (!mainWindow || mainWindow.isDestroyed()) return;
           closeSmokeStartedAt = Date.now();
-          mainWindow.close();
+          requestGracefulClose("quit");
         }, 100);
       }
       return null;
@@ -3016,6 +3087,11 @@ async function invokeCommand(event, command, rawArgs) {
       return persistStorageSnapshot(args.snapshot);
     case "import_tauri_storage":
       return importTauriStorage();
+    case "reopen_state_get":
+      return reopenJournal.load();
+    case "reopen_state_clear":
+      reopenJournal.clear();
+      return null;
     case "read_audio_file":
       return [...(await fsPromises.readFile(resolveExistingPath("", args.path)))];
     case "resolve_cli_session":
@@ -3024,6 +3100,9 @@ async function invokeCommand(event, command, rawArgs) {
         folder: args.folder,
         preferredSessionId: args.preferredSessionId,
         agentId: args.agentId,
+        // Automatic startup must not attach a different agent's newest
+        // conversation merely because both agents share the same folder.
+        allowFolderFallback: false,
       });
     case "resolve_cline_session":
       return resolveClineSession(args.folder);
@@ -3033,6 +3112,7 @@ async function invokeCommand(event, command, rawArgs) {
         folder: args.folder,
         preferredSessionId: null,
         agentId: args.agentId,
+        allowFolderFallback: true,
       });
     case "sync_remote_agents":
       remoteService.syncAgents(args.agents);
@@ -3144,22 +3224,11 @@ async function invokeCommand(event, command, rawArgs) {
       return downloadElectronUpdate();
     case "relaunch":
       if (updateDownloaded) {
-        forceClosing = true;
-        updaterLifecycle.record("install-requested");
-        updaterLifecycle.armInstallWatchdog();
-        try {
-          autoUpdater.quitAndInstall(false, true);
-          return null;
-        } catch (error) {
-          updaterLifecycle.clearInstallWatchdog();
-          updaterLifecycle.record("install-launch-failed", error);
-          forceClosing = false;
-          throw error;
-        }
+        requestGracefulClose("install-update");
+        return null;
       }
       updaterLifecycle.record("relaunch-requested");
-      app.relaunch();
-      requestGracefulClose();
+      requestGracefulClose("relaunch");
       return null;
     default:
       throw new Error(`Electron에서 아직 지원하지 않는 command: ${command}`);
@@ -3196,7 +3265,17 @@ ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
   sendEventToAll(name, payload);
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (
+    singleInstanceLockAcquired &&
+    !forceClosing &&
+    mainWindow &&
+    !mainWindow.isDestroyed()
+  ) {
+    event.preventDefault();
+    requestGracefulClose("quit");
+    return;
+  }
   forceClosing = true;
   if (tray && !tray.isDestroyed()) {
     tray.destroy();
@@ -3231,7 +3310,7 @@ app.on("activate", () => {
 console.log(
   `[electron] boot ${app.getVersion()} variant=${runtimeVariant.id} devUrl=${devUrl ?? "production"}`
 );
-void app.whenReady().then(async () => {
+if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
   console.log("[electron] ready");
   // Custom top bar replaces the native File/Edit/View/Window menu.
   Menu.setApplicationMenu(null);

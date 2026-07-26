@@ -106,6 +106,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "export_tauri_storage",
   "import_tauri_storage",
   "persist_storage_snapshot",
+  "reopen_state_get",
+  "reopen_state_clear",
   "relaunch",
 ]);
 
@@ -120,6 +122,7 @@ const DELIVERED_EVENTS = Object.freeze([
   "remote:restart-session",
   "chat:changed",
   "app:close-requested",
+  "app:close-cancelled",
   "agent:hook-event",
   "native-notification:clicked",
   "update:progress",

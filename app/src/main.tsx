@@ -2,7 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DesktopPetPage } from "./components/DesktopPetPage";
-import { syncSharedStorageBeforeRender } from "./platform/storageMigration";
+import {
+  syncReopenStateBeforeRender,
+  syncSharedStorageBeforeRender,
+} from "./platform/storageMigration";
 
 const desktopPet =
   (window as Window & { __MULTIAGENT_DESKTOP_PET__?: boolean })
@@ -10,7 +13,12 @@ const desktopPet =
   new URLSearchParams(window.location.search).has("desktopPet");
 
 async function render() {
-  if (!desktopPet) await syncSharedStorageBeforeRender();
+  if (!desktopPet) {
+    await Promise.all([
+      syncSharedStorageBeforeRender(),
+      syncReopenStateBeforeRender(),
+    ]);
+  }
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       {desktopPet ? <DesktopPetPage /> : <App />}

@@ -273,4 +273,46 @@ describe("Electron session resolution", () => {
       service.resolve({ aiToolId: "codex", folder, preferredSessionId: "missing" })
     ).resolves.toBe(latestId);
   });
+
+  it("uses the per-agent hook index without falling into another folder session", async () => {
+    const baseDir = temporaryDirectory();
+    const transcripts = path.join(baseDir, "transcripts");
+    await fsPromises.mkdir(transcripts, { recursive: true });
+    const folder = path.join(baseDir, "project");
+    await fsPromises.mkdir(folder);
+    const otherId = "33333333-3333-4333-8333-333333333333";
+    const notedId = "44444444-4444-4444-8444-444444444444";
+    await fsPromises.writeFile(
+      path.join(transcripts, `${otherId}.jsonl`),
+      `${JSON.stringify({ type: "session_meta", payload: { id: otherId, cwd: folder } })}\n`
+    );
+
+    const service = new SessionService(path.join(baseDir, "state"));
+    service.transcriptRoots = () => [transcripts];
+    await service.noteHook({
+      id: "agent-a",
+      event: "session-start",
+      session_id: notedId,
+      cwd: folder,
+    });
+
+    await expect(
+      service.resolve({
+        aiToolId: "codex",
+        folder,
+        preferredSessionId: null,
+        agentId: "agent-a",
+        allowFolderFallback: false,
+      })
+    ).resolves.toBe(notedId);
+    await expect(
+      service.resolve({
+        aiToolId: "codex",
+        folder,
+        preferredSessionId: null,
+        agentId: "unknown-agent",
+        allowFolderFallback: false,
+      })
+    ).resolves.toBeNull();
+  });
 });

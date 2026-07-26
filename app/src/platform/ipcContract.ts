@@ -36,7 +36,8 @@ export type RuntimeCommand =
   | "ssh_password_clear" | "ssh_password_has" | "ssh_test"
   | "get_ssh_public_key" | "generate_ssh_key" | "check_for_update"
   | "download_and_install_update" | "export_tauri_storage"
-  | "import_tauri_storage" | "persist_storage_snapshot" | "relaunch";
+  | "import_tauri_storage" | "persist_storage_snapshot"
+  | "reopen_state_get" | "reopen_state_clear" | "relaunch";
 
 export type RuntimeEventName =
   | "pty:data" | "pty:exit" | "desktop-pet:update"
@@ -44,7 +45,7 @@ export type RuntimeEventName =
   | "desktop-pet:close-requested" | "remote:access-request"
   | "remote:restart-session"
   | "chat:changed"
-  | "app:close-requested" | "agent:hook-event"
+  | "app:close-requested" | "app:close-cancelled" | "agent:hook-event"
   | "native-notification:clicked" | "update:progress"
   | "session-detached" | "sessions-reattached";
 
