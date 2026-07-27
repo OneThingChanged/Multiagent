@@ -27,10 +27,11 @@
   - `Shift+wheel` is 3x.
 
 ### Codex + xterm.js Scrollback Deletion Mitigation
-- On Windows xterm.js hosts, the Codex TUI emits `CSI 2J`/`CSI 3J` on the normal buffer, an upstream issue where the session JSONL is fine but the terminal's previous screen disappears. Related reports: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
+- On some Windows ConPTY builds, Codex normal-buffer repaint output does not increase xterm native scrollback, so the session JSONL remains intact while the terminal's previous screen disappears. Related reports: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
 - Codex is automatically launched with `--no-alt-screen` unless the session explicitly enables **Alt-screen mode**. The normal buffer is required for xterm native scrollback, `Ctrl+F`, and drag copy.
-- A Codex-only shadow xterm filter removes `CSI 3J` (scrollback purge), moves valid viewport rows into native scrollback before `CSI 2J`, and compares `ESC[?2026h`/`ESC[?2026l` repaint frames to preserve only rows shifted off the top. Claude and plain Shell output remain unmodified.
-- Filter state follows terminal resize before PTY resize and is preserved across ANSI/frame sequences split between PTY chunks. The shadow terminal is disposed when the PTY exits.
+- Windows local Codex uses WinPTY and matching xterm WinPTY compatibility with pass-through output. This preserves scrollback and ANSI styling without `tui.raw_output_mode=true` or `ZELLIJ=1`.
+- SSH Codex remains on ConPTY and uses the Codex-only shadow filter: it removes `CSI 3J`, preserves the viewport before `CSI 2J`, and detects rows shifted by synchronized repaint frames. Claude and plain Shell output remain unmodified.
+- Filter state follows terminal resize before PTY resize and is preserved across ANSI/frame sequences split between PTY chunks. The shadow terminal is disposed when its PTY exits.
 - The setting is not retroactive to a running Codex process. After updating or changing **Alt-screen mode**, deactivate the session and reopen it. A normal Codex child command line should contain `--no-alt-screen`.
 - **Alt-screen mode is an explicit opt-out**, not an additional scrollback fix. It lets Codex own an alternate screen and use its internal history/`ctrl+t`, but the conversation is then intentionally absent from xterm native scrollback.
 - The canonical conversation remains Codex's JSONL/resume data. The filter protects the visible terminal history but does not turn xterm scrollback into permanent transcript storage.

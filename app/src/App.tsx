@@ -107,6 +107,7 @@ import {
   persistStorageSnapshot,
 } from "./platform/storageMigration";
 import { isElectronRuntime } from "./platform/electronBridge";
+import { windowsPtyBackendForAgent } from "./lib/ptyBackend";
 import type {
   SpawnTerminalResult,
   TerminalDataPayload,
@@ -2809,7 +2810,13 @@ function App() {
           handleOpenImagePath,
           handleOpenFolderPath,
           handleOpenTerminalPath,
-          { normalizeSshCursorKeys: !!agent.sshHostId }
+          {
+            normalizeSshCursorKeys: !!agent.sshHostId,
+            windowsPtyBackend: windowsPtyBackendForAgent(
+              agent.aiToolId,
+              agent.sshHostId,
+            ),
+          }
         );
         termsRef.current.set(agentId, entry);
       }

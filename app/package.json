@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.74",
+  "version": "0.5.75",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.mjs",
     "electron:smoke": "electron electron/pty-smoke.mjs",
+    "electron:winpty-smoke": "electron electron/winpty-smoke.mjs",
     "electron:bridge-smoke": "node scripts/electron-bridge-smoke.mjs",
     "electron:lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs",
     "electron:single-instance-smoke": "node scripts/electron-single-instance-smoke.mjs",

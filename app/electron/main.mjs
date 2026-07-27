@@ -33,6 +33,10 @@ import {
   PassThroughTerminalFilter,
 } from "./services/terminal-stream.mjs";
 import { TerminalSessionService } from "./services/terminal-session-service.mjs";
+import {
+  resolvePtyBackend,
+  TERMINAL_FILTER_KIND,
+} from "./services/pty-backend.mjs";
 import { terminateWindowsProcessTree } from "./services/process-tree.mjs";
 import {
   buildInteractiveSshArgs,
@@ -1278,8 +1282,13 @@ async function spawnPty(args, event) {
   }
   const ptyCols = asPositiveInt(args.cols, 120);
   const ptyRows = asPositiveInt(args.rows, 30);
+  const ptyBackend = resolvePtyBackend({
+    platform: process.platform,
+    aiToolId,
+    hasSsh: Boolean(ssh),
+  });
   const outputFilter =
-    aiToolId === "codex"
+    ptyBackend.filterKind === TERMINAL_FILTER_KIND.CODEX_SCROLLBACK
       ? new CodexScrollbackFilter(ptyRows, ptyCols)
       : new PassThroughTerminalFilter();
   let processHandle;
@@ -1297,7 +1306,7 @@ async function spawnPty(args, event) {
         MULTIAGENT_PORT: String(hookService.port || ""),
         MULTIAGENT_TOKEN: hookService.token || "",
       },
-      useConpty: true,
+      useConpty: ptyBackend.useConpty,
     });
   } catch (error) {
     outputFilter.dispose();

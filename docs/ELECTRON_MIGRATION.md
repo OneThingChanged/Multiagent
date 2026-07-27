@@ -64,13 +64,13 @@ Korean prompt survives to the HTTP event.
 
 - node-pty spawn/write/resize/kill and packaged native module round-trip verified
 - Codex runs with `--no-alt-screen` by default so its conversation uses xterm's normal
-  buffer. A Codex-only shadow xterm filter removes `CSI 3 J`, advances the current
-  viewport into native scrollback before `CSI 2 J`, and compares synchronized-output
-  repaint frames to preserve only rows shifted off the top. Claude and plain Shell output
-  stays pass-through
+  buffer. Windows local Codex uses WinPTY with a matching renderer backend and pass-through
+  output; SSH Codex keeps ConPTY plus the Codex shadow scrollback filter. Claude and plain
+  Shell keep ConPTY with pass-through output
 - The shadow filter buffers split ANSI/synchronized-frame boundaries, follows terminal
-  resize before the PTY resize is delivered, and is disposed with its PTY. The packaged
-  app explicitly includes `@xterm/xterm`, which is also used by the Electron main process
+  resize before the PTY resize is delivered, and is disposed with its PTY. It remains the
+  fallback for Codex paths that do not use local Windows WinPTY. The packaged app includes
+  both `@xterm/xterm` and node-pty's WinPTY native files
 - A per-PTY 512K-char bounded sequence model in main; incrementally replays between `baseSequence` and `nextSequence`
 - Only visible renderers subscribe to PTY output. Pane/tab switches and Screen moves detach/attach, and hidden session output accumulates only in the main model without growing renderer queues
 - Live output arriving during attach is queued, then deduplicated against the replay sequence. If the buffer was truncated or a stale process cursor arrives, recovery uses the retained reset snapshot

@@ -62,6 +62,7 @@ import {
   beginTerminalSync,
   completeTerminalSync,
 } from "../lib/terminalDelivery";
+import { windowsPtyBackendForAgent } from "../lib/ptyBackend";
 
 function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
@@ -181,7 +182,13 @@ export function PaneSlot({
         ctx.onOpenImagePath,
         ctx.onOpenFolderPath,
         ctx.onOpenTerminalPath,
-        { normalizeSshCursorKeys: !!activeAgent.sshHostId }
+        {
+          normalizeSshCursorKeys: !!activeAgent.sshHostId,
+          windowsPtyBackend: windowsPtyBackendForAgent(
+            activeAgent.aiToolId,
+            activeAgent.sshHostId,
+          ),
+        }
       );
       termsRef.current.set(agentId, entry);
       freshlyCreated = true;

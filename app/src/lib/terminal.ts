@@ -12,6 +12,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import type { DropZone, TerminalEntry } from "../types";
 import { loadAppTheme, type AppThemeId } from "./appTheme";
+import type { WindowsPtyBackend } from "./ptyBackend";
 
 const LS_TERMINAL_FONT_SIZE = "multiagent.terminalFontSize.v1";
 const DEFAULT_TERMINAL_FONT_SIZE = 13;
@@ -237,6 +238,7 @@ function isImeCompositionKey(event: KeyboardEvent) {
 
 type CreateEntryOptions = {
   normalizeSshCursorKeys?: boolean;
+  windowsPtyBackend?: WindowsPtyBackend;
 };
 
 function normalizedCursorKeyData(event: KeyboardEvent) {
@@ -935,6 +937,7 @@ export function createEntry(
   options: CreateEntryOptions = {}
 ): TerminalEntry {
   const isWindows = navigator.userAgent.includes("Windows");
+  const windowsPtyBackend = options.windowsPtyBackend ?? "conpty";
   const term = new Terminal({
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
     fontSize: loadTerminalFontSize(),
@@ -944,7 +947,7 @@ export function createEntry(
     scrollback: 5000,
     convertEol: false,
     windowsPty: isWindows
-      ? { backend: "conpty", buildNumber: 22000 }
+      ? { backend: windowsPtyBackend, buildNumber: 22000 }
       : undefined,
     // Open xterm's natively-parsed OSC 8 hyperlinks in the browser (the
     // capture-phase handler in PaneSlot covers the mouse-tracking case).
