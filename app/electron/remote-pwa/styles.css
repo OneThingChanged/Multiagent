@@ -26,7 +26,7 @@ button { cursor: pointer; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
-.app-shell { min-height: 100vh; }
+.app-shell { min-height: 100vh; min-height: 100dvh; }
 .topbar {
   position: sticky;
   top: 0;
@@ -357,6 +357,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .session-offline span { min-width: 0; }
 .session-offline .send-button { flex: 0 0 auto; }
 .chat-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 26px 0; }
+.chat-error {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  margin: auto 0;
+  padding: 22px 16px;
+  border: 1px solid rgba(91, 188, 255, 0.24);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(91, 188, 255, 0.05);
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.chat-error strong { color: var(--text); font-size: 13px; }
+.chat-error-actions { display: flex; gap: 7px; margin-top: 5px; }
+.chat-error-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: #cfe0ec;
+  background: rgba(9, 20, 30, 0.9);
+  font-size: 11px;
+  font-weight: 700;
+}
+.chat-error-actions button:first-child { border-color: rgba(80, 223, 208, 0.35); color: var(--cyan); }
 .chat-diff { margin: 4px 0 2px; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.45; }
 .chat-diff-line { display: block; white-space: pre; padding-right: 8px; }
 .chat-diff-gutter { display: inline-block; width: 1.4em; text-align: center; opacity: 0.7; user-select: none; }
@@ -445,7 +472,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 }
 
 @media (max-width: 800px) {
-  body { padding-bottom: calc(62px + env(safe-area-inset-bottom)); }
+  html, body { min-height: 100dvh; }
+  body {
+    padding-bottom: calc(62px + env(safe-area-inset-bottom));
+    overscroll-behavior-y: none;
+  }
   .topbar { grid-template-columns: 1fr auto; min-height: 54px; padding: 7px 10px; }
   .brand-mark, .brand > div span { display: none; }
   .mobile-menu-button { display: block; }
@@ -479,6 +510,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   .sidebar-backdrop.visible { display: block; }
   .content-pane { min-height: calc(100vh - 192px); }
   .monitor-view, .screen-view, .documents-view, .session-view { padding: 13px; }
+  .app-shell:not([data-view="monitor"]) .monitor-strip { display: none; }
+  .app-shell[data-view="screen"] .workspace,
+  .app-shell[data-view="documents"] .workspace {
+    min-height: calc(100dvh - 124px - env(safe-area-inset-bottom));
+  }
   .view-head { min-height: 42px; margin-bottom: 11px; }
   .view-head h2 { font-size: 18px; }
   .monitor-board { grid-template-columns: 1fr; gap: 8px; overflow: visible; }
@@ -503,6 +539,160 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   .document-html { min-height: 60vh; }
   .terminal-output { font-size: 9px; }
   .output-panel > pre { min-height: 280px; max-height: none; font-size: 10px; }
+
+  /* Session is the primary phone workflow. Remove the dashboard chrome and
+     keep the conversation, terminal and composer in one dynamic-height view. */
+  .app-shell[data-view="session"] {
+    height: calc(100dvh - 62px - env(safe-area-inset-bottom));
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell[data-view="session"] .workspace {
+    height: calc(100dvh - 124px - env(safe-area-inset-bottom));
+    min-height: 0;
+    margin: 0 6px 8px;
+    overflow: hidden;
+  }
+  .app-shell[data-view="session"] .content-pane,
+  .app-shell[data-view="session"] .session-view {
+    height: 100%;
+    min-height: 0;
+  }
+  .app-shell[data-view="session"] .session-view {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+  .app-shell[data-view="session"] .session-head {
+    flex: 0 0 auto;
+    min-height: 54px;
+    margin: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(9, 21, 32, 0.96);
+  }
+  .app-shell[data-view="session"] .session-title {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 2px 8px;
+    min-width: 0;
+  }
+  .app-shell[data-view="session"] .session-title .status-chip {
+    grid-row: 1 / span 2;
+  }
+  .app-shell[data-view="session"] .session-title h2 {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+  }
+  .app-shell[data-view="session"] .session-title p {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+  }
+  .app-shell[data-view="session"] .session-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 7px;
+    min-height: 0;
+    padding: 8px;
+    overflow: hidden;
+  }
+  .app-shell[data-view="session"] .session-mode {
+    flex: 0 0 auto;
+    min-height: 42px;
+  }
+  .app-shell[data-view="session"] .session-mode button {
+    min-height: 34px;
+    padding: 6px;
+  }
+  .app-shell[data-view="session"] .session-offline,
+  .app-shell[data-view="session"] .question-panel,
+  .app-shell[data-view="session"] .context-panel {
+    flex: 0 0 auto;
+  }
+  .app-shell[data-view="session"] .question-panel {
+    max-height: 32dvh;
+    overflow-y: auto;
+  }
+  .app-shell[data-view="session"] .context-panel {
+    max-height: 72px;
+    overflow-y: auto;
+  }
+  .app-shell[data-view="session"] .chat-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    padding: 5px 3px 12px;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .app-shell[data-view="session"] .output-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .app-shell[data-view="session"] .output-panel[hidden] { display: none; }
+  .app-shell[data-view="session"] .terminal-mount {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 5px;
+  }
+  .app-shell[data-view="session"] .terminal-mount .xterm,
+  .app-shell[data-view="session"] .terminal-mount .xterm-viewport,
+  .app-shell[data-view="session"] .terminal-mount .xterm-screen {
+    height: 100%;
+  }
+  .app-shell[data-view="session"] .output-panel > pre {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+  .app-shell[data-view="session"] .composer {
+    flex: 0 0 auto;
+    padding: 8px;
+    border-radius: 10px;
+  }
+  .app-shell[data-view="session"] .composer label,
+  .app-shell[data-view="session"] .composer-foot > span { display: none; }
+  .app-shell[data-view="session"] .composer textarea {
+    min-height: 54px;
+    max-height: 26dvh;
+    resize: none;
+    font-size: 14px;
+  }
+  .app-shell[data-view="session"] .composer-ac { max-height: 24dvh; }
+  .app-shell[data-view="session"] .composer-queue { max-height: 80px; }
+  .app-shell[data-view="session"] .composer-keys {
+    flex-wrap: nowrap;
+    margin: 6px -2px 0;
+    padding: 0 2px 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .app-shell[data-view="session"] .composer-keys::-webkit-scrollbar { display: none; }
+  .app-shell[data-view="session"] .composer-keys button {
+    flex: 0 0 auto;
+    min-height: 36px;
+  }
+  .app-shell[data-view="session"] .composer-foot {
+    justify-content: flex-end;
+    margin-top: 6px;
+  }
+  .app-shell[data-view="session"] .send-button { min-height: 38px; padding: 0 20px; }
+  .app-shell[data-view="session"] .chat-user { max-width: 92%; font-size: 14px; }
+  .app-shell[data-view="session"] .chat-md { font-size: 14px; line-height: 1.68; }
+  .app-shell[data-view="session"] .chat-work > summary,
+  .app-shell[data-view="session"] .chat-tool > summary { min-height: 42px; }
+
   .mobile-nav {
     position: fixed;
     z-index: 60;
@@ -510,7 +700,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     bottom: calc(7px + env(safe-area-inset-bottom));
     left: 8px;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     min-height: 52px;
     padding: 5px;
     border: 1px solid var(--line-strong);
@@ -519,7 +709,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     backdrop-filter: blur(18px);
     box-shadow: var(--shadow);
   }
-  .mobile-nav button { position: relative; display: grid; place-items: center; gap: 1px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 8px; }
+  .mobile-nav button { position: relative; display: grid; min-width: 0; min-height: 42px; place-items: center; gap: 1px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 8px; }
   .mobile-nav button > span { font-size: 14px; }
   .mobile-nav button.active { color: var(--cyan); background: rgba(80, 223, 208, 0.07); }
   .mobile-nav i { position: absolute; top: 2px; left: calc(50% + 9px); min-width: 16px; padding: 2px 4px; border-radius: 999px; color: #06101a; background: var(--blue); font-style: normal; font-size: 8px; font-weight: 900; }

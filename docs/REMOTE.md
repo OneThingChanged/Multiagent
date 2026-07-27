@@ -20,10 +20,11 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 ## Remote Screen Layout
 
 - **Monitor**: separates working · needs-answer · done · waiting · inactive sessions into lanes, with status counts at a glance
-- **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts, showing multiple terminals at once
-- **Sessions**: per-project session list with status filters and search; the selected terminal is shown large
+- **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts. Desktop can show every pane; mobile uses pane tabs and streams only the selected terminal
+- **Sessions**: per-project session list with status filters and search; the selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
-- Mobile Screens switch to pane tabs instead of small splits, and navigation lists appear as a slide menu
+- Mobile Screens switch to pane tabs instead of small splits, navigation lists appear as a slide menu, and non-monitor views reclaim the status-summary space
+- Session detail defaults to parsed Codex/Claude chat and can switch to the live xterm terminal. Windows extended transcript paths (`\\?\C:\...`) are normalized before transcript reads
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
 - `Ctrl/⌘ + Enter` to send, copy recent output
@@ -31,7 +32,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - While the PWA is running, completion/new questions appear as service worker notifications
 - Offline, only the app shell opens; session API/input are network-only
 
-Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. Full PTY emulation, file editing, screen sharing, and a background Push server are not in the MVP.
+Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. File editing, screen sharing, and a background Push server are not in the MVP.
 
 ## HTTP Endpoints
 
@@ -43,6 +44,9 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /sw.js` | offline shell / notification service worker |
 | `GET /api/state` | projects, sessions, hooks, recent output state |
 | `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
+| `GET /api/stream?id=...` | SSE backfill and live PTY output for the xterm view |
+| `GET /api/chat?id=...` | parsed Codex/Claude transcript blocks for the chat view |
+| `POST /api/session/restart` | request activation of an inactive session |
 | `GET /api/docs?projectId=...` | list up to 500 Markdown/HTML documents under one synchronized local project |
 | `GET /api/docs/read?projectId=...&path=...` | read one Markdown/HTML document inside that project (2MB limit) |
 | `GET /auth/mode` | returns web/device mode based on OAuth config |
@@ -107,7 +111,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 5. If not the Owner, approve the approval request on the desktop.
 6. Choose **Install app / Add to Home Screen** from the browser menu and enable notification permission.
 
-The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, and **Documents** opens the local project document browser. On mobile, the monitor/screens/sessions/documents/question buttons at the bottom provide the same navigation.
+The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, and **Documents** opens the local project document browser. On mobile, the monitor/screens/sessions/documents/question buttons at the bottom provide the same navigation. Opening a Screen or Session hides the monitor summary so the selected content can use the phone's full dynamic viewport.
 
 Document browsing is local-project only. SSH project files and relative HTML assets such as external CSS/images are not transferred in this version; self-contained HTML and inline styles render normally.
 

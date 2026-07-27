@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 
 const ui = {
+  appShell: $(".app-shell"),
   connection: $("#connection"),
   updated: $("#updated"),
   workingCount: $("#workingCount"),
@@ -565,6 +566,7 @@ function renderScreenPaneTabs(screen) {
       renderScreenPaneTabs(screen);
       updateMobilePaneVisibility();
       updateScreenHeader(screen);
+      syncTerminal();
     });
     fragment.appendChild(button);
   }
@@ -1157,6 +1159,7 @@ function renderDocuments() {
 }
 
 function renderSelection() {
+  ui.appShell.dataset.view = selection.type;
   ui.monitorView.hidden = selection.type !== "monitor";
   ui.screenView.hidden = selection.type !== "screen";
   ui.documentsView.hidden = selection.type !== "documents";
@@ -1174,6 +1177,10 @@ function renderSelection() {
   ui.mobileSessionsButton.classList.toggle("active", selection.type === "session");
   ui.mobileDocumentsButton.classList.toggle("active", selection.type === "documents");
   ui.mobileQuestionsButton.classList.toggle("active", selection.type === "monitor" && activeFilter === "attention");
+  for (const button of document.querySelectorAll(".mobile-nav button")) {
+    if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
 }
 
 function closeSidebar() {
@@ -1197,7 +1204,6 @@ function selectMonitor(filter = activeFilter) {
 }
 
 function selectScreen(id) {
-  if (isMobile()) { selectMonitor(); return; } // Screen mode is PC-only
   if (!screenGroups().some((screen) => screen.id === id)) return;
   selection = { type: "screen", id };
   returnScreenId = id;
@@ -1366,8 +1372,8 @@ async function sendSelectedMessage() {
 // Each visible pane gets its own xterm mirroring the desktop terminal: raw PTY
 // output streams in over SSE and every keystroke goes straight back to the PTY.
 // The PTY size is authoritative — we never resize it, since the desktop views
-// the same session. The single session view has one terminal; PC Screen mode
-// runs one per pane. Mobile keeps Screen mode disabled (one stream at a time).
+// the same session. The single session view has one terminal; desktop Screen
+// mode runs one per pane, while mobile streams only its selected pane.
 const terminalSupported = typeof window.Terminal === "function";
 const mobileMedia = window.matchMedia("(max-width: 800px)");
 const isMobile = () => mobileMedia.matches;
@@ -1607,8 +1613,11 @@ function syncTerminal() {
       keep.add(ui.terminalMount);
     }
     if (ui.terminalLive) ui.terminalLive.hidden = !agent;
-  } else if (selection.type === "screen" && !isMobile()) {
+  } else if (selection.type === "screen") {
     for (const mount of ui.screenLayout.querySelectorAll("[data-terminal-mount]")) {
+      if (isMobile() && !mount.closest(".screen-leaf")?.classList.contains("mobile-pane-active")) {
+        continue;
+      }
       const agentId = mount.dataset.terminalMount;
       if (agentId) { attachTerminal(mount, agentId, 12); keep.add(mount); }
     }
@@ -1769,6 +1778,27 @@ function renderChat(data) {
   const frag = document.createDocumentFragment();
   if (data?.unsupported) {
     frag.appendChild(make("div", "chat-empty", "이 세션은 대화 보기를 지원하지 않습니다 (codex/claude)."));
+  } else if (data?.error) {
+    const error = make("div", "chat-error");
+    error.append(
+      make("strong", "", "대화를 불러오지 못했습니다"),
+      make("span", "", "터미널은 계속 사용할 수 있습니다. 잠시 후 다시 시도해 주세요."),
+    );
+    const actions = make("div", "chat-error-actions");
+    const retry = make("button", "", "다시 시도");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      const agent = selectedAgent();
+      if (!agent) return;
+      lastChatFetch = { id: null, at: 0 };
+      void fetchChat(agent.id);
+    });
+    const terminal = make("button", "", "터미널 보기");
+    terminal.type = "button";
+    terminal.addEventListener("click", () => setSessionViewMode("term"));
+    actions.append(retry, terminal);
+    error.appendChild(actions);
+    frag.appendChild(error);
   } else if (!blocks.length) {
     frag.appendChild(make("div", "chat-empty", data?.missing ? "아직 대화 기록이 없습니다." : "대화를 불러오는 중…"));
   } else {
@@ -1865,12 +1895,13 @@ async function fetchChat(agentId) {
   const seq = ++chatRequestSeq;
   try {
     const response = await fetch(`/api/chat?id=${encodeURIComponent(agentId)}`, { credentials: "same-origin" });
-    const data = await response.json().catch(() => ({ blocks: [] }));
+    let data = await response.json().catch(() => ({ blocks: [] }));
+    if (!response.ok) data = { blocks: [], error: true };
     if (seq !== chatRequestSeq) return; // a newer request superseded this one
     const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
     const last = blocks[blocks.length - 1];
     // Skip re-render when nothing changed so opened tool/▸ details stay open.
-    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}`;
+    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}|${data?.error ? 1 : 0}`;
     if (key === lastChatKey) return;
     lastChatKey = key;
     renderChat(data);
@@ -1913,13 +1944,19 @@ function syncSessionView() {
 }
 let lastChatStatusSig = "";
 
-// Screen mode is PC-only. On mobile, hide its nav section + bottom-nav button
-// and bounce any active Screen selection back to the Monitor.
+function setSessionViewMode(mode) {
+  sessionViewMode = mode === "term" ? "term" : "chat";
+  localStorage.setItem("multiagent.remote.sessionMode", sessionViewMode);
+  lastChatFetch = { id: null, at: 0 };
+  syncTerminal();
+  syncSessionView();
+}
+
+// Mobile Screen mode renders one pane at a time and keeps the same navigation
+// entry as desktop. Refit the selected terminal after a viewport transition.
 function applyScreenAvailability() {
-  const mobile = isMobile();
-  if (ui.screensSection) ui.screensSection.hidden = mobile;
-  if (ui.mobileScreensButton) ui.mobileScreensButton.hidden = mobile;
-  if (mobile && selection.type === "screen") selectMonitor();
+  if (ui.screensSection) ui.screensSection.hidden = false;
+  if (ui.mobileScreensButton) ui.mobileScreensButton.hidden = false;
 }
 
 async function showNotification(title, body, tag, agentId) {
@@ -2163,11 +2200,7 @@ ui.restartSessionButton?.addEventListener("click", async () => {
 ui.sessionMode?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-mode]");
   if (!button) return;
-  sessionViewMode = button.dataset.mode === "term" ? "term" : "chat";
-  localStorage.setItem("multiagent.remote.sessionMode", sessionViewMode);
-  lastChatFetch = { id: null, at: 0 }; // force an immediate chat refresh on switch
-  syncTerminal();
-  syncSessionView();
+  setSessionViewMode(button.dataset.mode);
 });
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
 setInterval(() => { void drainQueue(); }, 500);

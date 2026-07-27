@@ -49,6 +49,7 @@ import {
 import { resolveTerminalPath } from "./services/terminal-path-service.mjs";
 import { sanitizeTerminalOutput } from "./services/terminal-sanitize.mjs";
 import { parseChatTranscript, deriveTurnLifecycle } from "./services/chat-transcript.mjs";
+import { normalizeTranscriptPath } from "./services/transcript-path.mjs";
 import {
   LocalDashboardService,
   RemoteDashboardService,
@@ -306,13 +307,14 @@ const hookService = new HookService({
       });
       // Track the live transcript path / session id per agent so the chat view
       // can read the conversation for any session.
-      if (payload.transcript_path) agentTranscripts.set(payload.id, payload.transcript_path);
+      const transcriptPath = normalizeTranscriptPath(payload.transcript_path);
+      if (transcriptPath) agentTranscripts.set(payload.id, transcriptPath);
       if (payload.session_id) agentSessionIds.set(payload.id, payload.session_id);
-      if (payload.event === "done" && payload.transcript_path) {
+      if (payload.event === "done" && transcriptPath) {
         try {
           usageIndex.ingestHook(
             payload.id,
-            payload.transcript_path,
+            transcriptPath,
             payload.session_id,
             payload.cwd
           );
@@ -1472,11 +1474,19 @@ async function readChatTranscript(tool, transcriptPath) {
   const toolId = asString(tool);
   const root = chatSessionRoot(toolId);
   if (!root) throw new Error("지원하지 않는 도구입니다.");
-  const requested = asString(transcriptPath).trim();
+  const requested = normalizeTranscriptPath(asString(transcriptPath));
   if (!requested || !fs.existsSync(requested)) {
     return { blocks: [], truncated: false, missing: true };
   }
-  const resolved = fs.realpathSync(requested);
+  let resolved;
+  try {
+    resolved = fs.realpathSync(requested);
+  } catch (error) {
+    if (["ENOENT", "EISDIR", "EINVAL"].includes(error?.code)) {
+      return { blocks: [], truncated: false, missing: true };
+    }
+    throw error;
+  }
   const rootReal = fs.existsSync(root) ? fs.realpathSync(root) : root;
   if (!isInside(rootReal, resolved)) throw new Error("허용되지 않은 트랜스크립트 경로입니다.");
   const stat = await fsPromises.stat(resolved);
@@ -1563,7 +1573,7 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
     catalogAgent?.lastSessionId ||
     null;
 
-  let transcriptPath = agentTranscripts.get(id);
+  let transcriptPath = normalizeTranscriptPath(agentTranscripts.get(id));
   let tool = agentTranscriptTool.get(id) || declaredTool;
   // Drop a cached path that doesn't belong to the current session id (a resumed
   // session gets a new rollout; both CLIs embed the session id in the path).

@@ -134,8 +134,11 @@ Electron Remote is served as a mobile-first PWA. With 1.6s state polling it show
 projects, sessions, hooks, and recent output, and supports question answers/short input,
 home screen install, and completion/question notifications while running. The API binds
 to loopback only and includes GitHub Device Flow for quick tunnels plus automatic
-cloudflared setup. A full xterm.js remote terminal and background Web Push are later
-scope.
+cloudflared setup. It provides a live xterm.js terminal over SSE plus a parsed
+Codex/Claude chat view. On phones, a Session uses the dynamic viewport for a compact
+header, scrollable chat/terminal, and composer; Screen mode streams only the selected
+pane. Windows namespaced transcript paths are normalized before chat parsing.
+Background Web Push remains later scope.
 
 ### Usage
 
