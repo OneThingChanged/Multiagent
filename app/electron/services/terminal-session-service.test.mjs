@@ -157,3 +157,38 @@ it("reports the live id set for crash-safe reopen journaling", () => {
     { reason: "sleep", ids: ["agent-2"] },
   ]);
 });
+
+it("resizes the output filter before resizing the PTY", () => {
+  const order = [];
+  const filter = {
+    push: (data) => data,
+    finish: () => "",
+    resize: vi.fn(() => order.push("filter")),
+    dispose: vi.fn(),
+  };
+  const pty = fakePty();
+  pty.resize.mockImplementation(() => order.push("pty"));
+  const service = new TerminalSessionService();
+  register(service, "agent-resize", pty, { filter });
+
+  expect(service.resize("agent-resize", 132, 42)).toBe(true);
+  expect(order).toEqual(["filter", "pty"]);
+  expect(filter.resize).toHaveBeenCalledWith(132, 42);
+  expect(pty.resize).toHaveBeenCalledWith(132, 42);
+});
+
+it("disposes the output filter exactly once when a session is released", () => {
+  const filter = {
+    push: (data) => data,
+    finish: () => "",
+    resize: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const service = new TerminalSessionService();
+  const pty = fakePty();
+  register(service, "agent-dispose", pty, { filter });
+
+  expect(service.close("agent-dispose")).toBe(true);
+  pty.emitExit(0);
+  expect(filter.dispose).toHaveBeenCalledTimes(1);
+});

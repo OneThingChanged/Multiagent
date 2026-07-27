@@ -63,7 +63,14 @@ Korean prompt survives to the HTTP event.
 ## Phase 3 — Terminal Reliability
 
 - node-pty spawn/write/resize/kill and packaged native module round-trip verified
-- Only the `CSI 3 J` emitted by Codex is removed with chunk-boundary tracking. Other ANSI sequences are preserved
+- Codex runs with `--no-alt-screen` by default so its conversation uses xterm's normal
+  buffer. A Codex-only shadow xterm filter removes `CSI 3 J`, advances the current
+  viewport into native scrollback before `CSI 2 J`, and compares synchronized-output
+  repaint frames to preserve only rows shifted off the top. Claude and plain Shell output
+  stays pass-through
+- The shadow filter buffers split ANSI/synchronized-frame boundaries, follows terminal
+  resize before the PTY resize is delivered, and is disposed with its PTY. The packaged
+  app explicitly includes `@xterm/xterm`, which is also used by the Electron main process
 - A per-PTY 512K-char bounded sequence model in main; incrementally replays between `baseSequence` and `nextSequence`
 - Only visible renderers subscribe to PTY output. Pane/tab switches and Screen moves detach/attach, and hidden session output accumulates only in the main model without growing renderer queues
 - Live output arriving during attach is queued, then deduplicated against the replay sequence. If the buffer was truncated or a stale process cursor arrives, recovery uses the retained reset snapshot

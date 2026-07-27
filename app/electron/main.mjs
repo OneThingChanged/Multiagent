@@ -1276,12 +1276,18 @@ async function spawnPty(args, event) {
       console.warn(`[electron] hook setup failed for ${id}:`, error);
     });
   }
+  const ptyCols = asPositiveInt(args.cols, 120);
+  const ptyRows = asPositiveInt(args.rows, 30);
+  const outputFilter =
+    aiToolId === "codex"
+      ? new CodexScrollbackFilter(ptyRows, ptyCols)
+      : new PassThroughTerminalFilter();
   let processHandle;
   try {
     processHandle = nodePty.spawn(executable, shellArgs, {
       name: "xterm-256color",
-      cols: asPositiveInt(args.cols, 120),
-      rows: asPositiveInt(args.rows, 30),
+      cols: ptyCols,
+      rows: ptyRows,
       cwd,
       env: {
         ...process.env,
@@ -1294,6 +1300,7 @@ async function spawnPty(args, event) {
       useConpty: true,
     });
   } catch (error) {
+    outputFilter.dispose();
     if (reversePort) remotePorts.delete(reversePort);
     throw error;
   }
@@ -1305,10 +1312,7 @@ async function spawnPty(args, event) {
     aiToolId,
     cwd,
     ssh: ssh ? { ...ssh, reversePort, passwordInjected: false } : null,
-    filter:
-      aiToolId === "codex"
-        ? new CodexScrollbackFilter()
-        : new PassThroughTerminalFilter(),
+    filter: outputFilter,
     quitCommand:
       aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen" || aiToolId === "cline"
         ? "/quit\r"

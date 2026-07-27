@@ -167,9 +167,9 @@ export function SessionPropertiesModal({
                     Alt-screen 모드
                   </span>
                   <span className="session-props-toggle-desc">
-                    켜면 Codex가 alternate screen에서 실행됨 — 재렌더 잘림이
-                    사라지지만 대화가 터미널 스크롤백(Ctrl+F 검색·드래그
-                    복사)에 남지 않음. 끄면 기존 --no-alt-screen 방식
+                    켜면 Codex 내부 화면·기록만 사용하는 alternate screen으로
+                    실행됨. 터미널 스크롤백(Ctrl+F 검색·드래그 복사)을
+                    사용하려면 끈 상태(--no-alt-screen)를 유지하세요
                   </span>
                 </span>
               </label>

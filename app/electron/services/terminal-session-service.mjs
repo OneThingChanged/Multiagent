@@ -123,6 +123,7 @@ export class TerminalSessionService {
   resize(id, cols, rows) {
     const entry = this.sessions.get(id);
     if (!entry) return false;
+    entry.filter.resize?.(cols, rows);
     entry.process.resize(cols, rows);
     return true;
   }
@@ -173,6 +174,7 @@ export class TerminalSessionService {
       clearTimeout(entry.initTimer);
       entry.initTimer = null;
     }
+    entry.filter.dispose?.();
     entry.release?.();
     if (!killProcess) return;
     try {

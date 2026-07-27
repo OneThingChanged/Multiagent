@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.73",
+  "version": "0.5.74",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -83,7 +83,8 @@
       "electron/**",
       "package.json",
       "src-tauri/icons/icon.ico",
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "node_modules/@xterm/xterm/**"
     ],
     "directories": {
       "output": "electron-dist"
