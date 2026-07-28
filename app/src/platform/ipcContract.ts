@@ -84,7 +84,6 @@ export type SpawnTerminalArgs = {
   ssh: unknown;
   cols: number;
   rows: number;
-  windowsPtyBackend?: "conpty" | "winpty";
 };
 
 export type DirectoryEntry = {

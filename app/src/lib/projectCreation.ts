@@ -14,9 +14,8 @@ export function defaultAiToolId(disabledTools: readonly string[]): string {
   );
 }
 
-export function buildNewProjectWithDefaultAgent(
+export function buildNewProjectWithFirstAgent(
   payload: NewProjectPayload,
-  aiToolId: string,
   options: {
     createId?: () => string;
     now?: number;
@@ -37,7 +36,7 @@ export function buildNewProjectWithDefaultAgent(
       ? payload.remoteFolder?.trim() || undefined
       : undefined,
   };
-  const tool = toolForId(aiToolId);
+  const tool = toolForId(payload.aiToolId);
   const agent: Agent = {
     id: createId(),
     projectId,

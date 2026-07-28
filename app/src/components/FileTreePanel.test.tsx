@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileKindOf } from "./FileTreePanel";
+import { collectKindFilterPaths, fileKindOf } from "./FileTreePanel";
 
 describe("fileKindOf", () => {
   it("classifies markdown files", () => {
@@ -31,5 +31,69 @@ describe("fileKindOf", () => {
     expect(fileKindOf("data.csv")).toBeNull();
     expect(fileKindOf("LICENSE")).toBeNull();
     expect(fileKindOf("archive.zip")).toBeNull();
+  });
+});
+
+describe("collectKindFilterPaths", () => {
+  const entries = new Map([
+    [
+      "",
+      [
+        { name: "Docs", relativePath: "Docs", isDir: true },
+        { name: "Source", relativePath: "Source", isDir: true },
+        { name: "Empty", relativePath: "Empty", isDir: true },
+        { name: "logo.png", relativePath: "logo.png", isDir: false },
+      ],
+    ],
+    [
+      "Docs",
+      [
+        { name: "Guide", relativePath: "Docs/Guide", isDir: true },
+        { name: "index.html", relativePath: "Docs/index.html", isDir: false },
+      ],
+    ],
+    [
+      "Docs/Guide",
+      [
+        {
+          name: "README.md",
+          relativePath: "Docs/Guide/README.md",
+          isDir: false,
+        },
+      ],
+    ],
+    [
+      "Source",
+      [{ name: "main.ts", relativePath: "Source/main.ts", isDir: false }],
+    ],
+    ["Empty", []],
+  ]);
+
+  it("keeps matching files and only their ancestor folders", () => {
+    const result = collectKindFilterPaths(entries, new Set(["md"]));
+
+    expect([...result.matchingFiles]).toEqual(["Docs/Guide/README.md"]);
+    expect([...result.visibleDirs].sort()).toEqual(["Docs", "Docs/Guide"]);
+    expect(result.visibleDirs.has("Source")).toBe(false);
+    expect(result.visibleDirs.has("Empty")).toBe(false);
+  });
+
+  it("combines multiple selected kinds", () => {
+    const result = collectKindFilterPaths(
+      entries,
+      new Set(["image", "code"])
+    );
+
+    expect([...result.matchingFiles].sort()).toEqual([
+      "Source/main.ts",
+      "logo.png",
+    ]);
+    expect([...result.visibleDirs]).toEqual(["Source"]);
+  });
+
+  it("returns no paths when no type filter is selected", () => {
+    const result = collectKindFilterPaths(entries, new Set());
+    expect(result.matchingFiles.size).toBe(0);
+    expect(result.visibleDirs.size).toBe(0);
   });
 });

@@ -64,14 +64,12 @@ Korean prompt survives to the HTTP event.
 
 - node-pty spawn/write/resize/kill and packaged native module round-trip verified
 - Codex runs with `--no-alt-screen` by default so its conversation uses xterm's normal
-  buffer. Windows local Codex defaults to WinPTY with a matching renderer backend and
-  pass-through output, while Settings → Agents can opt into ConPTY plus the Codex shadow
-  scrollback filter for 24-bit color. SSH Codex keeps ConPTY plus that filter. Claude and
-  plain Shell keep ConPTY with pass-through output
+  buffer. Every Windows terminal uses ConPTY with a matching xterm renderer backend.
+  Local and SSH Codex use the Codex shadow scrollback filter; Claude and plain Shell keep
+  pass-through output
 - The shadow filter buffers split ANSI/synchronized-frame boundaries, follows terminal
-  resize before the PTY resize is delivered, and is disposed with its PTY. It remains the
-  fallback for Codex paths that do not use local Windows WinPTY. The packaged app includes
-  both `@xterm/xterm` and node-pty's WinPTY native files
+  resize before the PTY resize is delivered, and is disposed with its PTY. The packaged
+  app includes `@xterm/xterm` and node-pty's ConPTY support
 - A per-PTY 512K-char bounded sequence model in main; incrementally replays between `baseSequence` and `nextSequence`
 - Only visible renderers subscribe to PTY output. Pane/tab switches and Screen moves detach/attach, and hidden session output accumulates only in the main model without growing renderer queues
 - Live output arriving during attach is queued, then deduplicated against the replay sequence. If the buffer was truncated or a stale process cursor arrives, recovery uses the retained reset snapshot

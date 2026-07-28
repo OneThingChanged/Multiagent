@@ -64,7 +64,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 
 ## New Project / Session Modals
 
-- **New Project**: enter a project name and root folder. This folder becomes the session cwd and the Docs scan root; `Session 1` is created immediately with the first enabled agent tool
+- **New Project**: enter a project name and root folder, then explicitly choose the first session tool. No tool is preselected, so the project cannot be created until Claude/Codex/Qwen/Cline/Shell is chosen. The folder becomes the session cwd and Docs scan root; `Session 1` starts immediately with the selected tool
   - **Run on remote host (SSH)** toggle: when on, instead of a folder, pick a registered SSH host (dropdown) and enter a **remote folder**. This project's sessions run over SSH on that machine (register hosts first in Settings → SSH Hosts)
 - **New Session**: creates a session inside the active project
 - **Session alias**: the name shown in the sidebar/tabs/Docs subtitle
@@ -130,6 +130,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - Toolbar: expand all (⊞, 400-folder cap) / collapse all (⊟) / refresh (⟳)
 - **Git status display**: if the project is a git repo, changed files get a color + one-letter badge — `M` modified (yellow) · `U` untracked (green) · `A` staged (green) · `D` deleted (red, strikethrough) · `R` renamed. Folders get the representative status of descendants propagated (D > M > A > U). Auto-refresh every 10 seconds
 - **Find files** input: filename substring search (recursive into subfolders, max 200 results). `Esc` clears
+- **Type filters**: MD / image / code / HTML chips can be combined. Filtering scans collapsed descendants too and keeps only matching files plus their ancestor folders; a folder with no matching file anywhere below it is hidden
 - SSH projects do not support the file tree (guide text shown)
 
 ### Source Control View (⎇ tab)
@@ -173,13 +174,19 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 
 ## Settings
 
-The sidebar top **Settings** (설정) button opens the popup (`Esc`/outside click/close). Tabs (General/Usage/Remote/SSH Hosts/About — company builds exclude Remote):
+The sidebar top **Settings** (설정) button opens the popup (`Esc`/outside click/close).
+The navigation is General / Agents / Shortcuts / Agent Hooks / Dashboard / Remote /
+Version Control / SSH Hosts / About (company builds exclude Remote):
 
 - **General**: theme (Soft/GitHub/Warm/Light — shared across app/terminal/Docs) + notification sound (System/Custom/TTS/Off, Test), TTS message, Windows notification toggle, and duplicate-audio prevention + **Desktop Pet** show/reset position
-- **Usage**: usage dashboard server on/off·port, copy URL, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
+- **Agents**: available tool detection, bottom usage-limit display, and Qwen region. Windows PTY selection is intentionally absent: all sessions use ConPTY
+- **Shortcuts**: command keyboard shortcut editing
+- **Agent Hooks**: Codex/Claude hook status, check, and repair
+- **Dashboard**: monitoring/usage dashboard server on/off·port, copy URL, Reindex ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 - **Remote PWA** (standard only): mobile remote server·Cloudflare tunnel Start/Stop, GitHub OAuth/Device Flow·Owner, named tunnel (token/hostname/port), account approval management. Monitor distinguishes working/question/done/waiting/inactive, and you can pick the desktop's Screen/pane/tab layout or an individual Session to view the latest request/output/question and send short commands. **Documents** browses and previews local-project Markdown/HTML files; HTML is sandboxed and scripts are blocked. Supports mobile home screen install and notifications while running ([REMOTE.md](REMOTE.md))
+- **Version Control**: external diff program command
 - **SSH Hosts**: host registry for SSH remote sessions. Add/edit/delete hosts (label·remote OS·user·host·port·**auth method**·identity file [Browse] or password·extra options) + **Test connection**. For Windows hosts, **Use .cmd shims for npm CLIs** is ON by default, so even if PowerShell execution policy blocks `codex.ps1`/`claude.ps1`, it runs `codex.cmd`/`claude.cmd`. **Auth method**: key (auto IdentitiesOnly when an identity is specified, preventing "Too many authentication failures") / password (auto-typed on connect when stored; stored only in local `ssh-secrets.json`)
-- **About**: author, version, **Check** (auto-update — downloads, installs, and restarts after signature verification), Releases
+- **About**: author, version, **Check** (auto-update — downloads, installs, and restarts after signature verification), Releases, support diagnostics
 
 Setting values are stored in localStorage and local JSON, persisting to the next run.
 ## Bottom Usage Status Bar

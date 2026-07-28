@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildNewProjectWithDefaultAgent,
+  buildNewProjectWithFirstAgent,
   defaultAiToolId,
 } from "./projectCreation";
 
@@ -14,12 +14,15 @@ describe("defaultAiToolId", () => {
   });
 });
 
-describe("buildNewProjectWithDefaultAgent", () => {
-  it("creates a local project with an active first session", () => {
+describe("buildNewProjectWithFirstAgent", () => {
+  it("creates a local project with the explicitly selected first session", () => {
     const ids = ["project-1", "agent-1"];
-    const result = buildNewProjectWithDefaultAgent(
-      { name: "  Project A  ", folder: "  K:\\AI\\ProjectA  " },
-      "codex",
+    const result = buildNewProjectWithFirstAgent(
+      {
+        name: "  Project A  ",
+        folder: "  K:\\AI\\ProjectA  ",
+        aiToolId: "codex",
+      },
       {
         createId: () => ids.shift()!,
         now: 1234,
@@ -51,14 +54,14 @@ describe("buildNewProjectWithDefaultAgent", () => {
 
   it("copies SSH project routing into the first session", () => {
     const ids = ["remote-project", "remote-agent"];
-    const { project, agent } = buildNewProjectWithDefaultAgent(
+    const { project, agent } = buildNewProjectWithFirstAgent(
       {
         name: "Remote",
         folder: "",
+        aiToolId: "claude",
         sshHostId: "  host-1  ",
         remoteFolder: "  /srv/project  ",
       },
-      "claude",
       { createId: () => ids.shift()!, now: 5678 }
     );
 

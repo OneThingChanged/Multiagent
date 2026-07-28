@@ -16,7 +16,7 @@
 - Electron journals the current live PTY IDs in `electron-reopen-state.json`, so forced/OS termination can still offer the last known sessions. It does not preserve the killed OS processes themselves; each conversation is recreated through the provider resume command
 
 ### Scrollback on Window Resize
-- xterm reflows automatically when cols change, but output that Codex/Claude **baked in with wrapping based on the previous width** does not re-wrap to the new width. Only new output uses the new width
+- Windows ConPTY uses xterm's conservative resize compatibility without assuming a hardcoded OS build, so existing lines are not reflowed when cols change. Output that Codex/Claude **baked in with wrapping based on the previous width** also does not re-wrap; only new output uses the new width
 
 ### Wheel Scroll / TUI
 - Wheel handling depends on **which screen buffer** the terminal is using at that moment. Buffer selection is decided by the **running program**, not the terminal (app) (`\x1b[?1049h` enters alternate, `…l` returns). Shell prompts and normal output use the normal buffer; vim/less/man, git pager, and claude/codex interactive screens use the alternate buffer.
@@ -29,10 +29,10 @@
 ### Codex + xterm.js Scrollback Deletion Mitigation
 - On some Windows ConPTY builds, Codex normal-buffer repaint output does not increase xterm native scrollback, so the session JSONL remains intact while the terminal's previous screen disappears. Related reports: [openai/codex#14277](https://github.com/openai/codex/issues/14277), [xtermjs/xterm.js#5745](https://github.com/xtermjs/xterm.js/issues/5745).
 - Codex is automatically launched with `--no-alt-screen` unless the session explicitly enables **Alt-screen mode**. The normal buffer is required for xterm native scrollback, `Ctrl+F`, and drag copy.
-- Windows local Codex defaults to WinPTY and matching xterm WinPTY compatibility with pass-through output. Settings → **Agents → Windows local Codex PTY backend** can opt into ConPTY for 24-bit color. ConPTY keeps the Codex shadow filter, while WinPTY prioritizes scrollback compatibility and may reduce ANSI colors to the Windows 16-color palette.
+- Windows terminals use ConPTY with matching xterm ConPTY compatibility. Codex keeps the shadow scrollback filter to protect normal-buffer history while preserving 24-bit color output.
 - SSH Codex remains on ConPTY and uses the Codex-only shadow filter: it removes `CSI 3J`, preserves the viewport before `CSI 2J`, and detects rows shifted by synchronized repaint frames. Claude and plain Shell output remain unmodified.
 - Filter state follows terminal resize before PTY resize and is preserved across ANSI/frame sequences split between PTY chunks. The shadow terminal is disposed when its PTY exits.
-- PTY backend and Alt-screen changes are not retroactive to a running Codex process. Deactivate the session and reopen it after changing either setting. A normal Codex child command line should contain `--no-alt-screen`.
+- Alt-screen changes are not retroactive to a running Codex process. Deactivate the session and reopen it after changing that setting. A normal Codex child command line should contain `--no-alt-screen`.
 - **Alt-screen mode is an explicit opt-out**, not an additional scrollback fix. It lets Codex own an alternate screen and use its internal history/`ctrl+t`, but the conversation is then intentionally absent from xterm native scrollback.
 - The canonical conversation remains Codex's JSONL/resume data. The filter protects the visible terminal history but does not turn xterm scrollback into permanent transcript storage.
 
@@ -99,8 +99,10 @@
 - If a codex companion plugin's `hooks.json` does not match codex's hook schema (e.g., a top-level `description` field), hook loading fails → working display/session capture may not work ([RESUME.md](RESUME.md))
 
 ### Stale Children Possible if Parent Dies in Dev Mode
-- Force-killing app.exe can leave the PowerShell child alive as an orphan
-- On the normal exit path (window X), portable-pty drops master → slave EIO → child exit cascade
+- Force-killing the Electron process can leave a PowerShell child alive as an orphan
+- A workspace X only closes that window and intentionally leaves the tray/PTYs alive.
+  Tray **Exit**, update, and relaunch perform the coordinated shutdown and clean local
+  Codex/Claude process trees before closing their ConPTY sessions
 
 ## Implemented (Past Phase 2 Candidates)
 

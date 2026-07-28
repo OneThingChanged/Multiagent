@@ -12,23 +12,21 @@ A desktop app that manages multiple AI agent (Claude Code, Codex) terminal sessi
 
 ## Tech Stack
 
-- **Shell**: Tauri 2 (Rust backend + WebView2 frontend), two build variants: standard / company
+- **Shell**: Electron (persistent main process/system tray + equal BrowserWindow workspaces), two build variants: standard / company
 - **Frontend**: React 19 + TypeScript + Vite (dev port 4420)
 - **Terminal**: `@xterm/xterm` v6 + addon-fit / -search / -serialize / -web-links
-- **PTY**: Rust `portable-pty` (Windows ConPTY)
-- **Local HTTP (hook receiver)**: `tiny_http` (127.0.0.1:random)
-- **Remote server**: `axum` + `tokio` (WebSocket), Cloudflare Tunnel (`cloudflared`)
-- **Usage DB**: `rusqlite` (SQLite)
+- **PTY**: `node-pty`, Windows ConPTY only (no backend selector or WinPTY mode)
+- **Codex terminal compatibility**: `--no-alt-screen` by default + ConPTY shadow scrollback filter
+- **Legacy runtime**: Tauri 2 sources remain for transition compatibility, but Electron is the production desktop shell
 - **Auth**: GitHub Device Flow / OAuth web flow
-- **Updates**: `tauri-plugin-updater` (signed GitHub release auto-install)
-- **Other plugins**: notification / dialog / opener / process
+- **Updates**: `electron-updater` for installed Electron builds; signed transition manifests remain for legacy Tauri installs
 
 ## Feature Catalog
 
 ### Sessions & Layout
 | feature | description |
 |---|---|
-| Project/session model | register a project → start its first session immediately → add aliased sessions inside a collapsible tree |
+| Project/session model | register a project + explicitly choose its first session tool → start `Session 1` immediately → add aliased sessions inside a collapsible tree |
 | Multi-tab / splits | multiple tabs per pane, 2+ h/v panes per Screen with nested splits, resize via handles |
 | Groups | sessions joined by splits form one group — clicking any member shows the whole group. A session belongs to exactly one group globally |
 | Split Screen summary | above the sidebar's `This PC`/project tree, shows `Screen N (A+B+C)`, with the same-color `SN` badge on cross-project members. Rows jump directly by Screen ID, not session search |
@@ -54,7 +52,7 @@ Switch / add as tab / split right·down / rename alias / **Deactivate session** 
 ### Viewers & Terminal
 | feature | description |
 |---|---|
-| File tree sidebar | full project file tree on the right sidebar — project dropdown, pin (📌), per-project expansion state persistence, expand/collapse all, git status badges (M/U/A/D colors, folder propagation, 10s polling), Find files search, context menu (new file/folder, duplicate, rename, trash delete, copy path). Open via the 🗀 button at the window's top-right; open state/width persisted |
+| File tree sidebar | full project file tree on the right sidebar — project dropdown, pin (📌), per-project expansion state persistence, expand/collapse all, git status badges (M/U/A/D colors, folder propagation, 10s polling), Find files search, MD/image/code/HTML type filters that hide folders without matching descendants, context menu (new file/folder, duplicate, rename, trash delete, copy path). Open via the 🗀 button at the window's top-right; open state/width persisted |
 | Source Control view | the ⎇ tab of the file tree panel — branch/ahead-behind, Staged/Changes groups (per-file & stage-all), per-file +/− line counts, Commit after entering a message (Ctrl+Enter), recent commits list. A change-count badge is always shown on the tab |
 | Document tabs | open a file from the tree/terminal link/QuickOpen → rendered as a tab in the main workspace (md = GFM + highlight, html = sandbox iframe, images, text = read-only source). Splits/drags/restores in the same tab strip as terminal tabs |
 | Image viewer | click an image path (png/jpg/…) in terminal output → in-app viewer |
@@ -64,6 +62,7 @@ Switch / add as tab / split right·down / rename alias / **Deactivate session** 
 | Ctrl+C/V | copy/paste text; image clipboard goes through as a raw keystroke |
 | Ctrl+wheel | terminal font zoom (persisted) |
 | Wheel scroll | normal buffer always scrolls scrollback (ignores mouse tracking); fullscreen TUIs receive the wheel (mouse wheel events or PageUp/Down) |
+| Windows PTY | every local and SSH launcher PTY uses ConPTY. The former WinPTY/ConPTY setting was removed; new sessions always use ConPTY and xterm's matching compatibility mode |
 
 ### Shortcuts
 `Ctrl+T` new session · `Ctrl+Shift+P` new project · `Ctrl+W` close active tab ·

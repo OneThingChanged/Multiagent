@@ -41,6 +41,12 @@ type FilterResult = {
   truncated: boolean;
 };
 
+type KindFilterResult = {
+  matchingFiles: Set<string>;
+  visibleDirs: Set<string>;
+  truncated: boolean;
+};
+
 type TreeEditing = {
   kind: "rename" | "new-file" | "new-dir";
   parentPath: string;
@@ -167,6 +173,30 @@ export function fileKindOf(name: string): FileKind | null {
   if (IMAGE_EXT_SET.has(ext)) return "image";
   if (CODE_EXT_SET.has(ext)) return "code";
   return null;
+}
+
+export function collectKindFilterPaths(
+  entriesByDir: ReadonlyMap<string, readonly FileTreeEntry[]>,
+  selectedKinds: ReadonlySet<FileKind>
+) {
+  const matchingFiles = new Set<string>();
+  const visibleDirs = new Set<string>();
+  if (selectedKinds.size === 0) return { matchingFiles, visibleDirs };
+
+  for (const entries of entriesByDir.values()) {
+    for (const entry of entries) {
+      if (entry.isDir) continue;
+      const kind = fileKindOf(entry.name);
+      if (kind === null || !selectedKinds.has(kind)) continue;
+      matchingFiles.add(entry.relativePath);
+      let dir = parentPath(entry.relativePath);
+      while (dir) {
+        visibleDirs.add(dir);
+        dir = parentPath(dir);
+      }
+    }
+  }
+  return { matchingFiles, visibleDirs };
 }
 
 function parentPath(relativePath: string) {
@@ -326,6 +356,10 @@ export function FileTreePanel({
   const [filterResult, setFilterResult] = useState<FilterResult | null>(null);
   const [filterLoading, setFilterLoading] = useState(false);
   const filterRunRef = useRef(0);
+  const [kindFilterResult, setKindFilterResult] =
+    useState<KindFilterResult | null>(null);
+  const [kindFilterLoading, setKindFilterLoading] = useState(false);
+  const kindFilterRunRef = useRef(0);
 
   // File-type filter chips (empty set = show everything).
   const [kindFilter, setKindFilter] = useState<Set<FileKind>>(() => new Set());
@@ -580,7 +614,16 @@ export function FileTreePanel({
       const entries = dirCache.get(relative);
       if (!entries) return;
       for (const entry of entries) {
-        if (!matchesKind(entry)) continue;
+        if (kindFiltering) {
+          if (!kindFilterResult) continue;
+          if (
+            entry.isDir
+              ? !kindFilterResult.visibleDirs.has(entry.relativePath)
+              : !kindFilterResult.matchingFiles.has(entry.relativePath)
+          ) {
+            continue;
+          }
+        }
         rows.push({ entry, depth });
         if (entry.isDir && expanded.has(entry.relativePath)) {
           walk(entry.relativePath, depth + 1);
@@ -589,7 +632,82 @@ export function FileTreePanel({
     };
     walk("", 0);
     return rows;
-  }, [dirCache, expanded, matchesKind]);
+  }, [dirCache, expanded, kindFilterResult, kindFiltering]);
+
+  // Type chips keep the normal tree shape, but prune any folder that has no
+  // matching descendant. Scan collapsed directories too so visibility does not
+  // depend on which folders happened to be opened before filtering.
+  useEffect(() => {
+    const hasTextQuery = filter.trim().length > 0;
+    if (!kindFiltering || !folder || hasTextQuery) {
+      kindFilterRunRef.current += 1;
+      setKindFilterResult(null);
+      setKindFilterLoading(false);
+      return;
+    }
+
+    const runId = ++kindFilterRunRef.current;
+    setKindFilterLoading(true);
+    const timer = window.setTimeout(async () => {
+      const queue: string[] = [""];
+      const localCache = new Map(dirCache);
+      let visitedDirs = 0;
+      let cacheChanged = false;
+      let truncated = false;
+
+      while (queue.length > 0) {
+        if (kindFilterRunRef.current !== runId) return;
+        if (visitedDirs >= FILTER_MAX_DIRS) {
+          truncated = true;
+          break;
+        }
+        const relative = queue.shift()!;
+        visitedDirs += 1;
+        let entries = localCache.get(relative);
+        if (!entries) {
+          try {
+            const raw = await invoke<DirectoryEntry[]>("list_directory", {
+              folder,
+              relative,
+            });
+            entries = raw.map(toEntry);
+            localCache.set(relative, entries);
+            cacheChanged = true;
+          } catch {
+            continue;
+          }
+        }
+        for (const entry of entries) {
+          if (entry.isDir) queue.push(entry.relativePath);
+        }
+      }
+
+      if (kindFilterRunRef.current !== runId) return;
+      const paths = collectKindFilterPaths(localCache, kindFilter);
+
+      // At the scan cap, queued folders are unknown rather than confirmed
+      // empty. Keep those paths visible so a large tree never loses content
+      // merely because the bounded scan stopped early.
+      for (const pendingDir of queue) {
+        let dir = pendingDir;
+        while (dir) {
+          paths.visibleDirs.add(dir);
+          dir = parentPath(dir);
+        }
+      }
+
+      if (cacheChanged) setDirCache(localCache);
+      setKindFilterResult({ ...paths, truncated });
+      setKindFilterLoading(false);
+    }, FILTER_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (kindFilterRunRef.current === runId) {
+        kindFilterRunRef.current += 1;
+      }
+    };
+  }, [dirCache, filter, folder, kindFilter, kindFiltering]);
 
   // "Find files" — debounced client-side BFS reusing/filling dirCache.
   useEffect(() => {
@@ -1122,9 +1240,22 @@ export function FileTreePanel({
 
         {folder && !error && !filtering && (
           <div className="file-tree-rows">
-            {renderTreeRows()}
-            {visibleRows.length === 0 && !rootLoading && (
-              <div className="docs-empty">파일이 없습니다.</div>
+            {kindFilterLoading ? (
+              <div className="docs-empty">Filtering...</div>
+            ) : (
+              renderTreeRows()
+            )}
+            {!kindFilterLoading && visibleRows.length === 0 && !rootLoading && (
+              <div className="docs-empty">
+                {kindFiltering
+                  ? "선택한 형식의 파일이 없습니다."
+                  : "파일이 없습니다."}
+              </div>
+            )}
+            {!kindFilterLoading && kindFilterResult?.truncated && (
+              <div className="file-tree-truncated">
+                폴더가 많아 확인하지 못한 경로는 그대로 표시합니다.
+              </div>
             )}
           </div>
         )}

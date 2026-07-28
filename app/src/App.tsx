@@ -107,7 +107,6 @@ import {
   persistStorageSnapshot,
 } from "./platform/storageMigration";
 import { isElectronRuntime } from "./platform/electronBridge";
-import { windowsPtyBackendForAgent } from "./lib/ptyBackend";
 import type {
   SpawnTerminalResult,
   TerminalDataPayload,
@@ -125,8 +124,7 @@ import {
   type DesktopPetCompletion,
 } from "./lib/desktopPet";
 import {
-  buildNewProjectWithDefaultAgent,
-  defaultAiToolId,
+  buildNewProjectWithFirstAgent,
 } from "./lib/projectCreation";
 import {
   migrateLegacyWorkspaceStorage,
@@ -2180,10 +2178,7 @@ function App() {
   // ---- Agent CRUD (side effects + layout via groupOps)
 
   const createProject = useCallback((payload: NewProjectPayload) => {
-    const { project, agent } = buildNewProjectWithDefaultAgent(
-      payload,
-      defaultAiToolId(disabledTools)
-    );
+    const { project, agent } = buildNewProjectWithFirstAgent(payload);
     const addProject = () => {
       setProjects((prev) => [project, ...prev]);
       setAgents((prev) => [...prev, agent]);
@@ -2228,7 +2223,6 @@ function App() {
       });
   }, [
     applyGroupOp,
-    disabledTools,
     pushToast,
   ]);
 
@@ -2812,10 +2806,6 @@ function App() {
           handleOpenTerminalPath,
           {
             normalizeSshCursorKeys: !!agent.sshHostId,
-            windowsPtyBackend: windowsPtyBackendForAgent(
-              agent.aiToolId,
-              agent.sshHostId,
-            ),
           }
         );
         termsRef.current.set(agentId, entry);
@@ -2854,7 +2844,6 @@ function App() {
             ssh,
             cols: 120,
             rows: 30,
-            windowsPtyBackend: entry.windowsPtyBackend,
           });
         })();
         const pendingSpawn = entry.spawnPromise;
@@ -3298,6 +3287,7 @@ function App() {
       {showProjectModal && (
         <NewProjectModal
           defaultName={`Project ${projects.length + 1}`}
+          disabledTools={disabledTools}
           onCancel={() => setShowProjectModal(false)}
           onCreate={(payload) => {
             setShowProjectModal(false);

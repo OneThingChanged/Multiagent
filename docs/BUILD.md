@@ -3,10 +3,11 @@
 ## Prerequisites
 
 - **Node.js** 24+
-- **Rust** stable (1.95+, rustup recommended)
-- **Visual Studio 2022 C++ Build Tools** (MSVC)
-- **WebView2** (included with Windows 11)
+- **Visual Studio 2022 C++ Build Tools** (MSVC, required by `node-pty`)
 - **PowerShell 7+** (falls back to 5.1 if missing)
+
+Rust stable (1.95+) and WebView2 are required only when building or testing the legacy
+Tauri transition channel.
 
 ## First-time Setup
 
@@ -19,22 +20,30 @@ npm install
 
 ```bash
 cd K:\AI\MultiAgent\app
-npm run tauri dev
-```
-
-- Vite on port 4420 + Tauri runs `target/debug/app.exe` after the Rust build
-- `src/**` changes → applied instantly via Vite HMR
-- `src-tauri/**` changes → Tauri watcher auto-recompiles + restarts the app
-- Closing the window ends the dev session. Relaunch with `npm run tauri dev`
-
-On the Electron experiment branch, the same renderer is launched with:
-
-```bash
-cd K:\AI\MultiAgent\app
 npm run electron:dev
 ```
 
-Electron also uses Vite `4420`, with auxiliary HMR port `4422`. For installer/security/PTY verification commands and migration criteria, see [ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md).
+- Vite runs on port 4420, with Electron HMR coordination on port 4422
+- `src/**` changes → applied instantly via Vite HMR
+- `electron/**` changes require the Electron dev process to restart
+- Closing a workspace leaves the Electron tray process alive; use tray **Exit** before
+  restarting development when main-process code changed
+
+Windows PTYs are ConPTY-only. The renderer also uses
+`windowsPty.backend = "conpty"`; there is no Settings toggle or WinPTY smoke path.
+Codex applies the shadow scrollback filter, while Claude and Shell are unfiltered.
+
+Minimum terminal verification:
+
+```bash
+cd K:\AI\MultiAgent\app
+npm test
+npm run build
+npm run electron:smoke
+```
+
+For installer/security/PTY verification commands and migration criteria, see
+[ELECTRON_MIGRATION.md](ELECTRON_MIGRATION.md).
 
 Electron installers are built separately for standard and company.
 Only NSIS installers are produced; portable executables are intentionally not built.
@@ -53,6 +62,9 @@ The Electron Windows local launcher invokes npm global CLIs as `codex.cmd`/`clau
 So even when PowerShell ExecutionPolicy blocks `codex.ps1`, sessions can start without
 changing any policy. If you hit the same error when running directly in PowerShell, use
 `codex.cmd` or `claude.cmd` as well.
+
+Changing terminal compatibility code does not alter an already-running PTY. Fully exit
+the tray process and start a new session before comparing behavior or colors.
 
 ## Debug Build
 

@@ -3,29 +3,31 @@
 ## Process Structure
 
 ```
-app.exe (Tauri Rust main process)
-├─ WebView2 (UI rendering, React + xterm.js)
-├─ Desktop Pet WebView2 (main process only, transparent, always-on-top, non-focusable)
-├─ tiny_http hook server thread (127.0.0.1:RANDOM_PORT, receives Claude/Codex hooks)
-├─ axum remote server (0.0.0.0:port, only when enabled — REMOTE.md)
-│   └─ cloudflared child process (only when tunnel is on)
-├─ axum Dashboard server (127.0.0.1:4421 default, session monitor + Usage — MONITOR.md)
-├─ PTY thread × N (one reader thread per agent)
-│  └─ PowerShell child process  (local session)
-│  │   └─ claude / codex CLI (the AI tool chosen by the user)
-│  └─ ssh.exe child process    (SSH remote session — Windows built-in OpenSSH)
-│     └─ remote shell → remote claude / codex
-└─ one-shot threads × N for typing init commands 600ms later
+MultiAgent.exe (Electron main process + system tray)
+├─ BrowserWindow × N (equal workspaces, React + xterm.js)
+├─ Desktop Pet BrowserWindow (transparent, always-on-top, non-focusable)
+├─ local hook HTTP service (127.0.0.1:RANDOM_PORT, Claude/Codex hooks)
+├─ Remote/Dashboard HTTP services
+│  └─ cloudflared child process (only when tunnel is on)
+└─ node-pty session × N
+   ├─ PowerShell via Windows ConPTY (local session)
+   │  └─ claude / codex CLI
+   └─ ssh.exe via Windows ConPTY (SSH remote session)
+      └─ remote shell → remote claude / codex
 ```
 
-Build variants: **standard** (`com.jintae.multiagent`, `latest.json`) / **company** (`com.jintae.multiagent.company`, `latest-company.json`). Same version and code; only the identifier and updater endpoint differ ([RELEASE.md](RELEASE.md)).
+Build variants: **standard** (`com.jintae.multiagent.electron`, `latest.yml`) /
+**company** (`com.jintae.multiagent.company.electron`, `latest-company.yml`). Legacy
+Tauri installs use transition manifests to move onto the matching Electron channel
+([RELEASE.md](RELEASE.md)).
 
 ## File Layout
 
 ```
 K:\AI\MultiAgent\
 ├─ docs/                ← these documents
-└─ app/                 ← Tauri project
+└─ app/                 ← Electron production app + legacy Tauri transition sources
+   ├─ electron/         ← Electron main/preload, IPC handlers, PTY/web services
    ├─ src/              ← frontend (React + TS)
    │  ├─ App.tsx        ← top-level orchestration, IPC listeners, workspace composition
    │  ├─ types.ts       ← shared types + AI_TOOLS + LS keys
@@ -53,7 +55,7 @@ K:\AI\MultiAgent\
    │  │  ├─ ResourceMonitor.tsx ← process tree CPU/memory monitor on the right of the status bar
    │  │  ├─ ImageViewer.tsx    ← terminal image path viewer
    │  │  ├─ DesktopPetPage.tsx / DesktopPetPage.css ← pet mascot, state animations
-   │  │  ├─ SettingsModal.tsx  ← General/Usage/Remote/About tabs
+   │  │  ├─ SettingsModal.tsx  ← workspace/services/info settings navigation
    │  │  ├─ SearchBar.tsx      ← terminal Ctrl+F search bar
    │  │  ├─ NewProjectModal / NewAgentModal / RenameSessionModal / RenameProjectModal
    │  │  ├─ SessionPropertiesModal.tsx / ProjectPropertiesModal.tsx
@@ -61,7 +63,7 @@ K:\AI\MultiAgent\
    │  │  └─ Menus.tsx         ← ContextMenu / ProjectContextMenu / TabContextMenu
    │  ├─ App.css
    │  └─ main.tsx
-   ├─ src-tauri/        ← Rust backend
+   ├─ src-tauri/        ← legacy Tauri transition backend
    │  ├─ src/lib.rs     ← PTY + hook server + commands + setup
    │  ├─ src/remote.rs  ← remote axum server, tunnel, auth, approval (REMOTE.md)
    │  ├─ src/remote_page.html / remote_login.html ← remote web client
@@ -70,12 +72,16 @@ K:\AI\MultiAgent\
    │  ├─ Cargo.toml
    │  ├─ tauri.conf.json / tauri.company.conf.json ← per-variant config
    │  └─ capabilities/default.json
-   ├─ scripts/         ← build-all-variants / build-variant / write-latest-json
+   ├─ scripts/         ← Electron/Tauri build, smoke, and manifest helpers
    └─ package.json
 ```
-## Rust Backend (`src-tauri/src/lib.rs`)
+## IPC Command Surface
 
-### Tauri Commands
+Electron production commands are validated in the main process and exposed through the
+preload bridge. The legacy Tauri backend retains a compatible command surface for the
+transition channel; the table below describes the shared behavior.
+
+### Commands
 
 | command | args | behavior |
 |---|---|---|
@@ -242,7 +248,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - Each entry owns one `el: HTMLDivElement`. `term.open(el)` happens only once
 - When the active tab changes, `bodyRef.replaceChildren(entry.el)` swaps the slot (the previous tab's el is detached)
 - An inactive tab's xterm stays alive in memory and keeps receiving PTY data into its scrollback. Clicking it again reattaches
-- Codex sessions default to `--no-alt-screen`. Windows local Codex uses node-pty's WinPTY backend and matching xterm `windowsPty.backend = "winpty"` with pass-through output, avoiding the Windows-build-dependent ConPTY viewport rewrite. SSH Codex stays on ConPTY and retains the Codex shadow scrollback filter; Claude and Shell stay on ConPTY with pass-through output
+- Codex sessions default to `--no-alt-screen`. Every terminal uses ConPTY on Windows, and xterm uses matching `windowsPty.backend = "conpty"` compatibility. Codex sessions additionally use the shadow scrollback filter; Claude and Shell keep pass-through output
 - Wheel events are intercepted in a capture-phase handler and **branch by buffer kind**. On the **normal buffer**, scrollback is rolled directly via `scrollTerminalLinesImmediately()`, which updates xterm's buffer scroll state immediately (ignoring TUI mouse tracking). xterm's public `scrollLines()` first updates the viewport scrollTop and only later reconciles `ydisp`/`isUserScrolling` in an async scroll event, so during streaming output the "user is looking up" state applies late and the view can snap to the bottom — hence the direct buffer scroll path. On the **alternate buffer** (fullscreen TUI) there is no scrollback, so the viewport is not rolled; if the TUI has mouse reporting on, a native SGR wheel event (`\x1b[<64/65;col;rowM`), otherwise `PageUp/PageDown`, is sent to the PTY to move the TUI's own scroll ([KNOWN_ISSUES.md](KNOWN_ISSUES.md))
 - Ctrl+wheel changes the `fontSize` of all terminals together and saves to `multiagent.terminalFontSize.v1`
 - When the global theme changes, `term.options.theme` of all living xterm instances is updated
@@ -273,7 +279,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 ### Frontend
 
-- **`FileTreePanel.tsx`** — right sidebar. Per-directory lazy cache in `dirCache: Map<relativePath, entry[]>`; only expanded folders project to flat visible rows. Find files is a debounced client-side BFS (400 dirs/200 results cap)
+- **`FileTreePanel.tsx`** — right sidebar. Per-directory lazy cache in `dirCache: Map<relativePath, entry[]>`; only expanded folders project to flat visible rows. Find files is a debounced client-side BFS (400 dirs/200 results cap). Type chips recursively scan collapsed directories and derive `matchingFiles` plus `visibleDirs`, so only matching files and their ancestor folders remain; paths left unscanned at the safety cap stay visible rather than becoming false negatives
   - **Project selection**: header dropdown chooses the displayed project. Pin OFF follows the active project; pin ON fixes it (persisted in `multiagent.fileTreePin.v1`, auto-released when the project is deleted)
   - **Expansion state**: stored per project in `multiagent.fileTreeExpanded.v1`; re-entering a project reloads the saved folders to restore. Expand all is BFS (400-dir cap)
   - **git badges**: processes `git_status` results into a file map + folder propagation map (D>M>A>U rank), 10s polling. Name and badge share the same color

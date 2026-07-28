@@ -96,15 +96,20 @@ also writes manifests based on the `tauri.conf.json` version.
 
 ### 2. Quick Verification
 
-Even for a small hotfix, the minimum pre-release verification is fixed to these two.
+For the production Electron channel, even a small hotfix must pass the renderer tests,
+production build, and ConPTY round-trip smoke test.
 
 ```powershell
 cd "K:\AI\MultiAgent\app"
 npm test
-
-cd "K:\AI\MultiAgent\app\src-tauri"
-cargo test
+npm run build
+npm run electron:smoke
 ```
+
+`electron:smoke` is the only Windows PTY backend smoke path. The application always
+requests ConPTY, and the former WinPTY selector/smoke test no longer exists. For releases
+that also change legacy Tauri transition code, additionally run `cargo test` from
+`app/src-tauri`.
 
 ### 3. Signed Build
 

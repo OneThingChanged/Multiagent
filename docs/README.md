@@ -1,6 +1,10 @@
 # MultiAgent Docs
 
-A Tauri desktop app that manages multiple AI agent (Claude Code · Codex) terminals as per-project sessions, groups, tabs, and splits, with remote control from an external browser and token usage accounting.
+An Electron desktop app that manages multiple AI agent (Claude Code · Codex) terminals as per-project sessions, groups, tabs, and splits, with remote control from an external browser and token usage accounting.
+
+Windows terminals use ConPTY exclusively. There is no runtime backend selector or
+WinPTY compatibility mode. Codex keeps a dedicated normal-buffer scrollback filter on
+top of ConPTY; Claude and plain Shell output pass through unchanged.
 
 ## Document Map
 
@@ -26,7 +30,7 @@ A Tauri desktop app that manages multiple AI agent (Claude Code · Codex) termin
 ```bash
 cd K:\AI\MultiAgent\app
 npm install
-npm run tauri dev        # development (dev port 4420)
+npm run electron:dev     # development (Vite port 4420)
 ```
 
 For release builds, signing, and publishing see [RELEASE.md](RELEASE.md); for build environment requirements see [BUILD.md](BUILD.md).

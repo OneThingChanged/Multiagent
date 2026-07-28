@@ -62,7 +62,6 @@ import {
   beginTerminalSync,
   completeTerminalSync,
 } from "../lib/terminalDelivery";
-import { windowsPtyBackendForAgent } from "../lib/ptyBackend";
 
 function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
@@ -184,10 +183,6 @@ export function PaneSlot({
         ctx.onOpenTerminalPath,
         {
           normalizeSshCursorKeys: !!activeAgent.sshHostId,
-          windowsPtyBackend: windowsPtyBackendForAgent(
-            activeAgent.aiToolId,
-            activeAgent.sshHostId,
-          ),
         }
       );
       termsRef.current.set(agentId, entry);
@@ -263,7 +258,6 @@ export function PaneSlot({
             ssh,
             cols,
             rows,
-            windowsPtyBackend: target.windowsPtyBackend,
           });
         })();
       }
@@ -362,7 +356,6 @@ export function PaneSlot({
             ssh,
             cols,
             rows,
-            windowsPtyBackend: e.windowsPtyBackend,
           }).catch((err) => {
             e.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
             setAgentStatus(agentId, "exited");

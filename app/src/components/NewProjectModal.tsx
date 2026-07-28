@@ -1,19 +1,25 @@
 import { useState } from "react";
 import { openDialog } from "../platform/plugins";
-import type { NewProjectPayload } from "../types";
+import { AI_TOOLS, type NewProjectPayload } from "../types";
 import { loadSshHosts } from "../lib/sshHosts";
 
 export function NewProjectModal({
   defaultName,
   onCancel,
   onCreate,
+  disabledTools = [],
 }: {
   defaultName: string;
   onCancel: () => void;
   onCreate: (payload: NewProjectPayload) => void;
+  disabledTools?: string[];
 }) {
+  const visibleTools = AI_TOOLS.filter(
+    (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
+  );
   const [name, setName] = useState(defaultName);
   const [folder, setFolder] = useState("");
+  const [aiToolId, setAiToolId] = useState("");
   const [remote, setRemote] = useState(false);
   const [sshHosts] = useState(() => loadSshHosts());
   const [sshHostId, setSshHostId] = useState<string>("");
@@ -28,6 +34,7 @@ export function NewProjectModal({
 
   const canSubmit =
     name.trim().length > 0 &&
+    visibleTools.some((tool) => tool.id === aiToolId) &&
     (remote ? sshHostId.length > 0 : folder.trim().length > 0);
 
   const submit = () => {
@@ -36,6 +43,7 @@ export function NewProjectModal({
       onCreate({
         name: name.trim(),
         folder: "",
+        aiToolId,
         sshHostId,
         remoteFolder: remoteFolder.trim(),
       });
@@ -43,6 +51,7 @@ export function NewProjectModal({
       onCreate({
         name: name.trim(),
         folder: folder.trim(),
+        aiToolId,
       });
     }
   };
@@ -64,6 +73,26 @@ export function NewProjectModal({
             }}
             placeholder="e.g. ProjectA"
           />
+        </label>
+
+        <label className="field">
+          <span className="field-label">First session tool</span>
+          <select
+            value={aiToolId}
+            onChange={(event) => setAiToolId(event.target.value)}
+          >
+            <option value="" disabled>
+              Select a tool…
+            </option>
+            {visibleTools.map((tool) => (
+              <option key={tool.id} value={tool.id}>
+                {tool.label}
+              </option>
+            ))}
+          </select>
+          <span className="check-hint">
+            프로젝트를 만들면 선택한 도구로 Session 1이 바로 시작됩니다.
+          </span>
         </label>
 
         <label className="field-check">
