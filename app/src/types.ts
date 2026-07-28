@@ -6,6 +6,7 @@ import type {
   SpawnTerminalResult,
   TerminalDataPayload,
 } from "./platform/ipcContract";
+import type { WindowsPtyBackend } from "./lib/ptyBackend";
 
 export type AgentRuntimeStatus =
   | "idle"
@@ -207,6 +208,7 @@ export type TerminalEntry = {
   pendingOutput: TerminalDataPayload[];
   restoreScrollbackOnAttach: boolean;
   restoredScrollback: boolean;
+  windowsPtyBackend: WindowsPtyBackend;
 };
 
 export type NewAgentPayload = {

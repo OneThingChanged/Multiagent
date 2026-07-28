@@ -43,6 +43,8 @@ describe("TabContextMenu", () => {
         chatMode={false}
         onToggleChat={() => {}}
         canChat={true}
+        canRevealInExplorer={false}
+        onRevealInExplorer={() => {}}
       />
     );
 
@@ -51,6 +53,7 @@ describe("TabContextMenu", () => {
     expect(html).toContain("다른 탭 닫기");
     expect(html).toContain("탭 색상");
     expect(html).toContain("Ctrl+Shift+T");
+    expect(html).not.toContain("탐색기에서 보기");
   });
 
   it("shows unpin label when the tab is pinned", () => {
@@ -72,9 +75,38 @@ describe("TabContextMenu", () => {
         chatMode={false}
         onToggleChat={() => {}}
         canChat={true}
+        canRevealInExplorer={false}
+        onRevealInExplorer={() => {}}
       />
     );
 
     expect(html).toContain("탭 고정 해제");
+  });
+
+  it("offers reveal in Explorer for a local file tab", () => {
+    const html = renderToStaticMarkup(
+      <TabContextMenu
+        state={{ agentId: "doc:project:docs/report.html", path: [], x: 0, y: 0 }}
+        pinned={false}
+        tabColor={null}
+        canReopen={false}
+        onDismiss={() => {}}
+        onSplit={() => {}}
+        onTogglePin={() => {}}
+        onCloseTab={() => {}}
+        onCloseOthers={() => {}}
+        onCloseRight={() => {}}
+        onRename={() => {}}
+        onSetColor={() => {}}
+        onReopen={() => {}}
+        chatMode={false}
+        onToggleChat={() => {}}
+        canChat={false}
+        canRevealInExplorer={true}
+        onRevealInExplorer={() => {}}
+      />
+    );
+
+    expect(html).toContain("탐색기에서 보기");
   });
 });

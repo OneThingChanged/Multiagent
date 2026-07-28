@@ -1091,6 +1091,7 @@ export function createEntry(
     pendingOutput: [],
     restoreScrollbackOnAttach: false,
     restoredScrollback: false,
+    windowsPtyBackend,
   };
 }
 

@@ -1288,6 +1288,7 @@ async function spawnPty(args, event) {
     platform: process.platform,
     aiToolId,
     hasSsh: Boolean(ssh),
+    requestedBackend: asString(args.windowsPtyBackend).trim(),
   });
   const outputFilter =
     ptyBackend.filterKind === TERMINAL_FILTER_KIND.CODEX_SCROLLBACK

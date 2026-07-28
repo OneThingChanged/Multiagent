@@ -29,6 +29,11 @@ import { loadDiffToolCommand, saveDiffToolCommand } from "../lib/diffTool";
 import { SshSetupGuide } from "./SshSetupGuide";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import type { CommandShortcuts } from "../lib/commandRegistry";
+import {
+  loadWindowsCodexPtyBackend,
+  saveWindowsCodexPtyBackend,
+  type WindowsPtyBackend,
+} from "../lib/ptyBackend";
 import type { SshHost } from "../types";
 import { toolForId } from "../types";
 
@@ -190,7 +195,7 @@ type NavEntry = {
 
 const ALL_NAV_ENTRIES: NavEntry[] = [
   { id: "general", group: "Workspace", label: "General", title: "General", sub: "테마 · 알림음 · 데스크톱 펫", keywords: "theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
-  { id: "agents", group: "Workspace", label: "Agents", title: "Agents", sub: "연결 상황 · 사용량 바 · Qwen 리전", keywords: "agent 에이전트 연결 connection status usage 사용량 bar qwen region 리전 나라 country", icon: <IconActivity /> },
+  { id: "agents", group: "Workspace", label: "Agents", title: "Agents", sub: "연결 · PTY 백엔드 · 사용량", keywords: "agent 에이전트 연결 connection status terminal pty conpty winpty codex scrollback 색상 사용량 usage bar qwen region 리전 나라 country", icon: <IconActivity /> },
   { id: "shortcuts", group: "Workspace", label: "Shortcuts", title: "Shortcuts", sub: "명령별 키보드 단축키", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
   { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
   { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
@@ -249,6 +254,12 @@ function AgentsSettings({
 }) {
   const [avail, setAvail] = useState<ToolAvailability | null>(null);
   const [checking, setChecking] = useState(false);
+  const [windowsCodexPtyBackend, setWindowsCodexPtyBackend] =
+    useState<WindowsPtyBackend>(loadWindowsCodexPtyBackend);
+  const chooseWindowsCodexPtyBackend = (backend: WindowsPtyBackend) => {
+    setWindowsCodexPtyBackend(backend);
+    saveWindowsCodexPtyBackend(backend);
+  };
   const refreshAvail = () => {
     setChecking(true);
     void invoke<ToolAvailability>("check_tools")
@@ -332,6 +343,43 @@ function AgentsSettings({
           onChange={(e) => onShowUsageBarChange(e.target.checked)}
         />
       </label>
+
+      <div className="agent-block">
+        <div className="agent-row-title">Windows 로컬 Codex PTY 백엔드</div>
+        <div className="agent-row-sub">
+          새로 시작하는 로컬 Codex 세션에 적용됩니다. 실행 중인 세션은
+          비활성화한 뒤 다시 열어야 변경됩니다.
+        </div>
+        <div className="app-theme-options">
+          <button
+            type="button"
+            className={`app-theme-option ${
+              windowsCodexPtyBackend === "winpty"
+                ? "app-theme-option-active"
+                : ""
+            }`}
+            onClick={() => chooseWindowsCodexPtyBackend("winpty")}
+          >
+            WinPTY · 호환성
+          </button>
+          <button
+            type="button"
+            className={`app-theme-option ${
+              windowsCodexPtyBackend === "conpty"
+                ? "app-theme-option-active"
+                : ""
+            }`}
+            onClick={() => chooseWindowsCodexPtyBackend("conpty")}
+          >
+            ConPTY · True Color
+          </button>
+        </div>
+        <div className="agent-hint">
+          {windowsCodexPtyBackend === "winpty"
+            ? "스크롤백 보존을 우선하는 기본 호환 모드입니다. 일부 ANSI 색상은 16색 팔레트로 표시될 수 있습니다."
+            : "24비트 색상을 유지합니다. 일부 Windows 환경에서는 Codex의 화면 재그리기로 이전 내용이 사라질 수 있습니다."}
+        </div>
+      </div>
 
       <div className="agent-block">
         <div className="agent-row-title">Qwen 리전 (나라)</div>

@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { windowsPtyBackendForAgent } from "./ptyBackend";
+import {
+  DEFAULT_WINDOWS_CODEX_PTY_BACKEND,
+  parseWindowsPtyBackend,
+  windowsPtyBackendForAgent,
+} from "./ptyBackend";
 
 describe("renderer Windows PTY backend selection", () => {
-  it("uses WinPTY for local Codex", () => {
-    expect(windowsPtyBackendForAgent("codex")).toBe("winpty");
+  it("uses the selected backend for local Codex", () => {
+    expect(windowsPtyBackendForAgent("codex", null, "winpty")).toBe("winpty");
+    expect(windowsPtyBackendForAgent("codex", null, "conpty")).toBe("conpty");
   });
 
   it("uses ConPTY for SSH Codex", () => {
-    expect(windowsPtyBackendForAgent("codex", "ssh-host")).toBe("conpty");
+    expect(windowsPtyBackendForAgent("codex", "ssh-host", "winpty")).toBe(
+      "conpty",
+    );
   });
 
   it.each(["claude", "none", "shell"])(
@@ -16,4 +23,13 @@ describe("renderer Windows PTY backend selection", () => {
       expect(windowsPtyBackendForAgent(aiToolId)).toBe("conpty");
     },
   );
+
+  it("falls back to WinPTY for missing or invalid stored values", () => {
+    expect(parseWindowsPtyBackend(null)).toBe(
+      DEFAULT_WINDOWS_CODEX_PTY_BACKEND,
+    );
+    expect(parseWindowsPtyBackend("invalid")).toBe(
+      DEFAULT_WINDOWS_CODEX_PTY_BACKEND,
+    );
+  });
 });

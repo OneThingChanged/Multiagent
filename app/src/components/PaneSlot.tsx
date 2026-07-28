@@ -263,6 +263,7 @@ export function PaneSlot({
             ssh,
             cols,
             rows,
+            windowsPtyBackend: target.windowsPtyBackend,
           });
         })();
       }
@@ -361,6 +362,7 @@ export function PaneSlot({
             ssh,
             cols,
             rows,
+            windowsPtyBackend: e.windowsPtyBackend,
           }).catch((err) => {
             e.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
             setAgentStatus(agentId, "exited");

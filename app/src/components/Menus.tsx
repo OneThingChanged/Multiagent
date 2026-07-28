@@ -104,6 +104,8 @@ export function TabContextMenu({
   chatMode,
   onToggleChat,
   canChat,
+  canRevealInExplorer,
+  onRevealInExplorer,
 }: {
   state: TabCtxState;
   pinned: boolean;
@@ -121,6 +123,8 @@ export function TabContextMenu({
   chatMode: boolean;
   onToggleChat: () => void;
   canChat: boolean;
+  canRevealInExplorer: boolean;
+  onRevealInExplorer: () => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
   const run = (action: () => void) => () => {
@@ -149,6 +153,14 @@ export function TabContextMenu({
         <button className="ctx-item" onClick={run(() => onSplit("v"))}>
           아래로 분할
         </button>
+        {canRevealInExplorer && (
+          <>
+            <div className="ctx-separator" />
+            <button className="ctx-item" onClick={run(onRevealInExplorer)}>
+              탐색기에서 보기
+            </button>
+          </>
+        )}
         {canChat && (
           <>
             <div className="ctx-separator" />

@@ -2854,6 +2854,7 @@ function App() {
             ssh,
             cols: 120,
             rows: 30,
+            windowsPtyBackend: entry.windowsPtyBackend,
           });
         })();
         const pendingSpawn = entry.spawnPromise;
@@ -3139,6 +3140,21 @@ function App() {
         : null,
     [agents, renameSessionId]
   );
+  const tabContextDocument = useMemo(() => {
+    if (!tabContextMenu) return null;
+    const ref = parseDocTabId(tabContextMenu.agentId);
+    if (!ref) return null;
+    const project = projects.find(
+      (candidate) => candidate.id === ref.projectId
+    );
+    if (!project?.folder || project.sshHostId) return null;
+    return {
+      path: isAbsoluteFsPath(ref.relativePath)
+        ? ref.relativePath
+        : joinFsPath(project.folder, ref.relativePath),
+      projectName: project.name,
+    };
+  }, [projects, tabContextMenu]);
 
   // ---- Render
 
@@ -3468,6 +3484,19 @@ function App() {
           canChat={toolSupportsChat(
             agents.find((a) => a.id === tabContextMenu.agentId)?.aiToolId
           )}
+          canRevealInExplorer={!!tabContextDocument}
+          onRevealInExplorer={() => {
+            if (!tabContextDocument) return;
+            void invoke("reveal_local_path", {
+              path: tabContextDocument.path,
+            }).catch((error) => {
+              pushToast(
+                tabContextMenu.agentId,
+                tabContextDocument.projectName,
+                `탐색기에서 파일을 표시할 수 없습니다: ${String(error)}`
+              );
+            });
+          }}
           onCloseTab={() =>
             closeTab(tabContextMenu.path, tabContextMenu.agentId)
           }
