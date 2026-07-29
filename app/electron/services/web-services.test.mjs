@@ -68,9 +68,10 @@ describe("Electron dashboard server", () => {
     });
 
     const status = await service.start();
-    const [page, appScript, styles, manifest, worker, state] = await Promise.all([
+    const [page, appScript, touchScript, styles, manifest, worker, state] = await Promise.all([
       fetch(status.url),
       fetch(`${status.url}/pwa/app.js`),
+      fetch(`${status.url}/pwa/terminal-touch.js`),
       fetch(`${status.url}/pwa/styles.css`),
       fetch(`${status.url}/manifest.webmanifest`),
       fetch(`${status.url}/sw.js`),
@@ -85,6 +86,7 @@ describe("Electron dashboard server", () => {
     });
     const pageBody = await page.text();
     const appScriptBody = await appScript.text();
+    const touchScriptBody = await touchScript.text();
     const stylesBody = await styles.text();
     const manifestBody = await manifest.json();
     const workerBody = await worker.text();
@@ -96,6 +98,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("/manifest.webmanifest");
     expect(pageBody).toContain("Remote Monitor");
     expect(pageBody).toContain("interactive-widget=resizes-content");
+    expect(pageBody).toContain("/pwa/terminal-touch.js");
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
     expect(appScriptBody).toContain("function renderScreen()");
@@ -103,16 +106,20 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function renderDocuments()");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
+    expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
+    expect(touchScriptBody).toContain("function scrollLinesImmediately");
+    expect(touchScriptBody).toContain('addEventListener("touchmove"');
     expect(stylesBody).toContain(".monitor-board");
     expect(stylesBody).toContain(".screen-layout");
     expect(stylesBody).toContain(".documents-layout");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
+    expect(stylesBody).toContain("touch-action: pinch-zoom");
     expect(appScriptBody).toContain("mobile streams only its selected pane");
     expect(stylesBody).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v25');
+    expect(workerBody).toContain('multiagent-remote-v26');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.agents[0].output).toBe("최근 출력");
     expect(stateBody.agents[0].hook.interactive_question).toBe("계속할까요?");

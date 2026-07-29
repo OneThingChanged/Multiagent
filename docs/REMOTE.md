@@ -25,6 +25,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - Mobile Screens switch to pane tabs instead of small splits, navigation lists appear as a slide menu, and non-monitor views reclaim the status-summary space
 - Session detail defaults to parsed Codex/Claude chat and can switch to the live xterm terminal. Windows extended transcript paths (`\\?\C:\...`) are normalized before transcript reads
+- On phones/tablets, one-finger vertical drags scroll the live terminal. Normal buffers move through xterm scrollback; alternate-screen TUIs receive wheel/PageUp/PageDown input. Pinch zoom and link taps remain available
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
 - `Ctrl/⌘ + Enter` to send, copy recent output

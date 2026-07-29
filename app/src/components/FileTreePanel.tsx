@@ -18,6 +18,7 @@ import type {
   GitFileCommit,
   GitStatusLetter,
   GitStatusResult,
+  GitSubmoduleEntry,
 } from "../platform/ipcContract";
 import { loadDiffToolCommand } from "../lib/diffTool";
 
@@ -62,6 +63,7 @@ type CtxMenuState = {
 
 const LS_TREE_PIN = "multiagent.fileTreePin.v1";
 const LS_TREE_EXPANDED = "multiagent.fileTreeExpanded.v1";
+const LS_TREE_SCOPE = "multiagent.fileTreeScope.v1";
 const FILTER_MAX_DIRS = 400;
 const FILTER_MAX_RESULTS = 200;
 const FILTER_DEBOUNCE_MS = 150;
@@ -258,6 +260,37 @@ function saveExpandedFor(projectId: string, expanded: Set<string>) {
   } catch {}
 }
 
+function loadScopeFor(projectId: string): string {
+  try {
+    const raw = localStorage.getItem(LS_TREE_SCOPE);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    return typeof parsed[projectId] === "string" ? parsed[projectId] : "";
+  } catch {
+    return "";
+  }
+}
+
+function saveScopeFor(projectId: string, relativePath: string) {
+  try {
+    const raw = localStorage.getItem(LS_TREE_SCOPE);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    parsed[projectId] = relativePath;
+    localStorage.setItem(LS_TREE_SCOPE, JSON.stringify(parsed));
+  } catch {}
+}
+
+export function projectRelativeFromScope(
+  scopePath: string,
+  relativePath: string
+) {
+  const scope = scopePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const relative = relativePath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  return scope ? `${scope}/${relative}` : relative;
+}
+
 export function FileTreePanel({
   projects,
   activeProject,
@@ -272,7 +305,11 @@ export function FileTreePanel({
   width: number;
   theme: AppThemeId;
   onOpenFile: (projectId: string, relativePath: string) => void;
-  onOpenGitHistory: (projectId: string, relativePath?: string | null) => void;
+  onOpenGitHistory: (
+    projectId: string,
+    relativePath?: string | null,
+    repositoryPath?: string | null
+  ) => void;
   onClose: () => void;
 }) {
   // ---- Shown project: follows the active project unless pinned ----
@@ -290,8 +327,76 @@ export function FileTreePanel({
     () => projects.find((p) => p.id === shownProjectId) ?? null,
     [projects, shownProjectId]
   );
-  const folder = shownProject && !shownProject.sshHostId ? shownProject.folder : "";
   const projectId = shownProject?.id ?? null;
+  const projectFolder =
+    shownProject && !shownProject.sshHostId ? shownProject.folder : "";
+  const [scopeState, setScopeState] = useState<{
+    projectId: string | null;
+    relativePath: string;
+  }>({ projectId: null, relativePath: "" });
+  const [submodules, setSubmodules] = useState<GitSubmoduleEntry[]>([]);
+  const [submodulesLoading, setSubmodulesLoading] = useState(false);
+  const scopePath =
+    scopeState.projectId === projectId ? scopeState.relativePath : "";
+  const folder =
+    projectFolder && scopePath
+      ? nativeAbsolutePath(projectFolder, scopePath)
+      : projectFolder;
+  const scopeStorageKey = projectId
+    ? scopePath
+      ? `${projectId}::${scopePath}`
+      : projectId
+    : "";
+  const toProjectRelative = useCallback(
+    (relativePath: string) =>
+      projectRelativeFromScope(scopePath, relativePath),
+    [scopePath]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setScopeState({ projectId, relativePath: "" });
+    setSubmodules([]);
+    if (!projectId || !projectFolder) {
+      setSubmodulesLoading(false);
+      return;
+    }
+    setSubmodulesLoading(true);
+    void invoke<GitSubmoduleEntry[]>("list_git_submodules", {
+      folder: projectFolder,
+    })
+      .then((entries) => {
+        if (cancelled) return;
+        setSubmodules(entries);
+        const storedScope = loadScopeFor(projectId);
+        if (
+          entries.some(
+            (entry) =>
+              entry.initialized && entry.relative_path === storedScope
+          )
+        ) {
+          setScopeState({ projectId, relativePath: storedScope });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSubmodules([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSubmodulesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectFolder, projectId]);
+
+  const selectScope = useCallback(
+    (relativePath: string) => {
+      if (!projectId) return;
+      setScopeState({ projectId, relativePath });
+      saveScopeFor(projectId, relativePath);
+    },
+    [projectId]
+  );
 
   // Follow the active project when unpinned.
   useEffect(() => {
@@ -475,7 +580,10 @@ export function FileTreePanel({
     setFilterResult(null);
     setCtxMenu(null);
     setEditing(null);
-    const restored = projectId ? loadExpandedFor(projectId) : new Set<string>();
+    setSelectedPath(null);
+    const restored = scopeStorageKey
+      ? loadExpandedFor(scopeStorageKey)
+      : new Set<string>();
     setExpanded(restored);
     if (folder) {
       void loadDir("");
@@ -486,12 +594,12 @@ export function FileTreePanel({
       setGitFolders(new Map());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folder, projectId, loadDir, refreshGit]);
+  }, [folder, scopeStorageKey, loadDir, refreshGit]);
 
-  // Persist expanded state per project.
+  // Persist expanded state per project + selected repository scope.
   useEffect(() => {
-    if (projectId) saveExpandedFor(projectId, expanded);
-  }, [expanded, projectId]);
+    if (scopeStorageKey) saveExpandedFor(scopeStorageKey, expanded);
+  }, [expanded, scopeStorageKey]);
 
   // Poll git status while the panel is visible.
   useEffect(() => {
@@ -991,7 +1099,7 @@ export function FileTreePanel({
           }}
           onDoubleClick={() => {
             if (!entry.isDir && projectId) {
-              onOpenFile(projectId, entry.relativePath);
+              onOpenFile(projectId, toProjectRelative(entry.relativePath));
             }
           }}
           onContextMenu={(event) => openCtxMenu(event, entry)}
@@ -1107,6 +1215,38 @@ export function FileTreePanel({
         </button>
       </div>
 
+      {(submodulesLoading || submodules.length > 0) && (
+        <label className="file-tree-scope">
+          <span className="file-tree-scope-label">Repository</span>
+          <select
+            value={scopePath}
+            onChange={(event) => selectScope(event.target.value)}
+            disabled={submodulesLoading}
+            title="파일 트리와 Source Control에 표시할 저장소"
+          >
+            <option value="">
+              {submodulesLoading
+                ? "서브모듈 확인 중…"
+                : `Main · ${shownProject?.name ?? "Project"}`}
+            </option>
+            {submodules.length > 0 && (
+              <optgroup label="Submodules">
+                {submodules.map((entry) => (
+                  <option
+                    key={entry.relative_path}
+                    value={entry.relative_path}
+                    disabled={!entry.initialized}
+                  >
+                    {entry.relative_path}
+                    {entry.initialized ? "" : " (초기화 안 됨)"}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+      )}
+
       {view === "files" && (
         <div className="file-tree-search">
           <input
@@ -1195,10 +1335,12 @@ export function FileTreePanel({
           folder={folder}
           sshProject={!!shownProject?.sshHostId}
           onOpenFile={(rel) => {
-            if (projectId) onOpenFile(projectId, rel);
+            if (projectId) onOpenFile(projectId, toProjectRelative(rel));
           }}
           onOpenHistory={(rel) => {
-            if (projectId) onOpenGitHistory(projectId, rel ?? null);
+            if (projectId) {
+              onOpenGitHistory(projectId, rel ?? null, scopePath || null);
+            }
           }}
           onMutated={() => void refreshGit()}
           onError={showOpError}
@@ -1270,7 +1412,12 @@ export function FileTreePanel({
                   className={`file-tree-row file-tree-row-file${gitClassFor(entry)}`}
                   style={{ paddingLeft: 8 }}
                   onClick={() => {
-                    if (projectId) onOpenFile(projectId, entry.relativePath);
+                    if (projectId) {
+                      onOpenFile(
+                        projectId,
+                        toProjectRelative(entry.relativePath)
+                      );
+                    }
                   }}
                   onContextMenu={(event) => openCtxMenu(event, entry)}
                   title={entry.relativePath}
@@ -1301,7 +1448,9 @@ export function FileTreePanel({
           state={ctxMenu}
           onOpenDoc={(entry) => {
             setCtxMenu(null);
-            if (projectId) onOpenFile(projectId, entry.relativePath);
+            if (projectId) {
+              onOpenFile(projectId, toProjectRelative(entry.relativePath));
+            }
           }}
           onOpenOs={(entry) => {
             setCtxMenu(null);
@@ -1315,7 +1464,7 @@ export function FileTreePanel({
           }}
           onCopyRelative={(entry) => {
             setCtxMenu(null);
-            copyText(entry.relativePath);
+            copyText(toProjectRelative(entry.relativePath));
           }}
           onDuplicate={(entry) => void duplicateEntry(entry)}
           onReveal={(entry) => {
@@ -1330,7 +1479,13 @@ export function FileTreePanel({
           onNewDir={(parent) => startCreate("new-dir", parent)}
           onOpenHistory={(entry) => {
             setCtxMenu(null);
-            if (projectId) onOpenGitHistory(projectId, entry.relativePath);
+            if (projectId) {
+              onOpenGitHistory(
+                projectId,
+                entry.relativePath,
+                scopePath || null
+              );
+            }
           }}
         />
       )}

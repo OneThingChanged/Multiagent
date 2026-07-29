@@ -2638,8 +2638,16 @@ function App() {
   );
 
   const openGitHistoryTab = useCallback(
-    (projectId: string, relativePath?: string | null) => {
-      const gitId = makeGitHistoryTabId(projectId, relativePath ?? null);
+    (
+      projectId: string,
+      relativePath?: string | null,
+      repositoryPath?: string | null
+    ) => {
+      const gitId = makeGitHistoryTabId(
+        projectId,
+        relativePath ?? null,
+        repositoryPath ?? null
+      );
       applyGroupOp((s) => {
         const group = s.groups.find((g) => g.id === s.activeGroupId);
         // Already open in the active screen → just focus it.

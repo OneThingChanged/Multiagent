@@ -27,6 +27,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "read_markdown_file",
   "resolve_markdown_path",
   "list_directory",
+  "list_git_submodules",
   "search_files",
   "read_text_file",
   "read_chat_transcript",
@@ -217,6 +218,9 @@ function assertInvokeRequest(command, rawArgs) {
     case "list_directory":
       assertPathString(args.folder, "folder");
       assertPathString(args.relative, "relative path", true);
+      break;
+    case "list_git_submodules":
+      assertPathString(args.folder, "folder");
       break;
     case "search_files":
       assertPathString(args.folder, "folder");

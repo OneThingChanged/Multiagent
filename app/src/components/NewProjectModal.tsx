@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { openDialog } from "../platform/plugins";
-import { AI_TOOLS, type NewProjectPayload } from "../types";
+import { AI_TOOLS, toolForId, type NewProjectPayload } from "../types";
 import { loadSshHosts } from "../lib/sshHosts";
 
 export function NewProjectModal({
@@ -20,10 +20,13 @@ export function NewProjectModal({
   const [name, setName] = useState(defaultName);
   const [folder, setFolder] = useState("");
   const [aiToolId, setAiToolId] = useState("");
+  const [dangerous, setDangerous] = useState(false);
   const [remote, setRemote] = useState(false);
   const [sshHosts] = useState(() => loadSshHosts());
   const [sshHostId, setSshHostId] = useState<string>("");
   const [remoteFolder, setRemoteFolder] = useState("");
+  const selectedTool = toolForId(aiToolId);
+  const supportsDangerous = !!aiToolId && !!selectedTool.dangerousFlag;
 
   const browse = async () => {
     try {
@@ -44,6 +47,7 @@ export function NewProjectModal({
         name: name.trim(),
         folder: "",
         aiToolId,
+        dangerous: dangerous && supportsDangerous,
         sshHostId,
         remoteFolder: remoteFolder.trim(),
       });
@@ -52,6 +56,7 @@ export function NewProjectModal({
         name: name.trim(),
         folder: folder.trim(),
         aiToolId,
+        dangerous: dangerous && supportsDangerous,
       });
     }
   };
@@ -79,7 +84,13 @@ export function NewProjectModal({
           <span className="field-label">First session tool</span>
           <select
             value={aiToolId}
-            onChange={(event) => setAiToolId(event.target.value)}
+            onChange={(event) => {
+              const nextToolId = event.target.value;
+              setAiToolId(nextToolId);
+              if (!toolForId(nextToolId).dangerousFlag) {
+                setDangerous(false);
+              }
+            }}
           >
             <option value="" disabled>
               Select a tool…
@@ -94,6 +105,22 @@ export function NewProjectModal({
             프로젝트를 만들면 선택한 도구로 Session 1이 바로 시작됩니다.
           </span>
         </label>
+
+        {supportsDangerous && (
+          <label className="field-check">
+            <input
+              type="checkbox"
+              checked={dangerous}
+              onChange={(event) => setDangerous(event.target.checked)}
+            />
+            <span>
+              <span className="check-label">Dangerous mode</span>
+              <span className="check-hint">
+                {selectedTool.dangerousFlag} — 권한 확인을 생략합니다.
+              </span>
+            </span>
+          </label>
+        )}
 
         <label className="field-check">
           <input

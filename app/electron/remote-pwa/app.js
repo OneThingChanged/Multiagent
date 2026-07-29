@@ -1482,8 +1482,16 @@ function buildTerminal(container, fontSize) {
     linkHandler: { activate: (_event, uri) => openExternalUrl(uri), allowNonHttpProtocols: false },
   });
   term.open(container);
-  const instance = { term, stream: null, agentId: null };
+  const instance = {
+    term,
+    stream: null,
+    agentId: null,
+    disposeTouchScroll: null,
+  };
   term.onData((data) => { if (instance.agentId) void sendRaw(instance.agentId, data); });
+  instance.disposeTouchScroll =
+    globalThis.MultiAgentTerminalTouch?.install(container, instance, sendRaw) ||
+    null;
 
   // Visible-URL links: intercept before xterm's mouse reporting so a tap/click
   // on a URL opens it even while Codex has mouse tracking on. mousedown/mouseup
@@ -1560,6 +1568,7 @@ function releaseTerminal(container) {
   const instance = terminals.get(container);
   if (!instance) return;
   closeStream(instance);
+  instance.disposeTouchScroll?.();
   try { instance.term.dispose(); } catch { /* already disposed */ }
   terminals.delete(container);
 }

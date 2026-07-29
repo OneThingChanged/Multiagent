@@ -44,7 +44,7 @@ export function buildNewProjectWithFirstAgent(
     folder: project.folder,
     aiToolId: tool.id,
     aiLabel: tool.label,
-    dangerous: false,
+    dangerous: payload.dangerous && !!tool.dangerousFlag,
     status: "starting",
     runtimeStatus: "starting",
     createdAt: now,

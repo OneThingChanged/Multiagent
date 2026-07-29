@@ -64,12 +64,12 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 
 ## New Project / Session Modals
 
-- **New Project**: enter a project name and root folder, then explicitly choose the first session tool. No tool is preselected, so the project cannot be created until Claude/Codex/Qwen/Cline/Shell is chosen. The folder becomes the session cwd and Docs scan root; `Session 1` starts immediately with the selected tool
+- **New Project**: enter a project name and root folder, then explicitly choose the first session tool. No tool is preselected, so the project cannot be created until Claude/Codex/Qwen/Cline/Shell is chosen. Tools with a permission-bypass flag also expose a **Dangerous mode** checkbox for `Session 1`. The folder becomes the session cwd and Docs scan root; `Session 1` starts immediately with the selected options
   - **Run on remote host (SSH)** toggle: when on, instead of a folder, pick a registered SSH host (dropdown) and enter a **remote folder**. This project's sessions run over SSH on that machine (register hosts first in Settings → SSH Hosts)
 - **New Session**: creates a session inside the active project
 - **Session alias**: the name shown in the sidebar/tabs/Docs subtitle
 - **AI tool**: Claude Code / Codex / Shell only
-- **Dangerous mode**: when checked, auto-adds `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex). Highlighted in red ⚠
+- **Dangerous mode**: when checked, auto-adds `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex) / `--yolo` (Qwen). It is available in both New Project and New Session, and highlighted in red ⚠ after creation
 - Does not close on backdrop click. Only Cancel/Esc closes (prevents losing input mid-typing)
 
 ## Panel Tab Strip
@@ -123,10 +123,11 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - The topmost panel tabs switch between **🗀 Files / ⎇ Source Control** views. The ⎇ tab shows a changed-file count badge
 - A layout sibling, not an overlay — opening shrinks the terminal area. Drag the boundary to adjust width
 - **Project dropdown**: directly choose which project to show at the top of the panel (name + folder path list). Follows the active project by default
+- **Repository dropdown**: when the selected project has `.gitmodules`, choose the main repository or any initialized submodule. Nested submodules are discovered recursively; uninitialized entries stay visible but disabled. The selected repository is remembered per project
 - **Pin (📌) button**: when on, the tree stays fixed to the current project even when switching sessions/projects. Pin state persists across restarts and auto-releases if the pinned project is deleted
 - Shows **all files/folders** of the displayed project folder (excluding `node_modules`, `.git`, `target`, `dist`, `build`, `.next`, `.cache`, `.venv`, `__pycache__`, `out`)
 - Folders lazy-load on expand (max 2,000 entries per directory)
-- **Expansion state remembered per project** — restored when returning from another project or restarting the app
+- **Expansion state remembered per project and repository** — restored when returning from another project/submodule or restarting the app
 - Toolbar: expand all (⊞, 400-folder cap) / collapse all (⊟) / refresh (⟳)
 - **Git status display**: if the project is a git repo, changed files get a color + one-letter badge — `M` modified (yellow) · `U` untracked (green) · `A` staged (green) · `D` deleted (red, strikethrough) · `R` renamed. Folders get the representative status of descendants propagated (D > M > A > U). Auto-refresh every 10 seconds
 - **Find files** input: filename substring search (recursive into subfolders, max 200 results). `Esc` clears
@@ -135,6 +136,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 
 ### Source Control View (⎇ tab)
 
+- All status, branch, stage/unstage, commit, diff, and history actions run against the repository selected in the Repository dropdown
 - Branch bar: current branch + `↑ahead ↓behind` + upstream (`vs origin/main`)
 - Commit message input + **Stage All** / **Commit** buttons (commit also via `Ctrl+Enter`)
 - **Commit behavior** (VS Code style): if there are staged items, `Commit (N)` = commit only those (selected commit). If nothing is staged, `Commit All (N)` = stage all then commit. Enabled whenever there is a message + changes, so there is no dead end

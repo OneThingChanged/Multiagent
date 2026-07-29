@@ -8,6 +8,7 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
+  | "list_git_submodules"
   | "read_text_file" | "read_chat_transcript" | "chat_blocks" | "search_files"
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
@@ -90,6 +91,13 @@ export type DirectoryEntry = {
   name: string;
   relative_path: string;
   is_dir: boolean;
+};
+
+export type GitSubmoduleEntry = {
+  name: string;
+  relative_path: string;
+  url: string;
+  initialized: boolean;
 };
 
 export type TextFileResult =
@@ -223,6 +231,10 @@ export type RuntimeCommandContract = {
   list_directory: {
     args: { folder: string; relative: string };
     result: DirectoryEntry[];
+  };
+  list_git_submodules: {
+    args: { folder: string };
+    result: GitSubmoduleEntry[];
   };
   read_text_file: {
     args: { folder: string; relativePath: string };

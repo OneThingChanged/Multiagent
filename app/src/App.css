@@ -3155,6 +3155,41 @@ body.files-resizing .files-resizer::after {
   color: var(--docs-muted);
 }
 
+.file-tree-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--docs-border);
+  flex-shrink: 0;
+}
+.file-tree-scope-label {
+  flex: 0 0 auto;
+  color: var(--docs-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.file-tree-scope select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--docs-border);
+  border-radius: 5px;
+  background: var(--docs-bg-strong);
+  color: var(--docs-text);
+  font: inherit;
+  font-size: 11px;
+  outline: none;
+}
+.file-tree-scope select:focus {
+  border-color: var(--docs-accent);
+}
+.file-tree-scope select:disabled {
+  opacity: 0.65;
+}
+
 /* Pin */
 .file-tree-pin {
   font-size: 12px;

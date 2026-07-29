@@ -11,6 +11,18 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("terminal_session_action");
     expect(contract.INVOKE_COMMANDS).toContain("get_agent_window_usage");
     expect(contract.INVOKE_COMMANDS).toContain("claim_agent_for_window");
+    expect(contract.INVOKE_COMMANDS).toContain("list_git_submodules");
+  });
+
+  it("validates submodule discovery roots", () => {
+    expect(
+      contract.assertInvokeRequest("list_git_submodules", {
+        folder: "K:\\AI\\MultiAgent",
+      })
+    ).toMatchObject({ folder: "K:\\AI\\MultiAgent" });
+    expect(() =>
+      contract.assertInvokeRequest("list_git_submodules", { folder: "" })
+    ).toThrow("folder");
   });
 
   it("validates terminal cursors, actions and write bounds", () => {

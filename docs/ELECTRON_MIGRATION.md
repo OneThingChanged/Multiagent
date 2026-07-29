@@ -135,8 +135,9 @@ home screen install, and completion/question notifications while running. The AP
 to loopback only and includes GitHub Device Flow for quick tunnels plus automatic
 cloudflared setup. It provides a live xterm.js terminal over SSE plus a parsed
 Codex/Claude chat view. On phones, a Session uses the dynamic viewport for a compact
-header, scrollable chat/terminal, and composer; Screen mode streams only the selected
-pane. Windows namespaced transcript paths are normalized before chat parsing.
+header, scrollable chat/terminal, and composer; one-finger terminal drags scroll the
+normal xterm buffer or forward wheel/page input to an alternate-screen TUI. Screen mode
+streams only the selected pane. Windows namespaced transcript paths are normalized before chat parsing.
 Background Web Push remains later scope.
 
 ### Usage

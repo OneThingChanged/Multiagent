@@ -54,6 +54,7 @@ import {
 import { UsageService } from "./services/usage-service.mjs";
 import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
+import { discoverGitSubmodules } from "./services/git-submodules.mjs";
 import {
   buildWindowSessionUsage,
   claimWindowSession,
@@ -3237,6 +3238,8 @@ async function invokeCommand(event, command, rawArgs) {
       return resolveDocPath(args.folder, args.path);
     case "list_directory":
       return listDirectory(args.folder, args.relative);
+    case "list_git_submodules":
+      return discoverGitSubmodules(args.folder);
     case "search_files":
       return searchFiles(args.folder, args.query, args.limit);
     case "read_text_file":

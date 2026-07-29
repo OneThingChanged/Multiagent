@@ -22,6 +22,7 @@ describe("buildNewProjectWithFirstAgent", () => {
         name: "  Project A  ",
         folder: "  K:\\AI\\ProjectA  ",
         aiToolId: "codex",
+        dangerous: true,
       },
       {
         createId: () => ids.shift()!,
@@ -45,7 +46,7 @@ describe("buildNewProjectWithFirstAgent", () => {
       folder: "K:\\AI\\ProjectA",
       aiToolId: "codex",
       aiLabel: "Codex",
-      dangerous: false,
+      dangerous: true,
       status: "starting",
       runtimeStatus: "starting",
       createdAt: 1234,
@@ -59,6 +60,7 @@ describe("buildNewProjectWithFirstAgent", () => {
         name: "Remote",
         folder: "",
         aiToolId: "claude",
+        dangerous: false,
         sshHostId: "  host-1  ",
         remoteFolder: "  /srv/project  ",
       },
@@ -69,5 +71,21 @@ describe("buildNewProjectWithFirstAgent", () => {
     expect(project.remoteFolder).toBe("/srv/project");
     expect(agent.sshHostId).toBe("host-1");
     expect(agent.remoteFolder).toBe("/srv/project");
+  });
+
+  it("discards dangerous mode for a tool without a dangerous flag", () => {
+    const ids = ["shell-project", "shell-agent"];
+    const { agent } = buildNewProjectWithFirstAgent(
+      {
+        name: "Shell Project",
+        folder: "K:\\AI\\ShellProject",
+        aiToolId: "none",
+        dangerous: true,
+      },
+      { createId: () => ids.shift()!, now: 9999 }
+    );
+
+    expect(agent.aiToolId).toBe("none");
+    expect(agent.dangerous).toBe(false);
   });
 });

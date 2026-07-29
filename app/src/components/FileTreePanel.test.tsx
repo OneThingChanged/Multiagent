@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { collectKindFilterPaths, fileKindOf } from "./FileTreePanel";
+import {
+  collectKindFilterPaths,
+  fileKindOf,
+  projectRelativeFromScope,
+} from "./FileTreePanel";
 
 describe("fileKindOf", () => {
   it("classifies markdown files", () => {
@@ -95,5 +99,16 @@ describe("collectKindFilterPaths", () => {
     const result = collectKindFilterPaths(entries, new Set());
     expect(result.matchingFiles.size).toBe(0);
     expect(result.visibleDirs.size).toBe(0);
+  });
+});
+
+describe("projectRelativeFromScope", () => {
+  it("prefixes submodule paths while leaving the main project unchanged", () => {
+    expect(projectRelativeFromScope("", "Source/main.ts")).toBe(
+      "Source/main.ts"
+    );
+    expect(
+      projectRelativeFromScope("Plugins/Shared", "Source/main.ts")
+    ).toBe("Plugins/Shared/Source/main.ts");
   });
 });

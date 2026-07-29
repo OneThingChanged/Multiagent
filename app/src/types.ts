@@ -219,6 +219,7 @@ export type NewProjectPayload = {
   name: string;
   folder: string;
   aiToolId: string;
+  dangerous: boolean;
   sshHostId?: string;
   remoteFolder?: string;
 };

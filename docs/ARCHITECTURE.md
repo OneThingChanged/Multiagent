@@ -265,6 +265,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ### Backend
 
 - **`list_directory`** (Electron only): returns `{name, relative_path, is_dir}[]` for one directory under the project root (dirs-first sort, 2,000-entry cap per directory). Excludes `node_modules`/`.git`/`target`/`dist`/`build`/`.next`/`.cache`/`.venv`/`__pycache__`/`out`. `isInside` sandbox blocks access outside the root
+- **`list_git_submodules`** (Electron only): parses the selected project's `.gitmodules`, recursively follows initialized nested submodules, and returns `{name, relative_path, url, initialized}[]` (200-entry cap). Paths are normalized and constrained to the project root; uninitialized submodules are reported for disabled UI options
 - **`read_text_file`** (Electron only): returns any file inside the root as `{kind:"text",content} | {kind:"binary"} | {kind:"too_large",size}` (2MB cap, binary detected by NUL sniffing the first 8KB, `isInside` enforced)
 - **`git_status`** (Electron only): runs `git status --porcelain -z` (3s timeout, 2,000-entry cap) → `{is_repo, entries: {relative_path, status}[]}`. Skips original-path tokens of rename/copy entries and compresses XY codes to a single letter (`U`/`D`/`R`/`A`/`M`). git missing/non-repo returns `is_repo:false`
 - **File operation IPC** (Electron only, all `isInside` sandboxed + name validation): `create_file` (`wx` flag protects existing files) / `create_directory` / `rename_path` (returns the new relative path) / `duplicate_path` (auto names `name copy[ n]`, folders copied recursively) / `delete_path` (`shell.trashItem` → trash, not permanent)
@@ -281,7 +282,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 
 - **`FileTreePanel.tsx`** — right sidebar. Per-directory lazy cache in `dirCache: Map<relativePath, entry[]>`; only expanded folders project to flat visible rows. Find files is a debounced client-side BFS (400 dirs/200 results cap). Type chips recursively scan collapsed directories and derive `matchingFiles` plus `visibleDirs`, so only matching files and their ancestor folders remain; paths left unscanned at the safety cap stay visible rather than becoming false negatives
   - **Project selection**: header dropdown chooses the displayed project. Pin OFF follows the active project; pin ON fixes it (persisted in `multiagent.fileTreePin.v1`, auto-released when the project is deleted)
-  - **Expansion state**: stored per project in `multiagent.fileTreeExpanded.v1`; re-entering a project reloads the saved folders to restore. Expand all is BFS (400-dir cap)
+  - **Repository selection**: `list_git_submodules` populates a main/submodule dropdown. Selecting a repository changes the sandbox root used by Files and Source Control while document tab paths are re-prefixed to remain project-relative. The selected scope persists in `multiagent.fileTreeScope.v1`
+  - **Expansion state**: stored per project/repository in `multiagent.fileTreeExpanded.v1`; the main-repository key remains the legacy project id for compatibility. Re-entering a project/submodule reloads the saved folders to restore. Expand all is BFS (400-dir cap)
   - **git badges**: processes `git_status` results into a file map + folder propagation map (D>M>A>U rank), 10s polling. Name and badge share the same color
   - **Context menu + inline input**: menus per file/folder/empty area; new file, new folder, and rename are handled as inline input rows (Enter/Esc). Renaming a folder also rewrites descendant expansion paths to the new prefix. After operations, that directory refreshes + git updates
   - **View tabs**: topmost 🗀 Files / ⎇ Source Control switch. The ⎇ badge count reuses the Files view's `git_status` polling (gitFiles.size)
@@ -341,7 +343,8 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.docsTheme.v1` — legacy Docs-only theme key. Kept for compatibility while the new key is read/written
 - `multiagent.filesWidth.v1` / `multiagent.filesOpen.v1` — file tree sidebar width/open state (old `multiagent.docsWidth.v1` unused)
 - `multiagent.fileTreePin.v1` — file tree project pin `{ pinned, projectId }`
-- `multiagent.fileTreeExpanded.v1` — file tree expansion state `{ [projectId]: relativePath[] }`
+- `multiagent.fileTreeScope.v1` — last selected repository path per project (`""` = main repository)
+- `multiagent.fileTreeExpanded.v1` — file tree expansion state keyed by project id for the main repository and `projectId::submodule/path` for submodules
 - `multiagent.sidebarOpen.v1` — left sidebar collapsed state (default open)
 - `multiagent.terminalFontSize.v1` — xterm font size
 - `multiagent.notificationSound.v1` — notification sound settings (mode + customPath)

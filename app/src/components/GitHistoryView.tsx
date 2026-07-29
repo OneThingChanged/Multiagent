@@ -21,6 +21,16 @@ function parentDir(p: string): string {
   return idx > 0 ? p.slice(0, idx) : "";
 }
 
+function scopedFolder(root: string, repositoryPath: string | null) {
+  if (!root || !repositoryPath) return root;
+  const separator = root.includes("\\") ? "\\" : "/";
+  const relative =
+    separator === "\\"
+      ? repositoryPath.replace(/\//g, "\\")
+      : repositoryPath;
+  return `${root.replace(/[\\/]+$/, "")}${separator}${relative}`;
+}
+
 function absoluteDate(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -50,7 +60,10 @@ export function GitHistoryView({
   project: Project | null;
 }) {
   const ref = parseGitHistoryTabId(tabId);
-  const folder = project?.folder ?? "";
+  const folder = scopedFolder(
+    project?.folder ?? "",
+    ref?.repositoryPath ?? null
+  );
   const scopePath = ref?.path ?? null;
 
   const [commits, setCommits] = useState<GitLogCommit[]>([]);

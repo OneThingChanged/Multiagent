@@ -651,6 +651,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   .app-shell[data-view="session"] .terminal-mount .xterm-screen {
     height: 100%;
   }
+  .terminal-mount .xterm,
+  .screen-terminal-mount .xterm {
+    touch-action: pinch-zoom;
+  }
+  .terminal-mount .xterm-viewport,
+  .screen-terminal-mount .xterm-viewport {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   .app-shell[data-view="session"] .output-panel > pre {
     flex: 1 1 auto;
     min-height: 0;

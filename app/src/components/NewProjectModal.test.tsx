@@ -18,6 +18,7 @@ describe("NewProjectModal", () => {
     expect(html).toContain('<option value="" disabled="" selected="">');
     expect(html).toContain('value="claude"');
     expect(html).toContain('value="codex"');
+    expect(html).not.toContain("Dangerous mode");
     expect(html).toContain("<button class=\"btn-primary\" disabled=\"\">");
   });
 
