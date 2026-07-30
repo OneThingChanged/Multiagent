@@ -99,6 +99,9 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("Remote Monitor");
     expect(pageBody).toContain("interactive-widget=resizes-content");
     expect(pageBody).toContain("/pwa/terminal-touch.js");
+    expect(pageBody).toContain('id="attachmentButton"');
+    expect(pageBody).toContain('id="attachmentInput"');
+    expect(pageBody).toContain('id="sessionNavButton"');
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
     expect(appScriptBody).toContain("function renderScreen()");
@@ -106,6 +109,9 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function renderDocuments()");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
+    expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
+    expect(appScriptBody).toContain('fetch("/api/attachment"');
+    expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
     expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
     expect(touchScriptBody).toContain("function scrollLinesImmediately");
     expect(touchScriptBody).toContain('addEventListener("touchmove"');
@@ -113,13 +119,18 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".screen-layout");
     expect(stylesBody).toContain(".documents-layout");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
+    expect(stylesBody).toContain('[data-session-mode="chat"] .composer');
+    expect(stylesBody).toContain(".composer-main-row");
+    expect(stylesBody).toContain(".composer-attachment");
+    expect(stylesBody).toContain(".session-head-actions");
+    expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
     expect(appScriptBody).toContain("mobile streams only its selected pane");
     expect(stylesBody).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v26');
+    expect(workerBody).toContain('multiagent-remote-v28');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.agents[0].output).toBe("최근 출력");
     expect(stateBody.agents[0].hook.interactive_question).toBe("계속할까요?");
@@ -231,6 +242,54 @@ describe("Electron dashboard server", () => {
 
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-1", data: "계속 진행해줘\r" }]);
+    expect(blocked.status).toBe(403);
+  });
+
+  it("stores bounded same-origin image attachments and rejects spoofed or cross-origin files", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-attachment-"));
+    roots.push(root);
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => true,
+    });
+    services.push(service);
+    service.config.server_port = 0;
+    const status = await service.start();
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const requestBody = {
+      id: "agent-1",
+      name: "phone capture.png",
+      type: "image/png",
+      data: `data:image/png;base64,${png.toString("base64")}`,
+    };
+
+    const accepted = await fetch(`${status.url}/api/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify(requestBody),
+    });
+    const uploaded = await accepted.json();
+    const spoofed = await fetch(`${status.url}/api/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ ...requestBody, data: `data:image/png;base64,${Buffer.from("not an image").toString("base64")}` }),
+    });
+    const blocked = await fetch(`${status.url}/api/attachment`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.invalid",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    expect(accepted.status).toBe(201);
+    expect(uploaded).toMatchObject({ name: "phone capture.png", type: "image/png", size: png.length });
+    expect(path.dirname(uploaded.path)).toBe(path.join(root, "remote-attachments"));
+    expect(fs.readFileSync(uploaded.path)).toEqual(png);
+    expect(spoofed.status).toBe(415);
     expect(blocked.status).toBe(403);
   });
 

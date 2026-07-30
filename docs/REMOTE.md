@@ -11,6 +11,7 @@ Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands i
      │                                                   │
      ├─ GitHub login + account approval                  ├─ session/hook/recent output query
      ├─ Markdown/HTML document browser                   ├─ sandboxed local project document read
+     ├─ bounded image attachment upload                  ├─ attachment saved under app data
      ├─ status/question/completion alerts                └─ short input to the selected PTY
      └─ home screen install
 ```
@@ -24,7 +25,10 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Sessions**: per-project session list with status filters and search; the selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - Mobile Screens switch to pane tabs instead of small splits, navigation lists appear as a slide menu, and non-monitor views reclaim the status-summary space
+- Session detail automatically collapses the fixed left navigation at tablet/small-desktop widths (up to 1180px). In this focus layout the global header is removed, and a single compact row contains the navigation button, session name/status, and Chat/Terminal switch
 - Session detail defaults to parsed Codex/Claude chat and can switch to the live xterm terminal. Windows extended transcript paths (`\\?\C:\...`) are normalized before transcript reads
+- Session chat keeps image attachment + message input + Send on one compact row at every width. Mobile also hides the global top bar and duplicate request/question panels and compacts its header/mode switch. Terminal-only special keys return when switching to Terminal mode
+- For local sessions, the attachment button accepts up to four PNG/JPEG/GIF/WebP/BMP files per draft. Each image is uploaded to the host app (8MB maximum), previewed/removable before send, and its host path is appended to the selected session message. SSH sessions disable this button because the remote shell cannot read a path on the host PC
 - On phones/tablets, one-finger vertical drags scroll the live terminal. Normal buffers move through xterm scrollback; alternate-screen TUIs receive wheel/PageUp/PageDown input. Pinch zoom and link taps remain available
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
@@ -45,6 +49,7 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /sw.js` | offline shell / notification service worker |
 | `GET /api/state` | projects, sessions, hooks, recent output state |
 | `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
+| `POST /api/attachment` | save one same-origin image attachment under app data. JSON data URL, 8MB decoded limit |
 | `GET /api/stream?id=...` | SSE backfill and live PTY output for the xterm view |
 | `GET /api/chat?id=...` | parsed Codex/Claude transcript blocks for the chat view |
 | `POST /api/session/restart` | request activation of an inactive session |
@@ -99,6 +104,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 - Document paths are resolved against a synchronized local project root. Absolute paths, `..` traversal outside the project, symbolic-link escapes, unsupported extensions, files over 2MB, and SSH projects are rejected. Dependency/build/cache folders are skipped while listing.
 - Markdown raw HTML is escaped before rendering. HTML previews use an iframe without `allow-scripts` or `allow-same-origin`, so document scripts and parent-window access are blocked.
 - PTY input allows same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB, and exited sessions are rejected.
+- Image uploads use the same approval and same-origin boundary. The server ignores client file paths, accepts five raster MIME types only, verifies their file signatures, caps decoded files at 8MB, and writes random names under `remote-attachments` in the app data folder.
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
 - Even if a Company renderer is compromised, main re-blocks Remote·Tunnel calls in the disabled command set.

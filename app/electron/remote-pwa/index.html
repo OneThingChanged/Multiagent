@@ -171,22 +171,25 @@
 
         <section class="session-view" id="sessionView" hidden>
           <div class="view-head session-head">
+            <button class="session-nav-button" id="sessionNavButton" type="button" title="세션 목록 열기" aria-label="세션 목록 열기">☰</button>
             <div class="session-title">
               <span class="status-chip idle" id="detailStatus">대기</span>
               <h2 id="detailName">Session</h2>
               <p id="detailMeta"></p>
             </div>
-            <button class="small-button" id="backToScreenButton" type="button" hidden>Screen으로 돌아가기</button>
+            <div class="session-head-actions">
+              <div class="session-mode" id="sessionMode" role="tablist">
+                <button class="on" data-mode="chat" type="button">💬 채팅</button>
+                <button data-mode="term" type="button">⌗ 터미널</button>
+              </div>
+              <button class="small-button" id="backToScreenButton" type="button" hidden>Screen으로 돌아가기</button>
+            </div>
           </div>
 
           <div class="session-content">
             <div class="session-offline" id="sessionOffline" hidden>
               <span>이 세션은 비활성 상태입니다 (실행 중인 터미널 없음).</span>
               <button class="send-button" id="restartSessionButton" type="button">다시 시작</button>
-            </div>
-            <div class="session-mode" id="sessionMode" role="tablist">
-              <button class="on" data-mode="chat" type="button">💬 채팅</button>
-              <button data-mode="term" type="button">⌗ 터미널</button>
             </div>
             <section class="question-panel" id="questionPanel" hidden>
               <div><span class="panel-kicker">ANSWER NEEDED</span><strong>질문이 도착했습니다</strong></div>
@@ -212,7 +215,13 @@
               <label for="messageInput">추가 지시 또는 질문 답변</label>
               <div class="composer-queue" id="composerQueue" hidden></div>
               <div class="composer-ac" id="composerAc" hidden></div>
-              <textarea id="messageInput" rows="3" maxlength="4000" placeholder="이 세션으로 전송됩니다"></textarea>
+              <div class="composer-attachments" id="composerAttachments" aria-label="첨부 이미지" hidden></div>
+              <div class="composer-main-row">
+                <button class="composer-attach-button" id="attachmentButton" type="button" title="이미지 첨부" aria-label="이미지 첨부">📎</button>
+                <input id="attachmentInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
+                <textarea id="messageInput" rows="1" maxlength="4000" placeholder="메시지 입력"></textarea>
+                <button class="send-button" id="sendButton" type="submit">전송</button>
+              </div>
               <div class="composer-keys" id="composerKeys" aria-label="특수 키 전송">
                 <button type="button" data-key="enter" title="Enter 전송 (계속/확인)">⏎ Enter</button>
                 <button type="button" data-key="up" title="위 화살표">↑</button>
@@ -220,7 +229,7 @@
                 <button type="button" data-key="esc" title="Esc">Esc</button>
                 <button type="button" data-key="ctrlc" title="Ctrl+C (중단)">Ctrl+C</button>
               </div>
-              <div class="composer-foot"><span>Ctrl/⌘ + Enter로 전송</span><button class="send-button" id="sendButton" type="submit">전송</button></div>
+              <span class="composer-hint">Ctrl/⌘ + Enter로 전송</span>
             </form>
           </div>
         </section>

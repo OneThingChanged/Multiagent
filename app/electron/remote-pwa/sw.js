@@ -1,4 +1,4 @@
-const CACHE_NAME = "multiagent-remote-v26";
+const CACHE_NAME = "multiagent-remote-v28";
 const STATIC_ASSETS = [
   "/",
   "/pwa/styles.css",

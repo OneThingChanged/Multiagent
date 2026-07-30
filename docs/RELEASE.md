@@ -80,19 +80,21 @@ npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.
 
 ## Release Procedure
 
-### 1. Bump the Tauri version (3 source spots)
+### 1. Bump the stable version
 
 | file | field |
 |---|---|
+| `app/package.json` | Electron package `"version"` |
+| `app/package-lock.json` | root/package versions |
 | `app/src-tauri/Cargo.toml` | `[package] version` |
 | `app/src-tauri/tauri.conf.json` | `"version"` |
-| `app/src/lib/appInfo.ts` | `APP_VERSION` |
 
-If the 3 spots disagree, Tauri build artifact filenames/displayed versions get crossed. The
-root package version in `app/src-tauri/Cargo.lock` must also be included in the final
-commit. `app/package.json` and `app/package-lock.json` use the Electron test channel
-version (`0.5.x-electron.n`), so they are not matched to Tauri. `write-latest-json.mjs`
-also writes manifests based on the `tauri.conf.json` version.
+Stable Electron and the legacy Tauri transition manifests use the same version. Include
+the root package version in `app/src-tauri/Cargo.lock` as well. The renderer's
+`APP_VERSION` is injected from `app/package.json` at build time, so
+`app/src/lib/appInfo.ts` has no separate version literal. Electron Builder and
+`write-electron-transition-manifest.mjs` read `app/package.json`; the legacy Tauri
+manifest writer reads `tauri.conf.json`.
 
 ### 2. Quick Verification
 

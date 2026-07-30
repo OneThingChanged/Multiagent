@@ -40,6 +40,15 @@ const REMOTE_DOCUMENT_SKIPPED_DIRS = new Set([
 ]);
 const MAX_REMOTE_DOCUMENT_FILES = 500;
 const MAX_REMOTE_DOCUMENT_BYTES = 2 * 1024 * 1024;
+const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
+const REMOTE_ATTACHMENT_TYPES = new Map([
+  ["image/png", { extension: ".png", signature: (buffer) => buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")) }],
+  ["image/jpeg", { extension: ".jpg", signature: (buffer) => buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff }],
+  ["image/gif", { extension: ".gif", signature: (buffer) => ["GIF87a", "GIF89a"].includes(buffer.subarray(0, 6).toString("ascii")) }],
+  ["image/webp", { extension: ".webp", signature: (buffer) => buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP" }],
+  ["image/bmp", { extension: ".bmp", signature: (buffer) => buffer.subarray(0, 2).toString("ascii") === "BM" }],
+]);
 const REMOTE_PWA_ASSETS = new Map([
   ["/", { file: "index.html", type: "text/html; charset=utf-8", cache: "no-store" }],
   ["/login", { file: "login.html", type: "text/html; charset=utf-8", cache: "no-store" }],
@@ -287,6 +296,50 @@ async function readJson(request, maxBytes = 64 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+async function saveRemoteAttachment(request, baseDir) {
+  let body;
+  try {
+    body = await readJson(request, MAX_REMOTE_ATTACHMENT_REQUEST_BYTES);
+  } catch (error) {
+    if (error?.message === "request too large") {
+      throw new RemoteDocumentError(413, "이미지는 8MB 이하여야 합니다.");
+    }
+    throw new RemoteDocumentError(400, "올바른 이미지 요청이 아닙니다.");
+  }
+  const id = String(body.id || "").trim();
+  const declaredType = String(body.type || "").trim().toLowerCase();
+  const match = String(body.data || "").match(/^data:([^;,]+);base64,([a-z0-9+/]+={0,2})$/i);
+  const mime = String(match?.[1] || "").toLowerCase();
+  const encoded = match?.[2] || "";
+  const imageType = REMOTE_ATTACHMENT_TYPES.get(mime);
+  if (!id || !imageType || declaredType !== mime || encoded.length % 4 !== 0) {
+    throw new RemoteDocumentError(415, "PNG, JPEG, GIF, WebP, BMP 이미지만 첨부할 수 있습니다.");
+  }
+  const content = Buffer.from(encoded, "base64");
+  if (!content.length || content.length > MAX_REMOTE_ATTACHMENT_BYTES) {
+    throw new RemoteDocumentError(413, "이미지는 8MB 이하여야 합니다.");
+  }
+  if (!imageType.signature(content)) {
+    throw new RemoteDocumentError(415, "파일 내용이 선택한 이미지 형식과 일치하지 않습니다.");
+  }
+  const directory = path.join(baseDir, "remote-attachments");
+  await fsPromises.mkdir(directory, { recursive: true });
+  const storedName = `${Date.now()}-${crypto.randomUUID()}${imageType.extension}`;
+  const storedPath = path.join(directory, storedName);
+  await fsPromises.writeFile(storedPath, content, { flag: "wx" });
+  return {
+    path: storedPath,
+    name: path.basename(String(body.name || "").trim()).slice(0, 160) || storedName,
+    type: mime,
+    size: content.length,
+  };
+}
+
+function sendRemoteAttachmentError(response, error) {
+  const status = Number.isInteger(error?.status) ? error.status : 500;
+  sendJson(response, status, { error: error?.message || "이미지를 첨부하지 못했습니다." });
+}
+
 async function listen(server, desiredPort, host = "127.0.0.1") {
   const candidates = desiredPort > 0
     ? Array.from({ length: 50 }, (_, index) => desiredPort + index)
@@ -392,6 +445,19 @@ export class LocalDashboardService {
             const data = String(body.data || "");
             if (!id || !data || data.length > 8 * 1024) { sendJson(response, 400, { error: "invalid input" }); return; }
             sendJson(response, p.writePty?.(id, data) === false ? 409 : 200, { ok: true });
+            return;
+          }
+          if (request.method === "POST" && url.pathname === "/api/attachment") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+              sendJson(response, 415, { error: "application/json required" });
+              return;
+            }
+            try {
+              sendJson(response, 201, await saveRemoteAttachment(request, this.baseDir));
+            } catch (error) {
+              sendRemoteAttachmentError(response, error);
+            }
             return;
           }
           if (request.method === "POST" && url.pathname === "/api/session/restart") {
@@ -797,6 +863,22 @@ export class RemoteDashboardService {
             return;
           }
           sendJson(response, 200, { ok: true });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/attachment") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          try {
+            sendJson(response, 201, await saveRemoteAttachment(request, this.baseDir));
+          } catch (error) {
+            sendRemoteAttachmentError(response, error);
+          }
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/stream") {

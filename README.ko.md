@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-[![Version](https://img.shields.io/badge/version-0.5.61-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.5.80-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -142,4 +142,3 @@ Tauri 산출물은 `app/src-tauri/target/release/bundle/`에 생성됩니다 (NS
 ## 라이선스
 
 [MIT](LICENSE)
-

@@ -328,6 +328,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .document-html { width: 100%; min-height: 625px; border: 0; background: white; }
 
 .session-content { display: grid; gap: 12px; max-width: none; }
+.session-nav-button { display: none; }
+.session-head-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .status-chip { display: inline-flex; align-items: center; min-height: 23px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 9px; font-weight: 800; }
 .status-chip.working { border-color: rgba(255, 201, 99, 0.3); color: var(--amber); background: rgba(255, 201, 99, 0.06); }
 .status-chip.attention { border-color: rgba(91, 188, 255, 0.35); color: var(--blue); background: rgba(91, 188, 255, 0.07); }
@@ -453,14 +455,57 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .composer-queue-text { flex: 1; min-width: 0; font-size: 11px; color: #cfe0ec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-queue-cancel { flex: 0 0 auto; width: 22px; height: 22px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .composer-queue-cancel:hover { color: #eaf3fa; background: rgba(80, 223, 208, 0.14); }
+.composer-attachments { display: flex; gap: 6px; margin-bottom: 7px; overflow-x: auto; scrollbar-width: thin; }
+.composer-attachment { display: grid; grid-template-columns: 30px minmax(0, 1fr) 22px; align-items: center; flex: 0 1 190px; min-width: 130px; gap: 6px; padding: 4px; border: 1px solid rgba(80, 223, 208, 0.26); border-radius: 8px; background: rgba(5, 13, 20, 0.78); }
+.composer-attachment.error { border-color: rgba(255, 125, 125, 0.4); }
+.composer-attachment img { width: 30px; height: 30px; border-radius: 5px; object-fit: cover; background: var(--panel); }
+.composer-attachment-name { min-width: 0; overflow: hidden; color: #cfe0ec; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment.error .composer-attachment-name { color: var(--red); }
+.composer-attachment-remove { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 16px; cursor: pointer; }
+.composer-attachment-remove:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.composer-main-row { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.composer-attach-button { flex: 0 0 38px; width: 38px; min-height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: var(--cyan); background: rgba(9, 20, 30, 0.9); font-size: 21px; line-height: 1; cursor: pointer; }
+.composer-attach-button:hover { border-color: var(--line-strong); background: rgba(80, 223, 208, 0.08); }
+.composer-attach-button:disabled { cursor: not-allowed; opacity: 0.4; }
 .composer textarea { width: 100%; min-height: 74px; resize: vertical; padding: 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: #050d14; font-size: 11px; line-height: 1.45; }
 .composer textarea:focus { border-color: #3e7192; }
 .composer-keys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .composer-keys button { min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: #cfe0ec; background: rgba(9, 20, 30, 0.9); font-size: 10px; font-weight: 700; cursor: pointer; }
 .composer-keys button:hover { border-color: #3e7192; color: #eaf3fa; }
 .composer-keys button:active { background: rgba(80, 223, 208, 0.14); }
-.composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.composer-hint { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; }
 .send-button { min-height: 33px; padding: 0 16px; font-size: 10px; }
+.send-button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* Session chat is deliberately compact at every viewport size: the transcript
+   gets the space, while attachment, input and Send stay on one row. */
+.app-shell[data-view="session"][data-session-mode="chat"] .composer { padding: 7px; }
+.app-shell[data-view="session"][data-session-mode="chat"] .composer > label,
+.app-shell[data-view="session"][data-session-mode="chat"] .composer-keys,
+.app-shell[data-view="session"][data-session-mode="chat"] .composer-hint { display: none; }
+.app-shell[data-view="session"][data-session-mode="chat"] .composer-main-row { min-height: 42px; }
+.app-shell[data-view="session"][data-session-mode="chat"] .composer textarea {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  max-height: min(112px, 22dvh);
+  padding: 8px 10px;
+  resize: none;
+  font-size: 13px;
+}
+.app-shell[data-view="session"][data-session-mode="chat"] .composer-attach-button {
+  flex-basis: 42px;
+  width: 42px;
+  min-height: 42px;
+}
+.app-shell[data-view="session"][data-session-mode="chat"] .send-button {
+  flex: 0 0 auto;
+  min-width: 58px;
+  min-height: 42px;
+  padding: 0 12px;
+}
 .mobile-nav { display: none; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 100; max-width: min(380px, calc(100vw - 36px)); padding: 11px 14px; border: 1px solid #315775; border-radius: 10px; color: #dcebf3; background: rgba(12, 29, 42, 0.96); box-shadow: var(--shadow); font-size: 11px; }
 
@@ -469,6 +514,126 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   .monitor-board { grid-template-columns: repeat(5, minmax(150px, 1fr)); }
   .topbar { grid-template-columns: 1fr auto; }
   .topbar-status { display: none; }
+
+  /* Session focus mode: use the entire tablet/small-desktop viewport and keep
+     navigation, identity, status and view switching in one compact row. */
+  .app-shell[data-view="session"] .topbar,
+  .app-shell[data-view="session"] .monitor-strip { display: none; }
+  .app-shell[data-view="session"] {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell[data-view="session"] .workspace {
+    height: calc(100dvh - 8px);
+    min-height: 0;
+    margin: 4px;
+    overflow: hidden;
+    border-radius: 11px;
+  }
+  .app-shell[data-view="session"] .content-pane,
+  .app-shell[data-view="session"] .session-view {
+    height: 100%;
+    min-height: 0;
+  }
+  .app-shell[data-view="session"] .session-view {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+  .app-shell[data-view="session"] .session-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 7px;
+    min-height: 42px;
+    margin: 0;
+    padding: 4px 7px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(9, 21, 32, 0.96);
+  }
+  .app-shell[data-view="session"] .session-nav-button {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    background: rgba(13, 28, 41, 0.86);
+    cursor: pointer;
+  }
+  .app-shell[data-view="session"] .session-title {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 7px;
+  }
+  .app-shell[data-view="session"] .session-title .status-chip {
+    flex: 0 0 auto;
+    min-height: 20px;
+    padding: 0 6px;
+    font-size: 8px;
+  }
+  .app-shell[data-view="session"] .session-title h2 {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+  .app-shell[data-view="session"] .session-title p { display: none; }
+  .app-shell[data-view="session"] .session-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .app-shell[data-view="session"] .session-mode {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 2px;
+  }
+  .app-shell[data-view="session"] .session-mode button {
+    min-height: 26px;
+    padding: 2px 9px;
+    font-size: 10px;
+  }
+  .app-shell[data-view="session"] .session-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 0;
+    padding: 4px;
+    overflow: hidden;
+  }
+  .app-shell[data-view="session"][data-session-mode="chat"] .question-panel,
+  .app-shell[data-view="session"][data-session-mode="chat"] .context-panel {
+    display: none !important;
+  }
+  .app-shell[data-view="session"] .chat-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    padding: 2px 3px 8px;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .app-shell[data-view="session"] .output-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .app-shell[data-view="session"] .output-panel[hidden] { display: none; }
+  .app-shell[data-view="session"] .terminal-mount {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .app-shell[data-view="session"] .composer { flex: 0 0 auto; }
 }
 
 @media (max-width: 800px) {
@@ -542,15 +707,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 
   /* Session is the primary phone workflow. Remove the dashboard chrome and
      keep the conversation, terminal and composer in one dynamic-height view. */
+  .app-shell[data-view="session"] .topbar {
+    display: none;
+  }
   .app-shell[data-view="session"] {
     height: calc(100dvh - 62px - env(safe-area-inset-bottom));
     min-height: 0;
     overflow: hidden;
   }
   .app-shell[data-view="session"] .workspace {
-    height: calc(100dvh - 124px - env(safe-area-inset-bottom));
+    height: calc(100dvh - 70px - env(safe-area-inset-bottom));
     min-height: 0;
-    margin: 0 6px 8px;
+    margin: 4px;
     overflow: hidden;
   }
   .app-shell[data-view="session"] .content-pane,
@@ -565,9 +733,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   }
   .app-shell[data-view="session"] .session-head {
     flex: 0 0 auto;
-    min-height: 54px;
+    min-height: 40px;
     margin: 0;
-    padding: 8px 10px;
+    padding: 5px 8px;
     border-bottom: 1px solid var(--line);
     background: rgba(9, 21, 32, 0.96);
   }
@@ -579,7 +747,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     min-width: 0;
   }
   .app-shell[data-view="session"] .session-title .status-chip {
-    grid-row: 1 / span 2;
+    min-height: 20px;
+    padding: 0 6px;
+    font-size: 8px;
   }
   .app-shell[data-view="session"] .session-title h2 {
     min-width: 0;
@@ -590,28 +760,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     font-size: 15px;
   }
   .app-shell[data-view="session"] .session-title p {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 9px;
+    display: none;
   }
   .app-shell[data-view="session"] .session-content {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    gap: 7px;
+    gap: 4px;
     min-height: 0;
-    padding: 8px;
+    padding: 4px;
     overflow: hidden;
   }
   .app-shell[data-view="session"] .session-mode {
     flex: 0 0 auto;
-    min-height: 42px;
+    min-height: 30px;
+    padding: 2px;
   }
   .app-shell[data-view="session"] .session-mode button {
-    min-height: 34px;
-    padding: 6px;
+    min-height: 26px;
+    padding: 2px 6px;
+    font-size: 10px;
   }
   .app-shell[data-view="session"] .session-offline,
   .app-shell[data-view="session"] .question-panel,
@@ -626,11 +794,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     max-height: 72px;
     overflow-y: auto;
   }
+  .app-shell[data-view="session"][data-session-mode="chat"] .question-panel,
+  .app-shell[data-view="session"][data-session-mode="chat"] .context-panel {
+    display: none !important;
+  }
   .app-shell[data-view="session"] .chat-view {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
-    padding: 5px 3px 12px;
+    padding: 2px 3px 8px;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
@@ -667,11 +839,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
   }
   .app-shell[data-view="session"] .composer {
     flex: 0 0 auto;
-    padding: 8px;
-    border-radius: 10px;
+    padding: 6px;
+    border-radius: 9px;
   }
   .app-shell[data-view="session"] .composer label,
-  .app-shell[data-view="session"] .composer-foot > span { display: none; }
+  .app-shell[data-view="session"] .composer-hint { display: none; }
   .app-shell[data-view="session"] .composer textarea {
     min-height: 54px;
     max-height: 26dvh;
@@ -692,11 +864,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
     flex: 0 0 auto;
     min-height: 36px;
   }
-  .app-shell[data-view="session"] .composer-foot {
-    justify-content: flex-end;
-    margin-top: 6px;
-  }
   .app-shell[data-view="session"] .send-button { min-height: 38px; padding: 0 20px; }
+  .app-shell[data-view="session"][data-session-mode="chat"] .composer textarea {
+    height: 44px;
+    min-height: 44px;
+    max-height: 18dvh;
+    padding: 7px 9px;
+  }
+  .app-shell[data-view="session"][data-session-mode="chat"] .composer-keys {
+    display: none;
+  }
+  .app-shell[data-view="session"][data-session-mode="chat"] .send-button {
+    min-width: 58px;
+    min-height: 44px;
+    padding: 0 12px;
+  }
   .app-shell[data-view="session"] .chat-user { max-width: 92%; font-size: 14px; }
   .app-shell[data-view="session"] .chat-md { font-size: 14px; line-height: 1.68; }
   .app-shell[data-view="session"] .chat-work > summary,

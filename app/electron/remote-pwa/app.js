@@ -53,6 +53,7 @@ const ui = {
   detailStatus: $("#detailStatus"),
   detailName: $("#detailName"),
   detailMeta: $("#detailMeta"),
+  sessionNavButton: $("#sessionNavButton"),
   backToScreenButton: $("#backToScreenButton"),
   questionPanel: $("#questionPanel"),
   questionText: $("#questionText"),
@@ -73,6 +74,9 @@ const ui = {
   composerKeys: $("#composerKeys"),
   composerQueue: $("#composerQueue"),
   composerAc: $("#composerAc"),
+  composerAttachments: $("#composerAttachments"),
+  attachmentButton: $("#attachmentButton"),
+  attachmentInput: $("#attachmentInput"),
   messageInput: $("#messageInput"),
   sendButton: $("#sendButton"),
   refreshButton: $("#refreshButton"),
@@ -124,6 +128,7 @@ const leafTabSelection = new Map();
 const screenDrafts = new Map();
 const documentLists = new Map();
 const documentListLoads = new Map();
+const attachmentDrafts = new Map();
 let documentContent = null;
 let documentContentKey = "";
 let documentContentLoading = false;
@@ -1186,11 +1191,13 @@ function renderSelection() {
 function closeSidebar() {
   ui.navigationPane.classList.remove("open");
   ui.sidebarBackdrop.classList.remove("visible");
+  updateSidebarToggleState();
 }
 
 function openSidebar(section) {
   ui.navigationPane.classList.add("open");
   ui.sidebarBackdrop.classList.add("visible");
+  updateSidebarToggleState();
   requestAnimationFrame(() => section?.scrollIntoView({ block: "start" }));
 }
 
@@ -1219,6 +1226,7 @@ function selectSession(id, fromScreenId = null) {
   if (!agentMap().has(id)) return;
   selection = { type: "session", id };
   returnScreenId = fromScreenId;
+  if (!isMobile() && compactWorkspaceMedia.matches) applyNavCollapsed(true);
   updateUrl();
   renderNavigation();
   renderSelection();
@@ -1260,6 +1268,139 @@ async function sendInput(agentId, message) {
   await sendRaw(agentId, "\r");
   showToast("전송했습니다.");
   return true;
+}
+
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENTS = 4;
+const ACCEPTED_ATTACHMENT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+
+function currentAttachments() {
+  const agent = selectedAgent();
+  if (!agent) return [];
+  if (!attachmentDrafts.has(agent.id)) attachmentDrafts.set(agent.id, []);
+  return attachmentDrafts.get(agent.id);
+}
+
+function updateComposerSendState() {
+  const agent = selectedAgent();
+  const attachments = currentAttachments();
+  const hasMessage = Boolean(ui.messageInput.value.trim());
+  const hasReadyAttachment = attachments.some((attachment) => attachment.path && !attachment.error);
+  const uploading = attachments.some((attachment) => attachment.uploading);
+  ui.sendButton.disabled = uploading || (!hasMessage && !hasReadyAttachment);
+  ui.attachmentButton.disabled = !agent || Boolean(agent.sshHostId) || attachments.length >= MAX_ATTACHMENTS;
+  ui.attachmentButton.title = agent?.sshHostId
+    ? "SSH 세션은 이미지 첨부를 지원하지 않습니다"
+    : "이미지 첨부";
+}
+
+function renderComposerAttachments() {
+  const attachments = currentAttachments();
+  ui.composerAttachments.replaceChildren();
+  ui.composerAttachments.hidden = attachments.length === 0;
+  attachments.forEach((attachment) => {
+    const item = make("div", `composer-attachment${attachment.error ? " error" : ""}`);
+    const image = document.createElement("img");
+    if (attachment.preview) image.src = attachment.preview;
+    else image.hidden = true;
+    image.alt = "";
+    const meta = make("span", "composer-attachment-name", attachment.uploading
+      ? `${attachment.name} · 업로드 중`
+      : attachment.error
+        ? `${attachment.name} · 실패`
+        : attachment.name);
+    const remove = make("button", "composer-attachment-remove", "×");
+    remove.type = "button";
+    remove.title = "첨부 제거";
+    remove.setAttribute("aria-label", `${attachment.name} 첨부 제거`);
+    remove.addEventListener("click", () => {
+      const draft = currentAttachments();
+      const index = draft.findIndex((candidate) => candidate.token === attachment.token);
+      if (index >= 0) {
+        URL.revokeObjectURL(draft[index].preview);
+        draft.splice(index, 1);
+      }
+      renderComposerAttachments();
+    });
+    item.append(image, meta, remove);
+    ui.composerAttachments.appendChild(item);
+  });
+  updateComposerSendState();
+}
+
+function readFileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error("파일을 읽지 못했습니다.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadAttachment(agentId, attachment, file) {
+  try {
+    const data = await readFileDataUrl(file);
+    const response = await fetch("/api/attachment", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agentId, name: file.name, type: file.type, data }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    attachment.path = result.path;
+    attachment.uploading = false;
+  } catch (error) {
+    attachment.uploading = false;
+    attachment.error = error.message || "업로드하지 못했습니다.";
+    showToast(`이미지 첨부 실패: ${attachment.error}`);
+  }
+  renderComposerAttachments();
+}
+
+function addAttachments(files) {
+  const agent = selectedAgent();
+  if (!agent) {
+    showToast("세션을 먼저 선택하세요.");
+    return;
+  }
+  if (agent.sshHostId) {
+    showToast("SSH 세션에는 로컬 이미지를 첨부할 수 없습니다.");
+    return;
+  }
+  const draft = currentAttachments();
+  for (const file of files) {
+    if (draft.length >= MAX_ATTACHMENTS) {
+      showToast(`이미지는 최대 ${MAX_ATTACHMENTS}개까지 첨부할 수 있습니다.`);
+      break;
+    }
+    if (!ACCEPTED_ATTACHMENT_TYPES.has(file.type)) {
+      showToast(`${file.name}: 지원하지 않는 이미지 형식입니다.`);
+      continue;
+    }
+    if (!file.size || file.size > MAX_ATTACHMENT_BYTES) {
+      showToast(`${file.name}: 이미지는 8MB 이하여야 합니다.`);
+      continue;
+    }
+    const attachment = {
+      token: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+      name: file.name,
+      preview: URL.createObjectURL(file),
+      path: "",
+      uploading: true,
+      error: "",
+    };
+    draft.push(attachment);
+    void uploadAttachment(agent.id, attachment, file);
+  }
+  renderComposerAttachments();
+}
+
+function attachmentMessage(message, attachments) {
+  const paths = attachments
+    .filter((attachment) => attachment.path && !attachment.error)
+    .map((attachment) => `"${String(attachment.path).replaceAll('"', '\\"')}"`);
+  return [message, paths.length ? `첨부 이미지:\n${paths.join("\n")}` : ""].filter(Boolean).join("\n\n");
 }
 
 // Special-key sequences for prompts the composer text field can't express:
@@ -1351,18 +1492,24 @@ async function drainQueue() {
 async function sendSelectedMessage() {
   const agent = selectedAgent();
   const message = ui.messageInput.value.trim();
-  if (!agent || !message) return;
+  const attachments = currentAttachments();
+  if (!agent || attachments.some((attachment) => attachment.uploading)) return;
+  const outgoing = attachmentMessage(message, attachments);
+  if (!outgoing) return;
   if (queueAgentId !== agent.id) { messageQueue.length = 0; queueAgentId = agent.id; }
   ui.messageInput.value = "";
+  attachments.forEach((attachment) => URL.revokeObjectURL(attachment.preview));
+  attachmentDrafts.delete(agent.id);
+  renderComposerAttachments();
   const cooled = Date.now() - lastSendAt >= QUEUE_COOLDOWN_MS;
   if (agentReady(agent) && !agentBusy(agent) && messageQueue.length === 0 && cooled) {
     ui.sendButton.disabled = true;
     lastSendAt = Date.now();
-    await sendInput(agent.id, message);
+    await sendInput(agent.id, outgoing);
     lastChatFetch = { id: null, at: 0 };
-    ui.sendButton.disabled = false;
+    updateComposerSendState();
   } else {
-    messageQueue.push(message);
+    messageQueue.push(outgoing);
     renderComposerQueue();
     showToast("작업 중 — 대기열에 예약했습니다.");
   }
@@ -1924,7 +2071,9 @@ function syncSessionView() {
   if (selection.type !== "session") return;
   const agent = selectedAgent();
   syncQueueAgent(agent);
+  renderComposerAttachments();
   const chat = sessionViewMode === "chat";
+  ui.appShell.dataset.sessionMode = sessionViewMode;
   if (ui.chatView) ui.chatView.hidden = !chat;
   if (ui.outputPanel) ui.outputPanel.hidden = chat;
   if (ui.sessionMode) {
@@ -2176,6 +2325,14 @@ ui.sidebarToggle.addEventListener("click", () => {
     toggleNavCollapsed();
   }
 });
+ui.sessionNavButton.addEventListener("click", () => {
+  if (isMobile()) {
+    if (ui.navigationPane.classList.contains("open")) closeSidebar();
+    else openSidebar(ui.filters);
+  } else {
+    toggleNavCollapsed();
+  }
+});
 ui.sidebarBackdrop.addEventListener("click", closeSidebar);
 ui.screenOpenSession.addEventListener("click", () => {
   const id = ui.screenOpenSession.dataset.agentId;
@@ -2212,6 +2369,11 @@ ui.sessionMode?.addEventListener("click", (event) => {
   setSessionViewMode(button.dataset.mode);
 });
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
+ui.attachmentButton.addEventListener("click", () => ui.attachmentInput.click());
+ui.attachmentInput.addEventListener("change", () => {
+  addAttachments([...ui.attachmentInput.files]);
+  ui.attachmentInput.value = "";
+});
 setInterval(() => { void drainQueue(); }, 500);
 ui.composerKeys?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-key]");
@@ -2268,7 +2430,10 @@ function acceptComposerAc(i) {
   renderComposerAc();
   ui.messageInput.focus();
 }
-ui.messageInput.addEventListener("input", refreshComposerAc);
+ui.messageInput.addEventListener("input", () => {
+  refreshComposerAc();
+  updateComposerSendState();
+});
 ui.messageInput.addEventListener("blur", () => setTimeout(() => { acItems = []; renderComposerAc(); }, 120));
 ui.messageInput.addEventListener("keydown", (event) => {
   // Autocomplete popup takes priority.
@@ -2330,8 +2495,18 @@ navigator.serviceWorker?.addEventListener("message", (event) => {
 // Collapsible sidebar (tablet/desktop) — persisted across sessions.
 const NAV_COLLAPSE_KEY = "multiagent.remote.navCollapsed";
 const appShell = document.querySelector(".app-shell");
+const compactWorkspaceMedia = window.matchMedia("(max-width: 1180px)");
+function updateSidebarToggleState() {
+  const expanded = isMobile()
+    ? ui.navigationPane.classList.contains("open")
+    : !appShell?.classList.contains("nav-collapsed");
+  ui.sidebarToggle.setAttribute("aria-expanded", String(expanded));
+  ui.sidebarToggle.setAttribute("aria-label", expanded ? "탐색 메뉴 접기" : "탐색 메뉴 열기");
+  ui.sidebarToggle.title = expanded ? "좌측 목록 접기" : "좌측 목록 열기";
+}
 function applyNavCollapsed(collapsed) {
   appShell?.classList.toggle("nav-collapsed", collapsed);
+  updateSidebarToggleState();
   requestAnimationFrame(refitAllTerminals);
 }
 function toggleNavCollapsed() {
@@ -2345,6 +2520,7 @@ mobileMedia.addEventListener("change", () => {
   applyScreenAvailability();
   renderNavigation();
   syncTerminal();
+  updateSidebarToggleState();
   refitAllTerminals();
 });
 let resizeTimer = null;
@@ -2357,8 +2533,12 @@ if (localStorage.getItem("multiagent.remote.notifications") === "on" && window.N
   ui.notifyButton.classList.add("enabled");
   ui.notifyButton.title = "알림 켜짐";
 }
-applyNavCollapsed(localStorage.getItem(NAV_COLLAPSE_KEY) === "1");
+applyNavCollapsed(
+  localStorage.getItem(NAV_COLLAPSE_KEY) === "1"
+  || (selection.type === "session" && compactWorkspaceMedia.matches),
+);
 applyScreenAvailability();
+updateComposerSendState();
 setActiveFilter(activeFilter);
 void registerServiceWorker();
 void fetchState();
