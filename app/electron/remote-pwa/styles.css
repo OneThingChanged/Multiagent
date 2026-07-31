@@ -131,7 +131,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
   background: var(--panel);
 }
 .overview-button:hover, .overview-button.selected { border-color: rgba(80, 223, 208, 0.42); background: rgba(14, 35, 48, 0.95); }
-.documents-button { margin-top: 7px; }
+.documents-button, .usage-button { margin-top: 7px; }
 .overview-icon { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 9px; color: var(--cyan); background: rgba(80, 223, 208, 0.08); }
 .overview-button > span:nth-child(2) { display: grid; min-width: 0; }
 .overview-button strong { font-size: 12px; }
@@ -200,7 +200,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .sidebar-backdrop { display: none; }
 
 .content-pane { min-width: 0; min-height: 620px; background: rgba(5, 13, 21, 0.52); }
-.monitor-view, .screen-view, .documents-view, .session-view { min-height: 100%; padding: 19px; }
+.monitor-view, .screen-view, .documents-view, .usage-view, .session-view { min-height: 100%; padding: 19px; }
 .view-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 48px; margin-bottom: 15px; }
 .view-head h2 { font-size: 20px; }
 .view-head p { margin-top: 5px; }
@@ -329,6 +329,111 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .document-markdown a { color: var(--blue); text-decoration: none; }
 .document-markdown a:hover { text-decoration: underline; }
 .document-html { width: 100%; min-height: 625px; border: 0; background: white; }
+
+.usage-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.usage-summary-grid article {
+  display: grid;
+  gap: 7px;
+  min-height: 78px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(16, 31, 44, 0.92), rgba(8, 19, 29, 0.92));
+}
+.usage-summary-grid span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.usage-summary-grid strong { align-self: end; font-size: 22px; line-height: 1; }
+.usage-summary-healthy { color: var(--green); }
+.usage-summary-warning { color: var(--amber); }
+.usage-summary-critical { color: var(--red); }
+.usage-message {
+  margin: 0 0 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(8, 19, 29, 0.78);
+  text-align: center;
+  font-size: 10px;
+}
+.usage-message[data-state="error"] { border-color: rgba(255, 125, 125, 0.35); color: #ffc0c0; }
+.usage-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.usage-provider-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(7, 17, 27, 0.88);
+}
+.usage-provider-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(13, 28, 41, 0.8);
+}
+.usage-provider-identity { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.usage-provider-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 15px;
+  font-weight: 900;
+}
+.usage-provider-identity > div { display: grid; min-width: 0; gap: 3px; }
+.usage-provider-identity strong { font-size: 13px; }
+.usage-provider-identity span { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.usage-provider-updated { flex: 0 0 auto; color: var(--muted); font-size: 8px; }
+.usage-limit-list { display: grid; gap: 9px; padding: 10px; }
+.usage-limit-card {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(11, 25, 37, 0.82);
+}
+.usage-limit-name { display: block; margin-bottom: 9px; color: #dcebf3; font-size: 10px; }
+.usage-window-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.usage-window {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #07121c;
+}
+.usage-window-heading, .usage-window-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.usage-window-heading span { color: var(--muted); font-size: 9px; }
+.usage-window-heading strong { font-size: 14px; white-space: nowrap; }
+.usage-window-meta { color: var(--muted); font-size: 8px; }
+.usage-window-meta span:last-child { text-align: right; }
+.usage-remaining-progress {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(113, 137, 154, 0.16);
+}
+.usage-remaining-fill { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--green); }
+.usage-tone-healthy .usage-window-heading strong { color: var(--green); }
+.usage-tone-warning .usage-window-heading strong { color: var(--amber); }
+.usage-tone-warning .usage-remaining-fill { background: var(--amber); }
+.usage-tone-critical .usage-window-heading strong { color: var(--red); }
+.usage-tone-critical .usage-remaining-fill { background: var(--red); }
+.usage-credit { margin: 9px 0 0; color: var(--cyan); font-size: 8px; }
 
 .session-content { display: grid; gap: 12px; max-width: none; }
 .session-nav-button { display: none; }
@@ -677,10 +782,11 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .sidebar-backdrop { position: fixed; inset: 0; z-index: 70; border: 0; background: rgba(0, 0, 0, 0.54); }
   .sidebar-backdrop.visible { display: block; }
   .content-pane { min-height: calc(100vh - 192px); }
-  .monitor-view, .screen-view, .documents-view, .session-view { padding: 13px; }
+  .monitor-view, .screen-view, .documents-view, .usage-view, .session-view { padding: 13px; }
   .app-shell:not([data-view="monitor"]) .monitor-strip { display: none; }
   .app-shell[data-view="screen"] .workspace,
-  .app-shell[data-view="documents"] .workspace {
+  .app-shell[data-view="documents"] .workspace,
+  .app-shell[data-view="usage"] .workspace {
     min-height: calc(100dvh - 124px - env(safe-area-inset-bottom));
   }
   .view-head { min-height: 42px; margin-bottom: 11px; }
@@ -705,6 +811,11 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .document-message { min-height: 360px; }
   .document-markdown { max-height: none; min-height: 360px; padding: 20px 16px 40px; font-size: 12px; }
   .document-html { min-height: 60vh; }
+  .usage-summary-grid { gap: 7px; }
+  .usage-summary-grid article { min-height: 66px; padding: 10px; }
+  .usage-summary-grid strong { font-size: 18px; }
+  .usage-provider-grid { grid-template-columns: 1fr; }
+  .usage-window-grid { grid-template-columns: 1fr; }
   .terminal-output { font-size: 9px; }
   .output-panel > pre { min-height: 280px; max-height: none; font-size: 10px; }
 
@@ -894,7 +1005,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
     bottom: calc(7px + env(safe-area-inset-bottom));
     left: 8px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     min-height: 52px;
     padding: 5px;
     border: 1px solid var(--line-strong);
@@ -916,6 +1027,13 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .summary-grid { grid-template-columns: repeat(5, 70px); }
   .summary-card { min-width: 70px; }
   .summary-icon { display: none; }
+  .usage-view .view-head { align-items: flex-start; }
+  .usage-view .view-head p { max-width: 220px; }
+  .usage-summary-grid { grid-template-columns: 1fr 1fr; }
+  .usage-summary-grid article:first-child { grid-column: 1 / -1; }
+  .usage-provider-heading { align-items: flex-start; }
+  .usage-window-meta { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .usage-window-meta span:last-child { text-align: left; }
   .lane-cards { grid-template-columns: 1fr; }
   .screen-leaf { min-width: 0; }
   .screen-terminal-head { padding: 5px 6px; }

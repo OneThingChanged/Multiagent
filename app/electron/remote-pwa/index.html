@@ -78,6 +78,11 @@
           <span><strong>Documents</strong><small>Markdown · HTML 보기</small></span>
           <b id="documentProjectCount">0</b>
         </button>
+        <button class="overview-button usage-button" id="usageButton" type="button">
+          <span class="overview-icon">◔</span>
+          <span><strong>Usage</strong><small>남은 사용량 · 초기화</small></span>
+          <b id="usageProviderCount">0</b>
+        </button>
 
         <label class="search-box">
           <span aria-hidden="true">⌕</span>
@@ -170,6 +175,33 @@
           </div>
         </section>
 
+        <section class="usage-view" id="usageView" hidden>
+          <div class="view-head">
+            <div>
+              <span class="eyebrow">ACCOUNT LIMITS</span>
+              <h2>남은 사용량</h2>
+              <p>Codex와 Claude 계정 한도, 초기화 시각을 확인합니다.</p>
+            </div>
+            <button class="small-button" id="refreshUsageButton" type="button">새로고침</button>
+          </div>
+          <div class="usage-summary-grid">
+            <article>
+              <span>가장 적은 잔여량</span>
+              <strong id="usageRemainingSummary">—</strong>
+            </article>
+            <article>
+              <span>연결된 제공자</span>
+              <strong id="usageProviderSummary">0</strong>
+            </article>
+            <article>
+              <span>마지막 갱신</span>
+              <strong id="usageUpdatedSummary">확인 중</strong>
+            </article>
+          </div>
+          <p class="usage-message" id="usageMessage">사용량 정보를 불러오는 중입니다.</p>
+          <div class="usage-provider-grid" id="usageProviderGrid"></div>
+        </section>
+
         <section class="session-view" id="sessionView" hidden>
           <div class="view-head session-head">
             <button class="session-nav-button" id="sessionNavButton" type="button" title="세션 목록 열기" aria-label="세션 목록 열기">☰</button>
@@ -242,6 +274,7 @@
       <button id="mobileScreensButton" type="button"><span>▥</span>스크린 <i id="mobileScreenBadge" hidden>0</i></button>
       <button id="mobileSessionsButton" type="button"><span>●</span>세션</button>
       <button id="mobileDocumentsButton" type="button"><span>▤</span>문서</button>
+      <button id="mobileUsageButton" type="button"><span>◔</span>사용량</button>
       <button id="mobileQuestionsButton" type="button"><span>?</span>질문 <i id="mobileQuestionBadge" hidden>0</i></button>
     </nav>
 

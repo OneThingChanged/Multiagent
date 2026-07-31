@@ -4,6 +4,8 @@ A feature that aggregates per-session/per-project token usage into `usage.db`. T
 
 Separately from token totals, the Electron app shows per-period limits of Codex/Claude accounts on the bottom status bar. Token usage is cumulative per-session/project statistics; account limits are the latest usage-rate snapshots reported by the account. Codex limits come from session transcripts; Claude limits come from the OAuth usage endpoint.
 
+The authenticated Remote PWA exposes the same normalized account-limit snapshots through its dedicated **Usage** tab. Remote converts the stored `usedPercent` value into an emphasized remaining percentage (`100 - usedPercent`) and also shows each rolling window's reset time. `GET /api/usage?refresh=1` requests a live refresh, with Remote-side throttling at one refresh per 30 seconds; no OAuth token or transcript path is sent to the browser.
+
 ## Data Sources
 
 CLI transcript JSONL is parsed for token figures (the app only launches CLIs via PTY and never sees API responses).
@@ -95,4 +97,3 @@ The Dashboard's `Usage` screen provides range buttons (today/7 days/30 days/all)
 `start_usage_server` / `stop_usage_server` / `usage_server_status` / `usage_config_get` / `usage_config_set` remain as legacy commands for the previous standalone Usage server, but the current UI uses the single Dashboard server.
 
 (`resolve_cli_session`·`relink_cli_session` share the transcript location search logic with the session resume relink feature. See [RESUME.md](RESUME.md).)
-

@@ -77,6 +77,7 @@
 - The internal localhost segment is plain HTTP (external is Cloudflare TLS). Direct LAN access (legacy token) is plaintext on the same network
 - Quick tunnel URLs change every launch. A fixed domain requires a Cloudflare account + domain for a named tunnel
 - Viewing the same session on desktop and web shares one PTY, so output is shared (intended; desktop owns the screen size)
+- Remote **Usage** shows account-limit snapshots, not an exact token countdown. Codex must first emit rate-limit metadata in a local transcript, while Claude needs a usable local Claude Code OAuth credential; a provider stays absent when neither source is available. Manual refresh is throttled to once every 30 seconds.
 
 ### SSH Remote Sessions
 - **Windows remote = working/done status + session resume supported (Phase 2)**: at spawn, an `ssh -R <port>:127.0.0.1:<hookPort>` reverse tunnel lets remote hooks reach the local server. Pushes the remote `<folder>\.claude\multiagent-notify.ps1` and merges hooks into `settings.local.json`/`config.toml` (remote read → local Rust merge → write, base64 transfer). env (`MULTIAGENT_PORT/TOKEN/AGENT_ID`) is injected into the remote PowerShell command. The session-start hook fills `lastSessionId` so the next spawn runs `claude --resume <id>` (codex `resume <id>`)

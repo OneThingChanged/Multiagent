@@ -620,7 +620,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -633,6 +633,8 @@ export class RemoteDashboardService {
     this.terminalSize = terminalSize ?? (() => null);
     this.chatProvider = chatProvider ?? (() => null);
     this.restartSession = restartSession ?? (() => false);
+    this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [] }));
+    this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
     this.server = null;
     this.port = null;
@@ -932,6 +934,22 @@ export class RemoteDashboardService {
             ...runtime,
             mobileApp: remoteMobileApkInfo(this.mobileApkPath),
           });
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/usage") {
+          const refreshRequested = url.searchParams.get("refresh") === "1";
+          const refresh = refreshRequested && Date.now() - this.usageRefreshAt >= 30_000;
+          if (refresh) this.usageRefreshAt = Date.now();
+          try {
+            const usage = await this.usageProvider(refresh);
+            sendJson(response, 200, usage ?? { updatedAt: 0, limits: [] });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error?.message || "usage limits unavailable",
+              updatedAt: 0,
+              limits: [],
+            });
+          }
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/input") {

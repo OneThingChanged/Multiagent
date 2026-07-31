@@ -31,9 +31,25 @@ describe("Electron dashboard server", () => {
     roots.push(root);
     const mobileApkPath = path.join(root, "MultiAgent-Mobile.apk");
     fs.writeFileSync(mobileApkPath, "0123456789");
+    const usageRefreshes = [];
     const service = new RemoteDashboardService({
       baseDir: root,
       mobileApkPath,
+      usageProvider: async (refresh) => {
+        usageRefreshes.push(refresh);
+        return {
+          updatedAt: 1_785_484_800_000,
+          limits: [{
+            limitId: "codex",
+            limitName: "Codex",
+            planType: "plus",
+            primary: { usedPercent: 42, windowMinutes: 300, resetsAt: 1_785_488_400 },
+            secondary: { usedPercent: 18, windowMinutes: 10_080, resetsAt: 1_786_089_600 },
+            credits: { hasCredits: false, unlimited: false, balance: null },
+            updatedAt: 1_785_484_800_000,
+          }],
+        };
+      },
       stateProvider: () => ({
         agents: [{
           id: "agent-1",
@@ -71,7 +87,7 @@ describe("Electron dashboard server", () => {
     });
 
     const status = await service.start();
-    const [page, appScript, touchScript, styles, manifest, worker, state, apkDownload, apkHead, apkRange, apkBadRange] = await Promise.all([
+    const [page, appScript, touchScript, styles, manifest, worker, state, usage, apkDownload, apkHead, apkRange, apkBadRange] = await Promise.all([
       fetch(status.url),
       fetch(`${status.url}/pwa/app.js`),
       fetch(`${status.url}/pwa/terminal-touch.js`),
@@ -79,6 +95,7 @@ describe("Electron dashboard server", () => {
       fetch(`${status.url}/manifest.webmanifest`),
       fetch(`${status.url}/sw.js`),
       fetch(`${status.url}/api/state`),
+      fetch(`${status.url}/api/usage?refresh=1`),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, { method: "HEAD" }),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, {
@@ -99,6 +116,10 @@ describe("Electron dashboard server", () => {
       `${status.url}/downloads/MultiAgent-Mobile.apk`,
       { headers: { "cf-connecting-ip": "203.0.113.10" } },
     );
+    const externalUsage = await fetch(`${status.url}/api/usage`, {
+      headers: { "cf-connecting-ip": "203.0.113.10" },
+    });
+    const throttledUsage = await fetch(`${status.url}/api/usage?refresh=1`);
     const pageBody = await page.text();
     const appScriptBody = await appScript.text();
     const touchScriptBody = await touchScript.text();
@@ -106,6 +127,7 @@ describe("Electron dashboard server", () => {
     const manifestBody = await manifest.json();
     const workerBody = await worker.text();
     const stateBody = await state.json();
+    const usageBody = await usage.json();
     const apkBody = Buffer.from(await apkDownload.arrayBuffer()).toString();
     const apkRangeBody = Buffer.from(await apkRange.arrayBuffer()).toString();
 
@@ -122,9 +144,11 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="androidDownloadButton"');
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
+    expect(pageBody).toContain('id="usageView"');
     expect(appScriptBody).toContain("function renderScreen()");
     expect(appScriptBody).toContain("function renderMonitor()");
     expect(appScriptBody).toContain("function renderDocuments()");
+    expect(appScriptBody).toContain("function renderUsage()");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
@@ -137,6 +161,8 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".monitor-board");
     expect(stylesBody).toContain(".screen-layout");
     expect(stylesBody).toContain(".documents-layout");
+    expect(stylesBody).toContain(".usage-provider-grid");
+    expect(stylesBody).toContain(".usage-remaining-progress");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
     expect(stylesBody).toContain('[data-session-mode="chat"] .composer');
     expect(stylesBody).toContain(".composer-main-row");
@@ -149,7 +175,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v29');
+    expect(workerBody).toContain('multiagent-remote-v30');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.mobileApp).toEqual({
@@ -165,6 +191,12 @@ describe("Electron dashboard server", () => {
     expect(stateBody.view.projects[0].name).toBe("ProjectA");
     expect(stateBody.view.groups[0].id).toBe("screen-1");
     expect(stateBody.view.activeGroupId).toBe("screen-1");
+    expect(usageBody.limits[0]).toMatchObject({
+      limitId: "codex",
+      primary: { usedPercent: 42, windowMinutes: 300 },
+    });
+    expect(usageRefreshes).toEqual([true, false]);
+    expect(throttledUsage.status).toBe(200);
     expect(apkDownload.status).toBe(200);
     expect(apkDownload.headers.get("content-type")).toBe("application/vnd.android.package-archive");
     expect(apkDownload.headers.get("content-disposition")).toContain("MultiAgent-Mobile.apk");
@@ -180,6 +212,7 @@ describe("Electron dashboard server", () => {
     expect(externalRoot.headers.get("location")).toBe("/login");
     expect(externalLogin.status).toBe(200);
     expect(externalDownload.status).toBe(401);
+    expect(externalUsage.status).toBe(401);
     const loginBody = await externalLogin.text();
     // The heading text is set at runtime by login.js per auth mode; assert on
     // stable markup instead (brand + the elements login.js drives).

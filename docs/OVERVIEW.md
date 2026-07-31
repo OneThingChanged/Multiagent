@@ -70,7 +70,7 @@ Switch / add as tab / split right·down / rename alias / **Deactivate session** 
 `Esc` close search/Docs.
 
 ### Remote Access ([REMOTE.md](REMOTE.md))
-Built-in web server + Cloudflare Tunnel (quick/named, fixed domain possible) + GitHub login + **account approval**. Session list, chat/terminal input, image attachments, sandboxed local-project Markdown/HTML viewing, and an authenticated resumable Android APK download from an external browser/PWA. The native Android shell lives in `mobile/`. Independent viewer (views a different session than the desktop).
+Built-in web server + Cloudflare Tunnel (quick/named, fixed domain possible) + GitHub login + **account approval**. Session list, chat/terminal input, image attachments, sandboxed local-project Markdown/HTML viewing, a dedicated Codex/Claude remaining-account-limit tab, and an authenticated resumable Android APK download from an external browser/PWA. The native Android shell lives in `mobile/`. Independent viewer (views a different session than the desktop).
 
 ### SSH Remote Sessions
 Connect via SSH to another computer reachable on the same network (or office VPN) and run shell/claude/codex on that machine. In Settings → **SSH Hosts** tab, register hosts (host/user/port/identity/extraOptions/Remote OS) (the **Usage guide** (사용 방법) button has a step-by-step guide + public key copy/generate), then in New Project choose **"Run on remote host"** with host + remote folder. The backend spawns the PTY with `ssh -tt` instead of local PowerShell (Windows built-in OpenSSH). On Windows remotes, `codex.cmd`/`claude.cmd` shims are used by default to avoid the npm `.ps1` execution policy error.
@@ -80,7 +80,7 @@ Connect via SSH to another computer reachable on the same network (or office VPN
 
 ### Usage Dashboard ([USAGE_DASHBOARD.md](USAGE_DASHBOARD.md))
 Parses transcript JSONL to load token usage into SQLite, visualized on a separate local web dashboard (charts, summaries, per-session).
-The Electron app also preserves per-period account rate limits observed from Codex (session transcripts) and Claude (OAuth usage endpoint) in SQLite, shown on the bottom status bar as **per-tool segments** (gauge + per-tool popover on click).
+The Electron app also preserves per-period account rate limits observed from Codex (session transcripts) and Claude (OAuth usage endpoint) in SQLite, shown on the bottom status bar as **per-tool segments** (gauge + per-tool popover on click) and in Remote's dedicated **Usage** tab as remaining percentage + reset time.
 
 ### Misc
 | feature | description |

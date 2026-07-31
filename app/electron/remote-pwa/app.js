@@ -17,6 +17,8 @@ const ui = {
   overviewButton: $("#overviewButton"),
   documentsButton: $("#documentsButton"),
   documentProjectCount: $("#documentProjectCount"),
+  usageButton: $("#usageButton"),
+  usageProviderCount: $("#usageProviderCount"),
   searchInput: $("#searchInput"),
   screensSection: $("#screensSection"),
   screenCount: $("#screenCount"),
@@ -49,6 +51,13 @@ const ui = {
   documentMessage: $("#documentMessage"),
   documentMarkdown: $("#documentMarkdown"),
   documentHtml: $("#documentHtml"),
+  usageView: $("#usageView"),
+  refreshUsageButton: $("#refreshUsageButton"),
+  usageRemainingSummary: $("#usageRemainingSummary"),
+  usageProviderSummary: $("#usageProviderSummary"),
+  usageUpdatedSummary: $("#usageUpdatedSummary"),
+  usageMessage: $("#usageMessage"),
+  usageProviderGrid: $("#usageProviderGrid"),
   sessionView: $("#sessionView"),
   detailStatus: $("#detailStatus"),
   detailName: $("#detailName"),
@@ -88,6 +97,7 @@ const ui = {
   mobileScreensButton: $("#mobileScreensButton"),
   mobileSessionsButton: $("#mobileSessionsButton"),
   mobileDocumentsButton: $("#mobileDocumentsButton"),
+  mobileUsageButton: $("#mobileUsageButton"),
   mobileQuestionsButton: $("#mobileQuestionsButton"),
   mobileScreenBadge: $("#mobileScreenBadge"),
   mobileQuestionBadge: $("#mobileQuestionBadge"),
@@ -109,7 +119,9 @@ const initialUrl = new URL(location.href);
 let activeFilter = FILTERS.includes(initialUrl.searchParams.get("filter"))
   ? initialUrl.searchParams.get("filter")
   : "all";
-let selection = initialUrl.searchParams.get("docs")
+let selection = initialUrl.searchParams.get("usage") === "1"
+  ? { type: "usage", id: null }
+  : initialUrl.searchParams.get("docs")
   ? { type: "documents", id: initialUrl.searchParams.get("docs") }
   : initialUrl.searchParams.get("screen")
   ? { type: "screen", id: initialUrl.searchParams.get("screen") }
@@ -136,6 +148,12 @@ let documentContentLoading = false;
 let documentContentError = "";
 let documentProjectsRenderKey = "";
 let documentListRenderKey = "";
+let usageSummary = null;
+let usageLoading = false;
+let usageRefreshing = false;
+let usageError = "";
+let usageLoadedAt = 0;
+let usageLoadAttempted = false;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -403,8 +421,10 @@ function updateUrl() {
   url.searchParams.delete("screen");
   url.searchParams.delete("docs");
   url.searchParams.delete("file");
+  url.searchParams.delete("usage");
   if (selection.type === "session") url.searchParams.set("agent", selection.id);
   if (selection.type === "screen") url.searchParams.set("screen", selection.id);
+  if (selection.type === "usage") url.searchParams.set("usage", "1");
   if (selection.type === "documents") {
     url.searchParams.set("docs", selection.id);
     if (selectedDocumentPath) url.searchParams.set("file", selectedDocumentPath);
@@ -498,6 +518,7 @@ function renderNavigation() {
   ui.emptyState.hidden = agents.length !== 0;
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.documentsButton.classList.toggle("selected", selection.type === "documents");
+  ui.usageButton.classList.toggle("selected", selection.type === "usage");
 }
 
 function renderMonitor() {
@@ -1164,24 +1185,272 @@ function renderDocuments() {
   }
 }
 
+function clampUsage(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(100, Math.max(0, number));
+}
+
+function usageRemaining(value) {
+  return 100 - clampUsage(value);
+}
+
+function formatUsagePercent(value) {
+  const percent = clampUsage(value);
+  return `${percent >= 10 ? Math.round(percent) : Math.round(percent * 10) / 10}%`;
+}
+
+function formatRemainingPercent(value) {
+  const percent = usageRemaining(value);
+  return `${percent >= 10 ? Math.round(percent) : Math.round(percent * 10) / 10}%`;
+}
+
+function formatUsageWindow(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) return "사용 한도";
+  if (value === 10_080) return "주간 한도";
+  if (value % 1_440 === 0) return `${value / 1_440}일 한도`;
+  if (value % 60 === 0) return `${value / 60}시간 한도`;
+  return `${value}분 한도`;
+}
+
+function formatUsageReset(resetsAt) {
+  const seconds = Number(resetsAt);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "초기화 시간 미확인";
+  const value = new Date(seconds * 1000);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${value.getMonth() + 1}/${value.getDate()} ${pad(value.getHours())}:${pad(value.getMinutes())} 초기화`;
+}
+
+function formatUsageUpdated(updatedAt) {
+  const timestamp = Number(updatedAt);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "아직 갱신되지 않음";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (elapsedMinutes < 1) return "방금 갱신";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}분 전`;
+  const hours = Math.floor(elapsedMinutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
+}
+
+function usageProviderMeta(limit) {
+  const id = text(limit?.limitId).toLowerCase();
+  if (id === "codex" || id.startsWith("codex")) {
+    return { key: "codex", label: "Codex", icon: "⬢", color: "#10a37f" };
+  }
+  if (id === "claude" || id.startsWith("claude")) {
+    return { key: "claude", label: "Claude", icon: "✻", color: "#cc785c" };
+  }
+  if (id === "gemini" || id.startsWith("gemini")) {
+    return { key: "gemini", label: "Gemini", icon: "✦", color: "#4796e3" };
+  }
+  return {
+    key: id || "unknown",
+    label: text(limit?.limitName || limit?.limitId) || "기타",
+    icon: "•",
+    color: "#8b949e",
+  };
+}
+
+function usageGroups() {
+  const groups = [];
+  const byKey = new Map();
+  for (const limit of Array.isArray(usageSummary?.limits) ? usageSummary.limits : []) {
+    const meta = usageProviderMeta(limit);
+    let group = byKey.get(meta.key);
+    if (!group) {
+      group = { ...meta, limits: [] };
+      byKey.set(meta.key, group);
+      groups.push(group);
+    }
+    group.limits.push(limit);
+  }
+  return groups;
+}
+
+function usageToneClass(remaining) {
+  if (remaining <= 10) return "critical";
+  if (remaining <= 30) return "warning";
+  return "healthy";
+}
+
+function usageLimitName(limit, providerLabel) {
+  const label = text(limit?.limitName || limit?.limitId);
+  if (!label || label.toLowerCase() === providerLabel.toLowerCase()) return "기본 한도";
+  if (label.toLowerCase().startsWith(`${providerLabel.toLowerCase()} `)) {
+    return label.slice(providerLabel.length + 1);
+  }
+  return label;
+}
+
+function usageWindowCard(window, index) {
+  const remaining = usageRemaining(window.usedPercent);
+  const tone = usageToneClass(remaining);
+  const card = make("div", `usage-window usage-tone-${tone}`);
+  const heading = make("div", "usage-window-heading");
+  heading.append(
+    make("span", "", formatUsageWindow(window.windowMinutes)),
+    make("strong", "", `${formatRemainingPercent(window.usedPercent)} 남음`),
+  );
+  const progress = make("span", "usage-remaining-progress");
+  const fill = make("span", "usage-remaining-fill");
+  fill.style.width = `${remaining}%`;
+  progress.appendChild(fill);
+  const meta = make("div", "usage-window-meta");
+  meta.append(
+    make("span", "", `${formatUsagePercent(window.usedPercent)} 사용`),
+    make("span", "", formatUsageReset(window.resetsAt)),
+  );
+  card.dataset.window = String(index);
+  card.append(heading, progress, meta);
+  return card;
+}
+
+function renderUsage() {
+  const groups = usageGroups();
+  const windows = groups.flatMap((group) => group.limits.flatMap((limit) => (
+    [limit?.primary, limit?.secondary].filter((window) => (
+      window && Number.isFinite(Number(window.usedPercent))
+    ))
+  )));
+  const remaining = windows.length > 0
+    ? Math.min(...windows.map((window) => usageRemaining(window.usedPercent)))
+    : null;
+  const updatedAt = Math.max(
+    Number(usageSummary?.updatedAt) || 0,
+    ...groups.flatMap((group) => group.limits.map((limit) => Number(limit?.updatedAt) || 0)),
+  );
+  ui.usageProviderCount.textContent = String(groups.length);
+  ui.usageProviderSummary.textContent = String(groups.length);
+  ui.usageRemainingSummary.textContent = remaining == null
+    ? "—"
+    : `${remaining >= 10 ? Math.round(remaining) : Math.round(remaining * 10) / 10}%`;
+  ui.usageRemainingSummary.className = remaining == null
+    ? ""
+    : `usage-summary-${usageToneClass(remaining)}`;
+  ui.usageUpdatedSummary.textContent = formatUsageUpdated(updatedAt);
+  ui.refreshUsageButton.disabled = usageLoading;
+  ui.refreshUsageButton.textContent = usageRefreshing ? "갱신 중…" : "새로고침";
+
+  if (usageError) {
+    ui.usageMessage.hidden = false;
+    ui.usageMessage.dataset.state = "error";
+    ui.usageMessage.textContent = `사용량을 불러오지 못했습니다: ${usageError}`;
+  } else if (usageLoading && !usageSummary) {
+    ui.usageMessage.hidden = false;
+    ui.usageMessage.dataset.state = "loading";
+    ui.usageMessage.textContent = "Codex·Claude 사용량을 확인하고 있습니다.";
+  } else if (groups.length === 0) {
+    ui.usageMessage.hidden = false;
+    ui.usageMessage.dataset.state = "empty";
+    ui.usageMessage.textContent = "사용량 정보가 아직 없습니다. Codex 또는 Claude 세션을 실행한 뒤 새로고침하세요.";
+  } else {
+    ui.usageMessage.hidden = true;
+    delete ui.usageMessage.dataset.state;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const provider of groups) {
+    const card = make("section", "usage-provider-card");
+    card.dataset.provider = provider.key;
+    const header = make("div", "usage-provider-heading");
+    const identity = make("div", "usage-provider-identity");
+    const icon = make("span", "usage-provider-icon", provider.icon);
+    icon.style.color = provider.color;
+    const title = make("div");
+    title.append(make("strong", "", provider.label));
+    const plan = provider.limits.find((limit) => text(limit?.planType))?.planType;
+    if (plan) title.append(make("span", "", text(plan)));
+    identity.append(icon, title);
+    const providerUpdated = Math.max(
+      ...provider.limits.map((limit) => Number(limit?.updatedAt) || 0),
+    );
+    header.append(identity, make("span", "usage-provider-updated", formatUsageUpdated(providerUpdated)));
+
+    const limitList = make("div", "usage-limit-list");
+    for (const limit of provider.limits) {
+      const limitCard = make("article", "usage-limit-card");
+      limitCard.appendChild(make("strong", "usage-limit-name", usageLimitName(limit, provider.label)));
+      const limitWindows = [limit?.primary, limit?.secondary].filter((window) => (
+        window && Number.isFinite(Number(window.usedPercent))
+      ));
+      const windowGrid = make("div", "usage-window-grid");
+      limitWindows.forEach((window, index) => windowGrid.appendChild(usageWindowCard(window, index)));
+      limitCard.appendChild(windowGrid);
+      if (limit?.credits?.unlimited || limit?.credits?.hasCredits) {
+        limitCard.appendChild(make(
+          "p",
+          "usage-credit",
+          limit.credits.unlimited
+            ? "추가 사용량 무제한"
+            : `추가 사용량 ${text(limit.credits.balance) || "확인 가능"}`,
+        ));
+      }
+      limitList.appendChild(limitCard);
+    }
+    card.append(header, limitList);
+    fragment.appendChild(card);
+  }
+  ui.usageProviderGrid.replaceChildren(fragment);
+}
+
+async function loadUsage(refresh = false) {
+  if (usageLoading) return;
+  usageLoadAttempted = true;
+  usageLoading = true;
+  usageRefreshing = refresh;
+  usageError = "";
+  renderUsage();
+  try {
+    const response = await fetch(`/api/usage${refresh ? "?refresh=1" : ""}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (response.status === 401 || response.status === 403) {
+      location.reload();
+      return;
+    }
+    const result = await response.json();
+    if (!response.ok) throw new Error(text(result?.error) || `HTTP ${response.status}`);
+    usageSummary = {
+      updatedAt: Number(result?.updatedAt) || 0,
+      limits: Array.isArray(result?.limits) ? result.limits : [],
+    };
+    usageLoadedAt = Date.now();
+  } catch (error) {
+    usageError = error instanceof Error ? error.message : String(error);
+  } finally {
+    usageLoading = false;
+    usageRefreshing = false;
+    renderUsage();
+  }
+}
+
 function renderSelection() {
   ui.appShell.dataset.view = selection.type;
   ui.monitorView.hidden = selection.type !== "monitor";
   ui.screenView.hidden = selection.type !== "screen";
   ui.documentsView.hidden = selection.type !== "documents";
+  ui.usageView.hidden = selection.type !== "usage";
   ui.sessionView.hidden = selection.type !== "session";
   if (selection.type === "monitor") renderMonitor();
   if (selection.type === "screen") renderScreen();
   if (selection.type === "documents") renderDocuments();
+  if (selection.type === "usage") {
+    renderUsage();
+    if (!usageLoadAttempted) void loadUsage(true);
+  }
   if (selection.type === "session") renderSession();
   syncTerminal();
   syncSessionView();
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.documentsButton.classList.toggle("selected", selection.type === "documents");
+  ui.usageButton.classList.toggle("selected", selection.type === "usage");
   ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor" && activeFilter !== "attention");
   ui.mobileScreensButton.classList.toggle("active", selection.type === "screen");
   ui.mobileSessionsButton.classList.toggle("active", selection.type === "session");
   ui.mobileDocumentsButton.classList.toggle("active", selection.type === "documents");
+  ui.mobileUsageButton.classList.toggle("active", selection.type === "usage");
   ui.mobileQuestionsButton.classList.toggle("active", selection.type === "monitor" && activeFilter === "attention");
   for (const button of document.querySelectorAll(".mobile-nav button")) {
     if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
@@ -1256,6 +1525,18 @@ function selectDocuments(projectId = null) {
   renderNavigation();
   renderSelection();
   closeSidebar();
+}
+
+function selectUsage() {
+  selection = { type: "usage", id: null };
+  returnScreenId = null;
+  updateUrl();
+  renderNavigation();
+  renderSelection();
+  closeSidebar();
+  if (!usageLoading && (!usageSummary || Date.now() - usageLoadedAt >= 60_000)) {
+    void loadUsage(true);
+  }
 }
 
 async function sendInput(agentId, message) {
@@ -2259,6 +2540,8 @@ async function registerServiceWorker() {
 
 ui.overviewButton.addEventListener("click", () => selectMonitor("all"));
 ui.documentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
+ui.usageButton.addEventListener("click", selectUsage);
+ui.refreshUsageButton.addEventListener("click", () => { void loadUsage(true); });
 ui.summaryGrid.addEventListener("click", (event) => {
   const card = event.target.closest("[data-summary-filter]");
   if (card) selectMonitor(card.dataset.summaryFilter);
@@ -2497,6 +2780,7 @@ ui.mobileMonitorButton.addEventListener("click", () => selectMonitor("all"));
 ui.mobileScreensButton.addEventListener("click", () => openSidebar(ui.screensSection));
 ui.mobileSessionsButton.addEventListener("click", () => openSidebar(ui.filters));
 ui.mobileDocumentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
+ui.mobileUsageButton.addEventListener("click", selectUsage);
 ui.mobileQuestionsButton.addEventListener("click", () => selectMonitor("attention"));
 
 addEventListener("beforeinstallprompt", (event) => {

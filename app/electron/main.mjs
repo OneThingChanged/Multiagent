@@ -438,6 +438,7 @@ let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
   stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
+  usageProvider: (refresh) => usageIndex.getRateLimits(refresh),
   ...sessionProviders,
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
