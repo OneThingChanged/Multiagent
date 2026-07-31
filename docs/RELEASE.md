@@ -4,16 +4,21 @@ The full procedure for building signed installers, publishing them to GitHub Rel
 
 ## Auto-Updater Overview
 
-- The app checks for updates via `tauri-plugin-updater`.
-- standard endpoint (`tauri.conf.json` → `plugins.updater.endpoints`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest.json`
-- company endpoint (`tauri.company.conf.json`): `https://github.com/OneThingChanged/Multiagent/releases/latest/download/latest-company.json`
-- In other words, an installed build variant reads **its own manifest attached to the "Latest" release on GitHub**.
-- If `latest.json`'s `version` is higher than the current app version and the `signature` verifies against the **pubkey baked into the app**, an update is offered.
+Current Electron installs use `electron-updater`:
 
-All three must line up for users to see an update:
-1. The release must be marked **Latest** (not draft/prerelease)
-2. `latest.json` / `latest-company.json` + `.sig` assets must be **attached** to the release
-3. The build must be **signed with the correct key** (paired with the pubkey)
+- standard: `latest.yml`
+- company: `latest-company.yml`
+
+Legacy Tauri installs use the signed transition manifests:
+
+- standard: `latest.json`
+- company: `latest-company.json`
+
+All four manifests are attached to the same GitHub release, which must be
+published and marked **Latest**. Electron Builder writes the YAML manifests and
+blockmaps. `release:electron-transition-manifest` writes the JSON manifests
+after both NSIS installers have been signed with the existing Tauri updater
+key.
 
 ## Electron Stable Channel (0.5.31+)
 
@@ -49,10 +54,10 @@ provide Remote·Tunnel.
 
 ## Build Variants
 
-| variant | product name | identifier | updater manifest | remote features |
+| variant | product name | Electron identifier | updater manifests | remote features |
 |---|---|---|---|---|
-| standard | `MultiAgent` | `com.jintae.multiagent` | `latest.json` | included |
-| company | `MultiAgentCompany` | `com.jintae.multiagent.company` | `latest-company.json` | excluded |
+| standard | `MultiAgent Electron` | `com.jintae.multiagent.electron` | `latest.yml`, `latest.json` | included, including bundled Android APK |
+| company | `MultiAgentCompany Electron` | `com.jintae.multiagent.company.electron` | `latest-company.yml`, `latest-company.json` | excluded |
 
 Both variants use the same version but different identifiers and updater endpoints. So a
 user who installs standard only gets standard updates, and company only gets company
@@ -113,74 +118,79 @@ requests ConPTY, and the former WinPTY selector/smoke test no longer exists. For
 that also change legacy Tauri transition code, additionally run `cargo test` from
 `app/src-tauri`.
 
+When the Android client or Remote APK delivery changes, also run:
+
+```powershell
+cd "K:\AI\MultiAgent\mobile"
+npm test
+npm run typecheck
+npx expo-doctor
+```
+
+The APK in `app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk` must be the
+verified mobile Release build before packaging.
+
 ### 3. Signed Build
 
-Build with the private key passed as an environment variable. (Even without a password, `_PASSWORD=""` is required to proceed without prompts.)
-
-On PowerShell/Codex environments, use the block below as-is. The private key is injected only into the current process environment and removed right after the build.
+Electron Builder produces the standard and Company NSIS installers, blockmaps,
+and YAML updater manifests. Then use the existing Tauri updater key to sign both
+NSIS files for legacy Tauri transition manifests. Even without a password,
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` is required to avoid prompts.
 
 ```powershell
 cd "K:\AI\MultiAgent\app"
+npm run electron:dist:all
+
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-npm run release:build:all
-$code = $LASTEXITCODE
+
+npm run tauri -- signer sign "electron-dist\MultiAgent-Electron-Setup-<ver>-x64.exe"
+if ($LASTEXITCODE -ne 0) { throw "standard installer signing failed" }
+npm run tauri -- signer sign "electron-dist\company\MultiAgentCompany-Electron-Setup-<ver>-x64.exe"
+if ($LASTEXITCODE -ne 0) { throw "company installer signing failed" }
+npm run release:electron-transition-manifest
+$releaseCode = $LASTEXITCODE
+
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
-if ($code -ne 0) { throw "release build failed: $code" }
-```
-
-On Bash/Git Bash, run:
-
-```bash
-cd K:/AI/MultiAgent/app
-export TAURI_SIGNING_PRIVATE_KEY="$(cat /c/Users/OneThingChanged/.tauri/multiagent.key)"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-npm run release:build:all
+if ($releaseCode -ne 0) { throw "transition manifest failed: $releaseCode" }
 ```
 
 > `TAURI_SIGNING_PRIVATE_KEY` takes the **key file contents** (not the path). `TAURI_SIGNING_PRIVATE_KEY_PATH`, which passes a path, can trigger a password prompt depending on the environment and hang headless runs, so use content injection.
 
-On success, the log ends with `Finished N updater signatures at:` and `.sig` files are generated.
+On success, both installer `.sig` files and transition JSON manifests exist
+beside their matching installers.
 
 ### 4. Artifacts
 
 ```
-app/src-tauri/target/release/bundle/
-  nsis/MultiAgent_<ver>_x64-setup.exe        ← main installer
-  nsis/MultiAgent_<ver>_x64-setup.exe.sig    ← signature (for updater)
-  nsis/MultiAgentCompany_<ver>_x64-setup.exe
-  nsis/MultiAgentCompany_<ver>_x64-setup.exe.sig
-  msi/MultiAgent_<ver>_x64_en-US.msi
-  msi/MultiAgent_<ver>_x64_en-US.msi.sig
-  msi/MultiAgentCompany_<ver>_x64_en-US.msi
-  msi/MultiAgentCompany_<ver>_x64_en-US.msi.sig
+app/electron-dist/
+  MultiAgent-Electron-Setup-<ver>-x64.exe
+  MultiAgent-Electron-Setup-<ver>-x64.exe.blockmap
+  MultiAgent-Electron-Setup-<ver>-x64.exe.sig
+  latest.yml
   latest.json
-  latest-company.json
+  company/
+    MultiAgentCompany-Electron-Setup-<ver>-x64.exe
+    MultiAgentCompany-Electron-Setup-<ver>-x64.exe.blockmap
+    MultiAgentCompany-Electron-Setup-<ver>-x64.exe.sig
+    latest-company.yml
+    latest-company.json
+
+app/electron/remote-pwa/downloads/
+  MultiAgent-Mobile.apk
 ```
 
 ### 5. Writing the latest Manifest
 
-Put the **entire contents** of the `.sig` file into `signature`.
+Do not hand-edit `latest.yml` or `latest-company.yml`; Electron Builder writes
+their installer URL, SHA-512, size, version, and blockmap metadata.
 
-```json
-{
-  "version": "0.4.5",
-  "notes": "Release summary",
-  "pub_date": "2026-06-13T13:30:00Z",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "<contents of the nsis setup.exe.sig file, verbatim>",
-      "url": "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/MultiAgent_<ver>_x64-setup.exe"
-    }
-  }
-}
-```
+After both `.sig` files exist, run
+`npm run release:electron-transition-manifest`. It copies each complete
+signature into the matching `latest.json` or `latest-company.json` and points
+legacy Tauri users at the Electron NSIS installer.
 
-- `signature` is the contents of the NSIS **setup.exe.sig** (do not confuse with the msi one)
-- `url` is that release's setup.exe download address
-- `npm run release:build:all` builds both variants and writes `latest.json` and `latest-company.json` into the bundle folder as well. It fails if either signature/manifest is missing.
-- To rewrite only the manifests manually: `npm run release:manifests`
 ### 6. Commit / Tag / Push
 
 ```bash
@@ -188,7 +198,7 @@ cd K:/AI/MultiAgent
 git add -A
 git commit -m "Release <ver> - <summary>"
 git tag v<ver>
-git push origin main
+git push origin <release-branch>
 git push origin v<ver>
 ```
 
@@ -202,16 +212,17 @@ Key point: **do not keep it as a draft — publish immediately + mark Latest.** 
 ```bash
 gh release create v<ver> --title "v<ver> — <title>" --notes "..." \
   --latest \
-  app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe \
-  app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe.sig \
-  app/src-tauri/target/release/bundle/nsis/MultiAgentCompany_<ver>_x64-setup.exe \
-  app/src-tauri/target/release/bundle/nsis/MultiAgentCompany_<ver>_x64-setup.exe.sig \
-  app/src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi \
-  app/src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi.sig \
-  app/src-tauri/target/release/bundle/msi/MultiAgentCompany_<ver>_x64_en-US.msi \
-  app/src-tauri/target/release/bundle/msi/MultiAgentCompany_<ver>_x64_en-US.msi.sig \
-  app/src-tauri/target/release/bundle/latest.json \
-  app/src-tauri/target/release/bundle/latest-company.json
+  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe \
+  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe.blockmap \
+  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe.sig \
+  app/electron-dist/latest.yml \
+  app/electron-dist/latest.json \
+  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe \
+  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe.blockmap \
+  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe.sig \
+  app/electron-dist/company/latest-company.yml \
+  app/electron-dist/company/latest-company.json \
+  app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk
 ```
 
 To update/add assets on an existing release:
@@ -226,9 +237,9 @@ gh release edit v<ver> --draft=false --latest
 ```bash
 # Does the Latest tag point to this version?
 gh api repos/OneThingChanged/Multiagent/releases/latest --jq '.tag_name'
-# Are all assets there? (standard/company setup.exe, .sig, msi, .sig, latest*.json)
+# Are all Electron installers, blockmaps, manifests, signatures, and APK there?
 gh release view v<ver> --json assets --jq '.assets[].name'
-# Check the latest.json version (bypass CDN cache: version-direct URL)
+# Check both transition manifests from the version-direct URL
 curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/latest.json" | grep version
 curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>/latest-company.json" | grep version
 ```
@@ -237,11 +248,13 @@ curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>
 
 ## Common Pitfalls (Checklist)
 
-- [ ] Are all 3 Tauri version sources and the Cargo.lock root version bumped?
-- [ ] Did you run `npm run release:build:all` with `TAURI_SIGNING_PRIVATE_KEY` (+ empty PASSWORD)? → both variants' `.sig` generated?
+- [ ] Are `package.json`, `package-lock.json`, Tauri config/Cargo sources, and Cargo.lock on the same version?
+- [ ] Does the Remote-bundled APK match the verified mobile Release APK?
+- [ ] Did `npm run electron:dist:all` create both NSIS installers, blockmaps, and YAML manifests?
+- [ ] Were both NSIS files signed with `TAURI_SIGNING_PRIVATE_KEY` (+ empty password)?
 - [ ] Is the `signature` in `latest.json` / `latest-company.json` the contents of each variant's **NSIS setup.exe.sig**?
 - [ ] Is the release **not a draft + marked Latest**?
-- [ ] Did you upload all standard/company assets (setup.exe, setup.exe.sig, msi, msi.sig, latest*.json)?
+- [ ] Did you upload both installers, blockmaps, signatures, four manifests, and the standalone APK?
 - [ ] Does `gh api .../releases/latest` point to this tag?
 
 ## Unsigned Warning

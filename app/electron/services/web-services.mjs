@@ -20,6 +20,12 @@ load();setInterval(load,1500);
 </script></body></html>`;
 
 const REMOTE_PWA_DIR = fileURLToPath(new URL("../remote-pwa/", import.meta.url));
+const REMOTE_MOBILE_APK_URL = "/downloads/MultiAgent-Mobile.apk";
+const DEFAULT_REMOTE_MOBILE_APK_PATH = path.join(
+  REMOTE_PWA_DIR,
+  "downloads",
+  "MultiAgent-Mobile.apk",
+);
 const REMOTE_DOCUMENT_EXTENSIONS = new Map([
   [".md", "markdown"],
   [".markdown", "markdown"],
@@ -99,6 +105,84 @@ function sendRemoteAsset(response, pathname) {
   });
   response.end(body);
   return true;
+}
+
+function remoteMobileApkInfo(apkPath) {
+  try {
+    const stats = fs.statSync(apkPath);
+    if (!stats.isFile() || stats.size <= 0) return { available: false };
+    return {
+      available: true,
+      downloadUrl: REMOTE_MOBILE_APK_URL,
+      filename: path.basename(apkPath),
+      size: stats.size,
+      architecture: "arm64-v8a",
+      minAndroidApi: 24,
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
+function parseSingleByteRange(value, size) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(value || "").trim());
+  if (!match || (!match[1] && !match[2]) || size <= 0) return null;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    return { start: Math.max(0, size - suffixLength), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    start >= size ||
+    requestedEnd < start
+  ) {
+    return null;
+  }
+  return { start, end: Math.min(requestedEnd, size - 1) };
+}
+
+function sendRemoteMobileApk(request, response, apkPath) {
+  const info = remoteMobileApkInfo(apkPath);
+  if (!info.available) {
+    sendJson(response, 404, { error: "Android APK is not available" });
+    return;
+  }
+  const stats = fs.statSync(apkPath);
+  const rangeHeader = String(request.headers.range || "").trim();
+  const range = rangeHeader ? parseSingleByteRange(rangeHeader, stats.size) : null;
+  if (rangeHeader && !range) {
+    response.writeHead(416, {
+      "content-range": `bytes */${stats.size}`,
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    }).end();
+    return;
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? stats.size - 1;
+  response.writeHead(range ? 206 : 200, {
+    "accept-ranges": "bytes",
+    "cache-control": "private, no-store",
+    "content-disposition": 'attachment; filename="MultiAgent-Mobile.apk"',
+    "content-length": end - start + 1,
+    "content-type": "application/vnd.android.package-archive",
+    "cross-origin-resource-policy": "same-origin",
+    "x-content-type-options": "nosniff",
+    ...(range ? { "content-range": `bytes ${start}-${end}/${stats.size}` } : {}),
+  });
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+  const stream = fs.createReadStream(apkPath, { start, end });
+  stream.on("error", (error) => response.destroy(error));
+  response.once("close", () => stream.destroy());
+  stream.pipe(response);
 }
 
 // SSE stream of raw filtered PTY output for an xterm client. Shared by the
@@ -536,7 +620,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -549,6 +633,7 @@ export class RemoteDashboardService {
     this.terminalSize = terminalSize ?? (() => null);
     this.chatProvider = chatProvider ?? (() => null);
     this.restartSession = restartSession ?? (() => false);
+    this.mobileApkPath = mobileApkPath;
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -828,6 +913,13 @@ export class RemoteDashboardService {
           } else sendJson(response, 401, { error: "unauthorized", pending: Boolean(login) });
           return;
         }
+        if (
+          ["GET", "HEAD"].includes(request.method) &&
+          url.pathname === REMOTE_MOBILE_APK_URL
+        ) {
+          sendRemoteMobileApk(request, response, this.mobileApkPath);
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/state") {
           const runtime = this.stateProvider?.() ?? {};
           sendJson(response, 200, {
@@ -838,6 +930,7 @@ export class RemoteDashboardService {
             agents: this.agents,
             view: this.view,
             ...runtime,
+            mobileApp: remoteMobileApkInfo(this.mobileApkPath),
           });
           return;
         }

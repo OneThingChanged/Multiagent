@@ -54,6 +54,56 @@ Only NSIS installers are produced; portable executables are intentionally not bu
 | company | `npm run electron:dist:company` | `latest-company.yml` |
 | both | `npm run electron:dist:all` | both channels |
 
+## Android APK
+
+The native Android shell under `mobile/` loads the existing Remote PWA in a
+constrained WebView. Metro uses port 4430, separate from the desktop Vite port
+4420.
+
+Prerequisites:
+
+- JDK 17
+- Android SDK Platform 36 and Build Tools
+- Android NDK 27.1.12297006 and CMake 3.22.1 for the Expo native build
+
+Build an installable ARM64 APK:
+
+```powershell
+cd K:\AI\MultiAgent\mobile
+npm install
+npm test
+npm run typecheck
+npm run prebuild:android
+npm run apk
+```
+
+The generated file is
+`mobile/android/app/build/outputs/apk/release/app-release.apk`. The checked-in
+source excludes generated `mobile/android/`, local SDK/JDK caches, and
+`mobile/artifacts/`. Regenerate the Android project with Expo prebuild when
+needed. The verified server-distribution copy is tracked separately at
+`app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk`.
+
+To publish that APK through the desktop Remote server, copy the verified build
+to its stable bundled path before building the standard Electron installer:
+
+```powershell
+Copy-Item `
+  mobile\android\app\build\outputs\apk\release\app-release.apk `
+  app\electron\remote-pwa\downloads\MultiAgent-Mobile.apk `
+  -Force
+```
+
+`electron/remote-pwa/downloads/**` is unpacked from ASAR so the Remote server can
+stream the APK efficiently. Standard installers include it; Company installers
+continue to exclude the entire Remote PWA tree. The authenticated Remote top bar
+shows the APK button only when this file exists.
+
+The prototype Release task uses the generated Android debug identity. It is
+suitable for direct device installation and repeatable local testing, but not
+for Play Store publishing. A store release needs a protected upload key, release
+signing configuration, and an AAB pipeline.
+
 Company Electron uses the `com.jintae.multiagent.company.electron` identifier and the
 `%LOCALAPPDATA%\com.jintae.multiagent.company` shared snapshot, and blocks Remote/Tunnel
 commands in main as well.

@@ -70,7 +70,7 @@ Switch / add as tab / split right·down / rename alias / **Deactivate session** 
 `Esc` close search/Docs.
 
 ### Remote Access ([REMOTE.md](REMOTE.md))
-Built-in web server + Cloudflare Tunnel (quick/named, fixed domain possible) + GitHub login + **account approval**. Session list, terminal, input, and sandboxed local-project Markdown/HTML viewing from an external browser. Independent viewer (views a different session than the desktop).
+Built-in web server + Cloudflare Tunnel (quick/named, fixed domain possible) + GitHub login + **account approval**. Session list, chat/terminal input, image attachments, sandboxed local-project Markdown/HTML viewing, and an authenticated resumable Android APK download from an external browser/PWA. The native Android shell lives in `mobile/`. Independent viewer (views a different session than the desktop).
 
 ### SSH Remote Sessions
 Connect via SSH to another computer reachable on the same network (or office VPN) and run shell/claude/codex on that machine. In Settings → **SSH Hosts** tab, register hosts (host/user/port/identity/extraOptions/Remote OS) (the **Usage guide** (사용 방법) button has a step-by-step guide + public key copy/generate), then in New Project choose **"Run on remote host"** with host + remote folder. The backend spawns the PTY with `ssh -tt` instead of local PowerShell (Windows built-in OpenSSH). On Windows remotes, `codex.cmd`/`claude.cmd` shims are used by default to avoid the npm `.ps1` execution policy error.

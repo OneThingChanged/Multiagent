@@ -81,6 +81,7 @@ const ui = {
   sendButton: $("#sendButton"),
   refreshButton: $("#refreshButton"),
   installButton: $("#installButton"),
+  androidDownloadButton: $("#androidDownloadButton"),
   notifyButton: $("#notifyButton"),
   logoutButton: $("#logoutButton"),
   mobileMonitorButton: $("#mobileMonitorButton"),
@@ -2159,6 +2160,24 @@ function validateSelection() {
   }
 }
 
+function syncMobileAppDownload(info) {
+  if (!ui.androidDownloadButton) return;
+  const downloadUrl = text(info?.downloadUrl);
+  const available = Boolean(info?.available && downloadUrl.startsWith("/downloads/"));
+  ui.androidDownloadButton.hidden = !available;
+  if (!available) return;
+  ui.androidDownloadButton.href = downloadUrl;
+  const size = Number(info?.size);
+  const sizeLabel = Number.isFinite(size) && size > 0
+    ? ` · ${(size / (1024 * 1024)).toFixed(1)} MB`
+    : "";
+  ui.androidDownloadButton.title = `Android APK 다운로드${sizeLabel}`;
+  ui.androidDownloadButton.setAttribute(
+    "aria-label",
+    `Android APK 다운로드${sizeLabel}`,
+  );
+}
+
 async function fetchState({ quiet = false } = {}) {
   try {
     const response = await fetch("/api/state", { cache: "no-store", credentials: "same-origin" });
@@ -2180,6 +2199,7 @@ async function fetchState({ quiet = false } = {}) {
           }
         : { projects: [], agents: [], groups: [] },
     };
+    syncMobileAppDownload(remoteState.mobileApp);
     validateSelection();
     processActivityNotifications(allAgents());
     renderSummary();

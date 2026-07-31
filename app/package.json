@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.5.80",
+  "version": "0.5.81",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -76,7 +76,8 @@
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "electron/remote-pwa/downloads/**"
     ],
     "files": [
       "dist/**",

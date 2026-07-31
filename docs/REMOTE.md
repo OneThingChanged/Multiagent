@@ -1,19 +1,19 @@
 # Remote PWA
 
-A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet browser, giving short commands, and viewing local project Markdown/HTML documents. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the installable PWA screen.
+A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet, giving short commands, and viewing local project Markdown/HTML documents. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the shared mobile UI. That UI can be opened in a browser/PWA or through the native Android shell under `mobile/`.
 
 Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands in main IPC, and exclude `electron/remote-pwa/**` from packaging.
 
 ## Overall Flow
 
 ```text
-[Phone PWA] ──HTTPS──> Cloudflare Tunnel ──> [My PC] 127.0.0.1:<port>
-     │                                                   │
-     ├─ GitHub login + account approval                  ├─ session/hook/recent output query
-     ├─ Markdown/HTML document browser                   ├─ sandboxed local project document read
-     ├─ bounded image attachment upload                  ├─ attachment saved under app data
-     ├─ status/question/completion alerts                └─ short input to the selected PTY
-     └─ home screen install
+[Phone PWA / Android app] ──HTTPS──> Cloudflare Tunnel ──> [My PC] 127.0.0.1:<port>
+           │                                                       │
+           ├─ GitHub login + account approval                      ├─ session/hook/recent output query
+           ├─ Markdown/HTML document browser                       ├─ sandboxed local project document read
+           ├─ bounded image attachment upload                      ├─ attachment saved under app data
+           ├─ status/question/completion alerts                    └─ short input to the selected PTY
+           └─ PWA install or native Android shell
 ```
 
 The Remote server does not listen on an external NIC; it binds to loopback only. Phone access uses the HTTPS tunnel URL. The local URL is for preview/diagnostics on the desktop PC.
@@ -24,6 +24,8 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts. Desktop can show every pane; mobile uses pane tabs and streams only the selected terminal
 - **Sessions**: per-project session list with status filters and search; the selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
+- **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change
+- **APK download**: after login and desktop approval, the top bar shows an `APK` button when the desktop build contains `app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk`. The Remote server streams that file directly and supports interrupted-download resume
 - Mobile Screens switch to pane tabs instead of small splits, navigation lists appear as a slide menu, and non-monitor views reclaim the status-summary space
 - Session detail automatically collapses the fixed left navigation at tablet/small-desktop widths (up to 1180px). In this focus layout the global header is removed, and a single compact row contains the navigation button, session name/status, and Chat/Terminal switch
 - Session detail defaults to parsed Codex/Claude chat and can switch to the live xterm terminal. Windows extended transcript paths (`\\?\C:\...`) are normalized before transcript reads
@@ -55,6 +57,7 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `POST /api/session/restart` | request activation of an inactive session |
 | `GET /api/docs?projectId=...` | list up to 500 Markdown/HTML documents under one synchronized local project |
 | `GET /api/docs/read?projectId=...&path=...` | read one Markdown/HTML document inside that project (2MB limit) |
+| `GET/HEAD /downloads/MultiAgent-Mobile.apk` | download the bundled ARM64 Android client APK; login/approval required, byte ranges supported |
 | `GET /auth/mode` | returns web/device mode based on OAuth config |
 | `POST /auth/start` | start GitHub Device Flow |
 | `POST /auth/poll` | Device Flow token/user check |
@@ -107,6 +110,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 - Image uploads use the same approval and same-origin boundary. The server ignores client file paths, accepts five raster MIME types only, verifies their file signatures, caps decoded files at 8MB, and writes random names under `remote-attachments` in the app data folder.
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
+- APK downloads require the same login/approval check as session APIs, use a fixed server-side file path, are never service-worker cached, and are sent with attachment, no-store, and nosniff headers.
 - Even if a Company renderer is compromised, main re-blocks Remote·Tunnel calls in the disabled command set.
 
 ## Setup Order
@@ -116,11 +120,19 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 3. **Start tunnel** to issue an HTTPS address. First run may take a while due to the cloudflared download.
 4. Open the HTTPS address on your phone and log in with GitHub.
 5. If not the Owner, approve the approval request on the desktop.
-6. Choose **Install app / Add to Home Screen** from the browser menu and enable notification permission.
+6. Use either client:
+   - Browser: choose **Install app / Add to Home Screen** and enable notification permission.
+   - Android: tap the `APK` button in the Remote top bar, install the downloaded file, enter the same HTTPS tunnel URL, and complete the existing GitHub login/approval flow.
 
 The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, and **Documents** opens the local project document browser. On mobile, the monitor/screens/sessions/documents/question buttons at the bottom provide the same navigation. Opening a Screen or Session hides the monitor summary so the selected content can use the phone's full dynamic viewport.
 
 Document browsing is local-project only. SSH project files and relative HTML assets such as external CSS/images are not transferred in this version; self-contained HTML and inline styles render normally.
+
+## Native Android Client
+
+The Android client lives in `mobile/` and intentionally reuses the Remote PWA rather than duplicating its chat, terminal, authentication, attachment, and document logic. The app permits plain HTTP only for loopback, the Android emulator host, and private IPv4 addresses; public endpoints must use HTTPS. Navigation stays inside the configured Remote origin and GitHub authentication pages, while unrelated web links open in the system browser.
+
+The saved endpoint reconnects on the next launch. To change it, expand the thin native connection bar and tap the settings button. The current prototype APK targets Android 7.0 or later and ARM64 devices. The download button is hidden inside the native app itself because it is intended for browser/PWA users who have not installed the app yet. See `docs/BUILD.md` for local APK generation and desktop bundling.
 
 ## Remaining Extensions
 

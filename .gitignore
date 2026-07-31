@@ -38,3 +38,7 @@ Thumbs.db
 
 # root deps / tool caches
 node_modules/
+/.build-tools/
+
+# Local mobile build products (release binaries are attached separately)
+/mobile/artifacts/

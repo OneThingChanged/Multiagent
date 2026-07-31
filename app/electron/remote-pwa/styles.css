@@ -61,7 +61,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 .icon-button:hover, .text-button:hover, .small-button:hover { border-color: var(--line-strong); background: var(--panel-3); }
 .icon-button:active, .text-button:active, .small-button:active { transform: translateY(1px); }
 .icon-button { width: 34px; height: 34px; padding: 0; }
+.topbar-actions .icon-button { display: grid; place-items: center; text-decoration: none; }
 .icon-button.enabled { border-color: rgba(80, 223, 208, 0.45); color: var(--cyan); }
+.android-download-button { color: var(--cyan); font-size: 9px; font-weight: 900; letter-spacing: -0.04em; }
+html[data-native-app="true"] .android-download-button { display: none !important; }
 .text-button { min-height: 34px; padding: 0 12px; color: #bfd0dc; font-size: 11px; }
 .small-button { min-height: 30px; padding: 0 10px; color: #b9cbd7; font-size: 11px; }
 

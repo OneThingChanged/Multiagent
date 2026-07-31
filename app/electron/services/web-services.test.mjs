@@ -29,8 +29,11 @@ describe("Electron dashboard server", () => {
   it("serves the authenticated mobile PWA shell and live session state", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-pwa-"));
     roots.push(root);
+    const mobileApkPath = path.join(root, "MultiAgent-Mobile.apk");
+    fs.writeFileSync(mobileApkPath, "0123456789");
     const service = new RemoteDashboardService({
       baseDir: root,
+      mobileApkPath,
       stateProvider: () => ({
         agents: [{
           id: "agent-1",
@@ -68,7 +71,7 @@ describe("Electron dashboard server", () => {
     });
 
     const status = await service.start();
-    const [page, appScript, touchScript, styles, manifest, worker, state] = await Promise.all([
+    const [page, appScript, touchScript, styles, manifest, worker, state, apkDownload, apkHead, apkRange, apkBadRange] = await Promise.all([
       fetch(status.url),
       fetch(`${status.url}/pwa/app.js`),
       fetch(`${status.url}/pwa/terminal-touch.js`),
@@ -76,6 +79,14 @@ describe("Electron dashboard server", () => {
       fetch(`${status.url}/manifest.webmanifest`),
       fetch(`${status.url}/sw.js`),
       fetch(`${status.url}/api/state`),
+      fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`),
+      fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, { method: "HEAD" }),
+      fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, {
+        headers: { range: "bytes=2-5" },
+      }),
+      fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, {
+        headers: { range: "bytes=99-120" },
+      }),
     ]);
     const externalRoot = await fetch(status.url, {
       redirect: "manual",
@@ -84,6 +95,10 @@ describe("Electron dashboard server", () => {
     const externalLogin = await fetch(`${status.url}/login`, {
       headers: { "cf-connecting-ip": "203.0.113.10" },
     });
+    const externalDownload = await fetch(
+      `${status.url}/downloads/MultiAgent-Mobile.apk`,
+      { headers: { "cf-connecting-ip": "203.0.113.10" } },
+    );
     const pageBody = await page.text();
     const appScriptBody = await appScript.text();
     const touchScriptBody = await touchScript.text();
@@ -91,6 +106,8 @@ describe("Electron dashboard server", () => {
     const manifestBody = await manifest.json();
     const workerBody = await worker.text();
     const stateBody = await state.json();
+    const apkBody = Buffer.from(await apkDownload.arrayBuffer()).toString();
+    const apkRangeBody = Buffer.from(await apkRange.arrayBuffer()).toString();
 
     expect(page.status).toBe(200);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
@@ -102,6 +119,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="attachmentButton"');
     expect(pageBody).toContain('id="attachmentInput"');
     expect(pageBody).toContain('id="sessionNavButton"');
+    expect(pageBody).toContain('id="androidDownloadButton"');
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
     expect(appScriptBody).toContain("function renderScreen()");
@@ -111,6 +129,7 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
+    expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
     expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
     expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
     expect(touchScriptBody).toContain("function scrollLinesImmediately");
@@ -130,16 +149,37 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v28');
+    expect(workerBody).toContain('multiagent-remote-v29');
+    expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
+    expect(stateBody.mobileApp).toEqual({
+      available: true,
+      downloadUrl: "/downloads/MultiAgent-Mobile.apk",
+      filename: "MultiAgent-Mobile.apk",
+      size: 10,
+      architecture: "arm64-v8a",
+      minAndroidApi: 24,
+    });
     expect(stateBody.agents[0].output).toBe("최근 출력");
     expect(stateBody.agents[0].hook.interactive_question).toBe("계속할까요?");
     expect(stateBody.view.projects[0].name).toBe("ProjectA");
     expect(stateBody.view.groups[0].id).toBe("screen-1");
     expect(stateBody.view.activeGroupId).toBe("screen-1");
+    expect(apkDownload.status).toBe(200);
+    expect(apkDownload.headers.get("content-type")).toBe("application/vnd.android.package-archive");
+    expect(apkDownload.headers.get("content-disposition")).toContain("MultiAgent-Mobile.apk");
+    expect(apkBody).toBe("0123456789");
+    expect(apkHead.status).toBe(200);
+    expect(apkHead.headers.get("content-length")).toBe("10");
+    expect(apkRange.status).toBe(206);
+    expect(apkRange.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect(apkRangeBody).toBe("2345");
+    expect(apkBadRange.status).toBe(416);
+    expect(apkBadRange.headers.get("content-range")).toBe("bytes */10");
     expect(externalRoot.status).toBe(302);
     expect(externalRoot.headers.get("location")).toBe("/login");
     expect(externalLogin.status).toBe(200);
+    expect(externalDownload.status).toBe(401);
     const loginBody = await externalLogin.text();
     // The heading text is set at runtime by login.js per auth mode; assert on
     // stable markup instead (brand + the elements login.js drives).
