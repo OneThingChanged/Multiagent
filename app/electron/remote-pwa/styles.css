@@ -550,8 +550,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .terminal-mount { margin: 0; padding: 8px; border-radius: 10px; background: #050d14; overflow: hidden; }
 .terminal-mount .xterm, .screen-terminal-mount .xterm { padding: 0; }
 .screen-terminal-mount { min-height: 0; overflow: hidden; border-radius: 8px; background: #050d14; }
-.composer { padding: 12px; }
-.composer label { display: block; margin-bottom: 8px; color: #b7c8d4; font-size: 10px; font-weight: 700; }
+.composer { padding: 7px; }
 .composer-ac { display: flex; flex-direction: column; margin-bottom: 8px; max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: rgba(9, 20, 30, 0.95); }
 .composer-ac-item { display: flex; align-items: baseline; gap: 10px; padding: 7px 11px; border: none; background: none; color: #cfe0ec; font-size: 11.5px; text-align: left; cursor: pointer; }
 .composer-ac-item.on { background: rgba(80, 223, 208, 0.16); }
@@ -571,49 +570,14 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .composer-attachment.error .composer-attachment-name { color: var(--red); }
 .composer-attachment-remove { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 16px; cursor: pointer; }
 .composer-attachment-remove:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
-.composer-main-row { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
-.composer-attach-button { flex: 0 0 38px; width: 38px; min-height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: var(--cyan); background: rgba(9, 20, 30, 0.9); font-size: 21px; line-height: 1; cursor: pointer; }
+.composer-main-row { display: flex; align-items: stretch; min-width: 0; min-height: 42px; gap: 6px; }
+.composer-attach-button { flex: 0 0 42px; width: 42px; min-height: 42px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: var(--cyan); background: rgba(9, 20, 30, 0.9); font-size: 21px; line-height: 1; cursor: pointer; }
 .composer-attach-button:hover { border-color: var(--line-strong); background: rgba(80, 223, 208, 0.08); }
 .composer-attach-button:disabled { cursor: not-allowed; opacity: 0.4; }
-.composer textarea { width: 100%; min-height: 74px; resize: vertical; padding: 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: #050d14; font-size: 11px; line-height: 1.45; }
+.composer textarea { flex: 1 1 auto; width: auto; min-width: 0; height: 42px; min-height: 42px; max-height: min(112px, 22dvh); resize: none; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: #050d14; font-size: 13px; line-height: 1.45; }
 .composer textarea:focus { border-color: #3e7192; }
-.composer-keys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.composer-keys button { min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: #cfe0ec; background: rgba(9, 20, 30, 0.9); font-size: 10px; font-weight: 700; cursor: pointer; }
-.composer-keys button:hover { border-color: #3e7192; color: #eaf3fa; }
-.composer-keys button:active { background: rgba(80, 223, 208, 0.14); }
-.composer-hint { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; }
-.send-button { min-height: 33px; padding: 0 16px; font-size: 10px; }
+.send-button { flex: 0 0 auto; min-width: 58px; min-height: 42px; padding: 0 12px; font-size: 10px; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.45; }
-
-/* Session chat is deliberately compact at every viewport size: the transcript
-   gets the space, while attachment, input and Send stay on one row. */
-.app-shell[data-view="session"][data-session-mode="chat"] .composer { padding: 7px; }
-.app-shell[data-view="session"][data-session-mode="chat"] .composer > label,
-.app-shell[data-view="session"][data-session-mode="chat"] .composer-keys,
-.app-shell[data-view="session"][data-session-mode="chat"] .composer-hint { display: none; }
-.app-shell[data-view="session"][data-session-mode="chat"] .composer-main-row { min-height: 42px; }
-.app-shell[data-view="session"][data-session-mode="chat"] .composer textarea {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  height: 42px;
-  min-height: 42px;
-  max-height: min(112px, 22dvh);
-  padding: 8px 10px;
-  resize: none;
-  font-size: 13px;
-}
-.app-shell[data-view="session"][data-session-mode="chat"] .composer-attach-button {
-  flex-basis: 42px;
-  width: 42px;
-  min-height: 42px;
-}
-.app-shell[data-view="session"][data-session-mode="chat"] .send-button {
-  flex: 0 0 auto;
-  min-width: 58px;
-  min-height: 42px;
-  padding: 0 12px;
-}
 .mobile-nav { display: none; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 100; max-width: min(380px, calc(100vw - 36px)); padding: 11px 14px; border: 1px solid #315775; border-radius: 10px; color: #dcebf3; background: rgba(12, 29, 42, 0.96); box-shadow: var(--shadow); font-size: 11px; }
 
@@ -956,43 +920,17 @@ html[data-native-app="true"] .android-download-button { display: none !important
     padding: 6px;
     border-radius: 9px;
   }
-  .app-shell[data-view="session"] .composer label,
-  .app-shell[data-view="session"] .composer-hint { display: none; }
   .app-shell[data-view="session"] .composer textarea {
-    min-height: 54px;
-    max-height: 26dvh;
-    resize: none;
-    font-size: 14px;
-  }
-  .app-shell[data-view="session"] .composer-ac { max-height: 24dvh; }
-  .app-shell[data-view="session"] .composer-queue { max-height: 80px; }
-  .app-shell[data-view="session"] .composer-keys {
-    flex-wrap: nowrap;
-    margin: 6px -2px 0;
-    padding: 0 2px 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .app-shell[data-view="session"] .composer-keys::-webkit-scrollbar { display: none; }
-  .app-shell[data-view="session"] .composer-keys button {
-    flex: 0 0 auto;
-    min-height: 36px;
-  }
-  .app-shell[data-view="session"] .send-button { min-height: 38px; padding: 0 20px; }
-  .app-shell[data-view="session"][data-session-mode="chat"] .composer textarea {
     height: 44px;
     min-height: 44px;
     max-height: 18dvh;
     padding: 7px 9px;
+    font-size: 14px;
   }
-  .app-shell[data-view="session"][data-session-mode="chat"] .composer-keys {
-    display: none;
-  }
-  .app-shell[data-view="session"][data-session-mode="chat"] .send-button {
-    min-width: 58px;
-    min-height: 44px;
-    padding: 0 12px;
-  }
+  .app-shell[data-view="session"] .composer-ac { max-height: 24dvh; }
+  .app-shell[data-view="session"] .composer-queue { max-height: 80px; }
+  .app-shell[data-view="session"] .composer-attach-button,
+  .app-shell[data-view="session"] .send-button { min-height: 44px; }
   .app-shell[data-view="session"] .chat-user { max-width: 92%; font-size: 14px; }
   .app-shell[data-view="session"] .chat-md { font-size: 14px; line-height: 1.68; }
   .app-shell[data-view="session"] .chat-work > summary,
@@ -1005,7 +943,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
     bottom: calc(7px + env(safe-area-inset-bottom));
     left: 8px;
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     min-height: 52px;
     padding: 5px;
     border: 1px solid var(--line-strong);
@@ -1017,7 +955,6 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .mobile-nav button { position: relative; display: grid; min-width: 0; min-height: 42px; place-items: center; gap: 1px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 8px; }
   .mobile-nav button > span { font-size: 14px; }
   .mobile-nav button.active { color: var(--cyan); background: rgba(80, 223, 208, 0.07); }
-  .mobile-nav i { position: absolute; top: 2px; left: calc(50% + 9px); min-width: 16px; padding: 2px 4px; border-radius: 999px; color: #06101a; background: var(--blue); font-style: normal; font-size: 8px; font-weight: 900; }
   .toast { right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); }
 }
 

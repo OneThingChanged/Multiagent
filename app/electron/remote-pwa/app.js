@@ -80,7 +80,6 @@ const ui = {
   terminalLive: $("#terminalLive"),
   copyOutputButton: $("#copyOutputButton"),
   composerForm: $("#composerForm"),
-  composerKeys: $("#composerKeys"),
   composerQueue: $("#composerQueue"),
   composerAc: $("#composerAc"),
   composerAttachments: $("#composerAttachments"),
@@ -94,13 +93,9 @@ const ui = {
   notifyButton: $("#notifyButton"),
   logoutButton: $("#logoutButton"),
   mobileMonitorButton: $("#mobileMonitorButton"),
-  mobileScreensButton: $("#mobileScreensButton"),
   mobileSessionsButton: $("#mobileSessionsButton"),
   mobileDocumentsButton: $("#mobileDocumentsButton"),
   mobileUsageButton: $("#mobileUsageButton"),
-  mobileQuestionsButton: $("#mobileQuestionsButton"),
-  mobileScreenBadge: $("#mobileScreenBadge"),
-  mobileQuestionBadge: $("#mobileQuestionBadge"),
   toast: $("#toast"),
 };
 
@@ -455,11 +450,6 @@ function renderSummary() {
   ui.offlineCount.textContent = String(counts.offline);
   ui.totalCount.textContent = String(allAgents().length);
   ui.documentProjectCount.textContent = String(localDocumentProjects().length);
-  ui.mobileQuestionBadge.textContent = String(counts.attention);
-  ui.mobileQuestionBadge.hidden = counts.attention === 0;
-  const screens = screenGroups();
-  ui.mobileScreenBadge.textContent = String(screens.length);
-  ui.mobileScreenBadge.hidden = screens.length === 0;
   if ("setAppBadge" in navigator) {
     if (counts.attention > 0) navigator.setAppBadge(counts.attention).catch(() => {});
     else navigator.clearAppBadge?.().catch(() => {});
@@ -1446,12 +1436,10 @@ function renderSelection() {
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.documentsButton.classList.toggle("selected", selection.type === "documents");
   ui.usageButton.classList.toggle("selected", selection.type === "usage");
-  ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor" && activeFilter !== "attention");
-  ui.mobileScreensButton.classList.toggle("active", selection.type === "screen");
-  ui.mobileSessionsButton.classList.toggle("active", selection.type === "session");
+  ui.mobileMonitorButton.classList.toggle("active", selection.type === "monitor");
+  ui.mobileSessionsButton.classList.toggle("active", ["screen", "session"].includes(selection.type));
   ui.mobileDocumentsButton.classList.toggle("active", selection.type === "documents");
   ui.mobileUsageButton.classList.toggle("active", selection.type === "usage");
-  ui.mobileQuestionsButton.classList.toggle("active", selection.type === "monitor" && activeFilter === "attention");
   for (const button of document.querySelectorAll(".mobile-nav button")) {
     if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
@@ -1684,17 +1672,6 @@ function attachmentMessage(message, attachments) {
     .map((attachment) => `"${String(attachment.path).replaceAll('"', '\\"')}"`);
   return [message, paths.length ? `첨부 이미지:\n${paths.join("\n")}` : ""].filter(Boolean).join("\n\n");
 }
-
-// Special-key sequences for prompts the composer text field can't express:
-// a bare Enter ("Press enter to continue"), arrow-key menu navigation, Esc,
-// and Ctrl+C. Sent raw (no trailing \r, no trim) so control bytes reach the PTY.
-const KEY_SEQUENCES = {
-  enter: "\r",
-  up: "\x1b[A",
-  down: "\x1b[B",
-  esc: "\x1b",
-  ctrlc: "\x03",
-};
 
 async function sendRaw(agentId, data) {
   if (!agentId || !data) return false;
@@ -2396,7 +2373,6 @@ function setSessionViewMode(mode) {
 // entry as desktop. Refit the selected terminal after a viewport transition.
 function applyScreenAvailability() {
   if (ui.screensSection) ui.screensSection.hidden = false;
-  if (ui.mobileScreensButton) ui.mobileScreensButton.hidden = false;
 }
 
 async function showNotification(title, body, tag, agentId) {
@@ -2678,14 +2654,6 @@ ui.attachmentInput.addEventListener("change", () => {
   ui.attachmentInput.value = "";
 });
 setInterval(() => { void drainQueue(); }, 500);
-ui.composerKeys?.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-key]");
-  if (!button) return;
-  const agent = selectedAgent();
-  if (!agent) { showToast("세션을 먼저 선택하세요."); return; }
-  const sequence = KEY_SEQUENCES[button.dataset.key];
-  if (sequence) void sendRaw(agent.id, sequence);
-});
 // ---- Slash-command autocomplete (composer) ----
 const SLASH_CLAUDE = [["clear","대화 컨텍스트 지우기"],["compact","대화 요약·압축"],["model","모델 변경"],["review","코드 리뷰"],["init","CLAUDE.md 생성"],["agents","서브에이전트"],["cost","토큰/비용"],["config","설정"],["memory","메모리"],["status","상태"],["resume","세션 재개"],["export","내보내기"],["help","도움말"]];
 const SLASH_CODEX = [["clear","대화 지우기"],["compact","요약·압축"],["model","모델 변경"],["approvals","승인 정책"],["new","새 대화"],["diff","변경 diff"],["status","상태"],["init","AGENTS.md 생성"],["quit","종료"],["help","도움말"]];
@@ -2777,11 +2745,9 @@ ui.logoutButton.addEventListener("click", async () => {
   location.reload();
 });
 ui.mobileMonitorButton.addEventListener("click", () => selectMonitor("all"));
-ui.mobileScreensButton.addEventListener("click", () => openSidebar(ui.screensSection));
-ui.mobileSessionsButton.addEventListener("click", () => openSidebar(ui.filters));
+ui.mobileSessionsButton.addEventListener("click", () => openSidebar());
 ui.mobileDocumentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
 ui.mobileUsageButton.addEventListener("click", selectUsage);
-ui.mobileQuestionsButton.addEventListener("click", () => selectMonitor("attention"));
 
 addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();

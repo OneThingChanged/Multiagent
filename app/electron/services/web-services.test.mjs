@@ -140,11 +140,15 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("/pwa/terminal-touch.js");
     expect(pageBody).toContain('id="attachmentButton"');
     expect(pageBody).toContain('id="attachmentInput"');
+    expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
     expect(pageBody).toContain('id="androidDownloadButton"');
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
     expect(pageBody).toContain('id="usageView"');
+    expect(pageBody).toContain('id="mobileSessionsButton"');
+    expect(pageBody).not.toContain('id="mobileScreensButton"');
+    expect(pageBody).not.toContain('id="mobileQuestionsButton"');
     expect(appScriptBody).toContain("function renderScreen()");
     expect(appScriptBody).toContain("function renderMonitor()");
     expect(appScriptBody).toContain("function renderDocuments()");
@@ -164,18 +168,19 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".usage-provider-grid");
     expect(stylesBody).toContain(".usage-remaining-progress");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
-    expect(stylesBody).toContain('[data-session-mode="chat"] .composer');
     expect(stylesBody).toContain(".composer-main-row");
+    expect(stylesBody).toContain(".composer textarea { flex: 1 1 auto");
     expect(stylesBody).toContain(".composer-attachment");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
     expect(appScriptBody).toContain("mobile streams only its selected pane");
     expect(stylesBody).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
+    expect(stylesBody).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v30');
+    expect(workerBody).toContain('multiagent-remote-v32');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.mobileApp).toEqual({
