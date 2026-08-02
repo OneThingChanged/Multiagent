@@ -59,6 +59,7 @@ import { UsageService } from "./services/usage-service.mjs";
 import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
 import { discoverGitSubmodules } from "./services/git-submodules.mjs";
+import { isGitRepository, runGit } from "./services/git-command.mjs";
 import {
   buildWindowSessionUsage,
   claimWindowSession,
@@ -1835,19 +1836,14 @@ async function readTextFile(folder, relativePath) {
   return { kind: "text", content: data.toString("utf8") };
 }
 
-// Git status for the file tree (M/A/U/D/R badges). Non-repo folders and
-// missing git both resolve to { is_repo: false } instead of throwing.
+// Git status for the file tree (M/A/U/D/R badges). Repository probing is
+// separate so timeout/missing-git errors are not mislabeled as non-repo.
 async function gitStatusForTree(folder) {
   const root = fs.realpathSync(asString(folder));
-  const stdout = await new Promise((resolve) => {
-    execFile(
-      "git",
-      ["-c", "core.quotepath=false", "status", "--porcelain", "-z"],
-      { cwd: root, timeout: 3000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-      (error, out) => resolve(error ? null : out)
-    );
-  });
-  if (stdout === null) return { is_repo: false, entries: [] };
+  if (!(await isGitRepository(root))) {
+    return { is_repo: false, entries: [] };
+  }
+  const stdout = await runGit(root, ["status", "--porcelain", "-z"]);
   const entries = [];
   const tokens = stdout.split("\0");
   for (let i = 0; i < tokens.length; i += 1) {
@@ -2250,23 +2246,6 @@ async function killPortProcess(pid, port) {
 
 // ---- Source control view: aggregated repo state + stage/commit ----
 
-function runGit(root, args, timeout = 3000) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      ["-c", "core.quotepath=false", ...args],
-      { cwd: root, timeout, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(String(stderr || error.message).trim()));
-        } else {
-          resolve(stdout);
-        }
-      }
-    );
-  });
-}
-
 function gitLetterFromCode(code) {
   if (code === "A") return "A";
   if (code === "D") return "D";
@@ -2319,10 +2298,7 @@ function parseNumstat(stdout) {
 
 async function gitChanges(folder) {
   const root = fs.realpathSync(asString(folder));
-  let statusOut;
-  try {
-    statusOut = await runGit(root, ["status", "--porcelain", "-z"]);
-  } catch {
+  if (!(await isGitRepository(root))) {
     return {
       is_repo: false,
       branch: "",
@@ -2334,6 +2310,7 @@ async function gitChanges(folder) {
       commits: [],
     };
   }
+  const statusOut = await runGit(root, ["status", "--porcelain", "-z"]);
   const { staged, unstaged } = parseGitStatusZ(statusOut);
 
   const [stagedStatsOut, unstagedStatsOut, branchOut, logOut] =

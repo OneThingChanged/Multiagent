@@ -3406,6 +3406,7 @@ body.files-resizing .files-resizer::after {
 }
 .scm-branch:disabled { cursor: default; opacity: 0.7; }
 .scm-branch-caret { color: var(--docs-muted); font-size: 9px; }
+.scm-refresh { margin-left: auto; flex: 0 0 auto; }
 .scm-branch-backdrop {
   position: fixed;
   inset: 0;

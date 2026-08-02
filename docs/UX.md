@@ -129,7 +129,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - Folders lazy-load on expand (max 2,000 entries per directory)
 - **Expansion state remembered per project and repository** — restored when returning from another project/submodule or restarting the app
 - Toolbar: expand all (⊞, 400-folder cap) / collapse all (⊟) / refresh (⟳)
-- **Git status display**: if the project is a git repo, changed files get a color + one-letter badge — `M` modified (yellow) · `U` untracked (green) · `A` staged (green) · `D` deleted (red, strikethrough) · `R` renamed. Folders get the representative status of descendants propagated (D > M > A > U). Auto-refresh every 10 seconds
+- **Git status display**: if the project is a git repo, changed files get a color + one-letter badge — `M` modified (yellow) · `U` untracked (green) · `A` staged (green) · `D` deleted (red, strikethrough) · `R` renamed. Folders get the representative status of descendants propagated (D > M > A > U). Refreshes when an agent answer completes, the app regains focus, the repository changes, a Git/file operation finishes, or the user requests it; repeated requests are coalesced while a scan is active
 - **Find files** input: filename substring search (recursive into subfolders, max 200 results). `Esc` clears
 - **Type filters**: MD / image / code / HTML chips can be combined. Filtering scans collapsed descendants too and keeps only matching files plus their ancestor folders; a folder with no matching file anywhere below it is hidden
 - SSH projects do not support the file tree (guide text shown)
@@ -146,7 +146,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - **Discard**: after a confirmation dialog — modified/deleted (M/D) are restored to the last commit state via `git restore`, untracked (U) goes to the trash, staged-new (A) is unstaged then trashed. May fail if the file is locked by another program (e.g., Unreal Editor)
 - Per-file `+added/−deleted` line counts and status colors, with the 8 most recent commits at the bottom
 - **Right-click context menu**: open / file history / external diff / **reveal in Explorer** / stage-unstage / commit (this file only) / discard / file history popup
-- Refreshes immediately after git actions + 10s polling. Non-repo/git-missing shows guide text. Push is unsupported (use the terminal)
+- Refreshes on entry, agent completion, app focus, manual refresh, and immediately after Git actions. Repository detection is separate from the 30-second safety timeout, so slow/error states are not mislabeled as non-repositories. Push is unsupported (use the terminal)
 
 ### File Tree Context Menu
 

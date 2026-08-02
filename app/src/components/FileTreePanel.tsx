@@ -68,7 +68,6 @@ const FILTER_MAX_DIRS = 400;
 const FILTER_MAX_RESULTS = 200;
 const FILTER_DEBOUNCE_MS = 150;
 const EXPAND_ALL_MAX_DIRS = 400;
-const GIT_POLL_MS = 10_000;
 const GIT_RANK: Record<GitStatusLetter, number> = {
   D: 5,
   M: 4,
@@ -291,6 +290,10 @@ export function projectRelativeFromScope(
   return scope ? `${scope}/${relative}` : relative;
 }
 
+export function shouldRefreshGitForHook(event?: string): boolean {
+  return event === "done";
+}
+
 export function FileTreePanel({
   projects,
   activeProject,
@@ -494,6 +497,10 @@ export function FileTreePanel({
   const [gitFolders, setGitFolders] = useState<Map<string, GitStatusLetter>>(
     () => new Map()
   );
+  const gitRefreshRunningRef = useRef(false);
+  const gitRefreshPendingRef = useRef(false);
+  const gitFolderRef = useRef(folder);
+  gitFolderRef.current = folder;
 
   // ---- Context menu & inline editing ----
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
@@ -540,36 +547,55 @@ export function FileTreePanel({
   );
 
   const refreshGit = useCallback(async () => {
-    if (!folder) {
-      setGitFiles(new Map());
-      setGitFolders(new Map());
+    if (gitRefreshRunningRef.current) {
+      gitRefreshPendingRef.current = true;
       return;
     }
+    gitRefreshRunningRef.current = true;
     try {
-      const result = await invoke<GitStatusResult>("git_status", { folder });
-      const files = new Map<string, GitStatusLetter>();
-      const folders = new Map<string, GitStatusLetter>();
-      if (result.is_repo) {
-        for (const entry of result.entries) {
-          files.set(entry.relative_path, entry.status);
-          // Propagate the dominant status up the folder chain (D > M > A > U).
-          let dir = parentPath(entry.relative_path);
-          while (dir) {
-            const current = folders.get(dir);
-            if (!current || GIT_RANK[entry.status] > GIT_RANK[current]) {
-              folders.set(dir, entry.status);
-            }
-            dir = parentPath(dir);
-          }
+      do {
+        gitRefreshPendingRef.current = false;
+        const targetFolder = gitFolderRef.current;
+        if (!targetFolder) {
+          setGitFiles(new Map());
+          setGitFolders(new Map());
+          continue;
         }
-      }
-      setGitFiles(files);
-      setGitFolders(folders);
-    } catch {
-      setGitFiles(new Map());
-      setGitFolders(new Map());
+        try {
+          const result = await invoke<GitStatusResult>("git_status", {
+            folder: targetFolder,
+          });
+          if (gitFolderRef.current !== targetFolder) {
+            gitRefreshPendingRef.current = true;
+            continue;
+          }
+          const files = new Map<string, GitStatusLetter>();
+          const folders = new Map<string, GitStatusLetter>();
+          if (result.is_repo) {
+            for (const entry of result.entries) {
+              files.set(entry.relative_path, entry.status);
+              // Propagate the dominant status up the folder chain (D > M > A > U).
+              let dir = parentPath(entry.relative_path);
+              while (dir) {
+                const current = folders.get(dir);
+                if (!current || GIT_RANK[entry.status] > GIT_RANK[current]) {
+                  folders.set(dir, entry.status);
+                }
+                dir = parentPath(dir);
+              }
+            }
+          }
+          setGitFiles(files);
+          setGitFolders(folders);
+        } catch (err) {
+          if (gitFolderRef.current === targetFolder) showOpError(err);
+          else gitRefreshPendingRef.current = true;
+        }
+      } while (gitRefreshPendingRef.current);
+    } finally {
+      gitRefreshRunningRef.current = false;
     }
-  }, [folder]);
+  }, [showOpError]);
 
   // Reset + load root + restore expanded dirs whenever the shown folder changes.
   useEffect(() => {
@@ -601,13 +627,6 @@ export function FileTreePanel({
     if (scopeStorageKey) saveExpandedFor(scopeStorageKey, expanded);
   }, [expanded, scopeStorageKey]);
 
-  // Poll git status while the panel is visible.
-  useEffect(() => {
-    if (!folder) return;
-    const timer = window.setInterval(() => void refreshGit(), GIT_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [folder, refreshGit]);
-
   const toggleDir = useCallback(
     (relativePath: string) => {
       setExpanded((current) => {
@@ -636,7 +655,8 @@ export function FileTreePanel({
     [loadDir]
   );
 
-  const refresh = useCallback(() => {
+  const [scmRefreshToken, setScmRefreshToken] = useState(0);
+  const refreshTree = useCallback(() => {
     setDirCache(new Map());
     setError(null);
     if (folder) {
@@ -645,10 +665,13 @@ export function FileTreePanel({
       void refreshGit();
     }
   }, [expanded, folder, loadDir, refreshGit]);
+  const refresh = useCallback(() => {
+    refreshTree();
+    setScmRefreshToken((current) => current + 1);
+  }, [refreshTree]);
 
-  // Auto-refresh the tree + git when an agent finishes a tool or a turn — hook
-  // events (tool-end / done) mean files may have been created/edited/moved.
-  // Debounced so a burst of tool calls triggers a single rescan.
+  // Refresh once when the agent's answer finishes. Tool-level events can be
+  // extremely frequent and are intentionally ignored for large repositories.
   const refreshRef = useRef(refresh);
   useEffect(() => {
     refreshRef.current = refresh;
@@ -659,7 +682,7 @@ export function FileTreePanel({
     let timer: number | undefined;
     void listen<{ event?: string }>("agent:hook-event", (e) => {
       const ev = e.payload?.event;
-      if (ev !== "tool-end" && ev !== "done") return;
+      if (!shouldRefreshGitForHook(ev)) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => refreshRef.current(), 400);
     }).then((fn) => {
@@ -671,6 +694,14 @@ export function FileTreePanel({
       unlisten();
       window.clearTimeout(timer);
     };
+  }, []);
+
+  // External editors and terminals do not emit agent hooks. Refresh once when
+  // the app window regains focus; the in-flight guard coalesces repeated focus.
+  useEffect(() => {
+    const onFocus = () => refreshRef.current();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const collapseAll = useCallback(() => {
@@ -1334,6 +1365,7 @@ export function FileTreePanel({
         <SourceControlView
           folder={folder}
           sshProject={!!shownProject?.sshHostId}
+          refreshToken={scmRefreshToken}
           onOpenFile={(rel) => {
             if (projectId) onOpenFile(projectId, toProjectRelative(rel));
           }}
@@ -1342,7 +1374,7 @@ export function FileTreePanel({
               onOpenGitHistory(projectId, rel ?? null, scopePath || null);
             }
           }}
-          onMutated={() => void refreshGit()}
+          onMutated={refreshTree}
           onError={showOpError}
         />
       )}
@@ -1496,6 +1528,7 @@ export function FileTreePanel({
 function SourceControlView({
   folder,
   sshProject,
+  refreshToken,
   onOpenFile,
   onOpenHistory,
   onMutated,
@@ -1503,6 +1536,7 @@ function SourceControlView({
 }: {
   folder: string;
   sshProject: boolean;
+  refreshToken: number;
   onOpenFile: (relativePath: string) => void;
   onOpenHistory: (relativePath?: string | null) => void;
   onMutated: () => void;
@@ -1525,39 +1559,59 @@ function SourceControlView({
   const [history, setHistory] = useState<
     { x: number; y: number; entry: GitChangeEntry; commits: GitFileCommit[] | null } | null
   >(null);
+  const loadRunningRef = useRef(false);
+  const loadPendingRef = useRef(false);
+  const loadFolderRef = useRef(folder);
+  loadFolderRef.current = folder;
 
   const load = useCallback(async () => {
-    if (!folder) {
-      setChanges(null);
+    if (loadRunningRef.current) {
+      loadPendingRef.current = true;
       return;
     }
+    loadRunningRef.current = true;
     setLoading(true);
     try {
-      const result = await invoke<GitChangesResult>("git_changes", { folder });
-      setChanges(result);
-      // Drop selections for paths that are no longer changed.
-      setSelected((current) => {
-        if (current.size === 0) return current;
-        const live = new Set([
-          ...result.staged.map((e) => e.relative_path),
-          ...result.unstaged.map((e) => e.relative_path),
-        ]);
-        const next = new Set([...current].filter((p) => live.has(p)));
-        return next.size === current.size ? current : next;
-      });
-    } catch (err) {
-      onError(err);
+      do {
+        loadPendingRef.current = false;
+        const targetFolder = loadFolderRef.current;
+        if (!targetFolder) {
+          setChanges(null);
+          continue;
+        }
+        try {
+          const result = await invoke<GitChangesResult>("git_changes", {
+            folder: targetFolder,
+          });
+          if (loadFolderRef.current !== targetFolder) {
+            loadPendingRef.current = true;
+            continue;
+          }
+          setChanges(result);
+          // Drop selections for paths that are no longer changed.
+          setSelected((current) => {
+            if (current.size === 0) return current;
+            const live = new Set([
+              ...result.staged.map((e) => e.relative_path),
+              ...result.unstaged.map((e) => e.relative_path),
+            ]);
+            const next = new Set([...current].filter((p) => live.has(p)));
+            return next.size === current.size ? current : next;
+          });
+        } catch (err) {
+          if (loadFolderRef.current === targetFolder) onError(err);
+          else loadPendingRef.current = true;
+        }
+      } while (loadPendingRef.current);
     } finally {
       setLoading(false);
+      loadRunningRef.current = false;
     }
-  }, [folder, onError]);
+  }, [onError]);
 
   useEffect(() => {
     void load();
-    if (!folder) return;
-    const timer = window.setInterval(() => void load(), GIT_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [folder, load]);
+  }, [folder, load, refreshToken]);
 
   const runGitOp = useCallback(
     async (op: () => Promise<unknown>) => {
@@ -1873,6 +1927,15 @@ function SourceControlView({
         {changes.ahead > 0 && <span className="scm-ahead">↑{changes.ahead}</span>}
         {changes.behind > 0 && <span className="scm-behind">↓{changes.behind}</span>}
         {changes.upstream && <span className="scm-upstream">vs {changes.upstream}</span>}
+        <button
+          className="docs-icon-btn scm-refresh"
+          type="button"
+          onClick={() => void load()}
+          disabled={loading || busy}
+          title="Git 상태 새로고침"
+        >
+          ⟳
+        </button>
         {branchOpen && (
           <div
             className="scm-branch-backdrop"

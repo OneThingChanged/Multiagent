@@ -3,6 +3,7 @@ import {
   collectKindFilterPaths,
   fileKindOf,
   projectRelativeFromScope,
+  shouldRefreshGitForHook,
 } from "./FileTreePanel";
 
 describe("fileKindOf", () => {
@@ -110,5 +111,14 @@ describe("projectRelativeFromScope", () => {
     expect(
       projectRelativeFromScope("Plugins/Shared", "Source/main.ts")
     ).toBe("Plugins/Shared/Source/main.ts");
+  });
+});
+
+describe("shouldRefreshGitForHook", () => {
+  it("refreshes only after a completed agent answer", () => {
+    expect(shouldRefreshGitForHook("done")).toBe(true);
+    expect(shouldRefreshGitForHook("tool-end")).toBe(false);
+    expect(shouldRefreshGitForHook("working")).toBe(false);
+    expect(shouldRefreshGitForHook(undefined)).toBe(false);
   });
 });
