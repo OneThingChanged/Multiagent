@@ -127,7 +127,7 @@ The Electron main process and system tray are the persistent application shell. 
 ```rust
 struct AppState {
     ptys: Mutex<HashMap<String, PtyHandle>>,
-    hook_info: HookInfo,  // { port, token, helper_path }
+    hook_info: HookInfo,  // { port, token, pid, integrationApiVersion, helper_path }
     close_confirmed: Mutex<bool>,  // marks graceful close in progress
     remote: Arc<remote::RemoteHub>,  // remote server/tunnel/session/approval
     usage: Arc<usage::UsageHub>,     // token accounting/dashboard server
@@ -144,7 +144,7 @@ struct PtyHandle {
 
 1. At app start, `start_hook_server` → `TcpListener::bind("127.0.0.1:0")` → random port + UUID token
 2. `write_helper_script` → writes `%LOCALAPPDATA%\com.jintae.multiagent\notify.ps1`
-3. `write_hook_info` → writes `hook-info.json { port, token }` in the same folder (helper reads from the file even if the port changes across app restarts)
+3. `write_hook_info` → writes `hook-info.json { port, token, pid, integrationApiVersion }` in the same folder (helpers and MiraControl read it again when the port/token changes across app restarts)
 4. On `spawn_pty`:
    - merges `UserPromptSubmit`/`Stop`/`SessionStart` hooks into that folder's `.claude/settings.local.json` (JSON)
    - merges the same 3 hooks into that folder's `.codex/config.toml` (TOML, `toml_edit` crate)
@@ -154,6 +154,11 @@ struct PtyHandle {
 6. The script reads `hook-info.json` and POSTs UTF-8 JSON to `http://127.0.0.1:PORT/event { id, event, token, prompt? }`
 7. The Rust HTTP server validates the token → emits Tauri event `agent:hook-event { id, event }`
 8. The listening frontend updates state + notifies
+
+The Electron hook server also exposes the token-authenticated local
+`/integration/v1/**` MiraControl API on that same loopback port. It returns compact
+Codex/Claude status and accepts guarded activate/input actions without exposing
+terminal output or changing hook configuration. See [MIRACONTROL.md](MIRACONTROL.md).
 
 ### Window Close Intercept
 

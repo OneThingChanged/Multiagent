@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 const electronPath = require("electron");
-const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
+const marker = "MULTIAGENT_MIRACONTROL_BRIDGE_OK";
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-electron-smoke-"));
 const env = {
   ...process.env,

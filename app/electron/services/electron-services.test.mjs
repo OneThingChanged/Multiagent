@@ -182,6 +182,98 @@ describe("Electron hook runtime", () => {
     }
   });
 
+  it("serves authenticated MiraControl state and guarded session actions", async () => {
+    const baseDir = temporaryDirectory();
+    const activated = [];
+    const inputs = [];
+    const service = new HookService({
+      baseDir,
+      sendEvent: () => {},
+      sessionService: { noteHook: async () => {} },
+      integrationProvider: () => ({
+        schemaVersion: 1,
+        app: { status: "ONLINE" },
+        sessions: [{
+          agentId: "agent-1",
+          providerSessionId: "session-1",
+          state: "DONE",
+        }],
+      }),
+      activateAgent: async (agentId) => {
+        activated.push(agentId);
+        return { ok: true, httpStatus: 202, agentId };
+      },
+      writeAgentInput: async (request) => {
+        inputs.push(request);
+        return {
+          ok: true,
+          agentId: request.agentId,
+          providerSessionId: request.expectedSessionId,
+        };
+      },
+    });
+    try {
+      const runtime = await service.start();
+      const baseUrl = `http://127.0.0.1:${runtime.port}`;
+      const authorization = { authorization: `Bearer ${runtime.token}` };
+      const runtimeInfo = JSON.parse(
+        await fsPromises.readFile(path.join(baseDir, "hook-info.json"), "utf8")
+      );
+      expect(runtimeInfo).toMatchObject({
+        port: runtime.port,
+        token: runtime.token,
+        integrationApiVersion: 1,
+      });
+      expect(runtimeInfo.pid).toBe(process.pid);
+
+      const unauthorized = await fetch(`${baseUrl}/integration/v1/sessions`);
+      const browserBlocked = await fetch(`${baseUrl}/integration/v1/sessions`, {
+        headers: { ...authorization, origin: "https://example.invalid" },
+      });
+      const health = await fetch(`${baseUrl}/integration/v1/health`, {
+        headers: authorization,
+      });
+      const sessions = await fetch(`${baseUrl}/integration/v1/sessions`, {
+        headers: authorization,
+      });
+      expect(unauthorized.status).toBe(401);
+      expect(browserBlocked.status).toBe(403);
+      expect(health.status).toBe(200);
+      expect(await health.json()).toMatchObject({ ok: true, apiVersion: 1 });
+      expect(sessions.status).toBe(200);
+      expect(await sessions.json()).toMatchObject({
+        sessions: [{ agentId: "agent-1", providerSessionId: "session-1" }],
+      });
+
+      const activate = await fetch(
+        `${baseUrl}/integration/v1/sessions/agent-1/activate`,
+        { method: "POST", headers: authorization }
+      );
+      const input = await fetch(
+        `${baseUrl}/integration/v1/sessions/agent-1/input`,
+        {
+          method: "POST",
+          headers: { ...authorization, "content-type": "application/json" },
+          body: JSON.stringify({
+            text: "이 작업을 진행해 주세요",
+            expectedSessionId: "session-1",
+          }),
+        }
+      );
+      expect(activate.status).toBe(202);
+      expect(input.status).toBe(200);
+      expect(activated).toEqual(["agent-1"]);
+      expect(inputs).toEqual([{
+        agentId: "agent-1",
+        text: "이 작업을 진행해 주세요",
+        submit: true,
+        expectedSessionId: "session-1",
+      }]);
+    } finally {
+      await service.stop();
+    }
+  });
+
   it("delivers Korean prompt text through the generated PowerShell helper", async () => {
     const powershell = path.join(
       process.env.SystemRoot || "C:\\Windows",

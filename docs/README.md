@@ -16,6 +16,7 @@ top of ConPTY; Claude and plain Shell output pass through unchanged.
 - **[UX.md](UX.md)** — complete interaction guide (sidebar, context menus, search, drop zones, shortcuts, viewers, notifications, settings tabs)
 - **[RESUME.md](RESUME.md)** — session resume flow, session_id capture, relink to current session, limits
 - **[MONITOR.md](MONITOR.md)** — single local Dashboard combining active sessions/splits/hooks/docs/usage
+- **[MIRACONTROL.md](MIRACONTROL.md)** — authenticated local session status, activation, and guarded input API for MiraControl/StreamDeck
 - **[REMOTE.md](REMOTE.md)** — remote access (axum server, Cloudflare Tunnel, GitHub auth, account approval, web client)
 - **[USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)** — token usage collection, SQLite, dashboard, and the Electron account rate-limit status bar
 

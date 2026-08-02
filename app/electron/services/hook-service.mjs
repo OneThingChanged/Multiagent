@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { MIRACONTROL_API_VERSION } from "./miracontrol-integration.mjs";
 
 const HOOK_MARKER = "multiagent";
 const CODEX_EVENTS = [
@@ -26,6 +27,66 @@ const QWEN_EVENTS = [
 ];
 const CODEX_BEGIN = "# >>> multiagent electron hooks >>>";
 const CODEX_END = "# <<< multiagent electron hooks <<<";
+const MAX_INTEGRATION_BODY_BYTES = 16 * 1024;
+
+function sendJson(response, status, payload) {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  }).end(JSON.stringify(payload));
+}
+
+function bearerToken(request) {
+  const match = String(request.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+}
+
+function tokensEqual(left, right) {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
+}
+
+async function readIntegrationJson(request) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > MAX_INTEGRATION_BODY_BYTES) {
+      const error = new Error("request too large");
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    const error = new Error("invalid json");
+    error.status = 400;
+    throw error;
+  }
+}
+
+function integrationAgentId(pathname, action) {
+  const match = pathname.match(
+    new RegExp(`^/integration/v1/sessions/([^/]+)/${action}$`)
+  );
+  if (!match) return null;
+  try {
+    const id = decodeURIComponent(match[1]).trim();
+    return id && id.length <= 256 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function actionPayload(result) {
+  if (!result || typeof result !== "object") return { ok: result !== false };
+  const { httpStatus: _httpStatus, ...payload } = result;
+  return payload;
+}
 
 function limitedString(value, maxLength) {
   if (value == null) return null;
@@ -272,13 +333,24 @@ function mergeCodex(existing, helperPath) {
 }
 
 export class HookService {
-  constructor({ baseDir, sendEvent, sessionService, onHook = null }) {
+  constructor({
+    baseDir,
+    sendEvent,
+    sessionService,
+    onHook = null,
+    integrationProvider = null,
+    activateAgent = null,
+    writeAgentInput = null,
+  }) {
     this.baseDir = baseDir;
     this.helperPath = path.join(baseDir, "notify.ps1");
     this.infoPath = path.join(baseDir, "hook-info.json");
     this.sendEvent = sendEvent;
     this.sessionService = sessionService;
     this.onHook = onHook;
+    this.integrationProvider = integrationProvider;
+    this.activateAgent = activateAgent;
+    this.writeAgentInput = writeAgentInput;
     this.server = null;
     this.port = 0;
     this.token = "";
@@ -304,7 +376,99 @@ export class HookService {
   async writeRuntimeFiles() {
     await fsPromises.mkdir(this.baseDir, { recursive: true });
     await atomicWrite(this.helperPath, HELPER_SCRIPT);
-    await atomicWrite(this.infoPath, JSON.stringify({ port: this.port, token: this.token }));
+    await atomicWrite(this.infoPath, JSON.stringify({
+      port: this.port,
+      token: this.token,
+      pid: process.pid,
+      integrationApiVersion: MIRACONTROL_API_VERSION,
+    }));
+  }
+
+  integrationAuthorized(request) {
+    return !request.headers.origin && tokensEqual(bearerToken(request), this.token);
+  }
+
+  async handleIntegrationRequest(request, response, url) {
+    if (request.headers.origin) {
+      sendJson(response, 403, { ok: false, error: "browser origin blocked" });
+      return;
+    }
+    if (!this.integrationAuthorized(request)) {
+      sendJson(response, 401, { ok: false, error: "unauthorized" });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/integration/v1/health") {
+      sendJson(response, 200, {
+        ok: true,
+        apiVersion: MIRACONTROL_API_VERSION,
+        pid: process.pid,
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/integration/v1/sessions") {
+      const snapshot = await this.integrationProvider?.();
+      if (!snapshot || typeof snapshot !== "object") {
+        sendJson(response, 503, { ok: false, error: "session state unavailable" });
+        return;
+      }
+      sendJson(response, 200, snapshot);
+      return;
+    }
+
+    const activateId = integrationAgentId(url.pathname, "activate");
+    if (request.method === "POST" && activateId) {
+      if (!this.activateAgent) {
+        sendJson(response, 501, { ok: false, error: "activation unavailable" });
+        return;
+      }
+      const result = await this.activateAgent(activateId);
+      const status = Number(result?.httpStatus) || (result?.ok === false || result === false ? 409 : 202);
+      sendJson(response, status, actionPayload(result));
+      return;
+    }
+
+    const inputId = integrationAgentId(url.pathname, "input");
+    if (request.method === "POST" && inputId) {
+      if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+        sendJson(response, 415, { ok: false, error: "application/json required" });
+        return;
+      }
+      if (!this.writeAgentInput) {
+        sendJson(response, 501, { ok: false, error: "input unavailable" });
+        return;
+      }
+      let body;
+      try {
+        body = await readIntegrationJson(request);
+      } catch (error) {
+        sendJson(response, Number(error?.status) || 400, { ok: false, error: error.message });
+        return;
+      }
+      const text = typeof body?.text === "string" ? body.text : "";
+      const expectedSessionId =
+        typeof body?.expectedSessionId === "string"
+          ? body.expectedSessionId.trim()
+          : "";
+      if (
+        !text.trim() ||
+        text.includes("\0") ||
+        Buffer.byteLength(text, "utf8") > 8 * 1024
+      ) {
+        sendJson(response, 400, { ok: false, error: "invalid input" });
+        return;
+      }
+      const result = await this.writeAgentInput({
+        agentId: inputId,
+        text,
+        submit: body?.submit !== false,
+        expectedSessionId,
+      });
+      const status = Number(result?.httpStatus) || (result?.ok === false || result === false ? 409 : 200);
+      sendJson(response, status, actionPayload(result));
+      return;
+    }
+
+    sendJson(response, 404, { ok: false, error: "not found" });
   }
 
   handleRequest(request, response) {
@@ -313,6 +477,17 @@ export class HookService {
       return;
     }
     const url = new URL(request.url || "/", "http://127.0.0.1");
+    if (url.pathname.startsWith("/integration/v1/")) {
+      void this.handleIntegrationRequest(request, response, url).catch((error) => {
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "integration request failed" });
+        } else if (!response.writableEnded) {
+          response.end();
+        }
+        console.warn("[electron] MiraControl integration request failed", error);
+      });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/remote-bootstrap") {
       const tool = url.searchParams.get("tool");
       if (url.searchParams.get("token") !== this.token) {

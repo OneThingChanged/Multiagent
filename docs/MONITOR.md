@@ -38,6 +38,11 @@ Important: even without hook events, a session is live if its PTY or lock is ali
 | `GET /api/usage/*` | Usage summary/projects/sessions/recent events/timeline on the same server |
 | `POST /api/usage/reindex` | immediate transcript reindex |
 
+MiraControl does not depend on this optionally enabled Dashboard port. Its native
+integration API is hosted by the always-on random-port hook server, discovered via
+`hook-info.json`, and authenticated with the existing hook token. See
+[MIRACONTROL.md](MIRACONTROL.md).
+
 `/api/docs/read` only reads files inside the `docs` folder of synced projects. It previews up to 3MB.
 
 ## State Model

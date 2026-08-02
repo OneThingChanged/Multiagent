@@ -26,6 +26,10 @@ import runtimeVariantModule from "./runtime-variant.cjs";
 import { createTerminalHandlers } from "./handlers/terminal-handlers.mjs";
 import { CloseCoordinator } from "./services/close-coordinator.mjs";
 import { HookService } from "./services/hook-service.mjs";
+import {
+  buildMiraControlSnapshot,
+  prepareMiraControlInput,
+} from "./services/miracontrol-integration.mjs";
 import { ReopenJournal } from "./services/reopen-journal.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import {
@@ -287,6 +291,9 @@ const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
 );
 const hookService = new HookService({
   baseDir: hookBaseDir,
+  integrationProvider: () => miraControlSnapshot(),
+  activateAgent: (agentId) => activateMiraControlAgent(agentId),
+  writeAgentInput: (request) => writeMiraControlAgentInput(request),
   sendEvent(eventName, payload) {
     if (eventName === "agent:hook-event" && payload?.id) {
       // Remote/monitor views only need concise state. Keep tool input and the
@@ -368,6 +375,99 @@ function liveOutputForAgents(agents, maxOutput = 80_000) {
       hook: live ? monitorHooks.get(agent.id) ?? null : null,
     };
   });
+}
+
+function miraControlCatalog() {
+  const state = monitorService?.state || {};
+  return {
+    projects: Array.isArray(state.projects) ? state.projects : [],
+    agents: Array.isArray(state.agents) ? state.agents : [],
+  };
+}
+
+function miraControlProviderSessionId(agent) {
+  return (
+    agentSessionIds.get(agent.id) ||
+    monitorHooks.get(agent.id)?.session_id ||
+    agent.lastSessionId ||
+    null
+  );
+}
+
+function miraControlSnapshot() {
+  const catalog = miraControlCatalog();
+  return buildMiraControlSnapshot({
+    ...catalog,
+    isActive: (agentId) => ptys.has(agentId),
+    hookFor: (agentId) => monitorHooks.get(agentId) ?? null,
+    sessionIdFor: (agentId) =>
+      miraControlProviderSessionId(
+        catalog.agents.find((agent) => agent.id === agentId) ?? { id: agentId }
+      ),
+    appVersion: app.getVersion(),
+    variant: runtimeVariant.id,
+  });
+}
+
+function miraControlAgent(agentId) {
+  const id = asString(agentId).trim();
+  const agent = miraControlCatalog().agents.find((candidate) => candidate.id === id);
+  if (!agent || !["codex", "claude"].includes(agent.aiToolId)) return null;
+  return agent;
+}
+
+function activateMiraControlAgent(agentId) {
+  const agent = miraControlAgent(agentId);
+  if (!agent) {
+    return { ok: false, httpStatus: 404, error: "session not found" };
+  }
+  const target = showWorkspaceWindow(agent.id);
+  // Existing windows need an explicit selection event. A newly-created window
+  // also receives openAgentId in its initial query, so this remains safe if the
+  // renderer is still loading and cannot receive the event yet.
+  sendEvent(target, "desktop-pet:activate", { agentId: agent.id });
+  return {
+    ok: true,
+    httpStatus: 202,
+    agentId: agent.id,
+    active: ptys.has(agent.id),
+  };
+}
+
+function writeMiraControlAgentInput({
+  agentId,
+  text,
+  submit,
+  expectedSessionId,
+}) {
+  const agent = miraControlAgent(agentId);
+  if (!agent) {
+    return { ok: false, httpStatus: 404, error: "session not found" };
+  }
+  const entry = ptys.get(agent.id);
+  const providerSessionId = asString(miraControlProviderSessionId(agent)).trim();
+  const session = miraControlSnapshot().sessions.find(
+    (candidate) => candidate.agentId === agent.id
+  );
+  const prepared = prepareMiraControlInput({
+    active: Boolean(entry),
+    state: session?.state,
+    providerSessionId,
+    expectedSessionId,
+    text,
+    submit,
+  });
+  if (!prepared.ok) return prepared;
+  try {
+    entry.process.write(prepared.data);
+  } catch {
+    return { ok: false, httpStatus: 409, error: "session exited before input" };
+  }
+  return {
+    ok: true,
+    agentId: agent.id,
+    providerSessionId: prepared.providerSessionId,
+  };
 }
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
@@ -3659,6 +3759,28 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
           })
         `);
         console.log(`[electron-smoke] ${marker}`);
+        const integrationHeaders = {
+          authorization: `Bearer ${hookService.token}`,
+        };
+        const integrationBase = `http://127.0.0.1:${hookService.port}/integration/v1`;
+        const healthResponse = await fetch(`${integrationBase}/health`, {
+          headers: integrationHeaders,
+          signal: AbortSignal.timeout(2_000),
+        });
+        const sessionsResponse = await fetch(`${integrationBase}/sessions`, {
+          headers: integrationHeaders,
+          signal: AbortSignal.timeout(2_000),
+        });
+        const integrationState = await sessionsResponse.json();
+        if (
+          !healthResponse.ok ||
+          !sessionsResponse.ok ||
+          integrationState.schemaVersion !== 1 ||
+          !Array.isArray(integrationState.sessions)
+        ) {
+          throw new Error("MiraControl integration endpoint validation failed");
+        }
+        console.log("[electron-smoke] MULTIAGENT_MIRACONTROL_BRIDGE_OK");
         closeEverything();
       } catch (error) {
         console.error("[electron-smoke] bridge failed", error);
