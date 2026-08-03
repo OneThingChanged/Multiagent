@@ -29,6 +29,66 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, pre:focus-vis
 [hidden] { display: none !important; }
 
 .app-shell { min-height: 100vh; min-height: 100dvh; }
+
+/* Remote views are application workspaces, not long documents. Lock the page
+   to the visual viewport and let only navigation/content surfaces scroll. */
+html.remote-workspace-locked,
+html.remote-workspace-locked body { height: 100%; overflow: hidden; }
+html.remote-workspace-locked .app-shell {
+  display: flex;
+  flex-direction: column;
+  height: var(--visual-viewport-height);
+  min-height: 0;
+  overflow: hidden;
+}
+html.remote-workspace-locked .topbar,
+html.remote-workspace-locked .monitor-strip { flex: 0 0 auto; }
+html.remote-workspace-locked .workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+html.remote-workspace-locked .navigation-pane {
+  height: 100%;
+  max-height: none;
+}
+html.remote-workspace-locked .content-pane,
+html.remote-workspace-locked .screen-view,
+html.remote-workspace-locked .session-view,
+html.remote-workspace-locked .documents-view,
+html.remote-workspace-locked .usage-view {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+html.remote-workspace-locked .documents-view,
+html.remote-workspace-locked .usage-view { overflow: auto; }
+html.remote-workspace-locked .screen-view,
+html.remote-workspace-locked .session-view {
+  display: flex;
+  flex-direction: column;
+}
+html.remote-workspace-locked .screen-view > .view-head,
+html.remote-workspace-locked .session-view > .view-head { flex: 0 0 auto; }
+html.remote-workspace-locked .screen-layout,
+html.remote-workspace-locked .session-content { flex: 1 1 auto; min-height: 0; }
+html.remote-workspace-locked .screen-layout { overflow: hidden; }
+html.remote-workspace-locked .session-content { display: flex; flex-direction: column; overflow: hidden; }
+html.remote-workspace-locked .chat-view { flex: 1 1 auto; min-height: 0; max-height: none; }
+html.remote-workspace-locked .output-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+html.remote-workspace-locked .output-panel[hidden] { display: none; }
+html.remote-workspace-locked .terminal-mount { flex: 1 1 auto; min-height: 0; }
+html.remote-workspace-locked .composer { flex: 0 0 auto; }
+
+/* A session detail is a focused workspace on every screen size. Its compact
+   local header replaces the global bar while reading or controlling an agent. */
+html.remote-workspace-locked .app-shell[data-view="session"] .topbar,
+html.remote-workspace-locked .app-shell[data-view="session"] .monitor-strip { display: none; }
+html.remote-workspace-locked .app-shell[data-view="session"] .workspace {
+  margin: 4px;
+  border-radius: 11px;
+}
 .topbar {
   position: sticky;
   top: 0;
@@ -237,12 +297,19 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .screen-tab { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 150px; padding: 5px 7px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; font-size: 9px; }
 .screen-tab.active { border-color: var(--line-strong); color: var(--text); background: var(--panel-3); }
 .screen-tab span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.screen-terminal-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.screen-pane-mode { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: #07111a; }
+.screen-pane-mode button { min-height: 23px; padding: 2px 7px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; font-size: 8px; }
+.screen-pane-mode button.active { color: var(--cyan); background: rgba(80, 223, 208, 0.13); }
 .expand-session { flex: 0 0 auto; width: 27px; height: 27px; padding: 0; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: transparent; }
 .terminal-body { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding: 10px; }
 .terminal-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; color: var(--muted); font-size: 8px; }
 .terminal-meta span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-question { margin: 0 0 7px; padding: 7px 9px; border: 1px solid rgba(91, 188, 255, 0.28); border-radius: 8px; color: #cce9fb; background: rgba(91, 188, 255, 0.06); font-size: 9px; }
 .terminal-output { min-height: 0; margin: 0; overflow: auto; color: #b9c9d5; font: 10px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-color: #2c485f transparent; }
+.screen-chat-view { min-height: 0; max-height: none; padding: 2px 3px 8px; }
+.screen-chat-view .chat-user, .screen-chat-view .chat-md { font-size: 11px; }
+.screen-chat-view .chat-work > summary, .screen-chat-view .chat-tool > summary { font-size: 9px; }
 .screen-composer { display: flex; gap: 6px; padding: 7px; border-top: 1px solid var(--line); background: #091520; }
 .screen-composer input { min-width: 0; flex: 1; height: 31px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; outline: 0; background: #050d15; font-size: 9px; }
 .screen-composer input:focus { border-color: #3e7192; }
@@ -438,7 +505,21 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .usage-credit { margin: 9px 0 0; color: var(--cyan); font-size: 8px; }
 
 .session-content { display: grid; gap: 12px; max-width: none; }
-.session-nav-button { display: none; }
+.session-nav-button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(13, 28, 41, 0.86);
+  cursor: pointer;
+}
+.session-nav-button:hover { border-color: var(--line-strong); background: var(--panel-3); }
+.session-title { min-width: 0; flex: 1 1 auto; }
 .session-head-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .status-chip { display: inline-flex; align-items: center; min-height: 23px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 9px; font-weight: 800; }
 .status-chip.working { border-color: rgba(255, 201, 99, 0.3); color: var(--amber); background: rgba(255, 201, 99, 0.06); }
@@ -768,6 +849,15 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .screen-split { display: contents; }
   .screen-leaf { display: none; min-height: calc(100vh - 315px); }
   .screen-leaf.mobile-pane-active { display: flex; }
+  .screen-pane-mode button { min-height: 26px; padding-inline: 8px; }
+  html.remote-workspace-locked body { padding-bottom: 0; }
+  html.remote-workspace-locked .app-shell {
+    height: calc(var(--visual-viewport-height) - var(--mobile-nav-reserve));
+  }
+  html.remote-workspace-locked .screen-leaf.mobile-pane-active {
+    height: 100%;
+    min-height: 0;
+  }
   .screen-view-head .small-button { display: none; }
   .documents-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
   .documents-toolbar > label:first-child { grid-column: 1 / -1; }
@@ -945,7 +1035,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
     bottom: calc(7px + env(safe-area-inset-bottom));
     left: 8px;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     min-height: 52px;
     padding: 5px;
     border: 1px solid var(--line-strong);

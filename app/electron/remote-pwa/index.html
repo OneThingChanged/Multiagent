@@ -39,7 +39,7 @@
       </div>
     </header>
 
-    <section class="monitor-strip" aria-label="세션 상태 요약">
+    <section class="monitor-strip" aria-label="세션 상태 요약" hidden>
       <div class="monitor-heading">
         <div>
           <span class="eyebrow">LIVE MONITOR</span>
@@ -68,7 +68,7 @@
 
     <main class="workspace">
       <aside class="navigation-pane" id="navigationPane" aria-label="Remote 탐색">
-        <button class="overview-button selected" id="overviewButton" type="button">
+        <button class="overview-button selected" id="overviewButton" type="button" hidden>
           <span class="overview-icon">▦</span>
           <span><strong>Monitor</strong><small>전체 세션 상태</small></span>
           <b id="totalCount">0</b>
@@ -111,7 +111,7 @@
       <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="탐색 메뉴 닫기"></button>
 
       <section class="content-pane">
-        <section class="monitor-view" id="monitorView">
+        <section class="monitor-view" id="monitorView" hidden>
           <div class="view-head">
             <div>
               <span class="eyebrow">OVERVIEW</span>
@@ -261,7 +261,7 @@
     </main>
 
     <nav class="mobile-nav" aria-label="모바일 메뉴">
-      <button class="active" id="mobileMonitorButton" type="button"><span>▦</span>모니터</button>
+      <button class="active" id="mobileMonitorButton" type="button" hidden><span>▦</span>모니터</button>
       <button id="mobileSessionsButton" type="button"><span>▥</span>세션</button>
       <button id="mobileDocumentsButton" type="button"><span>▤</span>문서</button>
       <button id="mobileUsageButton" type="button"><span>◔</span>사용량</button>

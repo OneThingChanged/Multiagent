@@ -135,6 +135,9 @@ let previousActivity = new Map();
 let backgroundPushEnabled = false;
 const leafTabSelection = new Map();
 const screenDrafts = new Map();
+const screenPaneModes = new Map();
+const screenChatCache = new Map();
+const screenChatLoads = new Map();
 const documentLists = new Map();
 const documentListLoads = new Map();
 const attachmentDrafts = new Map();
@@ -585,10 +588,26 @@ function renderScreenPaneTabs(screen) {
       updateMobilePaneVisibility();
       updateScreenHeader(screen);
       syncTerminal();
+      syncScreenChats(screen);
     });
     fragment.appendChild(button);
   }
   ui.screenPaneTabs.replaceChildren(fragment);
+}
+
+function screenPaneKey(screen, leaf) {
+  return `${screen.id}:${leaf.id}`;
+}
+
+function screenPaneMode(screen, leaf) {
+  return screenPaneModes.get(screenPaneKey(screen, leaf)) === "chat" ? "chat" : "term";
+}
+
+function setScreenPaneMode(screen, leaf, mode) {
+  screenPaneModes.set(screenPaneKey(screen, leaf), mode === "chat" ? "chat" : "term");
+  screenRenderKey = "";
+  renderScreen();
+  syncTerminal();
 }
 
 function renderLayoutNode(node, screen) {
@@ -610,6 +629,8 @@ function renderLayoutNode(node, screen) {
     return panel;
   }
   panel.dataset.screenAgent = activeAgent.id;
+  const paneMode = screenPaneMode(screen, leaf);
+  panel.dataset.paneMode = paneMode;
   const terminal = make("div", "screen-terminal");
   const head = make("div", "screen-terminal-head");
   const tabs = make("div", "screen-tabs");
@@ -627,11 +648,22 @@ function renderLayoutNode(node, screen) {
     });
     tabs.appendChild(tab);
   }
+  const actions = make("div", "screen-terminal-actions");
+  const modeSwitch = make("div", "screen-pane-mode");
+  for (const [mode, label] of [["chat", "채팅"], ["term", "터미널"]]) {
+    const button = make("button", paneMode === mode ? "active" : "", label);
+    button.type = "button";
+    button.dataset.screenPaneMode = mode;
+    button.title = mode === "chat" ? "대화로 보기" : "라이브 터미널로 보기";
+    button.addEventListener("click", () => setScreenPaneMode(screen, leaf, mode));
+    modeSwitch.appendChild(button);
+  }
   const expand = make("button", "expand-session", "↗");
   expand.type = "button";
   expand.title = "세션 크게 보기";
   expand.addEventListener("click", () => selectSession(activeAgent.id, screen.id));
-  head.append(tabs, expand);
+  actions.append(modeSwitch, expand);
+  head.append(tabs, actions);
 
   const body = make("div", "terminal-body");
   const meta = make("div", "terminal-meta");
@@ -644,7 +676,12 @@ function renderLayoutNode(node, screen) {
   question.dataset.role = "question";
   question.hidden = !questionOf(activeAgent);
   body.append(meta, question);
-  if (terminalSupported) {
+  if (paneMode === "chat") {
+    const chat = make("div", "screen-chat-view chat-view");
+    chat.dataset.screenChat = activeAgent.id;
+    chat.appendChild(make("div", "chat-empty", "대화를 불러오는 중…"));
+    body.append(chat);
+  } else if (terminalSupported) {
     // syncTerminal() attaches a live xterm to this mount after render.
     const mount = make("div", "screen-terminal-mount");
     mount.dataset.terminalMount = activeAgent.id;
@@ -679,6 +716,143 @@ function renderLayoutNode(node, screen) {
   terminal.append(head, body, form);
   panel.appendChild(terminal);
   return panel;
+}
+
+function screenChatRenderKey(data, agent) {
+  const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+  const last = blocks[blocks.length - 1];
+  const prompt = promptFor(agent);
+  return JSON.stringify([
+    agent?.id,
+    blocks.length,
+    String(last?.text ?? last?.output ?? "").length,
+    data?.unsupported ? 1 : 0,
+    data?.missing ? 1 : 0,
+    data?.error ? 1 : 0,
+    statusOf(agent),
+    prompt ? `${prompt.kind}:${prompt.text}:${prompt.options.length}` : "",
+  ]);
+}
+
+function renderScreenChat(container, data, agent) {
+  if (!container || !agent) return;
+  const key = screenChatRenderKey(data, agent);
+  if (container.dataset.renderKey === key) return;
+  container.dataset.renderKey = key;
+  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+  const fragment = document.createDocumentFragment();
+
+  if (data?.unsupported) {
+    fragment.appendChild(make("div", "chat-empty", "이 세션은 대화 보기를 지원하지 않습니다."));
+  } else if (data?.error) {
+    const error = make("div", "chat-error");
+    error.append(make("strong", "", "대화를 불러오지 못했습니다"), make("span", "", "터미널 보기로 전환하거나 다시 시도해 주세요."));
+    const retry = make("button", "", "다시 시도");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      screenChatCache.delete(agent.id);
+      void loadScreenChat(agent.id, container, true);
+    });
+    const actions = make("div", "chat-error-actions");
+    actions.appendChild(retry);
+    error.appendChild(actions);
+    fragment.appendChild(error);
+  } else if (!blocks.length) {
+    fragment.appendChild(make("div", "chat-empty", data?.missing ? "아직 대화 기록이 없습니다." : "대화를 불러오는 중…"));
+  } else {
+    const ranges = [];
+    let index = 0;
+    while (index < blocks.length) {
+      const block = blocks[index];
+      if (block.role === "user" && block.kind === "text") {
+        ranges.push({ user: true, start: index, end: index + 1 });
+        index += 1;
+      } else {
+        const start = index;
+        do { index += 1; }
+        while (index < blocks.length && !(blocks[index].role === "user" && blocks[index].kind === "text"));
+        ranges.push({ user: false, start, end: index });
+      }
+    }
+    const visible = ranges.slice(-12);
+    if (ranges.length > visible.length) {
+      const more = make("button", "chat-more", `↗ 이전 대화 ${ranges.length - visible.length}개 · 크게 보기`);
+      more.type = "button";
+      more.addEventListener("click", () => selectSession(agent.id, selectedScreen()?.id || null));
+      fragment.appendChild(more);
+    }
+    for (const range of visible) {
+      if (range.user) {
+        const turn = make("div", "chat-turn user");
+        turn.appendChild(make("div", "chat-user", blocks[range.start].text));
+        fragment.appendChild(turn);
+      } else {
+        fragment.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end)));
+      }
+    }
+  }
+
+  if (!data?.unsupported && statusOf(agent) === "working" && data?.lifecycle !== "idle") {
+    const thinking = make("div", "chat-thinking");
+    const dots = make("span", "chat-thinking-dots");
+    dots.append(make("i", ""), make("i", ""), make("i", ""));
+    thinking.append(dots, document.createTextNode("작업 중…"));
+    const stop = make("button", "chat-stop", "■ 중단");
+    stop.type = "button";
+    stop.addEventListener("click", () => { void sendRaw(agent.id, "\x1b"); });
+    thinking.appendChild(stop);
+    fragment.appendChild(thinking);
+  }
+  const prompt = promptFor(agent);
+  if (prompt && promptSignature(prompt) !== answeredPromptSig) {
+    const card = make("div", `chat-prompt ${prompt.kind}`);
+    card.appendChild(make("div", "chat-prompt-text", `${prompt.kind === "permission" ? "🔒 " : "❓ "}${prompt.text}`));
+    const options = make("div", "chat-prompt-options");
+    for (const option of prompt.options) {
+      const button = make("button", "chat-prompt-option", option.label);
+      button.type = "button";
+      button.addEventListener("click", () => { void respondPrompt(agent.id, prompt, option); });
+      options.appendChild(button);
+    }
+    card.appendChild(options);
+    fragment.appendChild(card);
+  }
+
+  container.replaceChildren(fragment);
+  if (nearBottom) requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+}
+
+async function loadScreenChat(agentId, container, force = false) {
+  const agent = agentMap().get(agentId);
+  if (!agent || !container?.isConnected || container.dataset.screenChat !== agentId) return;
+  const cached = screenChatCache.get(agentId);
+  if (cached) renderScreenChat(container, cached.data, agent);
+  if (!force && cached && Date.now() - cached.at < 3000) return;
+  let pending = screenChatLoads.get(agentId);
+  if (!pending) {
+    pending = fetch(`/api/chat?id=${encodeURIComponent(agentId)}`, { credentials: "same-origin" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({ blocks: [] }));
+        return response.ok ? data : { blocks: [], error: true };
+      })
+      .catch(() => ({ blocks: [], error: true }))
+      .finally(() => screenChatLoads.delete(agentId));
+    screenChatLoads.set(agentId, pending);
+  }
+  const data = await pending;
+  screenChatCache.set(agentId, { at: Date.now(), data });
+  if (container.isConnected && container.dataset.screenChat === agentId) {
+    renderScreenChat(container, data, agentMap().get(agentId));
+  }
+}
+
+function syncScreenChats(screen = selectedScreen()) {
+  if (!screen || selection.type !== "screen") return;
+  for (const container of ui.screenLayout.querySelectorAll("[data-screen-chat]")) {
+    if (isMobile() && !container.closest(".screen-leaf")?.classList.contains("mobile-pane-active")) continue;
+    void loadScreenChat(container.dataset.screenChat, container);
+  }
 }
 
 function updateScreenHeader(screen) {
@@ -716,6 +890,7 @@ function updateScreenLive(screen) {
     if (agent && dot) dot.className = `status-dot ${statusOf(agent)}`;
   }
   updateScreenHeader(screen);
+  syncScreenChats(screen);
 }
 
 function renderScreen() {
@@ -728,7 +903,12 @@ function renderScreen() {
   ui.screenMeta.textContent = `${screen.leaves.length}개 패널 · ${screen.memberIds.length}개 세션 · ${screen.label}`;
   if (!screen.leaves.some((leaf) => leaf.id === mobilePaneId)) mobilePaneId = screen.leaves[0]?.id || null;
   renderScreenPaneTabs(screen);
-  const nextKey = JSON.stringify([screen.id, screen.layout, [...leafTabSelection.entries()].filter(([key]) => key.startsWith(`${screen.id}:`))]);
+  const nextKey = JSON.stringify([
+    screen.id,
+    screen.layout,
+    [...leafTabSelection.entries()].filter(([key]) => key.startsWith(`${screen.id}:`)),
+    [...screenPaneModes.entries()].filter(([key]) => key.startsWith(`${screen.id}:`)),
+  ]);
   if (screenRenderKey !== nextKey) {
     screenRenderKey = nextKey;
     ui.screenLayout.replaceChildren(renderLayoutNode(screen.layout, screen));
@@ -1419,6 +1599,10 @@ async function loadUsage(refresh = false) {
 
 function renderSelection() {
   ui.appShell.dataset.view = selection.type;
+  document.documentElement.classList.toggle(
+    "remote-workspace-locked",
+    ["screen", "session", "documents", "usage"].includes(selection.type),
+  );
   ui.monitorView.hidden = selection.type !== "monitor";
   ui.screenView.hidden = selection.type !== "screen";
   ui.documentsView.hidden = selection.type !== "documents";
@@ -1461,9 +1645,12 @@ function openSidebar(section) {
 }
 
 function selectMonitor(filter = activeFilter) {
-  selection = { type: "monitor", id: null };
-  returnScreenId = null;
   setActiveFilter(filter);
+  selection = defaultWorkspaceSelection();
+  returnScreenId = selection.type === "screen" ? selection.id : null;
+  mobilePaneId = null;
+  screenRenderKey = "";
+  updateUrl();
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2449,14 +2636,27 @@ function processActivityNotifications(agents) {
   firstSnapshot = false;
 }
 
+function defaultWorkspaceSelection() {
+  const screen = screenGroups()[0];
+  if (screen) return { type: "screen", id: screen.id };
+  const agents = allAgents();
+  const agent = agents.find((candidate) => statusOf(candidate) !== "offline") || agents[0];
+  if (agent) return { type: "session", id: agent.id };
+  const project = localDocumentProjects()[0];
+  if (project) return { type: "documents", id: project.id };
+  return { type: "usage", id: null };
+}
+
 function validateSelection() {
-  if (selection.type === "session" && !agentMap().has(selection.id)) selection = { type: "monitor", id: null };
-  if (selection.type === "screen" && !screenGroups().some((screen) => screen.id === selection.id)) selection = { type: "monitor", id: null };
+  if (selection.type === "monitor") selection = defaultWorkspaceSelection();
+  if (selection.type === "session" && !agentMap().has(selection.id)) selection = defaultWorkspaceSelection();
+  if (selection.type === "screen" && !screenGroups().some((screen) => screen.id === selection.id)) selection = defaultWorkspaceSelection();
   if (selection.type === "documents" && !localDocumentProjects().some((project) => project.id === selection.id)) {
     const fallback = localDocumentProjects()[0];
-    selection = fallback ? { type: "documents", id: fallback.id } : { type: "monitor", id: null };
+    selection = fallback ? { type: "documents", id: fallback.id } : defaultWorkspaceSelection();
     selectedDocumentPath = null;
   }
+  returnScreenId = selection.type === "screen" ? selection.id : returnScreenId;
 }
 
 function syncMobileAppDownload(info) {
@@ -2882,6 +3082,10 @@ function updateSidebarToggleState() {
   ui.sidebarToggle.setAttribute("aria-expanded", String(expanded));
   ui.sidebarToggle.setAttribute("aria-label", expanded ? "탐색 메뉴 접기" : "탐색 메뉴 열기");
   ui.sidebarToggle.title = expanded ? "좌측 목록 접기" : "좌측 목록 열기";
+  ui.sessionNavButton.setAttribute("aria-expanded", String(expanded));
+  ui.sessionNavButton.setAttribute("aria-label", expanded ? "세션 목록 접기" : "세션 목록 열기");
+  ui.sessionNavButton.title = expanded ? "좌측 세션 목록 접기" : "좌측 세션 목록 열기";
+  ui.sessionNavButton.textContent = isMobile() && expanded ? "×" : expanded ? "‹" : "☰";
 }
 function applyNavCollapsed(collapsed) {
   appShell?.classList.toggle("nav-collapsed", collapsed);

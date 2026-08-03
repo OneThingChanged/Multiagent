@@ -36,6 +36,10 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - The session view tracks `visualViewport.height` on mobile so browser chrome and the software keyboard shrink only the chat/terminal area. While typing, the fixed bottom navigation is temporarily hidden and the composer remains visible above the keyboard
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
+- Every Screen pane has its own **Chat / Terminal** switch. Chat mode shows the selected tab's recent parsed conversation, tool groups, working indicator, and interactive prompts without leaving the multi-pane Screen
+- Screen, Session, Documents, and Usage views fill the visible viewport below the compact top bar. The browser-side scrollbar is removed; navigation and the active content surface keep their own independent scrolling. Session detail also hides the global header so the focused workspace uses the full viewport
+- The large global status summary and standalone Monitor dashboard are hidden in Remote. Opening the Remote root selects the first Screen, then falls back to an active Session, a local Documents project, or Usage, keeping the interface focused on controllable work
+- Session detail always exposes a header button for collapsing or restoring the left Screen/Session list on desktop; the same control opens the navigation drawer on mobile
 - `Ctrl/⌘ + Enter` to send, copy recent output
 - Browser **Install app / Add to Home Screen** support
 - Completion notifications use Web Push: after notification permission and push subscription are enabled, the service worker can show them even when the PWA window is closed. New-question notifications remain available while the PWA is running
