@@ -33,14 +33,15 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - Session chat and terminal modes keep only image attachment + one-line message input + Send in one compact row. Mobile also hides the global top bar and duplicate request/question panels and compacts its header/mode switch
 - For local sessions, the attachment button accepts up to four PNG/JPEG/GIF/WebP/BMP files per draft. Each image is uploaded to the host app (8MB maximum), previewed/removable before send, and its host path is appended to the selected session message. SSH sessions disable this button because the remote shell cannot read a path on the host PC
 - On phones/tablets, one-finger vertical drags scroll the live terminal. Normal buffers move through xterm scrollback; alternate-screen TUIs receive wheel/PageUp/PageDown input. Pinch zoom and link taps remain available
+- The session view tracks `visualViewport.height` on mobile so browser chrome and the software keyboard shrink only the chat/terminal area. While typing, the fixed bottom navigation is temporarily hidden and the composer remains visible above the keyboard
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
 - `Ctrl/⌘ + Enter` to send, copy recent output
 - Browser **Install app / Add to Home Screen** support
-- While the PWA is running, completion/new questions appear as service worker notifications
+- Completion notifications use Web Push: after notification permission and push subscription are enabled, the service worker can show them even when the PWA window is closed. New-question notifications remain available while the PWA is running
 - Offline, only the app shell opens; session API/input are network-only
 
-Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. File editing, screen sharing, and a background Push server are not in the MVP.
+Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. File editing and screen sharing are not in the MVP.
 
 ## HTTP Endpoints
 
@@ -52,6 +53,9 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /sw.js` | offline shell / notification service worker |
 | `GET /api/state` | projects, sessions, hooks, recent output state |
 | `GET /api/usage?refresh=1` | current Codex/Claude account-limit snapshots. `refresh=1` requests a live refresh and is throttled to once every 30 seconds |
+| `GET /api/push/public-key` | current server VAPID public key for an approved PWA client |
+| `POST /api/push/subscription` | register/update an approved same-origin Web Push subscription |
+| `DELETE /api/push/subscription` | remove the caller's same-origin Web Push subscription |
 | `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
 | `POST /api/attachment` | save one same-origin image attachment under app data. JSON data URL, 8MB decoded limit |
 | `GET /api/stream?id=...` | SSE backfill and live PTY output for the xterm view |
@@ -113,6 +117,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
 - Account-limit requests use the same login/approval boundary as session state. The browser receives only normalized percentages, reset times, plan labels, and credit state; local OAuth credentials are never exposed.
+- Push subscription writes require the same login/approval and same-origin checks as PTY input. VAPID keys and endpoint capabilities are stored only in `%LOCALAPPDATA%\com.jintae.multiagent\remote-push.json`; revoking an account removes its subscriptions. Expired endpoints (`404`/`410`) are pruned automatically. Web Push payloads contain only project/session display names, the agent id, and a completion message—never terminal output or prompts
 - APK downloads require the same login/approval check as session APIs, use a fixed server-side file path, are never service-worker cached, and are sent with attachment, no-store, and nosniff headers.
 - Even if a Company renderer is compromised, main re-blocks Remote·Tunnel calls in the disabled command set.
 
@@ -124,10 +129,12 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 4. Open the HTTPS address on your phone and log in with GitHub.
 5. If not the Owner, approve the approval request on the desktop.
 6. Use either client:
-   - Browser: choose **Install app / Add to Home Screen** and enable notification permission.
+   - Browser: choose **Install app / Add to Home Screen** and tap the notification button. The success message must say that background notifications are enabled. HTTPS is required away from localhost; on iPhone/iPad, Web Push requires a Home Screen-installed PWA
    - Android: tap the `APK` button in the Remote top bar, install the downloaded file, enter the same HTTPS tunnel URL, and complete the existing GitHub login/approval flow.
 
 The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, **Documents** opens the local project document browser, and **Usage** opens account limits. On mobile, one combined **Sessions** button opens the sidebar containing both Screens and individual sessions; the one-line bottom bar is Monitor/Sessions/Documents/Usage. Opening any non-monitor view hides the monitor summary so the selected content can use the phone's full dynamic viewport.
+
+Background completion delivery requires the desktop MultiAgent process and an internet connection to remain available. Closing all workspace windows is fine because the system tray keeps hooks and Web Push alive; choosing **Exit** from the tray stops delivery. Keep the Remote tunnel/server available as well so tapping a notification can reopen the session.
 
 The Usage tab emphasizes the amount **remaining** even though provider APIs report `used_percent`. Codex values come from recent local Codex transcript rate-limit metadata; Claude values come from Claude Code's local OAuth usage endpoint. A provider can therefore be absent until its local session/credential has supplied a snapshot. The refresh button requests current values, while the server protects the upstream check with a 30-second throttle.
 
@@ -141,7 +148,7 @@ The saved endpoint reconnects on the next launch. To change it, expand the thin 
 
 ## Remaining Extensions
 
-- Web Push/VAPID that works even when the browser is fully closed
+- Background Web Push for interactive-question events (completion events already work while the PWA is closed)
 - Server→PWA delta stream or WebSocket to remove polling
 - Explicit control APIs like session pause/resume
 - Sync interval adjustment based on network/battery state

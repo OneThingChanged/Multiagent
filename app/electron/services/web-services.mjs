@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { RemotePushService } from "./remote-push-service.mjs";
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -620,7 +621,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -636,6 +637,7 @@ export class RemoteDashboardService {
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [] }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
+    this.pushService = pushService ?? new RemotePushService({ baseDir });
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -658,8 +660,17 @@ export class RemoteDashboardService {
   }
 
   async setConfig(config) {
+    const previousOwner = String(this.config.owner || "").trim();
     this.config = { ...this.config, ...config };
     await this.save(this.configPath, this.config);
+    const nextOwner = String(this.config.owner || "").trim();
+    if (
+      previousOwner &&
+      previousOwner.toLowerCase() !== nextOwner.toLowerCase() &&
+      !this.access.approved.some((value) => value.toLowerCase() === previousOwner.toLowerCase())
+    ) {
+      this.pushService.removeLogin(previousOwner);
+    }
     return this.config;
   }
 
@@ -679,7 +690,28 @@ export class RemoteDashboardService {
     this.access.pending = this.access.pending.filter((value) => value.toLowerCase() !== login.toLowerCase());
     this.access.approved = this.access.approved.filter((value) => value.toLowerCase() !== login.toLowerCase());
     await this.save(this.accessPath, this.access);
+    this.pushService.removeLogin(login);
     return this.accessList();
+  }
+
+  notifyAgentDone(payload) {
+    if (payload?.event !== "done" || !payload?.id) return Promise.resolve(null);
+    const agent = this.agents.find((entry) => entry.id === payload.id) ?? null;
+    const viewAgent = Array.isArray(this.view?.agents)
+      ? this.view.agents.find((entry) => entry.id === payload.id)
+      : null;
+    const project = Array.isArray(this.view?.projects)
+      ? this.view.projects.find((entry) => entry.id === viewAgent?.projectId)
+      : null;
+    const projectName = String(
+      agent?.project || agent?.projectName || project?.name || "MultiAgent",
+    ).trim();
+    const agentName = String(agent?.name || payload.id).trim();
+    return this.pushService.notifyDone({
+      agentId: payload.id,
+      sessionId: payload.session_id,
+      title: `${projectName} / ${agentName}`,
+    });
   }
 
   sign(login) {
@@ -920,6 +952,41 @@ export class RemoteDashboardService {
           url.pathname === REMOTE_MOBILE_APK_URL
         ) {
           sendRemoteMobileApk(request, response, this.mobileApkPath);
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/push/public-key") {
+          sendJson(response, 200, {
+            supported: true,
+            publicKey: this.pushService.publicKey(),
+          });
+          return;
+        }
+        if (
+          ["POST", "DELETE"].includes(request.method) &&
+          url.pathname === "/api/push/subscription"
+        ) {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          const pushLogin = login || (this.isDirectLocal(request) ? "__local__" : "");
+          if (!pushLogin) {
+            sendJson(response, 401, { error: "authenticated login required" });
+            return;
+          }
+          try {
+            const body = await readJson(request);
+            const result = request.method === "POST"
+              ? this.pushService.subscribe(pushLogin, body)
+              : this.pushService.unsubscribe(pushLogin, body.endpoint);
+            sendJson(response, request.method === "POST" ? 201 : 200, result);
+          } catch (error) {
+            sendJson(response, 400, { error: error?.message || "invalid push subscription" });
+          }
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/state") {

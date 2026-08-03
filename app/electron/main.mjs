@@ -335,6 +335,9 @@ const hookService = new HookService({
         if (tool === "claude") {
           usageIndex.refreshClaudeRateLimits(false).catch(() => {});
         }
+        remoteService.notifyAgentDone(payload).catch((error) => {
+          console.warn("[electron] remote completion push failed", error?.message || error);
+        });
       }
     }
     sendEventToAll(eventName, payload);

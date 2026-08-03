@@ -1,4 +1,4 @@
-const CACHE_NAME = "multiagent-remote-v32";
+const CACHE_NAME = "multiagent-remote-v34";
 const STATIC_ASSETS = [
   "/",
   "/pwa/styles.css",
@@ -72,6 +72,29 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data?.json() || {};
+  } catch {
+    payload = { body: event.data?.text() || "작업이 완료되었습니다." };
+  }
+  const agentId = payload.agentId || null;
+  const title = payload.title || "MultiAgent";
+  event.waitUntil(self.registration.showNotification(title, {
+    body: payload.body || "작업이 완료되었습니다.",
+    tag: payload.tag || (agentId ? `done:${agentId}` : "multiagent:done"),
+    renotify: true,
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    timestamp: Number(payload.timestamp) || Date.now(),
+    data: {
+      agentId,
+      url: payload.url || (agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/"),
+    },
+  }));
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const agentId = event.notification.data?.agentId || null;
@@ -83,7 +106,7 @@ self.addEventListener("notificationclick", (event) => {
         existing.postMessage({ type: "open-agent", agentId });
         return;
       }
-      const target = agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/";
+      const target = event.notification.data?.url || (agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/");
       await self.clients.openWindow(target);
     })
   );

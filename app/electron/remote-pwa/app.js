@@ -132,6 +132,7 @@ let pollTimer = null;
 let toastTimer = null;
 let screenRenderKey = "";
 let previousActivity = new Map();
+let backgroundPushEnabled = false;
 const leafTabSelection = new Map();
 const screenDrafts = new Map();
 const documentLists = new Map();
@@ -2015,6 +2016,46 @@ function refitAllTerminals() {
   }
 }
 
+// Some Android Chrome/WebView versions leave dvh unchanged while the software
+// keyboard overlays the page. Mirror the visual viewport into CSS so the
+// terminal/chat flex area yields space to the composer. The bottom navigation
+// is hidden only while a text editor is focused and the viewport contracted.
+let largestVisualViewportHeight = 0;
+let lastVisualViewportWidth = 0;
+let viewportLayoutTimer = null;
+
+function syncVisualViewport() {
+  const viewport = window.visualViewport;
+  const width = Math.round(viewport?.width || window.innerWidth || 0);
+  const height = Math.round(viewport?.height || window.innerHeight || 0);
+  if (!height) return;
+
+  if (!lastVisualViewportWidth || Math.abs(width - lastVisualViewportWidth) > 80) {
+    largestVisualViewportHeight = height;
+  } else {
+    largestVisualViewportHeight = Math.max(largestVisualViewportHeight, height);
+  }
+  lastVisualViewportWidth = width;
+
+  const focused = document.activeElement;
+  const acceptsText = Boolean(focused?.matches?.('input, textarea, [contenteditable="true"], .xterm-helper-textarea'));
+  const keyboardThreshold = Math.max(100, largestVisualViewportHeight * 0.18);
+  const keyboardVisible = isMobile()
+    && acceptsText
+    && largestVisualViewportHeight - height > keyboardThreshold;
+
+  document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+  document.documentElement.classList.toggle("keyboard-visible", keyboardVisible);
+
+  clearTimeout(viewportLayoutTimer);
+  viewportLayoutTimer = setTimeout(() => {
+    refitAllTerminals();
+    if (keyboardVisible && focused === ui.messageInput) {
+      ui.messageInput.scrollIntoView({ block: "nearest" });
+    }
+  }, 60);
+}
+
 // Attach terminals to exactly the mounts of the active view; release the rest.
 // Called after every render, so switching views or rebuilding a Screen layout
 // tears down the terminals (and their SSE streams) that are no longer visible.
@@ -2378,7 +2419,8 @@ function applyScreenAvailability() {
 async function showNotification(title, body, tag, agentId) {
   if (!("Notification" in window)
     || localStorage.getItem("multiagent.remote.notifications") !== "on"
-    || window.Notification.permission !== "granted") return;
+    || window.Notification.permission !== "granted"
+    || (backgroundPushEnabled && String(tag).startsWith("done:"))) return;
   const options = { body, tag, renotify: true, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", data: { agentId } };
   try {
     const registration = await navigator.serviceWorker?.ready;
@@ -2480,6 +2522,52 @@ function schedulePoll(delay = 1600) {
   }, delay);
 }
 
+function pushKeyBytes(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const raw = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+function samePushKey(subscription, expected) {
+  const current = subscription?.options?.applicationServerKey;
+  if (!current) return true;
+  const bytes = new Uint8Array(current);
+  return bytes.length === expected.length && bytes.every((value, index) => value === expected[index]);
+}
+
+async function ensureBackgroundPush(registration) {
+  if (!registration?.pushManager) return false;
+  try {
+    const keyResponse = await fetch("/api/push/public-key", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!keyResponse.ok) return false;
+    const key = pushKeyBytes(text((await keyResponse.json()).publicKey));
+    if (key.length === 0) return false;
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !samePushKey(subscription, key)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    subscription ??= await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: key,
+    });
+    const response = await fetch("/api/push/subscription", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    backgroundPushEnabled = response.ok;
+    return backgroundPushEnabled;
+  } catch {
+    backgroundPushEnabled = false;
+    return false;
+  }
+}
+
 async function enableNotifications() {
   if (!("Notification" in window)) {
     showToast("이 브라우저는 알림을 지원하지 않습니다.");
@@ -2493,8 +2581,12 @@ async function enableNotifications() {
   if (permission === "granted") {
     localStorage.setItem("multiagent.remote.notifications", "on");
     ui.notifyButton.classList.add("enabled");
-    ui.notifyButton.title = "알림 켜짐";
-    showToast("완료와 질문 알림을 켰습니다.");
+    const registration = await registerServiceWorker();
+    const background = await ensureBackgroundPush(registration);
+    ui.notifyButton.title = background ? "백그라운드 알림 켜짐" : "알림 켜짐";
+    showToast(background
+      ? "앱을 닫아도 작업 완료 알림을 받습니다."
+      : "PWA 실행 중 완료와 질문 알림을 받습니다.");
   }
 }
 
@@ -2510,8 +2602,25 @@ async function installPwa() {
 }
 
 async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-  try { await navigator.serviceWorker.register("/sw.js", { scope: "/" }); } catch {}
+  if (!("serviceWorker" in navigator)) return null;
+  try {
+    await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    return await navigator.serviceWorker.ready;
+  } catch {
+    return null;
+  }
+}
+
+async function initializeNotifications() {
+  const registration = await registerServiceWorker();
+  if (
+    localStorage.getItem("multiagent.remote.notifications") === "on" &&
+    window.Notification?.permission === "granted"
+  ) {
+    ui.notifyButton.classList.add("enabled");
+    const background = await ensureBackgroundPush(registration);
+    ui.notifyButton.title = background ? "백그라운드 알림 켜짐" : "알림 켜짐";
+  }
 }
 
 ui.overviewButton.addEventListener("click", () => selectMonitor("all"));
@@ -2796,8 +2905,15 @@ mobileMedia.addEventListener("change", () => {
 let resizeTimer = null;
 addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(refitAllTerminals, 150);
+  resizeTimer = setTimeout(() => {
+    syncVisualViewport();
+    refitAllTerminals();
+  }, 150);
 });
+window.visualViewport?.addEventListener("resize", syncVisualViewport);
+window.visualViewport?.addEventListener("scroll", syncVisualViewport);
+document.addEventListener("focusin", () => setTimeout(syncVisualViewport, 0));
+document.addEventListener("focusout", () => setTimeout(syncVisualViewport, 80));
 
 if (localStorage.getItem("multiagent.remote.notifications") === "on" && window.Notification?.permission === "granted") {
   ui.notifyButton.classList.add("enabled");
@@ -2807,9 +2923,10 @@ applyNavCollapsed(
   localStorage.getItem(NAV_COLLAPSE_KEY) === "1"
   || (selection.type === "session" && compactWorkspaceMedia.matches),
 );
+syncVisualViewport();
 applyScreenAvailability();
 updateComposerSendState();
 setActiveFilter(activeFilter);
-void registerServiceWorker();
+void initializeNotifications();
 void fetchState();
 schedulePoll();

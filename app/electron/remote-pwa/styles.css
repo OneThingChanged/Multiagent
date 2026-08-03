@@ -1,4 +1,6 @@
 :root {
+  --visual-viewport-height: 100dvh;
+  --mobile-nav-reserve: calc(62px + env(safe-area-inset-bottom));
   color-scheme: dark;
   --bg: #050c13;
   --panel: #0b1621;
@@ -711,7 +713,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
 @media (max-width: 800px) {
   html, body { min-height: 100dvh; }
   body {
-    padding-bottom: calc(62px + env(safe-area-inset-bottom));
+    padding-bottom: var(--mobile-nav-reserve);
     overscroll-behavior-y: none;
   }
   .topbar { grid-template-columns: 1fr auto; min-height: 54px; padding: 7px 10px; }
@@ -789,12 +791,12 @@ html[data-native-app="true"] .android-download-button { display: none !important
     display: none;
   }
   .app-shell[data-view="session"] {
-    height: calc(100dvh - 62px - env(safe-area-inset-bottom));
+    height: calc(var(--visual-viewport-height) - var(--mobile-nav-reserve));
     min-height: 0;
     overflow: hidden;
   }
   .app-shell[data-view="session"] .workspace {
-    height: calc(100dvh - 70px - env(safe-area-inset-bottom));
+    height: calc(var(--visual-viewport-height) - var(--mobile-nav-reserve) - 8px);
     min-height: 0;
     margin: 4px;
     overflow: hidden;
@@ -956,6 +958,14 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .mobile-nav button > span { font-size: 14px; }
   .mobile-nav button.active { color: var(--cyan); background: rgba(80, 223, 208, 0.07); }
   .toast { right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); }
+
+  /* Android Chrome and embedded WebViews do not consistently resize dvh when
+     the software keyboard opens. app.js mirrors visualViewport.height into the
+     CSS variable above. Reclaim the fixed navigation slot while typing so the
+     composer remains visible and only the terminal/chat viewport shrinks. */
+  html.keyboard-visible { --mobile-nav-reserve: env(safe-area-inset-bottom); }
+  html.keyboard-visible .mobile-nav { display: none; }
+  html.keyboard-visible .toast { bottom: calc(8px + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 480px) {

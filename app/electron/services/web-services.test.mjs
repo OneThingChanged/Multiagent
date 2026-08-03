@@ -119,6 +119,15 @@ describe("Electron dashboard server", () => {
     const externalUsage = await fetch(`${status.url}/api/usage`, {
       headers: { "cf-connecting-ip": "203.0.113.10" },
     });
+    const pushKey = await fetch(`${status.url}/api/push/public-key`).then((response) => response.json());
+    const pushSubscription = await fetch(`${status.url}/api/push/subscription`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: JSON.stringify({
+        endpoint: "https://push.example.test/device-1",
+        keys: { p256dh: "p256dh-key", auth: "auth-key" },
+      }),
+    });
     const throttledUsage = await fetch(`${status.url}/api/usage?refresh=1`);
     const pageBody = await page.text();
     const appScriptBody = await appScript.text();
@@ -158,6 +167,11 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
     expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
+    expect(appScriptBody).toContain("function ensureBackgroundPush(registration)");
+    expect(appScriptBody).toContain("function syncVisualViewport()");
+    expect(appScriptBody).toContain('style.setProperty("--visual-viewport-height"');
+    expect(appScriptBody).toContain('classList.toggle("keyboard-visible"');
+    expect(appScriptBody).toContain('fetch("/api/push/subscription"');
     expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
     expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
     expect(touchScriptBody).toContain("function scrollLinesImmediately");
@@ -174,13 +188,16 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
+    expect(stylesBody).toContain("--visual-viewport-height: 100dvh");
+    expect(stylesBody).toContain("html.keyboard-visible .mobile-nav");
     expect(appScriptBody).toContain("mobile streams only its selected pane");
     expect(stylesBody).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
     expect(stylesBody).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v32');
+    expect(workerBody).toContain('multiagent-remote-v34');
+    expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.mobileApp).toEqual({
@@ -218,6 +235,9 @@ describe("Electron dashboard server", () => {
     expect(externalLogin.status).toBe(200);
     expect(externalDownload.status).toBe(401);
     expect(externalUsage.status).toBe(401);
+    expect(pushKey.supported).toBe(true);
+    expect(pushKey.publicKey).toBeTruthy();
+    expect(pushSubscription.status).toBe(201);
     const loginBody = await externalLogin.text();
     // The heading text is set at runtime by login.js per auth mode; assert on
     // stable markup instead (brand + the elements login.js drives).
@@ -321,6 +341,70 @@ describe("Electron dashboard server", () => {
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-1", data: "계속 진행해줘\r" }]);
     expect(blocked.status).toBe(403);
+  });
+
+  it("authenticates push subscriptions and forwards done hooks to background delivery", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-push-api-"));
+    roots.push(root);
+    const calls = [];
+    const pushService = {
+      publicKey: () => "public-vapid",
+      subscribe(login, value) {
+        calls.push({ type: "subscribe", login, value });
+        return { subscribed: true };
+      },
+      unsubscribe(login, endpoint) {
+        calls.push({ type: "unsubscribe", login, endpoint });
+        return { subscribed: false };
+      },
+      removeLogin: () => {},
+      async notifyDone(value) {
+        calls.push({ type: "notify", value });
+        return { sent: 1 };
+      },
+    };
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => false,
+      pushService,
+    });
+    services.push(service);
+    service.config.server_port = 0;
+    service.syncAgents([{ id: "agent-1", name: "Build", project: "ProjectA" }]);
+    const status = await service.start();
+    const value = {
+      endpoint: "https://push.example.test/device-1",
+      keys: { p256dh: "key", auth: "auth" },
+    };
+
+    const subscribed = await fetch(`${status.url}/api/push/subscription`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: JSON.stringify(value),
+    });
+    const blocked = await fetch(`${status.url}/api/push/subscription`, {
+      method: "POST",
+      headers: { origin: "https://evil.example", "content-type": "application/json" },
+      body: JSON.stringify(value),
+    });
+    await service.notifyAgentDone({
+      id: "agent-1",
+      event: "done",
+      session_id: "session-1",
+    });
+
+    expect(subscribed.status).toBe(201);
+    expect(blocked.status).toBe(403);
+    expect(calls).toContainEqual({ type: "subscribe", login: "__local__", value });
+    expect(calls).toContainEqual({
+      type: "notify",
+      value: {
+        agentId: "agent-1",
+        sessionId: "session-1",
+        title: "ProjectA / Build",
+      },
+    });
   });
 
   it("stores bounded same-origin image attachments and rejects spoofed or cross-origin files", async () => {
