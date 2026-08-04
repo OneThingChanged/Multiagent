@@ -20,7 +20,7 @@ import type { AgentStatus } from "../types";
 // While the agent is working, composer sends are queued and drained one at a
 // time once it's ready for input (with a short cooldown so a message doesn't
 // fire during the brief lag before "working" registers).
-const BUSY_STATUSES: AgentStatus[] = ["working", "starting"];
+const BUSY_STATUSES: AgentStatus[] = ["working", "starting", "recovering"];
 const DEAD_STATUSES: AgentStatus[] = ["exited", "unreachable"];
 const QUEUE_COOLDOWN_MS = 1200;
 
@@ -434,7 +434,10 @@ export function ChatView({
   // at "working" (missed Stop hook). This stops a phantom "작업 중…" that traps
   // composer sends in the queue.
   const stoppedHere = stoppedKey !== null && stoppedKey === msgKey;
-  const busy = BUSY_STATUSES.includes(agentStatus) && lifecycle !== "idle" && !stoppedHere;
+  const initializing = agentStatus === "starting" || agentStatus === "recovering";
+  const busy = initializing || (
+    BUSY_STATUSES.includes(agentStatus) && lifecycle !== "idle" && !stoppedHere
+  );
   const alive = !DEAD_STATUSES.includes(agentStatus);
 
   // Cancel the in-progress turn by sending Esc to the PTY — same as pressing
@@ -482,7 +485,7 @@ export function ChatView({
   // Esc cancels the in-progress turn from anywhere in the focused chat pane
   // (not just when the composer has focus) while the agent is working.
   useEffect(() => {
-    if (!active || !busy) return;
+    if (!active || !busy || initializing) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -491,7 +494,7 @@ export function ChatView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, busy, interrupt]);
+  }, [active, busy, initializing, interrupt]);
 
   // Actually write a message to the PTY + echo it instantly. Text and Enter go
   // as separate writes (80ms apart) so Codex/Claude don't treat "text\r" as a
@@ -593,15 +596,17 @@ export function ChatView({
               <i />
               <i />
             </span>
-            작업 중…
-            <button
-              type="button"
-              className="chat-stop"
-              onClick={interrupt}
-              title="진행 취소 (Esc)"
-            >
-              ■ 중단
-            </button>
+            {agentStatus === "recovering" ? "복구 중…" : initializing ? "시작 중…" : "작업 중…"}
+            {!initializing && (
+              <button
+                type="button"
+                className="chat-stop"
+                onClick={interrupt}
+                title="진행 취소 (Esc)"
+              >
+                ■ 중단
+              </button>
+            )}
           </div>
         )}
       </div>

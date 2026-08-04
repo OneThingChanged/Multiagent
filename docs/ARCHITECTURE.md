@@ -156,6 +156,13 @@ struct PtyHandle {
 7. The Rust HTTP server validates the token → emits Tauri event `agent:hook-event { id, event }`
 8. The listening frontend updates state + notifies
 
+App-relaunch recovery uses a separate `recovering` runtime state. Restored PTYs
+stay in that state even when startup output arrives; `SessionStart` (or another
+live CLI hook) promotes them to `running`, while only prompt/tool hooks can mark
+them `working`. A 20-second live-PTY fallback prevents a missing hook from
+blocking input forever. Remote and MiraControl expose this as initialization,
+not work.
+
 The Electron hook server also exposes the token-authenticated local
 `/integration/v1/**` MiraControl API on that same loopback port. It returns compact
 Codex/Claude status and accepts guarded activate/input actions without exposing

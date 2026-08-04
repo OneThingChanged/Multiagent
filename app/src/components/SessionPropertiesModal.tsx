@@ -15,6 +15,7 @@ function formatDate(ms: number | undefined) {
 const STATUS_LABEL: Record<string, string> = {
   idle: "대기",
   starting: "시작 중",
+  recovering: "복구 중",
   running: "실행 중",
   working: "작업 중",
   waiting: "응답 대기",

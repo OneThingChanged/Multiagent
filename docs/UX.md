@@ -51,7 +51,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - Active group members: light blue background + left bar
 - Active tab session of the active leaf: deep blue background
 - Pinned group members: `PIN` badge next to the name
-- Unread completed work on a running/starting session: animated cyan-tinted background sweep + cyan dot. Inactive/exited sessions keep their Attention Center history without lighting up the sidebar. Opening the active session from the sidebar/tab, or starting new work in that session, marks the previous completion as read and removes both effects
+- Unread completed work on a running/starting/recovering session: animated cyan-tinted background sweep + cyan dot. Inactive/exited sessions keep their Attention Center history without lighting up the sidebar. Opening the active session from the sidebar/tab, or starting new work in that session, marks the previous completion as read and removes both effects
 - Between groups: thin gray divider
 - Session item: status dot / tool icon / alias / dangerous `!` / close `x` (one line)
 
@@ -61,6 +61,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 |---|---|
 | gray | idle — not spawned yet (restored from saved state) |
 | yellow (no blink) | starting — right after spawn, waiting for first data |
+| cyan + pulse animation | recovering — the PTY has restarted after app relaunch but the AI CLI has not emitted a ready hook yet |
 | green | running — normal |
 | yellow + pulse animation | working — Claude/Codex processing a response (based on hook signals) |
 | gray | exited — PTY terminated |

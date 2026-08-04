@@ -124,6 +124,9 @@ describe("buildDesktopPetUpdate", () => {
       buildDesktopPetUpdate([{ ...agent, status: "starting" }], [], {}, []).status
     ).toBe("running");
     expect(
+      buildDesktopPetUpdate([{ ...agent, status: "recovering" }], [], {}, []).status
+    ).toBe("running");
+    expect(
       buildDesktopPetUpdate([{ ...agent, status: "exited" }], [], {}, []).status
     ).toBe("idle");
   });

@@ -265,7 +265,8 @@ describe("Sidebar", () => {
     });
     const runningAgent = {
       ...agent("active-session", "project-a"),
-      status: "running" as const,
+      status: "recovering" as const,
+      runtimeStatus: "recovering" as const,
     };
 
     const html = renderSidebar(

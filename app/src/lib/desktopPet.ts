@@ -104,6 +104,7 @@ export function buildDesktopPetUpdate(
       .filter(
         (agent) =>
       agent.status === "starting" ||
+      agent.status === "recovering" ||
       agent.status === "running" ||
       agent.status === "working" ||
       agent.status === "waiting" ||

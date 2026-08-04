@@ -10,6 +10,7 @@ import type {
 export type AgentRuntimeStatus =
   | "idle"
   | "starting"
+  | "recovering"
   | "running"
   | "exited"
   | "unreachable";

@@ -117,6 +117,36 @@ describe("agent activity state v2", () => {
     });
   });
 
+  it("keeps a restored process in recovery until a hook proves the CLI is ready", () => {
+    const working = applyAgentHookEvent(
+      agent(),
+      { id: "agent-1", event: "working" },
+      100
+    );
+    const recovering = applyAgentRuntimeStatus(working, "recovering", 200);
+    const ready = applyAgentHookEvent(
+      recovering,
+      {
+        id: "agent-1",
+        event: "session-start",
+        hook_event_name: "SessionStart",
+        session_id: "session-1",
+      },
+      300
+    );
+
+    expect(recovering).toMatchObject({
+      status: "recovering",
+      runtimeStatus: "recovering",
+      activity: undefined,
+    });
+    expect(ready).toMatchObject({
+      status: "running",
+      runtimeStatus: "running",
+      lastSessionId: "session-1",
+    });
+  });
+
   it("returns a cancelled live turn to the running idle state", () => {
     const working = applyAgentHookEvent(
       agent(),
@@ -147,6 +177,8 @@ describe("agent activity state v2", () => {
     expect(isAgentRuntimeActive({ ...agent("working"), status: "working" }))
       .toBe(true);
     expect(isAgentRuntimeActive({ ...agent("idle"), runtimeStatus: "starting" }))
+      .toBe(true);
+    expect(isAgentRuntimeActive({ ...agent("idle"), runtimeStatus: "recovering" }))
       .toBe(true);
     expect(isAgentRuntimeActive(agent("idle"))).toBe(false);
     expect(

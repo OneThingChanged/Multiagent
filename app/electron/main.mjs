@@ -460,6 +460,7 @@ function writeMiraControlAgentInput({
   const prepared = prepareMiraControlInput({
     active: Boolean(entry),
     state: session?.state,
+    reason: session?.reason,
     providerSessionId,
     expectedSessionId,
     text,
@@ -484,7 +485,13 @@ const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionS
 // send input, stream the live terminal, read the chat transcript, restart.
 const sessionProviders = {
   writePty(id, data) {
-    const entry = ptys.get(id);
+    const agentId = asString(id).trim();
+    const syncedAgent = (monitorService?.state?.agents || [])
+      .find((agent) => agent.id === agentId);
+    if (["starting", "recovering"].includes(asString(syncedAgent?.status).toLowerCase())) {
+      return false;
+    }
+    const entry = ptys.get(agentId);
     if (!entry || data.length > 8 * 1024) return false;
     entry.process.write(data);
     return true;

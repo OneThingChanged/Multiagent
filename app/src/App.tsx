@@ -504,6 +504,8 @@ type ReopenPending = {
   count: number;
 };
 
+const RECOVERY_READY_TIMEOUT_MS = 20_000;
+
 function computeInitialReopen(
   boot: Bootstrap,
   viewKey: string,
@@ -550,6 +552,19 @@ function App() {
   const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
     computeInitialReopen(boot, workspace.viewKey, workspace.restore)
   );
+  const recoveryTimersRef = useRef<Map<string, number>>(new Map());
+  const clearAgentRecoveryTimer = useCallback((agentId: string) => {
+    const timer = recoveryTimersRef.current.get(agentId);
+    if (timer !== undefined) window.clearTimeout(timer);
+    recoveryTimersRef.current.delete(agentId);
+  }, []);
+
+  useEffect(() => () => {
+    for (const timer of recoveryTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    recoveryTimersRef.current.clear();
+  }, []);
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
   const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(
@@ -1608,6 +1623,7 @@ function App() {
     listen<{ id: string }>("pty:exit", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
+      clearAgentRecoveryTimer(id);
       const exitingAgent = agentsRef.current.find((agent) => agent.id === id);
       if (exitingAgent && isAgentActivelyWorking(exitingAgent)) {
         const sessionKey =
@@ -1665,6 +1681,7 @@ function App() {
         if (cancelled) return;
         const payload = e.payload;
         const { id, event } = payload;
+        clearAgentRecoveryTimer(id);
         const currentAgent = agentsRef.current.find((agent) => agent.id === id);
         const nextAgent = currentAgent
           ? applyAgentHookEvent(currentAgent, payload)
@@ -1842,6 +1859,7 @@ function App() {
     };
   }, [
     beginAgentWork,
+    clearAgentRecoveryTimer,
     isCoordinatorWindow,
     pushAttention,
     pushToast,
@@ -3012,7 +3030,7 @@ function App() {
   // a default size; when the user later opens it, PaneSlot reattaches the same
   // entry and resizes (it skips re-spawning because entry.spawned is already set).
   const spawnAgentInBackground = useCallback(
-    async (agentId: string) => {
+    async (agentId: string, options: { recovering?: boolean } = {}) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
       if (!agent) return;
       let entry = termsRef.current.get(agentId);
@@ -3044,7 +3062,20 @@ function App() {
         }
       }
       entry.spawned = true;
-      setAgentStatus(agentId, "starting");
+      clearAgentRecoveryTimer(agentId);
+      setAgentStatus(agentId, options.recovering ? "recovering" : "starting");
+      if (options.recovering) {
+        const timer = window.setTimeout(() => {
+          recoveryTimersRef.current.delete(agentId);
+          const current = agentsRef.current.find((candidate) => candidate.id === agentId);
+          if (current?.runtimeStatus !== "recovering") return;
+          console.warn(
+            `[recovery] SessionStart hook timeout; allowing input for ${agentId}`
+          );
+          setAgentStatus(agentId, "running");
+        }, RECOVERY_READY_TIMEOUT_MS);
+        recoveryTimersRef.current.set(agentId, timer);
+      }
       try {
         entry.spawnPromise = (async () => {
           const group = groupsRef.current.find((g) =>
@@ -3071,9 +3102,14 @@ function App() {
         if (entry.spawnPromise === pendingSpawn) entry.spawnPromise = null;
         if (isElectronRuntime()) {
           entry.restoreScrollbackOnAttach = !result.reattached;
-          if (result.cancelled) entry.spawned = false;
+          if (result.cancelled) {
+            entry.spawned = false;
+            clearAgentRecoveryTimer(agentId);
+            setAgentStatus(agentId, "idle");
+          }
         }
       } catch (err) {
+        clearAgentRecoveryTimer(agentId);
         entry.spawnPromise = null;
         entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
         setAgentStatus(agentId, "exited");
@@ -3084,6 +3120,7 @@ function App() {
       handleOpenImagePath,
       handleOpenFolderPath,
       handleOpenTerminalPath,
+      clearAgentRecoveryTimer,
       setAgentStatus,
       setAgentSessionId,
     ]
@@ -3121,7 +3158,7 @@ function App() {
     // that aren't currently visible. Setting entry.spawned synchronously here
     // means PaneSlot won't double-spawn the ones in the shown group.
     for (const id of pending.agentIds) {
-      void spawnAgentInBackground(id);
+      void spawnAgentInBackground(id, { recovering: true });
     }
   }, [pendingReopen, spawnAgentInBackground]);
 

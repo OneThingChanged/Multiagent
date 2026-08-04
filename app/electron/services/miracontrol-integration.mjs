@@ -25,6 +25,9 @@ export function deriveMiraControlState(
   if (!active) return { state: "OFFLINE", reason: "inactive" };
 
   const runtimeStatus = lower(status);
+  if (runtimeStatus === "recovering" || runtimeStatus === "starting") {
+    return { state: "WAIT", reason: "initializing" };
+  }
   if (runtimeStatus === "working") {
     return { state: "WORK", reason: "working" };
   }
@@ -140,6 +143,7 @@ export function buildMiraControlSnapshot({
 export function prepareMiraControlInput({
   active,
   state,
+  reason,
   providerSessionId,
   expectedSessionId,
   text: input,
@@ -147,6 +151,14 @@ export function prepareMiraControlInput({
 }) {
   if (!active) {
     return { ok: false, httpStatus: 409, error: "session is not active" };
+  }
+  if (reason === "initializing") {
+    return {
+      ok: false,
+      httpStatus: 409,
+      error: "session is still initializing",
+      code: "session_initializing",
+    };
   }
   const currentSessionId = text(providerSessionId);
   if (!currentSessionId) {

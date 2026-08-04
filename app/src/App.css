@@ -2419,6 +2419,11 @@ body,
 .status-starting {
   background: var(--app-warning);
 }
+.status-recovering {
+  background: #58a6ff;
+  box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.55);
+  animation: pulse-waiting 1.4s ease-in-out infinite;
+}
 .status-running {
   background: var(--app-success-dot);
 }

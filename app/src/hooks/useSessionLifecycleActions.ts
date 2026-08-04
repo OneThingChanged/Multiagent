@@ -109,6 +109,7 @@ export function useSessionLifecycleActions({
           if (
             status === "idle" ||
             status === "starting" ||
+            status === "recovering" ||
             status === "running" ||
             status === "exited" ||
             status === "unreachable"

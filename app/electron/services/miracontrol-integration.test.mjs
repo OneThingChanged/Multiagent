@@ -13,6 +13,8 @@ describe("MiraControl integration state", () => {
       .toEqual({ state: "OFFLINE", reason: "inactive" });
     expect(deriveMiraControlState({ active: true, status: "working" }, now))
       .toEqual({ state: "WORK", reason: "working" });
+    expect(deriveMiraControlState({ active: true, status: "recovering" }, now))
+      .toEqual({ state: "WAIT", reason: "initializing" });
     expect(deriveMiraControlState({ active: true, status: "blocked" }, now))
       .toEqual({ state: "WAIT", reason: "blocked" });
     expect(deriveMiraControlState({
@@ -131,6 +133,8 @@ describe("MiraControl integration state", () => {
       .toMatchObject({ ok: false, httpStatus: 428 });
     expect(prepareMiraControlInput({ ...base, state: "WORK" }))
       .toMatchObject({ ok: false, httpStatus: 409, code: "session_working" });
+    expect(prepareMiraControlInput({ ...base, reason: "initializing" }))
+      .toMatchObject({ ok: false, httpStatus: 409, code: "session_initializing" });
     expect(prepareMiraControlInput({ ...base, text: "한".repeat(3000) }))
       .toMatchObject({ ok: false, httpStatus: 400, error: "input is too large" });
   });

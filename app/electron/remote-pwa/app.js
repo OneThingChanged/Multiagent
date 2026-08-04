@@ -102,9 +102,11 @@ const ui = {
 const STATUS = {
   working: { label: "작업 중", rank: 0 },
   attention: { label: "답변 필요", rank: 1 },
-  done: { label: "완료", rank: 2 },
-  idle: { label: "대기", rank: 3 },
-  offline: { label: "비활성", rank: 4 },
+  recovering: { label: "복구 중", rank: 2 },
+  starting: { label: "시작 중", rank: 2 },
+  done: { label: "완료", rank: 3 },
+  idle: { label: "대기", rank: 4 },
+  offline: { label: "비활성", rank: 5 },
 };
 const STATUS_ORDER = Object.keys(STATUS);
 const FILTERS = ["all", "active", ...STATUS_ORDER];
@@ -259,10 +261,12 @@ function statusOf(agent) {
   const rawStatus = text(agent?.status).toLowerCase();
   if (["exited", "unreachable", "offline"].includes(rawStatus)) return "offline";
   if (["cancelled", "canceled", "interrupted", "aborted"].includes(hookEvent)) return "idle";
+  if (rawStatus === "recovering") return "recovering";
+  if (rawStatus === "starting") return "starting";
   if (questionOf(agent) || ["waiting", "blocked", "permission-request"].includes(rawStatus)
     || ["waiting", "blocked", "permission-request"].includes(hookEvent)) return "attention";
-  if (["working", "starting"].includes(rawStatus)
-    || ["working", "tool-start", "tool-end", "starting"].includes(hookEvent)) return "working";
+  if (rawStatus === "working"
+    || ["working", "tool-start", "tool-end"].includes(hookEvent)) return "working";
   if (hookEvent === "done" || rawStatus === "done") return "done";
   if (["running", "idle"].includes(rawStatus)) return "idle";
   return "offline";
@@ -449,7 +453,7 @@ function setActiveFilter(filter) {
 }
 
 function renderSummary() {
-  const counts = { working: 0, attention: 0, done: 0, idle: 0, offline: 0 };
+  const counts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
   for (const agent of allAgents()) counts[statusOf(agent)] += 1;
   ui.workingCount.textContent = String(counts.working);
   ui.questionCount.textContent = String(counts.attention);
@@ -704,9 +708,12 @@ function renderLayoutNode(node, screen) {
   const form = make("form", "screen-composer");
   const input = document.createElement("input");
   input.maxLength = 4000;
-  const inactiveTerminal = statusOf(activeAgent) === "offline" && paneMode === "term";
+  const activeStatus = statusOf(activeAgent);
+  const inactiveTerminal = ["offline", "recovering", "starting"].includes(activeStatus) && paneMode === "term";
   input.placeholder = inactiveTerminal
-    ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+    ? activeStatus === "offline"
+      ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+      : "세션 초기화가 끝나면 입력할 수 있습니다"
     : "메시지 또는 답변";
   input.disabled = inactiveTerminal;
   input.value = screenDrafts.get(activeAgent.id) || "";
@@ -719,7 +726,8 @@ function renderLayoutNode(node, screen) {
     const message = input.value.trim();
     if (!message) return;
     send.disabled = true;
-    if (statusOf(agentMap().get(activeAgent.id) || activeAgent) === "offline") {
+    const latestStatus = statusOf(agentMap().get(activeAgent.id) || activeAgent);
+    if (latestStatus === "offline") {
       if (paneMode !== "chat") {
         showToast("비활성 세션에는 채팅 모드에서만 메시지를 보낼 수 있습니다.");
         send.disabled = false;
@@ -728,6 +736,13 @@ function renderLayoutNode(node, screen) {
       const requested = await requestSessionActivation(activeAgent.id, { queuedMessage: true });
       if (!requested || !(await waitForSessionReady(activeAgent.id))) {
         if (requested) showToast("세션을 활성화하지 못해 메시지를 전송하지 않았습니다.");
+        send.disabled = false;
+        return;
+      }
+    }
+    if (["recovering", "starting"].includes(statusOf(agentMap().get(activeAgent.id) || activeAgent))) {
+      if (!(await waitForSessionReady(activeAgent.id))) {
+        showToast("세션 초기화가 끝나지 않아 메시지를 전송하지 않았습니다.");
         send.disabled = false;
         return;
       }
@@ -820,7 +835,8 @@ function renderScreenChat(container, data, agent) {
     }
   }
 
-  if (!data?.unsupported && statusOf(agent) === "working" && data?.lifecycle !== "idle") {
+  const chatStatus = statusOf(agent);
+  if (!data?.unsupported && chatStatus === "working" && data?.lifecycle !== "idle") {
     const thinking = make("div", "chat-thinking");
     const dots = make("span", "chat-thinking-dots");
     dots.append(make("i", ""), make("i", ""), make("i", ""));
@@ -829,6 +845,15 @@ function renderScreenChat(container, data, agent) {
     stop.type = "button";
     stop.addEventListener("click", () => { void cancelSession(agent.id); });
     thinking.appendChild(stop);
+    fragment.appendChild(thinking);
+  } else if (!data?.unsupported && ["recovering", "starting"].includes(chatStatus)) {
+    const thinking = make("div", "chat-thinking");
+    const dots = make("span", "chat-thinking-dots");
+    dots.append(make("i", ""), make("i", ""), make("i", ""));
+    thinking.append(
+      dots,
+      document.createTextNode(chatStatus === "recovering" ? "세션 복구 중…" : "세션 시작 중…"),
+    );
     fragment.appendChild(thinking);
   }
   const prompt = promptFor(agent);
@@ -1773,18 +1798,25 @@ function updateComposerSendState() {
   const hasReadyAttachment = attachments.some((attachment) => attachment.path && !attachment.error);
   const uploading = attachments.some((attachment) => attachment.uploading);
   const inactiveTerminal = Boolean(
-    agent && statusOf(agent) === "offline" && sessionViewMode === "term"
+    agent && ["offline", "recovering", "starting"].includes(statusOf(agent)) && sessionViewMode === "term"
+  );
+  const initializingTerminal = Boolean(
+    agent && ["recovering", "starting"].includes(statusOf(agent)) && sessionViewMode === "term"
   );
   ui.messageInput.disabled = inactiveTerminal;
   ui.messageInput.placeholder = inactiveTerminal
-    ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+    ? initializingTerminal
+      ? "세션 초기화가 끝나면 입력할 수 있습니다"
+      : "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
     : "메시지 입력";
   ui.sendButton.disabled = inactiveTerminal || uploading || (!hasMessage && !hasReadyAttachment);
   ui.attachmentButton.disabled = inactiveTerminal || !agent || Boolean(agent.sshHostId) || attachments.length >= MAX_ATTACHMENTS;
   ui.attachmentButton.title = agent?.sshHostId
     ? "SSH 세션은 이미지 첨부를 지원하지 않습니다"
     : inactiveTerminal
-      ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+      ? initializingTerminal
+        ? "세션 초기화가 끝나면 첨부할 수 있습니다"
+        : "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
     : "이미지 첨부";
 }
 
@@ -1965,7 +1997,8 @@ const sessionActivationDeadlines = new Map();
 // Busy only when the hook says "working" AND the transcript's last turn isn't
 // finished — so a stale/stuck "working" hook doesn't trap queued messages.
 const agentBusy = (agent) => statusOf(agent) === "working" && lastChatData?.lifecycle !== "idle";
-const agentReady = (agent) => !agentBusy(agent) && !["offline", "unreachable"].includes(statusOf(agent));
+const agentInitializing = (agent) => ["recovering", "starting"].includes(statusOf(agent));
+const agentReady = (agent) => !agentBusy(agent) && !agentInitializing(agent) && !["offline", "unreachable"].includes(statusOf(agent));
 
 function renderComposerQueue() {
   const el = ui.composerQueue;
@@ -2011,7 +2044,7 @@ async function drainQueue() {
   if (statusOf(agent) === "offline") {
     return;
   }
-  if (activationDeadline && text(agent.status).toLowerCase() === "starting") return;
+  if (agentInitializing(agent)) return;
   if (agentBusy(agent) || !agentReady(agent)) return;
   if (Date.now() - lastSendAt < QUEUE_COOLDOWN_MS) return;
   const next = messageQueue[0];
@@ -2054,8 +2087,8 @@ async function waitForSessionReady(agentId) {
     || Date.now() + SESSION_ACTIVATION_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const agent = agentMap().get(agentId);
-    const starting = text(agent?.status).toLowerCase() === "starting";
-    if (agent && statusOf(agent) !== "offline" && !starting) {
+    const initializing = agent && agentInitializing(agent);
+    if (agent && statusOf(agent) !== "offline" && !initializing) {
       sessionActivationDeadlines.delete(agentId);
       await new Promise((resolve) => setTimeout(resolve, 350));
       return true;
@@ -2229,7 +2262,7 @@ function buildTerminal(container, fontSize) {
   term.onData((data) => {
     if (!instance.agentId) return;
     const agent = agentMap().get(instance.agentId);
-    if (!agent || statusOf(agent) === "offline") return;
+    if (!agent || ["offline", "recovering", "starting"].includes(statusOf(agent))) return;
     void sendRaw(instance.agentId, data);
   });
   instance.disposeTouchScroll =
@@ -2649,7 +2682,8 @@ function renderChat(data) {
   // Suppress it when the transcript says the turn finished (stale hook status).
   if (!data?.unsupported) {
     const agent = selectedAgent();
-    if (agent && statusOf(agent) === "working" && data?.lifecycle !== "idle") {
+    const chatStatus = agent ? statusOf(agent) : "offline";
+    if (agent && chatStatus === "working" && data?.lifecycle !== "idle") {
       const think = make("div", "chat-thinking");
       const dots = make("span", "chat-thinking-dots");
       dots.append(make("i", ""), make("i", ""), make("i", ""));
@@ -2659,6 +2693,15 @@ function renderChat(data) {
       stop.title = "진행 취소 (Esc)";
       stop.addEventListener("click", () => { void cancelSession(agent.id); });
       think.appendChild(stop);
+      frag.appendChild(think);
+    } else if (agent && ["recovering", "starting"].includes(chatStatus)) {
+      const think = make("div", "chat-thinking");
+      const dots = make("span", "chat-thinking-dots");
+      dots.append(make("i", ""), make("i", ""), make("i", ""));
+      think.append(
+        dots,
+        document.createTextNode(chatStatus === "recovering" ? "세션 복구 중…" : "세션 시작 중…"),
+      );
       frag.appendChild(think);
     }
     // Inline prompt card (question / permission) — hidden once answered.
@@ -2735,7 +2778,7 @@ function syncSessionView() {
     // Re-render promptly when the busy state or the inline prompt changes, even
     // if the transcript itself didn't change this poll.
     const prompt = promptFor(agent);
-    const sig = `${statusOf(agent) === "working" ? 1 : 0}|${prompt ? `${prompt.kind}:${prompt.options.length}:${prompt.text}` : ""}`;
+    const sig = `${statusOf(agent)}|${prompt ? `${prompt.kind}:${prompt.options.length}:${prompt.text}` : ""}`;
     if (sig !== lastChatStatusSig) {
       lastChatStatusSig = sig;
       if (lastChatData) renderChat(lastChatData);

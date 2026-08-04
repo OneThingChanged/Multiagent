@@ -33,6 +33,7 @@ export function runtimeStatusOf(
   if (
     agent.status === "idle" ||
     agent.status === "starting" ||
+    agent.status === "recovering" ||
     agent.status === "running" ||
     agent.status === "exited" ||
     agent.status === "unreachable"
@@ -46,7 +47,11 @@ export function isAgentRuntimeActive(
   agent: Pick<Agent, "status" | "runtimeStatus">
 ): boolean {
   const status = runtimeStatusOf(agent);
-  return status === "running" || status === "starting";
+  return (
+    status === "running" ||
+    status === "starting" ||
+    status === "recovering"
+  );
 }
 
 export function deriveAgentStatus(
@@ -74,7 +79,9 @@ export function applyAgentRuntimeStatus(
   now = Date.now()
 ): Agent {
   const activity =
-    runtimeStatus === "idle" || runtimeStatus === "starting"
+    runtimeStatus === "idle" ||
+    runtimeStatus === "starting" ||
+    runtimeStatus === "recovering"
       ? undefined
       : agent.activity;
   return {
@@ -133,7 +140,9 @@ export function applyAgentHookEvent(
   // A hook can only be emitted by a live CLI process. Promote startup/idle
   // races to running, while keeping a confirmed PTY exit authoritative.
   const runtimeStatus =
-    currentRuntimeStatus === "idle" || currentRuntimeStatus === "starting"
+    currentRuntimeStatus === "idle" ||
+    currentRuntimeStatus === "starting" ||
+    currentRuntimeStatus === "recovering"
       ? "running"
       : currentRuntimeStatus;
   const workStatus = workStatusForHook(event);

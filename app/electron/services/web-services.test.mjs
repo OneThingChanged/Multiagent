@@ -157,6 +157,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="usageView"');
     expect(pageBody).toContain('id="mobileSessionsButton"');
     expect(pageBody).toContain('data-filter="active"');
+    expect(pageBody).toContain('data-filter="recovering"');
     expect(pageBody).toContain('id="restartSessionButton" type="button">활성화</button>');
     expect(pageBody).not.toContain('id="mobileScreensButton"');
     expect(pageBody).not.toContain('id="mobileQuestionsButton"');
@@ -179,6 +180,8 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function waitForSessionReady(agentId)");
     expect(appScriptBody).toContain("SESSION_ACTIVATION_TIMEOUT_MS = 30_000");
     expect(appScriptBody).toContain('activeFilter === "active"');
+    expect(appScriptBody).toContain('rawStatus === "recovering"');
+    expect(appScriptBody).toContain('const agentInitializing = (agent)');
     expect(appScriptBody).toContain('inactive && sessionViewMode !== "chat"');
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
@@ -220,7 +223,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v42');
+    expect(workerBody).toContain('multiagent-remote-v43');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);

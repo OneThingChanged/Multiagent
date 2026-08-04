@@ -34,6 +34,8 @@ export function ProjectPropertiesModal({
       a.status === "working" ||
       a.status === "waiting" ||
       a.status === "blocked" ||
+      a.status === "starting" ||
+      a.status === "recovering" ||
       a.status === "running"
   ).length;
 
