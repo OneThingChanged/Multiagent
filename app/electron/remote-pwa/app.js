@@ -107,7 +107,8 @@ const STATUS = {
   offline: { label: "비활성", rank: 4 },
 };
 const STATUS_ORDER = Object.keys(STATUS);
-const FILTERS = ["all", ...STATUS_ORDER];
+const FILTERS = ["all", "active", ...STATUS_ORDER];
+const FILTER_LABELS = { all: "전체 세션", active: "활성 세션" };
 
 let remoteState = { agents: [], view: { projects: [], agents: [], groups: [] } };
 const initialUrl = new URL(location.href);
@@ -257,6 +258,7 @@ function statusOf(agent) {
   const hookEvent = text(agent?.hook?.event).toLowerCase();
   const rawStatus = text(agent?.status).toLowerCase();
   if (["exited", "unreachable", "offline"].includes(rawStatus)) return "offline";
+  if (["cancelled", "canceled", "interrupted", "aborted"].includes(hookEvent)) return "idle";
   if (questionOf(agent) || ["waiting", "blocked", "permission-request"].includes(rawStatus)
     || ["waiting", "blocked", "permission-request"].includes(hookEvent)) return "attention";
   if (["working", "starting"].includes(rawStatus)
@@ -397,7 +399,9 @@ function matchesQuery(agent, query) {
 function visibleAgents() {
   const query = ui.searchInput.value.trim().toLowerCase();
   return sortedAgents().filter((agent) => {
-    if (activeFilter !== "all" && statusOf(agent) !== activeFilter) return false;
+    const status = statusOf(agent);
+    if (activeFilter === "active" && status === "offline") return false;
+    if (!["all", "active"].includes(activeFilter) && status !== activeFilter) return false;
     return matchesQuery(agent, query);
   });
 }
@@ -517,12 +521,17 @@ function renderNavigation() {
 
 function renderMonitor() {
   const query = ui.searchInput.value.trim().toLowerCase();
-  const statuses = activeFilter === "all" ? STATUS_ORDER : [activeFilter];
-  ui.monitorTitle.textContent = activeFilter === "all" ? "전체 세션" : STATUS[activeFilter].label;
+  const statuses = activeFilter === "all"
+    ? STATUS_ORDER
+    : activeFilter === "active"
+      ? STATUS_ORDER.filter((status) => status !== "offline")
+      : [activeFilter];
+  const filterLabel = FILTER_LABELS[activeFilter] || STATUS[activeFilter].label;
+  ui.monitorTitle.textContent = filterLabel;
   ui.monitorMeta.textContent = activeFilter === "all"
     ? "PC에서 실행 중인 작업을 상태별로 확인합니다."
-    : `${STATUS[activeFilter].label} 상태의 세션만 표시하고 있습니다.`;
-  ui.monitorBoard.dataset.filtered = activeFilter === "all" ? "false" : "true";
+    : `${filterLabel}만 표시하고 있습니다.`;
+  ui.monitorBoard.dataset.filtered = ["all", "active"].includes(activeFilter) ? "false" : "true";
   const fragment = document.createDocumentFragment();
   for (const status of statuses) {
     const agents = sortedAgents().filter((agent) => statusOf(agent) === status && matchesQuery(agent, query));
@@ -695,16 +704,34 @@ function renderLayoutNode(node, screen) {
   const form = make("form", "screen-composer");
   const input = document.createElement("input");
   input.maxLength = 4000;
-  input.placeholder = "메시지 또는 답변";
+  const inactiveTerminal = statusOf(activeAgent) === "offline" && paneMode === "term";
+  input.placeholder = inactiveTerminal
+    ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+    : "메시지 또는 답변";
+  input.disabled = inactiveTerminal;
   input.value = screenDrafts.get(activeAgent.id) || "";
   input.addEventListener("input", () => screenDrafts.set(activeAgent.id, input.value));
   const send = make("button", "", "전송");
   send.type = "submit";
+  send.disabled = inactiveTerminal;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = input.value.trim();
     if (!message) return;
     send.disabled = true;
+    if (statusOf(agentMap().get(activeAgent.id) || activeAgent) === "offline") {
+      if (paneMode !== "chat") {
+        showToast("비활성 세션에는 채팅 모드에서만 메시지를 보낼 수 있습니다.");
+        send.disabled = false;
+        return;
+      }
+      const requested = await requestSessionActivation(activeAgent.id, { queuedMessage: true });
+      if (!requested || !(await waitForSessionReady(activeAgent.id))) {
+        if (requested) showToast("세션을 활성화하지 못해 메시지를 전송하지 않았습니다.");
+        send.disabled = false;
+        return;
+      }
+    }
     const sent = await sendInput(activeAgent.id, message);
     if (sent) {
       input.value = "";
@@ -800,7 +827,7 @@ function renderScreenChat(container, data, agent) {
     thinking.append(dots, document.createTextNode("작업 중…"));
     const stop = make("button", "chat-stop", "■ 중단");
     stop.type = "button";
-    stop.addEventListener("click", () => { void sendRaw(agent.id, "\x1b"); });
+    stop.addEventListener("click", () => { void cancelSession(agent.id); });
     thinking.appendChild(stop);
     fragment.appendChild(thinking);
   }
@@ -1745,10 +1772,19 @@ function updateComposerSendState() {
   const hasMessage = Boolean(ui.messageInput.value.trim());
   const hasReadyAttachment = attachments.some((attachment) => attachment.path && !attachment.error);
   const uploading = attachments.some((attachment) => attachment.uploading);
-  ui.sendButton.disabled = uploading || (!hasMessage && !hasReadyAttachment);
-  ui.attachmentButton.disabled = !agent || Boolean(agent.sshHostId) || attachments.length >= MAX_ATTACHMENTS;
+  const inactiveTerminal = Boolean(
+    agent && statusOf(agent) === "offline" && sessionViewMode === "term"
+  );
+  ui.messageInput.disabled = inactiveTerminal;
+  ui.messageInput.placeholder = inactiveTerminal
+    ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
+    : "메시지 입력";
+  ui.sendButton.disabled = inactiveTerminal || uploading || (!hasMessage && !hasReadyAttachment);
+  ui.attachmentButton.disabled = inactiveTerminal || !agent || Boolean(agent.sshHostId) || attachments.length >= MAX_ATTACHMENTS;
   ui.attachmentButton.title = agent?.sshHostId
     ? "SSH 세션은 이미지 첨부를 지원하지 않습니다"
+    : inactiveTerminal
+      ? "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
     : "이미지 첨부";
 }
 
@@ -1880,15 +1916,51 @@ async function sendRaw(agentId, data) {
   }
 }
 
+async function cancelSession(agentId) {
+  if (!agentId) return false;
+  try {
+    const response = await fetch("/api/session/cancel", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agentId }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    // The endpoint also emits a synthetic cancelled hook. Optimistically mark
+    // the transcript idle so the composer queue is usable before the next
+    // state/chat refresh reaches this client.
+    if (selection.type === "session" && selection.id === agentId && lastChatData) {
+      lastChatData = { ...lastChatData, lifecycle: "idle" };
+      renderChat(lastChatData);
+    }
+    const cached = screenChatCache.get(agentId);
+    if (cached) {
+      screenChatCache.set(agentId, {
+        ...cached,
+        data: { ...cached.data, lifecycle: "idle" },
+      });
+    }
+    showToast("작업을 취소하고 대기 상태로 전환했습니다.");
+    await fetchState({ quiet: true });
+    return true;
+  } catch (error) {
+    showToast(`취소 실패: ${error.message}`);
+    return false;
+  }
+}
+
 // ---- Message queue ----
 // While the agent is working, composer sends are reserved in a queue and
 // drained one at a time once it's ready for input (with a cooldown so a send
 // doesn't fire during the brief lag before "working" registers). Items can be
 // cancelled before they go out. The queue is tied to the selected agent.
 const QUEUE_COOLDOWN_MS = 1200;
+const SESSION_ACTIVATION_TIMEOUT_MS = 30_000;
 const messageQueue = [];
 let queueAgentId = null;
 let lastSendAt = 0;
+const sessionActivationDeadlines = new Map();
 
 // Busy only when the hook says "working" AND the transcript's last turn isn't
 // finished — so a stale/stuck "working" hook doesn't trap queued messages.
@@ -1917,6 +1989,7 @@ function renderComposerQueue() {
 // Drop the queue when the selection moves to a different session.
 function syncQueueAgent(agent) {
   if (queueAgentId && agent?.id !== queueAgentId) {
+    sessionActivationDeadlines.delete(queueAgentId);
     messageQueue.length = 0;
     queueAgentId = agent?.id ?? null;
     renderComposerQueue();
@@ -1927,13 +2000,71 @@ async function drainQueue() {
   if (!messageQueue.length) return;
   const agent = selectedAgent();
   if (!agent || agent.id !== queueAgentId) return;
+  const activationDeadline = sessionActivationDeadlines.get(agent.id);
+  if (activationDeadline && Date.now() >= activationDeadline) {
+    sessionActivationDeadlines.delete(agent.id);
+    messageQueue.length = 0;
+    renderComposerQueue();
+    showToast("세션을 활성화하지 못해 예약 메시지를 취소했습니다.");
+    return;
+  }
+  if (statusOf(agent) === "offline") {
+    return;
+  }
+  if (activationDeadline && text(agent.status).toLowerCase() === "starting") return;
   if (agentBusy(agent) || !agentReady(agent)) return;
   if (Date.now() - lastSendAt < QUEUE_COOLDOWN_MS) return;
-  const next = messageQueue.shift();
-  renderComposerQueue();
+  const next = messageQueue[0];
   lastSendAt = Date.now();
-  await sendInput(agent.id, next);
+  const sent = await sendInput(agent.id, next);
+  if (!sent) return;
+  messageQueue.shift();
+  if (activationDeadline) sessionActivationDeadlines.delete(agent.id);
+  renderComposerQueue();
   lastChatFetch = { id: null, at: 0 }; // pull the sent turn into the chat quickly
+}
+
+async function requestSessionActivation(agentId, { queuedMessage = false } = {}) {
+  if (!agentId) return false;
+  const existingDeadline = sessionActivationDeadlines.get(agentId);
+  if (existingDeadline && existingDeadline > Date.now()) return true;
+  try {
+    const response = await fetch("/api/session/restart", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agentId }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    sessionActivationDeadlines.set(agentId, Date.now() + SESSION_ACTIVATION_TIMEOUT_MS);
+    showToast(queuedMessage
+      ? "세션 활성화 중 — 준비되면 메시지를 자동 전송합니다."
+      : "세션을 활성화하고 있습니다.");
+    setTimeout(() => fetchState({ quiet: true }), 500);
+    return true;
+  } catch (error) {
+    showToast(`세션 활성화 실패: ${error.message}`);
+    return false;
+  }
+}
+
+async function waitForSessionReady(agentId) {
+  const deadline = sessionActivationDeadlines.get(agentId)
+    || Date.now() + SESSION_ACTIVATION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const agent = agentMap().get(agentId);
+    const starting = text(agent?.status).toLowerCase() === "starting";
+    if (agent && statusOf(agent) !== "offline" && !starting) {
+      sessionActivationDeadlines.delete(agentId);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return true;
+    }
+    await fetchState({ quiet: true });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  sessionActivationDeadlines.delete(agentId);
+  return false;
 }
 
 async function sendSelectedMessage() {
@@ -1943,11 +2074,24 @@ async function sendSelectedMessage() {
   if (!agent || attachments.some((attachment) => attachment.uploading)) return;
   const outgoing = attachmentMessage(message, attachments);
   if (!outgoing) return;
+  const inactive = statusOf(agent) === "offline";
+  if (inactive && sessionViewMode !== "chat") {
+    showToast("비활성 세션에는 채팅 모드에서만 메시지를 보낼 수 있습니다.");
+    return;
+  }
+  if (inactive && !(await requestSessionActivation(agent.id, { queuedMessage: true }))) {
+    return;
+  }
   if (queueAgentId !== agent.id) { messageQueue.length = 0; queueAgentId = agent.id; }
   ui.messageInput.value = "";
   attachments.forEach((attachment) => URL.revokeObjectURL(attachment.preview));
   attachmentDrafts.delete(agent.id);
   renderComposerAttachments();
+  if (inactive) {
+    messageQueue.push(outgoing);
+    renderComposerQueue();
+    return;
+  }
   const cooled = Date.now() - lastSendAt >= QUEUE_COOLDOWN_MS;
   if (agentReady(agent) && !agentBusy(agent) && messageQueue.length === 0 && cooled) {
     ui.sendButton.disabled = true;
@@ -2082,7 +2226,12 @@ function buildTerminal(container, fontSize) {
     agentId: null,
     disposeTouchScroll: null,
   };
-  term.onData((data) => { if (instance.agentId) void sendRaw(instance.agentId, data); });
+  term.onData((data) => {
+    if (!instance.agentId) return;
+    const agent = agentMap().get(instance.agentId);
+    if (!agent || statusOf(agent) === "offline") return;
+    void sendRaw(instance.agentId, data);
+  });
   instance.disposeTouchScroll =
     globalThis.MultiAgentTerminalTouch?.install(container, instance, sendRaw) ||
     null;
@@ -2508,7 +2657,7 @@ function renderChat(data) {
       const stop = make("button", "chat-stop", "■ 중단");
       stop.type = "button";
       stop.title = "진행 취소 (Esc)";
-      stop.addEventListener("click", () => { void sendRaw(agent.id, "\x1b"); });
+      stop.addEventListener("click", () => { void cancelSession(agent.id); });
       think.appendChild(stop);
       frag.appendChild(think);
     }
@@ -2601,6 +2750,7 @@ function setSessionViewMode(mode) {
   lastChatFetch = { id: null, at: 0 };
   syncTerminal();
   syncSessionView();
+  updateComposerSendState();
 }
 
 // Mobile Screen mode renders one pane at a time and keeps the same navigation
@@ -2941,21 +3091,8 @@ ui.restartSessionButton?.addEventListener("click", async () => {
   const agent = selectedAgent();
   if (!agent) return;
   ui.restartSessionButton.disabled = true;
-  try {
-    const response = await fetch("/api/session/restart", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: agent.id }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    showToast("세션을 다시 시작했습니다.");
-    setTimeout(() => fetchState({ quiet: true }), 600);
-  } catch (error) {
-    showToast(`다시 시작 실패: ${error.message}`);
-  } finally {
-    ui.restartSessionButton.disabled = false;
-  }
+  await requestSessionActivation(agent.id);
+  ui.restartSessionButton.disabled = false;
 });
 ui.sessionMode?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-mode]");
@@ -3039,7 +3176,7 @@ ui.messageInput.addEventListener("keydown", (event) => {
     const agent = selectedAgent();
     if (agent && statusOf(agent) === "working") {
       event.preventDefault();
-      void sendRaw(agent.id, "\x1b");
+      void cancelSession(agent.id);
     }
   }
 });

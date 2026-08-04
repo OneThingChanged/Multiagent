@@ -98,6 +98,7 @@
           <div class="nav-heading"><span>SESSIONS</span><b id="visibleSessionCount">0</b></div>
           <div class="filter-row" id="filters" aria-label="세션 필터">
             <button class="active" type="button" data-filter="all">전체</button>
+            <button type="button" data-filter="active">활성</button>
             <button type="button" data-filter="working">작업</button>
             <button type="button" data-filter="attention">질문</button>
             <button type="button" data-filter="done">완료</button>
@@ -222,7 +223,7 @@
           <div class="session-content">
             <div class="session-offline" id="sessionOffline" hidden>
               <span>이 세션은 비활성 상태입니다 (실행 중인 터미널 없음).</span>
-              <button class="send-button" id="restartSessionButton" type="button">다시 시작</button>
+              <button class="send-button" id="restartSessionButton" type="button">활성화</button>
             </div>
             <section class="question-panel" id="questionPanel" hidden>
               <div><span class="panel-kicker">ANSWER NEEDED</span><strong>질문이 도착했습니다</strong></div>

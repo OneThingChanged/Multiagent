@@ -115,6 +115,15 @@ function workStatusForHook(event: AgentHookEvent): AgentWorkStatus | null {
   return null;
 }
 
+export function isAgentCancellationHookEvent(event: AgentHookEvent): boolean {
+  const eventName = event.event.trim().toLowerCase();
+  const hookName = event.hook_event_name?.trim().toLowerCase();
+  return (
+    ["cancelled", "canceled", "interrupted", "aborted"].includes(eventName) ||
+    ["remotecancel", "usercancel", "interrupt"].includes(hookName || "")
+  );
+}
+
 export function applyAgentHookEvent(
   agent: Agent,
   event: AgentHookEvent,
@@ -133,7 +142,12 @@ export function applyAgentHookEvent(
   const providerSessionId = clean(event.session_id, 200);
 
   let activity = previous;
-  if (workStatus) {
+  if (isAgentCancellationHookEvent(event)) {
+    // Cancellation ends the current turn, not the PTY process. Clearing the
+    // work activity makes the live session ready for the next prompt without
+    // misreporting a successful completion.
+    activity = undefined;
+  } else if (workStatus) {
     const prompt = clean(event.prompt);
     const toolName = clean(event.tool_name, 200);
     const toolInput = clean(event.tool_input, 4_000);

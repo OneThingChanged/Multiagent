@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
 import type { Agent, Group, Project, ProjectFolder } from "../types";
 
@@ -64,7 +64,17 @@ function agent(id: string, projectId: string): Agent {
   };
 }
 
+function stubSidebarState(values: Record<string, string>) {
+  const state = new Map(Object.entries(values));
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => state.get(key) ?? null,
+    setItem: (key: string, value: string) => state.set(key, value),
+  });
+}
+
 describe("Sidebar", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("shows projects that do not have sessions yet", () => {
     const html = renderSidebar([
       {
@@ -246,5 +256,57 @@ describe("Sidebar", () => {
     expect(html).toContain("Project A");
     expect(html).toContain("Project B");
     expect(html).toContain("프로젝트를 여기로 끌어오세요");
+  });
+
+  it("keeps projects collapsible while active-only filtering is enabled", () => {
+    stubSidebarState({
+      "multiagent.activeOnly.v1": "1",
+      "multiagent.expandedProjects.v1": "[]",
+    });
+    const runningAgent = {
+      ...agent("active-session", "project-a"),
+      status: "running" as const,
+    };
+
+    const html = renderSidebar(
+      [{ id: "project-a", name: "Project A", folder: "K:\\AI\\A", createdAt: 1 }],
+      [runningAgent]
+    );
+
+    expect(html).toContain('title="Expand project"');
+    expect(html).toContain("Project A");
+    expect(html).not.toContain("ACTIVE-SESSION");
+  });
+
+  it("keeps project folders collapsible while active-only filtering is enabled", () => {
+    stubSidebarState({
+      "multiagent.activeOnly.v1": "1",
+      "multiagent.expandedProjects.v1": '["project-a"]',
+      "multiagent.collapsedProjectFolders.v1": '["folder-work"]',
+    });
+    const runningAgent = {
+      ...agent("active-session", "project-a"),
+      status: "running" as const,
+    };
+    const projects: Project[] = [
+      {
+        id: "project-a",
+        name: "Project A",
+        folder: "K:\\AI\\A",
+        projectFolderId: "folder-work",
+        createdAt: 1,
+      },
+    ];
+
+    const html = renderSidebar(projects, [runningAgent], [], null, {
+      projectFolders: [
+        { id: "folder-work", name: "업무", machineKey: "local", createdAt: 1 },
+      ],
+    });
+
+    expect(html).toContain('title="폴더 펼치기"');
+    expect(html).toContain("업무");
+    expect(html).not.toContain("Project A");
+    expect(html).not.toContain("ACTIVE-SESSION");
   });
 });

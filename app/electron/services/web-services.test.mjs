@@ -156,6 +156,8 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="documentsView"');
     expect(pageBody).toContain('id="usageView"');
     expect(pageBody).toContain('id="mobileSessionsButton"');
+    expect(pageBody).toContain('data-filter="active"');
+    expect(pageBody).toContain('id="restartSessionButton" type="button">활성화</button>');
     expect(pageBody).not.toContain('id="mobileScreensButton"');
     expect(pageBody).not.toContain('id="mobileQuestionsButton"');
     expect(pageBody).toContain('id="overviewButton" type="button" hidden');
@@ -171,6 +173,13 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function renderUsage()");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
+    expect(appScriptBody).toContain("function requestSessionActivation(agentId");
+    expect(appScriptBody).toContain("async function cancelSession(agentId)");
+    expect(appScriptBody).toContain('fetch("/api/session/cancel"');
+    expect(appScriptBody).toContain("function waitForSessionReady(agentId)");
+    expect(appScriptBody).toContain("SESSION_ACTIVATION_TIMEOUT_MS = 30_000");
+    expect(appScriptBody).toContain('activeFilter === "active"');
+    expect(appScriptBody).toContain('inactive && sessionViewMode !== "chat"');
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
     expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
@@ -211,7 +220,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v40');
+    expect(workerBody).toContain('multiagent-remote-v42');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -330,11 +339,21 @@ describe("Electron dashboard server", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-input-"));
     roots.push(root);
     const writes = [];
+    const activations = [];
+    const cancellations = [];
     const service = new RemoteDashboardService({
       baseDir: root,
       stateProvider: () => ({}),
       writePty(id, data) {
         writes.push({ id, data });
+        return id === "agent-1";
+      },
+      restartSession(id) {
+        activations.push(id);
+        return true;
+      },
+      cancelSession(id) {
+        cancellations.push(id);
         return id === "agent-1";
       },
     });
@@ -352,10 +371,41 @@ describe("Electron dashboard server", () => {
       headers: { "content-type": "application/json", origin: "https://attacker.invalid", "sec-fetch-site": "cross-site" },
       body: JSON.stringify({ id: "agent-1", data: "malicious\r" }),
     });
+    const activated = await fetch(`${status.url}/api/session/restart`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-offline" }),
+    });
+    const cancelled = await fetch(`${status.url}/api/session/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-1" }),
+    });
+    const inactiveCancel = await fetch(`${status.url}/api/session/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-offline" }),
+    });
+    const blockedCancel = await fetch(`${status.url}/api/session/cancel`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.invalid",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({ id: "agent-1" }),
+    });
 
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-1", data: "계속 진행해줘\r" }]);
     expect(blocked.status).toBe(403);
+    expect(activated.status).toBe(200);
+    expect(activations).toEqual(["agent-offline"]);
+    expect(cancelled.status).toBe(200);
+    await expect(cancelled.json()).resolves.toEqual({ ok: true, status: "idle" });
+    expect(inactiveCancel.status).toBe(409);
+    expect(blockedCancel.status).toBe(403);
+    expect(cancellations).toEqual(["agent-1", "agent-offline"]);
   });
 
   it("authenticates push subscriptions and forwards done hooks to background delivery", async () => {
@@ -476,6 +526,7 @@ describe("Electron dashboard server", () => {
     fs.mkdirSync(path.join(root, "docs"));
     fs.writeFileSync(path.join(root, "docs", "local.md"), "# Local dashboard");
     const writes = [];
+    const cancellations = [];
     const service = new LocalDashboardService({
       title: "Monitor",
       defaultPort: 0,
@@ -501,6 +552,10 @@ describe("Electron dashboard server", () => {
         subscribeTerminal: () => null,
         terminalSize: () => null,
         restartSession: () => true,
+        cancelSession: (id) => {
+          cancellations.push(id);
+          return id === "agent-9";
+        },
       },
     });
     services.push(service);
@@ -521,6 +576,13 @@ describe("Electron dashboard server", () => {
     });
     expect(input.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-9", data: "go\r" }]);
+    const cancelled = await fetch(`${status.url}/api/session/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-9" }),
+    });
+    expect(cancelled.status).toBe(200);
+    expect(cancellations).toEqual(["agent-9"]);
 
     const lanHost = `192.168.10.25:${new URL(status.url).port}`;
     expect(service.isLocalOrigin({

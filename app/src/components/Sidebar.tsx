@@ -510,7 +510,7 @@ export function Sidebar({
     projects.some((p) => p.sshHostId) ||
     projectFolders.some((folder) => folder.machineKey.startsWith("ssh:"));
   const machineExpanded = (machineId: string) =>
-    searchTerm.length > 0 || activeOnly || !collapsedMachineIds.has(machineId);
+    searchTerm.length > 0 || !collapsedMachineIds.has(machineId);
 
   const startSessionPointer = (
     agentId: string,
@@ -732,7 +732,7 @@ export function Sidebar({
     );
     if (sections === null) return null;
     const expanded =
-      searchTerm.length > 0 || activeOnly || expandedProjectIds.has(project.id);
+      searchTerm.length > 0 || expandedProjectIds.has(project.id);
     const sessionCount = projectSessionCounts.get(project.id) ?? 0;
 
     const isDropTarget = projectDropTarget?.id === project.id;
@@ -941,7 +941,6 @@ export function Sidebar({
 
       const expanded =
         searchTerm.length > 0 ||
-        activeOnly ||
         !collapsedProjectFolderIds.has(bucket.key);
       const isIntoTarget = projectIntoFolderTarget === bucket.key;
       const isFolderDropTarget =

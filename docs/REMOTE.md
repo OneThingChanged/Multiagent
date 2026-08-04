@@ -22,7 +22,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 
 - **Monitor**: separates working · needs-answer · done · waiting · inactive sessions into lanes, with status counts at a glance
 - **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts. Desktop can show every pane; mobile uses pane tabs and streams only the selected terminal
-- **Sessions**: per-project session list with status filters and search; the selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
+- **Sessions**: per-project session list with status filters and search. The `Active` filter combines working, needs-answer, done, and waiting sessions while excluding inactive sessions. The selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project, search its `.md`/`.markdown`/`.html`/`.htm` files, then open a rendered preview. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - **Usage**: a dedicated account-limit view for Codex and Claude. It shows the remaining percentage for each rolling window, reset time, plan, extra-usage availability, and the oldest provider refresh time
 - **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change
@@ -36,6 +36,8 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - The session view tracks `visualViewport.height` on mobile so browser chrome and the software keyboard shrink only the chat/terminal area. While typing, the fixed bottom navigation is temporarily hidden and the composer remains visible above the keyboard
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
+- Sending a message to an inactive Session from **Chat** mode requests activation, keeps the message in a bounded pending queue, and sends it once the PTY reports ready. If activation does not complete within 30 seconds the pending message is cancelled with an error. Inactive Terminal mode remains read-only so raw key input cannot accidentally race session startup
+- Pressing **Stop** (or Esc in the Remote chat composer) calls the dedicated cancellation endpoint. The host writes Esc to the live PTY and emits a synthetic `cancelled` hook, clearing the stale working activity without treating the turn as successfully completed. The live session returns to waiting/idle immediately and can accept the next queued or newly entered message
 - Every Screen pane has its own **Chat / Terminal** switch. Chat mode shows the selected tab's recent parsed conversation, tool groups, working indicator, and interactive prompts without leaving the multi-pane Screen
 - Screen, Session, Documents, and Usage views fill the visible viewport below the compact top bar. The browser-side scrollbar is removed; navigation and the active content surface keep their own independent scrolling. Session detail also hides the global header so the focused workspace uses the full viewport
 - The large global status summary and standalone Monitor dashboard are hidden in Remote. Opening the Remote root selects the first Screen, then falls back to an active Session, a local Documents project, or Usage, keeping the interface focused on controllable work
@@ -67,6 +69,7 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /api/stream?id=...` | SSE backfill and live PTY output for the xterm view |
 | `GET /api/chat?id=...` | parsed Codex/Claude transcript blocks for the chat view |
 | `POST /api/session/restart` | request activation of an inactive session |
+| `POST /api/session/cancel` | interrupt an active turn and publish a `cancelled` hook so the live session returns to idle |
 | `GET /api/docs?projectId=...` | list up to 500 Markdown/HTML documents under one synchronized local project |
 | `GET /api/docs/read?projectId=...&path=...` | read one Markdown/HTML document inside that project (2MB limit) |
 | `GET/HEAD /downloads/MultiAgent-Mobile.apk` | download the bundled ARM64 Android client APK; login/approval required, byte ranges supported |
@@ -118,7 +121,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 - All APIs check login + approval. Only direct loopback requests are allowed without approval, for local diagnostics.
 - Document paths are resolved against a synchronized local project root. Absolute paths, `..` traversal outside the project, symbolic-link escapes, unsupported extensions, files over 2MB, and SSH projects are rejected. Dependency/build/cache folders are skipped while listing.
 - Markdown raw HTML is escaped before rendering. HTML previews use an iframe without `allow-scripts` or `allow-same-origin`, so document scripts and parent-window access are blocked.
-- PTY input allows same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB, and exited sessions are rejected.
+- PTY input and cancellation allow same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB input, and exited sessions are rejected.
 - Image uploads use the same approval and same-origin boundary. The server ignores client file paths, accepts five raster MIME types only, verifies their file signatures, caps decoded files at 8MB, and writes random names under `remote-attachments` in the app data folder.
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.

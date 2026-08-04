@@ -78,6 +78,7 @@ import {
   applyAgentRuntimeStatus,
   deriveAgentStatus,
   isAgentActivelyWorking,
+  isAgentCancellationHookEvent,
   isAgentRuntimeActive,
   runtimeStatusOf,
   type AgentHookEvent,
@@ -1719,6 +1720,25 @@ function App() {
             desktopPetQuestionsRef.current = next;
             return next;
           });
+        } else if (isAgentCancellationHookEvent(payload) && nextAgent) {
+          const sessionKey =
+            currentAgent?.activity?.providerSessionId?.trim() ||
+            currentAgent?.lastSessionId?.trim() ||
+            id;
+          resolveSessionAttention(sessionKey);
+          setDesktopPetQuestions((previous) => {
+            if (!(id in previous)) return previous;
+            const next = { ...previous };
+            delete next[id];
+            desktopPetQuestionsRef.current = next;
+            return next;
+          });
+          setDesktopPetCompletions((previous) =>
+            previous.filter(
+              (completion) =>
+                completion.sessionKey !== sessionKey && completion.agentId !== id
+            )
+          );
         } else if (event === "done" && nextAgent) {
           const completedQuestion =
             desktopPetQuestionsRef.current[id] ||

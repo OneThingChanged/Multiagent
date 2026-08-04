@@ -291,58 +291,61 @@ const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
   runtimeVariant.localDataDirectory
 );
+
+function publishAgentHookEvent(eventName, payload) {
+  if (eventName === "agent:hook-event" && payload?.id) {
+    // Remote/monitor views only need concise state. Keep tool input and the
+    // full assistant response inside the local renderer/pet contract.
+    monitorHooks.set(payload.id, {
+      id: payload.id,
+      event: payload.event,
+      session_id: payload.session_id,
+      hook_event_name: payload.hook_event_name,
+      prompt: payload.prompt,
+      tool_name: payload.tool_name,
+      interactive_question: payload.interactive_question,
+      received_at: payload.received_at,
+      lastTs: Date.now(),
+    });
+    // Track the live transcript path / session id per agent so the chat view
+    // can read the conversation for any session.
+    const transcriptPath = normalizeTranscriptPath(payload.transcript_path);
+    if (transcriptPath) agentTranscripts.set(payload.id, transcriptPath);
+    if (payload.session_id) agentSessionIds.set(payload.id, payload.session_id);
+    if (payload.event === "done" && transcriptPath) {
+      try {
+        usageIndex.ingestHook(
+          payload.id,
+          transcriptPath,
+          payload.session_id,
+          payload.cwd
+        );
+      } catch (error) {
+        console.warn("[electron] usage hook ingest failed", error);
+      }
+    }
+    if (payload.event === "done") {
+      // Claude limits live behind the OAuth usage endpoint (not the transcript),
+      // so refresh them after a Claude turn completes. Throttled inside the service.
+      const tool = usageIndex.catalog.agents
+        .find((agent) => agent.id === payload.id)?.aiToolId;
+      if (tool === "claude") {
+        usageIndex.refreshClaudeRateLimits(false).catch(() => {});
+      }
+      remoteService.notifyAgentDone(payload).catch((error) => {
+        console.warn("[electron] remote completion push failed", error?.message || error);
+      });
+    }
+  }
+  sendEventToAll(eventName, payload);
+}
+
 const hookService = new HookService({
   baseDir: hookBaseDir,
   integrationProvider: () => miraControlSnapshot(),
   activateAgent: (agentId) => activateMiraControlAgent(agentId),
   writeAgentInput: (request) => writeMiraControlAgentInput(request),
-  sendEvent(eventName, payload) {
-    if (eventName === "agent:hook-event" && payload?.id) {
-      // Remote/monitor views only need concise state. Keep tool input and the
-      // full assistant response inside the local renderer/pet contract.
-      monitorHooks.set(payload.id, {
-        id: payload.id,
-        event: payload.event,
-        session_id: payload.session_id,
-        hook_event_name: payload.hook_event_name,
-        prompt: payload.prompt,
-        tool_name: payload.tool_name,
-        interactive_question: payload.interactive_question,
-        received_at: payload.received_at,
-        lastTs: Date.now(),
-      });
-      // Track the live transcript path / session id per agent so the chat view
-      // can read the conversation for any session.
-      const transcriptPath = normalizeTranscriptPath(payload.transcript_path);
-      if (transcriptPath) agentTranscripts.set(payload.id, transcriptPath);
-      if (payload.session_id) agentSessionIds.set(payload.id, payload.session_id);
-      if (payload.event === "done" && transcriptPath) {
-        try {
-          usageIndex.ingestHook(
-            payload.id,
-            transcriptPath,
-            payload.session_id,
-            payload.cwd
-          );
-        } catch (error) {
-          console.warn("[electron] usage hook ingest failed", error);
-        }
-      }
-      if (payload.event === "done") {
-        // Claude limits live behind the OAuth usage endpoint (not the transcript),
-        // so refresh them after a Claude turn completes. Throttled inside the service.
-        const tool = usageIndex.catalog.agents
-          .find((agent) => agent.id === payload.id)?.aiToolId;
-        if (tool === "claude") {
-          usageIndex.refreshClaudeRateLimits(false).catch(() => {});
-        }
-        remoteService.notifyAgentDone(payload).catch((error) => {
-          console.warn("[electron] remote completion push failed", error?.message || error);
-        });
-      }
-    }
-    sendEventToAll(eventName, payload);
-  },
+  sendEvent: publishAgentHookEvent,
   sessionService,
 });
 let hookReady = null;
@@ -496,6 +499,28 @@ const sessionProviders = {
   restartSession: (id) => {
     sendEventToAll("remote:restart-session", { id: asString(id) });
     return ptys.has(asString(id));
+  },
+  cancelSession: (id) => {
+    const agentId = asString(id).trim();
+    const entry = ptys.get(agentId);
+    if (!entry) return false;
+    try {
+      entry.process.write("\x1b");
+    } catch {
+      return false;
+    }
+    const previousHook = monitorHooks.get(agentId);
+    publishAgentHookEvent("agent:hook-event", {
+      id: agentId,
+      event: "cancelled",
+      hook_event_name: "RemoteCancel",
+      session_id:
+        previousHook?.session_id ||
+        agentSessionIds.get(agentId) ||
+        null,
+      received_at: Date.now(),
+    });
+    return true;
   },
 };
 

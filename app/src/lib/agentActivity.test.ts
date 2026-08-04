@@ -117,6 +117,31 @@ describe("agent activity state v2", () => {
     });
   });
 
+  it("returns a cancelled live turn to the running idle state", () => {
+    const working = applyAgentHookEvent(
+      agent(),
+      { id: "agent-1", event: "working", session_id: "session-1" },
+      100
+    );
+    const cancelled = applyAgentHookEvent(
+      working,
+      {
+        id: "agent-1",
+        event: "cancelled",
+        hook_event_name: "RemoteCancel",
+        session_id: "session-1",
+      },
+      200
+    );
+
+    expect(cancelled).toMatchObject({
+      status: "running",
+      runtimeStatus: "running",
+      lastSessionId: "session-1",
+      activity: undefined,
+    });
+  });
+
   it("uses one runtime-active rule for derived work states", () => {
     expect(isAgentRuntimeActive(agent("running"))).toBe(true);
     expect(isAgentRuntimeActive({ ...agent("working"), status: "working" }))

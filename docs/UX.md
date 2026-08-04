@@ -30,7 +30,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 - **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf and clears its unread completion highlight
 - **Session double-click**: rename alias popup
 - **Hovering a project row shows a `+` button on the right** — clicking activates that project and immediately opens the new session modal
-- **Dot button next to the Projects title**: toggle between all sessions and active sessions only. Every workspace window has the same control
+- **Dot button next to the Projects title**: toggle between all sessions and active sessions only. Every workspace window has the same control. Filtering never forces machines, project folders, or projects open; their saved collapse state remains usable. Search matches still auto-expand their ancestors
 - **`+` button next to the Projects title**: new project in the current workspace window. The modal can place it in any project folder belonging to the selected local/SSH machine
 - **Session right-click**: context menu
   - Switch (jump to current group) / add as tab / split right / split down

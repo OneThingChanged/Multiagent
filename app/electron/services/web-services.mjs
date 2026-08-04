@@ -572,6 +572,18 @@ export class LocalDashboardService {
             sendJson(response, 200, { ok: true });
             return;
           }
+          if (request.method === "POST" && url.pathname === "/api/session/cancel") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            const body = await readJson(request);
+            const id = String(body.id || "").trim();
+            if (!id) { sendJson(response, 400, { error: "invalid session id" }); return; }
+            if (p.cancelSession?.(id) === false) {
+              sendJson(response, 409, { error: "session is not active" });
+              return;
+            }
+            sendJson(response, 200, { ok: true, status: "idle" });
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/api/chat") {
             const id = String(url.searchParams.get("id") || "").trim();
             try {
@@ -639,7 +651,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -652,6 +664,7 @@ export class RemoteDashboardService {
     this.terminalSize = terminalSize ?? (() => null);
     this.chatProvider = chatProvider ?? (() => null);
     this.restartSession = restartSession ?? (() => false);
+    this.cancelSession = cancelSession ?? (() => false);
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [] }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
@@ -1094,6 +1107,28 @@ export class RemoteDashboardService {
           }
           this.restartSession?.(id);
           sendJson(response, 200, { ok: true });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/session/cancel") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          const body = await readJson(request);
+          const id = String(body.id || "").trim();
+          if (!id) {
+            sendJson(response, 400, { error: "invalid session id" });
+            return;
+          }
+          if (this.cancelSession?.(id) === false) {
+            sendJson(response, 409, { error: "session is not active" });
+            return;
+          }
+          sendJson(response, 200, { ok: true, status: "idle" });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/chat") {
