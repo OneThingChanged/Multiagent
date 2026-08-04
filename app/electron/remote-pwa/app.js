@@ -143,6 +143,7 @@ const screenChatCache = new Map();
 const screenChatLoads = new Map();
 const documentLists = new Map();
 const documentListLoads = new Map();
+const documentExpandedFolders = new Map();
 const attachmentDrafts = new Map();
 let documentContent = null;
 let documentContentKey = "";
@@ -1191,6 +1192,128 @@ function documentKey(projectId, relativePath) {
   return `${projectId}\u0000${relativePath}`;
 }
 
+function expandedDocumentFolders(projectId) {
+  if (!documentExpandedFolders.has(projectId)) {
+    documentExpandedFolders.set(projectId, new Set());
+  }
+  return documentExpandedFolders.get(projectId);
+}
+
+function documentFolderAncestors(relativePath) {
+  const parts = String(relativePath || "").split("/").filter(Boolean);
+  parts.pop();
+  const ancestors = [];
+  for (let index = 1; index <= parts.length; index += 1) {
+    ancestors.push(parts.slice(0, index).join("/"));
+  }
+  return ancestors;
+}
+
+function expandDocumentParents(projectId, relativePath) {
+  const expanded = expandedDocumentFolders(projectId);
+  for (const folder of documentFolderAncestors(relativePath)) expanded.add(folder);
+}
+
+function buildDocumentTree(documents) {
+  const root = { name: "", path: "", folders: new Map(), files: [], count: 0 };
+  for (const file of documents) {
+    const parts = String(file.path || "").split("/").filter(Boolean);
+    if (!parts.length) continue;
+    const fileName = parts.pop();
+    let node = root;
+    node.count += 1;
+    const folderParts = [];
+    for (const folderName of parts) {
+      folderParts.push(folderName);
+      if (!node.folders.has(folderName)) {
+        node.folders.set(folderName, {
+          name: folderName,
+          path: folderParts.join("/"),
+          folders: new Map(),
+          files: [],
+          count: 0,
+        });
+      }
+      node = node.folders.get(folderName);
+      node.count += 1;
+    }
+    node.files.push({ ...file, name: file.name || fileName });
+  }
+  return root;
+}
+
+function sortedDocumentFolders(node) {
+  return [...node.folders.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+  );
+}
+
+function sortedDocumentFiles(node) {
+  return [...node.files].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+  );
+}
+
+function appendDocumentTree(container, node, projectId, query, depth = 0) {
+  const expanded = expandedDocumentFolders(projectId);
+  for (const folder of sortedDocumentFolders(node)) {
+    const isExpanded = Boolean(query) || expanded.has(folder.path);
+    const wrapper = make("div", "document-tree-folder");
+    const button = make("button", "document-folder-row");
+    button.type = "button";
+    button.style.setProperty("--tree-indent", `${depth * 14}px`);
+    button.setAttribute("role", "treeitem");
+    button.setAttribute("aria-expanded", String(isExpanded));
+    button.title = folder.path;
+    button.append(
+      make("span", "document-folder-caret", isExpanded ? "▾" : "▸"),
+      make("span", "document-folder-icon", "▰"),
+      make("strong", "document-folder-name", folder.name),
+      make("span", "document-folder-count", String(folder.count)),
+    );
+    button.addEventListener("click", () => {
+      if (expanded.has(folder.path)) expanded.delete(folder.path);
+      else expanded.add(folder.path);
+      documentListRenderKey = "";
+      renderDocuments();
+    });
+    wrapper.appendChild(button);
+    if (isExpanded) {
+      const children = make("div", "document-tree-children");
+      children.setAttribute("role", "group");
+      appendDocumentTree(children, folder, projectId, query, depth + 1);
+      wrapper.appendChild(children);
+    }
+    container.appendChild(wrapper);
+  }
+
+  for (const file of sortedDocumentFiles(node)) {
+    const button = make("button", "document-row document-tree-file");
+    button.type = "button";
+    button.dataset.kind = file.kind;
+    button.style.setProperty("--tree-indent", `${depth * 14}px`);
+    button.setAttribute("role", "treeitem");
+    button.setAttribute("aria-selected", String(file.path === selectedDocumentPath));
+    button.classList.toggle("selected", file.path === selectedDocumentPath);
+    button.title = file.path;
+    const icon = make("span", "document-row-icon", file.kind === "html" ? "HTML" : "MD");
+    const copy = make("span", "document-row-copy");
+    copy.append(make("strong", "", file.name), make("small", "", file.path));
+    button.append(icon, copy);
+    button.addEventListener("click", () => {
+      selectedDocumentPath = file.path;
+      expandDocumentParents(projectId, file.path);
+      documentContent = null;
+      documentContentKey = "";
+      documentContentError = "";
+      renderDocuments();
+      updateUrl();
+      void loadDocument(projectId, file.path);
+    });
+    container.appendChild(button);
+  }
+}
+
 async function loadDocumentList(projectId, { force = false } = {}) {
   if (!projectId || (!force && documentLists.has(projectId))) return;
   if (documentListLoads.has(projectId)) return documentListLoads.get(projectId);
@@ -1213,6 +1336,7 @@ async function loadDocumentList(projectId, { force = false } = {}) {
           documentContent = null;
           documentContentKey = "";
         }
+        if (selectedDocumentPath) expandDocumentParents(projectId, selectedDocumentPath);
       }
     } catch (error) {
       documentLists.set(projectId, { documents: [], truncated: false, error: error.message });
@@ -1371,31 +1495,13 @@ function renderDocuments() {
     query,
     selectedDocumentPath,
     cached.error,
+    [...expandedDocumentFolders(project.id)].sort(),
     visible.map((document) => [document.path, document.kind]),
   ]);
   if (documentListRenderKey !== listRenderKey) {
     documentListRenderKey = listRenderKey;
     const fragment = document.createDocumentFragment();
-    for (const document of visible) {
-      const button = make("button", "document-row");
-      button.type = "button";
-      button.dataset.kind = document.kind;
-      button.classList.toggle("selected", document.path === selectedDocumentPath);
-      const icon = make("span", "document-row-icon", document.kind === "html" ? "HTML" : "MD");
-      const copy = make("span", "document-row-copy");
-      copy.append(make("strong", "", document.name), make("small", "", document.path));
-      button.append(icon, copy);
-      button.addEventListener("click", () => {
-        selectedDocumentPath = document.path;
-        documentContent = null;
-        documentContentKey = "";
-        documentContentError = "";
-        renderDocuments();
-        updateUrl();
-        void loadDocument(project.id, document.path);
-      });
-      fragment.appendChild(button);
-    }
+    appendDocumentTree(fragment, buildDocumentTree(visible), project.id, query);
     ui.documentList.replaceChildren(fragment);
   }
   ui.documentEmptyState.hidden = visible.length > 0 && !cached.error;
@@ -3095,7 +3201,8 @@ ui.documentMarkdown.addEventListener("click", (event) => {
     showToast("링크된 문서를 목록에서 찾을 수 없습니다.");
     return;
   }
-  selectedDocumentPath = match.path;
+    selectedDocumentPath = match.path;
+    expandDocumentParents(selection.id, match.path);
   documentContent = null;
   documentContentKey = "";
   documentContentError = "";
