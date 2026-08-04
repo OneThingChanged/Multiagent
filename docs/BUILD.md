@@ -54,6 +54,11 @@ Only NSIS installers are produced; portable executables are intentionally not bu
 | company | `npm run electron:dist:company` | `latest-company.yml` |
 | both | `npm run electron:dist:all` | both channels |
 
+The Company build keeps `electron/remote-pwa`'s shared HTML/CSS/JavaScript shell because
+the loopback Dashboard serves those files too. It excludes only
+`electron/remote-pwa/downloads/**` (the downloadable Android APK); external Remote/Tunnel
+remains disabled by the Company runtime variant.
+
 ## Android APK
 
 The native Android shell under `mobile/` loads the existing Remote PWA in a

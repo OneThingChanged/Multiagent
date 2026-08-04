@@ -63,6 +63,11 @@ Both variants use the same version but different identifiers and updater endpoin
 user who installs standard only gets standard updates, and company only gets company
 updates.
 
+Company still packages the shared `electron/remote-pwa` Dashboard shell. The loopback
+Dashboard and external Remote service use the same static files, so excluding that whole
+directory breaks Dashboard startup. Company excludes only `remote-pwa/downloads/**`; its
+runtime variant continues to disable Remote/Tunnel.
+
 ## Signing Key
 
 | item | value |

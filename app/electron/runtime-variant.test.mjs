@@ -34,8 +34,10 @@ describe("Electron runtime variant", () => {
     }).id).toBe("company");
   });
 
-  it("excludes the Remote PWA assets from the Company package", () => {
+  it("keeps shared Dashboard assets but excludes the Remote APK from Company", () => {
     const companyBuild = require("../electron-builder.company.cjs");
-    expect(companyBuild.files).toContain("!electron/remote-pwa/**");
+    expect(companyBuild.files).toContain("electron/**");
+    expect(companyBuild.files).toContain("!electron/remote-pwa/downloads/**");
+    expect(companyBuild.files).not.toContain("!electron/remote-pwa/**");
   });
 });

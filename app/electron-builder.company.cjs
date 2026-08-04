@@ -13,7 +13,10 @@ module.exports = {
   },
   files: [
     ...base.files,
-    "!electron/remote-pwa/**",
+    // The local Dashboard and Remote server share this static shell. Company
+    // disables the external Remote service at runtime, but still needs the
+    // shell for its loopback-only Dashboard. Exclude only the downloadable APK.
+    "!electron/remote-pwa/downloads/**",
   ],
   nsis: {
     ...base.nsis,
