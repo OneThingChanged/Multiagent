@@ -35,6 +35,7 @@ export function buildNewProjectWithFirstAgent(
     remoteFolder: sshHostId
       ? payload.remoteFolder?.trim() || undefined
       : undefined,
+    projectFolderId: payload.projectFolderId || undefined,
   };
   const tool = toolForId(payload.aiToolId);
   const agent: Agent = {

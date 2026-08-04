@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type {
   ContextMenuState,
+  ProjectFolderContextMenuState,
   ProjectContextMenuState,
   SessionContextAction,
   TabCtxState,
@@ -29,6 +30,47 @@ function useClampedMenuPosition(x: number, y: number) {
     setPos({ left, top });
   }, [x, y]);
   return { ref, pos };
+}
+
+export function ProjectFolderContextMenu({
+  state,
+  onClose,
+  onAction,
+}: {
+  state: ProjectFolderContextMenuState;
+  onClose: () => void;
+  onAction: (action: "rename" | "delete") => void;
+}) {
+  const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  return (
+    <>
+      <div
+        className="ctx-backdrop"
+        onClick={onClose}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onClose();
+        }}
+      />
+      <div
+        ref={ref}
+        className="ctx-menu"
+        style={{ left: pos.left, top: pos.top }}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <button className="ctx-item" onClick={() => onAction("rename")}>
+          폴더 이름 변경
+        </button>
+        <div className="ctx-separator" />
+        <button
+          className="ctx-item ctx-item-danger"
+          onClick={() => onAction("delete")}
+        >
+          폴더 삭제
+        </button>
+      </div>
+    </>
+  );
 }
 
 export function ProjectContextMenu({

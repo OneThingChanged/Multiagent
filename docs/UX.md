@@ -18,17 +18,20 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 
 ## Sidebar
 
-- The sidebar body is a collapsible project tree. Each project row lists its sessions below it. Projects and sessions are all shown **compressed to one line**; details (path, session ID, creation time, etc.) are in the hover title and the right-click properties
-- **Top search box**: filter by project/session name. A project-name match shows all sessions of that project; a session-name match shows only that session. Auto-expands while searching
+- The sidebar body is a collapsible `machine → project folder → project → session` tree. Project folders are UI-only collections and never change a project's physical cwd or SSH routing. Each project row lists its sessions below it. Projects and sessions are all shown **compressed to one line**; details (path, session ID, creation time, etc.) are in the hover title and the right-click properties
+- **Top search box**: filter by project-folder/project/session name. A folder-name match shows all projects below it, a project-name match shows all sessions of that project, and a session-name match shows only that session. Matching ancestors auto-expand while searching
+- **Folder button (`▣`) next to Projects**: create a local project folder. When SSH machine groups are visible, the `+` on each machine row creates a folder scoped to that machine
+- **Project folder drag**: reorder folders within the same local/SSH machine. Drag a project onto a folder header to move it; dropping on `미분류` removes its folder assignment. Cross-machine drops are rejected and never alter SSH routing
+- **Project folder right-click**: rename or delete. Deleting a folder never deletes projects; its projects move to `미분류`
 - **Project `>`/`v` button**: collapse/expand the session list
 - **Project left-click**: activate the project + show the first session group (expands if collapsed)
 - Creating a project also creates and starts `Session 1`, so the project remains visible when `Active only` is enabled
-- **Project drag**: drag up/down in the sidebar to reorder projects
+- **Project drag**: drag up/down to reorder within a folder, or onto another folder to move it
 - **Session left-click**: switch to that session's group. The clicked session becomes the active tab of that leaf and clears its unread completion highlight
 - **Session double-click**: rename alias popup
 - **Hovering a project row shows a `+` button on the right** — clicking activates that project and immediately opens the new session modal
 - **Dot button next to the Projects title**: toggle between all sessions and active sessions only. Every workspace window has the same control
-- **`+` button next to the Projects title**: new project in the current workspace window (pin, new window, pet, settings, Quick Open, and notification buttons all moved to the top bar)
+- **`+` button next to the Projects title**: new project in the current workspace window. The modal can place it in any project folder belonging to the selected local/SSH machine
 - **Session right-click**: context menu
   - Switch (jump to current group) / add as tab / split right / split down
   - **Open in new window** — transfers the session into a new, equal workspace window. It is removed from the current Screen and shown as **"사용 중"** in every other window. All windows expose the same project/session creation, filtering, rename, drag, and context-menu features. Closing the owning window releases its sessions so any remaining/new workspace can claim them
@@ -65,6 +68,7 @@ The Windows default titlebar and `File/Edit/View/Window` menu were removed and r
 ## New Project / Session Modals
 
 - **New Project**: enter a project name and root folder, then explicitly choose the first session tool. No tool is preselected, so the project cannot be created until Claude/Codex/Qwen/Cline/Shell is chosen. Tools with a permission-bypass flag also expose a **Dangerous mode** checkbox for `Session 1`. The folder becomes the session cwd and Docs scan root; `Session 1` starts immediately with the selected options
+  - **Sidebar folder**: optional one-level project collection. Only folders for the selected local machine or SSH host are offered; the default is `미분류`
   - **Run on remote host (SSH)** toggle: when on, instead of a folder, pick a registered SSH host (dropdown) and enter a **remote folder**. This project's sessions run over SSH on that machine (register hosts first in Settings → SSH Hosts)
 - **New Session**: creates a session inside the active project
 - **Session alias**: the name shown in the sidebar/tabs/Docs subtitle

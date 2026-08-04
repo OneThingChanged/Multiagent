@@ -178,6 +178,8 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function syncVisualViewport()");
     expect(appScriptBody).toContain('style.setProperty("--visual-viewport-height"');
     expect(appScriptBody).toContain('classList.toggle("keyboard-visible"');
+    expect(appScriptBody).toContain("availableHeight / naturalHeight");
+    expect(appScriptBody).not.toContain("Math.ceil(element.offsetHeight * scale)");
     expect(appScriptBody).toContain('fetch("/api/push/subscription"');
     expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
     expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
@@ -209,7 +211,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v39');
+    expect(workerBody).toContain('multiagent-remote-v40');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -489,7 +491,11 @@ describe("Electron dashboard server", () => {
         },
       }),
       providers: {
-        writePty: (id, data) => { writes.push({ id, data }); return true; },
+        writePty: (id, data) => {
+          if (id === "agent-offline") return false;
+          writes.push({ id, data });
+          return true;
+        },
         chatProvider: (id) => ({ blocks: [{ role: "user", kind: "text", text: `hi ${id}` }], missing: false }),
         terminalSnapshot: () => null,
         subscribeTerminal: () => null,
@@ -515,6 +521,51 @@ describe("Electron dashboard server", () => {
     });
     expect(input.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-9", data: "go\r" }]);
+
+    const lanHost = `192.168.10.25:${new URL(status.url).port}`;
+    expect(service.isLocalOrigin({
+      headers: { host: lanHost, origin: `http://${lanHost}` },
+    })).toBe(true);
+    expect(service.isLocalOrigin({
+      headers: {
+        host: lanHost,
+        origin: "https://attacker.invalid",
+        "sec-fetch-site": "cross-site",
+      },
+    })).toBe(false);
+    const lanInput = await fetch(`${status.url}/api/input`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-host": lanHost,
+        origin: `http://${lanHost}`,
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ id: "agent-9", data: "lan\r" }),
+    });
+    const crossSiteInput = await fetch(`${status.url}/api/input`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-host": lanHost,
+        origin: "https://attacker.invalid",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({ id: "agent-9", data: "blocked\r" }),
+    });
+    expect(lanInput.status).toBe(200);
+    expect(crossSiteInput.status).toBe(403);
+    const inactiveInput = await fetch(`${status.url}/api/input`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-offline", data: "hello\r" }),
+    });
+    expect(inactiveInput.status).toBe(409);
+    await expect(inactiveInput.json()).resolves.toEqual({ error: "session is not active" });
+    expect(writes).toEqual([
+      { id: "agent-9", data: "go\r" },
+      { id: "agent-9", data: "lan\r" },
+    ]);
   });
 
   it("streams raw terminal output over SSE with backfill, live deltas, and exit", async () => {

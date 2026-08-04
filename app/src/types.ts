@@ -188,9 +188,22 @@ export type Project = {
   // of locally. remoteFolder is the working directory on the remote machine.
   sshHostId?: string;
   remoteFolder?: string;
+  // Optional UI-only collection used by the sidebar. This never changes the
+  // project's physical working directory or SSH host.
+  projectFolderId?: string;
 };
 
 export type StoredProject = Project;
+
+export type ProjectFolder = {
+  id: string;
+  name: string;
+  // "local" or "ssh:<hostId>". Collections never span machines.
+  machineKey: string;
+  createdAt: number;
+};
+
+export type StoredProjectFolder = ProjectFolder;
 
 export type TerminalEntry = {
   term: Terminal;
@@ -222,6 +235,7 @@ export type NewProjectPayload = {
   dangerous: boolean;
   sshHostId?: string;
   remoteFolder?: string;
+  projectFolderId?: string;
 };
 
 export type Toast = {
@@ -281,6 +295,12 @@ export type ProjectContextMenuState = {
   projectId: string;
 };
 
+export type ProjectFolderContextMenuState = {
+  x: number;
+  y: number;
+  projectFolderId: string;
+};
+
 export type TabCtxState = {
   x: number;
   y: number;
@@ -301,6 +321,7 @@ export type DropTargetState = {
 
 export const LS_AGENTS = "multiagent.agents.v1";
 export const LS_PROJECTS = "multiagent.projects.v1";
+export const LS_PROJECT_FOLDERS = "multiagent.projectFolders.v1";
 export const LS_SSH_HOSTS = "multiagent.sshHosts.v1";
 export const LS_GROUPS = "multiagent.groups.v1";
 export const LS_VIEW = "multiagent.view.v1";

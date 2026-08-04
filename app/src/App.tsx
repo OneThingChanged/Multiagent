@@ -17,6 +17,7 @@ import "./App.css";
 
 import {
   LS_AGENTS,
+  LS_PROJECT_FOLDERS,
   LS_PROJECTS,
   toolForId,
   toolSupportsChat,
@@ -33,9 +34,12 @@ import type {
   Path,
   Project,
   ProjectContextMenuState,
+  ProjectFolder,
+  ProjectFolderContextMenuState,
   SessionContextAction,
   StoredAgent,
   StoredProject,
+  StoredProjectFolder,
   TabCtxState,
   TerminalEntry,
   Toast,
@@ -126,6 +130,12 @@ import {
 import {
   buildNewProjectWithFirstAgent,
 } from "./lib/projectCreation";
+import { loadSshHosts } from "./lib/sshHosts";
+import {
+  moveProjectToFolder as moveProjectToFolderInCatalog,
+  reorderProjectFolders,
+  unassignProjectFolder,
+} from "./lib/projectFolders";
 import {
   migrateLegacyWorkspaceStorage,
   workspaceWindowContext,
@@ -137,7 +147,12 @@ import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { ToastContainer } from "./components/Toast";
-import { ContextMenu, ProjectContextMenu, TabContextMenu } from "./components/Menus";
+import {
+  ContextMenu,
+  ProjectContextMenu,
+  ProjectFolderContextMenu,
+  TabContextMenu,
+} from "./components/Menus";
 import { FileTreePanel } from "./components/FileTreePanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
@@ -147,6 +162,7 @@ import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
 import { ProjectPropertiesModal } from "./components/ProjectPropertiesModal";
+import { ProjectFolderModal } from "./components/ProjectFolderModal";
 import { QuickOpen } from "./components/QuickOpen";
 import { AttentionCenter } from "./components/AttentionCenter";
 import { UsageStatusBar } from "./components/UsageStatusBar";
@@ -225,6 +241,18 @@ function storedProjectFromProject(project: Project): StoredProject {
     lastOpenedAt: project.lastOpenedAt,
     sshHostId: project.sshHostId,
     remoteFolder: project.remoteFolder,
+    projectFolderId: project.projectFolderId,
+  };
+}
+
+function storedProjectFolderFromProjectFolder(
+  folder: ProjectFolder
+): StoredProjectFolder {
+  return {
+    id: folder.id,
+    name: folder.name,
+    machineKey: folder.machineKey,
+    createdAt: folder.createdAt,
   };
 }
 
@@ -279,7 +307,40 @@ function projectFromStored(
     lastOpenedAt: stored.lastOpenedAt ?? existing?.lastOpenedAt,
     sshHostId: stored.sshHostId || undefined,
     remoteFolder: stored.remoteFolder || undefined,
+    projectFolderId: stored.projectFolderId || undefined,
   };
+}
+
+function projectFolderFromStored(
+  stored: StoredProjectFolder,
+  existing?: ProjectFolder
+): ProjectFolder | null {
+  if (!stored.id || !stored.name?.trim()) return null;
+  return {
+    id: stored.id,
+    name: stored.name.trim(),
+    machineKey: stored.machineKey || existing?.machineKey || "local",
+    createdAt: stored.createdAt || existing?.createdAt || Date.now(),
+  };
+}
+
+function mergeProjectFoldersFromStorage(
+  current: ProjectFolder[],
+  stored: StoredProjectFolder[],
+  removedIds: Set<string>
+) {
+  const currentById = new Map(current.map((folder) => [folder.id, folder]));
+  const merged = stored.flatMap((item) => {
+    if (!item.id || removedIds.has(item.id)) return [];
+    const folder = projectFolderFromStored(item, currentById.get(item.id));
+    return folder ? [folder] : [];
+  });
+  return sameJson(
+    current.map(storedProjectFolderFromProjectFolder),
+    merged.map(storedProjectFolderFromProjectFolder)
+  )
+    ? current
+    : merged;
 }
 
 function mergeProjectsFromStorage(
@@ -490,6 +551,9 @@ function App() {
   );
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
+  const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(
+    boot.projectFolders
+  );
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   // Sessions detached to other windows — kept visible but unavailable here.
@@ -591,6 +655,13 @@ function App() {
   }, []);
   const [projectContextMenu, setProjectContextMenu] =
     useState<ProjectContextMenuState | null>(null);
+  const [projectFolderContextMenu, setProjectFolderContextMenu] =
+    useState<ProjectFolderContextMenuState | null>(null);
+  const [projectFolderEditor, setProjectFolderEditor] = useState<
+    | { mode: "create"; machineKey: string }
+    | { mode: "rename"; projectFolderId: string }
+    | null
+  >(null);
   const [tabContextMenu, setTabContextMenu] = useState<TabCtxState | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
@@ -627,12 +698,16 @@ function App() {
   const detachedAgentIdsRef = useRef<Set<string>>(new Set());
   const ownedAgentIdsRef = useRef<Set<string>>(new Set());
   const projectsRef = useRef<Project[]>([]);
+  const projectFoldersRef = useRef<ProjectFolder[]>([]);
   const groupsRef = useRef<Group[]>([]);
   const activeProjectIdRef = useRef<string | null>(null);
   const activeGroupIdRef = useRef<string | null>(null);
   const activePathRef = useRef<Path | null>(null);
   const alwaysOnTopRef = useRef(alwaysOnTop);
   const storedProjectsJsonRef = useRef(readLocalStorageValue(LS_PROJECTS));
+  const storedProjectFoldersJsonRef = useRef(
+    readLocalStorageValue(LS_PROJECT_FOLDERS)
+  );
   const storedAgentsJsonRef = useRef(readLocalStorageValue(LS_AGENTS));
   const storedGroupsJsonRef = useRef(
     readLocalStorageValue(workspace.groupsKey)
@@ -645,6 +720,7 @@ function App() {
   const desktopPetJsonRef = useRef<string | null>(null);
   const desktopPetQuestionsRef = useRef<Record<string, string>>({});
   const removedProjectIdsRef = useRef<Set<string>>(new Set());
+  const removedProjectFolderIdsRef = useRef<Set<string>>(new Set());
   const removedAgentIdsRef = useRef<Set<string>>(new Set());
   const openedInitialAgentRef = useRef<string | null>(null);
   const executeCommandRef = useRef<((commandId: CommandId) => void) | null>(null);
@@ -652,6 +728,7 @@ function App() {
 
   const syncSharedStateFromStorage = useCallback(() => {
     const projectsRaw = readLocalStorageValue(LS_PROJECTS);
+    const projectFoldersRaw = readLocalStorageValue(LS_PROJECT_FOLDERS);
     const agentsRaw = readLocalStorageValue(LS_AGENTS);
 
     let nextProjects = projectsRef.current;
@@ -667,6 +744,22 @@ function App() {
         nextProjects = merged;
         projectsRef.current = merged;
         setProjects(merged);
+      }
+    }
+
+    if (projectFoldersRaw !== storedProjectFoldersJsonRef.current) {
+      const storedFolders = parseStoredArray<StoredProjectFolder>(
+        projectFoldersRaw
+      );
+      const merged = mergeProjectFoldersFromStorage(
+        projectFoldersRef.current,
+        storedFolders,
+        removedProjectFolderIdsRef.current
+      );
+      storedProjectFoldersJsonRef.current = projectFoldersRaw;
+      if (merged !== projectFoldersRef.current) {
+        projectFoldersRef.current = merged;
+        setProjectFolders(merged);
       }
     }
 
@@ -810,6 +903,7 @@ function App() {
     const onStorage = (event: StorageEvent) => {
       if (
         event.key === LS_PROJECTS ||
+        event.key === LS_PROJECT_FOLDERS ||
         event.key === LS_AGENTS
       ) {
         syncSharedStateFromStorage();
@@ -826,6 +920,10 @@ function App() {
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
+
+  useEffect(() => {
+    projectFoldersRef.current = projectFolders;
+  }, [projectFolders]);
 
   useEffect(() => {
     agentsRef.current = agents;
@@ -952,6 +1050,12 @@ function App() {
         name: p.name,
         folder: p.folder,
         sshHostId: p.sshHostId,
+        projectFolderId: p.projectFolderId,
+      })),
+      projectFolders: projectFolders.map((folder) => ({
+        id: folder.id,
+        name: folder.name,
+        machineKey: folder.machineKey,
       })),
       agents: agents.map((a) => ({
         id: a.id,
@@ -974,6 +1078,7 @@ function App() {
     invoke("sync_remote_view", { view }).catch(() => {});
   }, [
     projects,
+    projectFolders,
     agents,
     groups,
     activeGroupId,
@@ -1083,6 +1188,24 @@ function App() {
       JSON.stringify(mergedProjects)
     );
   }, [projects]);
+
+  useEffect(() => {
+    const storedFolders = projectFolders.map(
+      storedProjectFolderFromProjectFolder
+    );
+    const mergedFolders = mergeStoredByIdForWrite(
+      storedFolders,
+      parseStoredArray<StoredProjectFolder>(
+        readLocalStorageValue(LS_PROJECT_FOLDERS)
+      ),
+      removedProjectFolderIdsRef.current
+    );
+    writeLocalStorageIfChanged(
+      storedProjectFoldersJsonRef,
+      LS_PROJECT_FOLDERS,
+      JSON.stringify(mergedFolders)
+    );
+  }, [projectFolders]);
 
   useEffect(() => {
     const configs = agents.map(storedAgentFromAgent);
@@ -2178,7 +2301,18 @@ function App() {
   // ---- Agent CRUD (side effects + layout via groupOps)
 
   const createProject = useCallback((payload: NewProjectPayload) => {
-    const { project, agent } = buildNewProjectWithFirstAgent(payload);
+    const machineKey = payload.sshHostId
+      ? `ssh:${payload.sshHostId}`
+      : "local";
+    const validFolder = projectFoldersRef.current.find(
+      (folder) =>
+        folder.id === payload.projectFolderId &&
+        folder.machineKey === machineKey
+    );
+    const { project, agent } = buildNewProjectWithFirstAgent({
+      ...payload,
+      projectFolderId: validFolder?.id,
+    });
     const addProject = () => {
       setProjects((prev) => [project, ...prev]);
       setAgents((prev) => [...prev, agent]);
@@ -2226,22 +2360,73 @@ function App() {
     pushToast,
   ]);
 
-  const reorderProject = useCallback(
+  const createProjectFolder = useCallback((machineKey: string, name: string) => {
+    const normalizedName = name.trim();
+    if (!normalizedName) return;
+    setProjectFolders((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        name: normalizedName,
+        machineKey,
+        createdAt: Date.now(),
+      },
+    ]);
+  }, []);
+
+  const renameProjectFolder = useCallback((id: string, name: string) => {
+    const normalizedName = name.trim();
+    if (!normalizedName) return;
+    setProjectFolders((current) =>
+      current.map((folder) =>
+        folder.id === id ? { ...folder, name: normalizedName } : folder
+      )
+    );
+  }, []);
+
+  const removeProjectFolder = useCallback((id: string) => {
+    const folder = projectFoldersRef.current.find((item) => item.id === id);
+    if (!folder) return;
+    const childCount = projectsRef.current.filter(
+      (project) => project.projectFolderId === id
+    ).length;
+    const childLine = childCount
+      ? `\n포함된 프로젝트 ${childCount}개는 미분류로 이동합니다.`
+      : "";
+    if (!window.confirm(`"${folder.name}" 폴더를 삭제할까요?${childLine}`)) {
+      return;
+    }
+    removedProjectFolderIdsRef.current.add(id);
+    setProjectFolders((current) => current.filter((item) => item.id !== id));
+    setProjects((current) => unassignProjectFolder(current, id));
+  }, []);
+
+  const reorderProjectFolder = useCallback(
     (draggedId: string, targetId: string, before: boolean) => {
-      if (draggedId === targetId) return;
-      setProjects((prev) => {
-        const dragged = prev.find((p) => p.id === draggedId);
-        if (!dragged) return prev;
-        const without = prev.filter((p) => p.id !== draggedId);
-        const targetIdx = without.findIndex((p) => p.id === targetId);
-        if (targetIdx === -1) return prev;
-        const insertIdx = before ? targetIdx : targetIdx + 1;
-        return [
-          ...without.slice(0, insertIdx),
-          dragged,
-          ...without.slice(insertIdx),
-        ];
-      });
+      setProjectFolders((current) =>
+        reorderProjectFolders(current, draggedId, targetId, before)
+      );
+    },
+    []
+  );
+
+  const moveProjectToFolder = useCallback(
+    (
+      projectId: string,
+      projectFolderId: string | null,
+      targetProjectId?: string,
+      before = false
+    ) => {
+      setProjects((current) =>
+        moveProjectToFolderInCatalog(
+          current,
+          projectFoldersRef.current,
+          projectId,
+          projectFolderId,
+          targetProjectId,
+          before
+        )
+      );
     },
     []
   );
@@ -2401,6 +2586,13 @@ function App() {
   const onSidebarProjectContextMenu = useCallback(
     (projectId: string, x: number, y: number) => {
       setProjectContextMenu({ projectId, x, y });
+    },
+    []
+  );
+
+  const onSidebarProjectFolderContextMenu = useCallback(
+    (projectFolderId: string, x: number, y: number) => {
+      setProjectFolderContextMenu({ projectFolderId, x, y });
     },
     []
   );
@@ -3185,6 +3377,7 @@ function App() {
       )}
       <Sidebar
         projects={sidebarProjects}
+        projectFolders={projectFolders}
         agents={sidebarAgents}
         groups={groups}
         activeProjectId={activeProjectId}
@@ -3200,6 +3393,9 @@ function App() {
         onRenameSession={setRenameSessionId}
         onContextMenu={onSidebarContextMenu}
         onNewProject={() => setShowProjectModal(true)}
+        onNewProjectFolder={(machineKey) =>
+          setProjectFolderEditor({ mode: "create", machineKey })
+        }
         onNewSessionForProject={(projectId) => {
           selectProject(projectId);
           setShowModal(true);
@@ -3207,8 +3403,10 @@ function App() {
         onDeactivate={deactivateAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
-        onReorderProject={reorderProject}
+        onMoveProject={moveProjectToFolder}
+        onReorderProjectFolder={reorderProjectFolder}
         onProjectContextMenu={onSidebarProjectContextMenu}
+        onProjectFolderContextMenu={onSidebarProjectFolderContextMenu}
         sessionPickerMode={false}
         detachedLabel="사용 중"
       />
@@ -3296,6 +3494,7 @@ function App() {
         <NewProjectModal
           defaultName={`Project ${projects.length + 1}`}
           disabledTools={disabledTools}
+          projectFolders={projectFolders}
           onCancel={() => setShowProjectModal(false)}
           onCreate={(payload) => {
             setShowProjectModal(false);
@@ -3303,6 +3502,47 @@ function App() {
           }}
         />
       )}
+      {projectFolderEditor &&
+        (() => {
+          const folder =
+            projectFolderEditor.mode === "rename"
+              ? projectFolders.find(
+                  (item) =>
+                    item.id === projectFolderEditor.projectFolderId
+                ) ?? null
+              : null;
+          if (projectFolderEditor.mode === "rename" && !folder) return null;
+          const machineKey =
+            projectFolderEditor.mode === "create"
+              ? projectFolderEditor.machineKey
+              : folder!.machineKey;
+          const machineLabel =
+            machineKey === "local"
+              ? "This PC"
+              : loadSshHosts().find(
+                  (host) => `ssh:${host.id}` === machineKey
+                )?.label ?? machineKey.replace(/^ssh:/, "SSH · ");
+          return (
+            <ProjectFolderModal
+              title={
+                projectFolderEditor.mode === "create"
+                  ? "새 프로젝트 폴더"
+                  : "프로젝트 폴더 이름 변경"
+              }
+              defaultName={folder?.name}
+              machineLabel={machineLabel}
+              onCancel={() => setProjectFolderEditor(null)}
+              onSave={(name) => {
+                if (projectFolderEditor.mode === "create") {
+                  createProjectFolder(machineKey, name);
+                } else {
+                  renameProjectFolder(projectFolderEditor.projectFolderId, name);
+                }
+                setProjectFolderEditor(null);
+              }}
+            />
+          );
+        })()}
       {showModal && (
         <NewAgentModal
           project={activeProject}
@@ -3455,6 +3695,23 @@ function App() {
               setPropertiesProjectId(projectContextMenu.projectId);
             }
             setProjectContextMenu(null);
+          }}
+        />
+      )}
+      {projectFolderContextMenu && (
+        <ProjectFolderContextMenu
+          state={projectFolderContextMenu}
+          onClose={() => setProjectFolderContextMenu(null)}
+          onAction={(action) => {
+            if (action === "rename") {
+              setProjectFolderEditor({
+                mode: "rename",
+                projectFolderId: projectFolderContextMenu.projectFolderId,
+              });
+            } else {
+              removeProjectFolder(projectFolderContextMenu.projectFolderId);
+            }
+            setProjectFolderContextMenu(null);
           }}
         />
       )}

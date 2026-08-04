@@ -23,6 +23,7 @@ describe("buildNewProjectWithFirstAgent", () => {
         folder: "  K:\\AI\\ProjectA  ",
         aiToolId: "codex",
         dangerous: true,
+        projectFolderId: "folder-work",
       },
       {
         createId: () => ids.shift()!,
@@ -38,6 +39,7 @@ describe("buildNewProjectWithFirstAgent", () => {
       lastOpenedAt: 1234,
       sshHostId: undefined,
       remoteFolder: undefined,
+      projectFolderId: "folder-work",
     });
     expect(result.agent).toMatchObject({
       id: "agent-1",

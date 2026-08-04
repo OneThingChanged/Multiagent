@@ -1,7 +1,14 @@
-import { LS_AGENTS, LS_GROUPS, LS_PROJECTS, LS_SSH_HOSTS } from "../types";
+import {
+  LS_AGENTS,
+  LS_GROUPS,
+  LS_PROJECT_FOLDERS,
+  LS_PROJECTS,
+  LS_SSH_HOSTS,
+} from "../types";
 
 export const SHARED_WORKSPACE_KEYS = [
   LS_PROJECTS,
+  LS_PROJECT_FOLDERS,
   LS_AGENTS,
   LS_GROUPS,
   LS_SSH_HOSTS,

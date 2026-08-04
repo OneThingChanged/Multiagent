@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Sidebar } from "./Sidebar";
-import type { Agent, Group, Project } from "../types";
+import type { Agent, Group, Project, ProjectFolder } from "../types";
 
 function renderSidebar(
   projects: Project[],
@@ -13,11 +13,13 @@ function renderSidebar(
     unreadCompletedAgentIds?: Set<string>;
     sessionPickerMode?: boolean;
     detachedLabel?: string;
+    projectFolders?: ProjectFolder[];
   } = {}
 ) {
   return renderToStaticMarkup(
     <Sidebar
       projects={projects}
+      projectFolders={options.projectFolders ?? []}
       agents={agents}
       groups={groups}
       activeProjectId={projects[0]?.id ?? null}
@@ -33,12 +35,15 @@ function renderSidebar(
       onRenameSession={() => {}}
       onContextMenu={() => {}}
       onNewProject={() => {}}
+      onNewProjectFolder={() => {}}
       onNewSessionForProject={() => {}}
       onDeactivate={() => {}}
       onDragStart={() => {}}
       onDragEnd={() => {}}
-      onReorderProject={() => {}}
+      onMoveProject={() => {}}
+      onReorderProjectFolder={() => {}}
       onProjectContextMenu={() => {}}
+      onProjectFolderContextMenu={() => {}}
       sessionPickerMode={options.sessionPickerMode}
       detachedLabel={options.detachedLabel}
     />
@@ -200,5 +205,46 @@ describe("Sidebar", () => {
     expect(html).toContain('title="세션 비활성화"');
     expect(html).toContain('aria-label="SESSION-A 세션 비활성화"');
     expect(html).not.toContain("Remove session");
+  });
+
+  it("groups projects in one-level virtual folders and keeps uncategorized projects", () => {
+    const projects: Project[] = [
+      {
+        id: "project-a",
+        name: "Project A",
+        folder: "K:\\AI\\A",
+        projectFolderId: "folder-work",
+        createdAt: 1,
+      },
+      {
+        id: "project-b",
+        name: "Project B",
+        folder: "K:\\AI\\B",
+        createdAt: 1,
+      },
+    ];
+    const html = renderSidebar(projects, [], [], null, {
+      projectFolders: [
+        {
+          id: "folder-work",
+          name: "업무",
+          machineKey: "local",
+          createdAt: 1,
+        },
+        {
+          id: "folder-empty",
+          name: "빈 폴더",
+          machineKey: "local",
+          createdAt: 2,
+        },
+      ],
+    });
+
+    expect(html).toContain("업무");
+    expect(html).toContain("미분류");
+    expect(html).toContain("빈 폴더");
+    expect(html).toContain("Project A");
+    expect(html).toContain("Project B");
+    expect(html).toContain("프로젝트를 여기로 끌어오세요");
   });
 });

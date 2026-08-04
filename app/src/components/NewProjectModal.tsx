@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { openDialog } from "../platform/plugins";
-import { AI_TOOLS, toolForId, type NewProjectPayload } from "../types";
+import {
+  AI_TOOLS,
+  toolForId,
+  type NewProjectPayload,
+  type ProjectFolder,
+} from "../types";
 import { loadSshHosts } from "../lib/sshHosts";
 
 export function NewProjectModal({
@@ -8,11 +13,13 @@ export function NewProjectModal({
   onCancel,
   onCreate,
   disabledTools = [],
+  projectFolders = [],
 }: {
   defaultName: string;
   onCancel: () => void;
   onCreate: (payload: NewProjectPayload) => void;
   disabledTools?: string[];
+  projectFolders?: ProjectFolder[];
 }) {
   const visibleTools = AI_TOOLS.filter(
     (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
@@ -27,6 +34,19 @@ export function NewProjectModal({
   const [remoteFolder, setRemoteFolder] = useState("");
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!aiToolId && !!selectedTool.dangerousFlag;
+  const machineKey = remote && sshHostId ? `ssh:${sshHostId}` : "local";
+  const availableProjectFolders = projectFolders.filter(
+    (item) => item.machineKey === machineKey
+  );
+  const [projectFolderId, setProjectFolderId] = useState("");
+  useEffect(() => {
+    if (
+      projectFolderId &&
+      !availableProjectFolders.some((item) => item.id === projectFolderId)
+    ) {
+      setProjectFolderId("");
+    }
+  }, [availableProjectFolders, projectFolderId]);
 
   const browse = async () => {
     try {
@@ -50,6 +70,7 @@ export function NewProjectModal({
         dangerous: dangerous && supportsDangerous,
         sshHostId,
         remoteFolder: remoteFolder.trim(),
+        projectFolderId: projectFolderId || undefined,
       });
     } else {
       onCreate({
@@ -57,6 +78,7 @@ export function NewProjectModal({
         folder: folder.trim(),
         aiToolId,
         dangerous: dangerous && supportsDangerous,
+        projectFolderId: projectFolderId || undefined,
       });
     }
   };
@@ -191,6 +213,23 @@ export function NewProjectModal({
               />
             </label>
           </>
+        )}
+
+        {availableProjectFolders.length > 0 && (
+          <label className="field">
+            <span className="field-label">사이드바 폴더</span>
+            <select
+              value={projectFolderId}
+              onChange={(event) => setProjectFolderId(event.target.value)}
+            >
+              <option value="">미분류</option>
+              {availableProjectFolders.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
 
         <div className="modal-actions">

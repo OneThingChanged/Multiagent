@@ -1721,6 +1721,10 @@ body,
   border-color: var(--app-accent);
 }
 
+.project-folder-create-btn {
+  font-size: 11px;
+}
+
 /* "Active only" filter toggle: dim dot when off, green-accent when on. */
 .active-only-btn {
   font-size: 9px;
@@ -1875,6 +1879,30 @@ body,
   align-items: stretch;
   min-width: 0;
 }
+.machine-add-folder-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-self: center;
+  margin-right: 5px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-button-bg);
+  color: var(--app-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.machine-row:hover .machine-add-folder-btn {
+  display: inline-flex;
+}
+.machine-add-folder-btn:hover {
+  color: var(--app-heading);
+  border-color: var(--app-accent);
+  background: var(--app-button-hover);
+}
 .machine-caret-btn {
   width: 24px;
   flex: 0 0 24px;
@@ -1917,6 +1945,115 @@ body,
 /* Indent projects nested under a machine group. */
 .machine-projects {
   padding-left: 12px;
+}
+
+.project-folder-node {
+  position: relative;
+  margin-bottom: 1px;
+}
+
+.project-folder-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.project-folder-row:hover {
+  background: var(--app-panel-hover);
+}
+
+.project-folder-caret-btn {
+  width: 22px;
+  flex: 0 0 22px;
+  border: 0;
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 0;
+}
+
+.project-folder-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--app-soft-text);
+  cursor: pointer;
+  font-family: inherit;
+  padding: 5px 7px 5px 0;
+  text-align: left;
+}
+
+.project-folder-icon {
+  color: var(--app-accent);
+  font-size: 10px;
+}
+
+.project-folder-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-soft-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.project-folder-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  border-radius: 8px;
+  background: var(--app-button-bg);
+  color: var(--app-muted);
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.project-folder-projects {
+  padding-left: 12px;
+}
+
+.project-folder-empty-hint {
+  padding: 5px 6px 7px 22px;
+  font-size: 10px;
+}
+
+.project-folder-dragging {
+  opacity: 0.5;
+}
+
+.project-folder-drop-inside > .project-folder-row {
+  border-color: var(--app-accent);
+  background: var(--app-active-bg);
+}
+
+.project-folder-drop-before::before,
+.project-folder-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--app-accent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.project-folder-drop-before::before {
+  top: -1px;
+}
+
+.project-folder-drop-after::after {
+  bottom: -1px;
 }
 
 .project-name,

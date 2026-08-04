@@ -32,7 +32,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - Session detail defaults to parsed Codex/Claude chat and can switch to the live xterm terminal. Windows extended transcript paths (`\\?\C:\...`) are normalized before transcript reads
 - Session chat and terminal modes keep only image attachment + one-line message input + Send in one compact row. Mobile also hides the global top bar and duplicate request/question panels and compacts its header/mode switch
 - For local sessions, the attachment button accepts up to four PNG/JPEG/GIF/WebP/BMP files per draft. Each image is uploaded to the host app (8MB maximum), previewed/removable before send, and its host path is appended to the selected session message. SSH sessions disable this button because the remote shell cannot read a path on the host PC
-- On phones/tablets, one-finger vertical drags scroll the live terminal. Normal buffers move through xterm scrollback; alternate-screen TUIs receive wheel/PageUp/PageDown input. Pinch zoom and link taps remain available
+- On phones/tablets, the live terminal fits both the desktop PTY width and height into the available panel so its bottom rows are not clipped behind the composer. One-finger vertical drags scroll normal xterm scrollback; alternate-screen TUIs receive wheel/PageUp/PageDown input. Pinch zoom and link taps remain available
 - The session view tracks `visualViewport.height` on mobile so browser chrome and the software keyboard shrink only the chat/terminal area. While typing, the fixed bottom navigation is temporarily hidden and the composer remains visible above the keyboard
 - Latest user request, interactive question, recent terminal output
 - Send instructions/question answers to the active session from a Screen pane or Session detail
@@ -44,6 +44,8 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - Browser **Install app / Add to Home Screen** support
 - Completion notifications use Web Push: after notification permission and push subscription are enabled, the service worker can show them even when the PWA window is closed. New-question notifications remain available while the PWA is running
 - Offline, only the app shell opens; session API/input are network-only
+
+The loopback Dashboard preview uses the same PWA and accepts PTY input from the browser's actual same-origin host, including a LAN hostname or a trusted reverse proxy's forwarded host. Cross-site origins remain blocked. This lets a Dashboard page forwarded to another computer send text without weakening the Remote server's login and approval boundary.
 
 Screen selection changes only inside the Remote browser and does not change the desktop MultiAgent's current Screen or active session. File editing and screen sharing are not in the MVP.
 

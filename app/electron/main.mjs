@@ -114,6 +114,7 @@ const IMAGE_MIME = new Map([
 const DOC_ASSET_TEXT_EXTS = new Set([".css"]);
 const SHARED_WORKSPACE_KEYS = new Set([
   "multiagent.projects.v1",
+  "multiagent.projectFolders.v1",
   "multiagent.agents.v1",
   "multiagent.groups.v1",
   "multiagent.sshHosts.v1",

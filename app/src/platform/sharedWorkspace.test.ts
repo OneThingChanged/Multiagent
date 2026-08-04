@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { LS_AGENTS, LS_GROUPS, LS_PROJECTS, LS_SSH_HOSTS } from "../types";
+import {
+  LS_AGENTS,
+  LS_GROUPS,
+  LS_PROJECT_FOLDERS,
+  LS_PROJECTS,
+  LS_SSH_HOSTS,
+} from "../types";
 import {
   mergeSharedWorkspaceValues,
   sanitizeSharedWorkspaceValues,
@@ -54,9 +60,31 @@ describe("shared workspace migration", () => {
       })
     ).toEqual({
       [LS_PROJECTS]: "[]",
+      [LS_PROJECT_FOLDERS]: "[]",
       [LS_AGENTS]: "[]",
       [LS_GROUPS]: "[]",
       [LS_SSH_HOSTS]: "[]",
     });
+  });
+
+  it("merges project-folder entities by stable id", () => {
+    const merged = mergeSharedWorkspaceValues(
+      {
+        [LS_PROJECT_FOLDERS]: JSON.stringify([
+          { id: "folder-local", name: "Local", machineKey: "local" },
+        ]),
+      },
+      {
+        [LS_PROJECT_FOLDERS]: JSON.stringify([
+          { id: "folder-local", name: "Shared", machineKey: "local" },
+          { id: "folder-ssh", name: "Build", machineKey: "ssh:host-1" },
+        ]),
+      }
+    );
+
+    expect(JSON.parse(merged[LS_PROJECT_FOLDERS])).toEqual([
+      { id: "folder-local", name: "Shared", machineKey: "local" },
+      { id: "folder-ssh", name: "Build", machineKey: "ssh:host-1" },
+    ]);
   });
 });

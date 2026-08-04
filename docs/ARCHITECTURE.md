@@ -48,7 +48,7 @@ K:\AI\MultiAgent\
    │  │  ├─ desktopPet.ts   ← pet settings, session state aggregation, completion queue payload
    │  │  └─ terminal.ts     ← createEntry / theme / md·html·image links / search·serialize / zoom / Ctrl+Enter / notifyDone
    │  ├─ components/
-   │  │  ├─ Sidebar.tsx        ← Screen summary, project tree, search, 1-line, drag reorder
+   │  │  ├─ Sidebar.tsx        ← Screen summary, machine/folder/project tree, search, drag/move
    │  │  ├─ TerminalArea.tsx / PaneSlot.tsx / Splitter.tsx
    │  │  ├─ TopBar.tsx         ← custom titlebar (sidebar toggle, Quick Open, notifications, pin, new window, pet, settings)
    │  │  ├─ FileTreePanel.tsx  ← right file tree sidebar (lazy loading, Find files)
@@ -186,7 +186,8 @@ When starting a PowerShell-family shell, the `-NoLogo` argument is added.
 ### State
 
 ```ts
-projects: Project[]                // project meta (id, name, folder, createdAt, lastOpenedAt?, sshHostId?, remoteFolder?)
+projects: Project[]                // project meta + optional UI-only projectFolderId
+projectFolders: ProjectFolder[]    // one-level collections scoped to local or one SSH machine
 agents: Agent[]                    // session meta (id, projectId, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
 groups: Group[]                    // each group = layout tree + optional reference projectId + session pins
 activeProjectId: string | null     // the project the sidebar/Docs currently follow
@@ -194,7 +195,7 @@ activeGroupId: string | null       // the group currently shown
 activePath: Path | null            // active leaf path within that group (number[])
 filesOpen/filesWidth                // file tree sidebar open/width (both persisted)
 appTheme: AppThemeId                // Soft/GitHub/Warm/Light global theme
-projects/agents/groups/view/theme/filesOpen/filesWidth/terminalFontSize are all persisted to localStorage
+projects/projectFolders/agents/groups/view/theme/filesOpen/filesWidth/terminalFontSize are all persisted to localStorage
 ```
 
 `App.tsx` owns orchestration only for attention and session lifecycle. Attention
@@ -239,6 +240,16 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - Screen numbers and colors are assigned by current split group order, and each member row of a project also shows the same-color `SN` badge
 - Sessions from different projects split together still appear on one Screen summary line, and clicking the row activates that `groupId` directly instead of re-finding a representative session via `groupOf`
 - In `Screen 1 (A+B)`, splitting C inside pane A makes it `Screen 1 (A+C+B)` with the same group ID. If C was on another Screen, it is removed from the original Screen — it never belongs to two Screens at once
+
+### Project Folder Collections
+
+- `ProjectFolder = { id, name, machineKey, createdAt }`, where `machineKey` is `local` or `ssh:<hostId>`. `Project.projectFolderId` is optional
+- Collections are sidebar metadata only. They do not rewrite `Project.folder`, `remoteFolder`, `sshHostId`, session cwd, Git scope, Docs scope, or file-tree scope
+- The hierarchy is one level: `machine → project folder → project → session`. Projects without a valid same-machine folder render under the virtual `미분류` folder
+- Folder and project array order remain authoritative. Folder reorder changes `projectFolders[]`; project drops update `projectFolderId` and the existing `projects[]` order
+- Folder deletion removes only the collection entity and clears matching project assignments. It never deletes projects or sessions
+- Folder collapse state is window-local UI state, while folder entities and project assignments are part of the shared workspace snapshot and synchronize between equal workspace windows
+- The remote view payload includes `projectFolders` and each project's `projectFolderId`, so Remote navigation can adopt the same hierarchy without changing the data contract again
 
 ### Pinning Group Sessions
 
@@ -339,7 +350,8 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 
 ## localStorage Keys
 
-- `multiagent.projects.v1` — `StoredProject[]` (project name, folder, last used time, optional `sshHostId`/`remoteFolder`)
+- `multiagent.projects.v1` — `StoredProject[]` (project name, physical folder, last used time, optional `sshHostId`/`remoteFolder`/`projectFolderId`)
+- `multiagent.projectFolders.v1` — shared `ProjectFolder[]` registry (UI-only name, machine scope, order)
 - `multiagent.sshHosts.v1` — `SshHost[]` (SSH host registry: label/host/user/port?/identityFile?/extraOptions?/remoteOs?/authMethod?/preferCmdShim?)
 - `multiagent.agents.v1` — `StoredAgent[]` (session meta + projectId)
 - `multiagent.workspace.<workspaceWindowId>.groups.v1` — that peer window's `Group[]` Screen tree
@@ -352,6 +364,7 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.fileTreeScope.v1` — last selected repository path per project (`""` = main repository)
 - `multiagent.fileTreeExpanded.v1` — file tree expansion state keyed by project id for the main repository and `projectId::submodule/path` for submodules
 - `multiagent.sidebarOpen.v1` — left sidebar collapsed state (default open)
+- `multiagent.collapsedProjectFolders.v1` — collapsed project-folder ids for the current renderer profile
 - `multiagent.terminalFontSize.v1` — xterm font size
 - `multiagent.notificationSound.v1` — notification sound settings (mode + customPath)
 - `multiagent.attentionItems.v1` — waiting/blocked/completed/stale attention history. Unread `completed` items derive the running-session-only cyan sidebar completion sweep/dot; opening the agent or beginning new work marks its previous completion read

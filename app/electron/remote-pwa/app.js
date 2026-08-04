@@ -1723,7 +1723,7 @@ async function sendInput(agentId, message) {
   // not submitted); a discrete \r a beat later registers as the Enter keypress.
   if (!(await sendRaw(agentId, text))) return false;
   await new Promise((resolve) => setTimeout(resolve, 80));
-  await sendRaw(agentId, "\r");
+  if (!(await sendRaw(agentId, "\r"))) return false;
   showToast("전송했습니다.");
   return true;
 }
@@ -2177,23 +2177,29 @@ function terminalBufferText(instance) {
   return lines.join("\n").replace(/\s+$/, "");
 }
 
-// The terminal mirrors the desktop PTY's column count, which is far wider than
-// a phone. Scale the xterm element down so the whole width fits the container
-// (a phone shows the full layout instead of a clipped sliver; pinch to zoom for
-// detail). PC panes wide enough for the PTY render at natural 1:1 size.
+// The terminal mirrors the desktop PTY's rows and columns, which are wider and
+// taller than a phone viewport. Fit both axes so mobile starts at the top-left
+// but still includes the bottom row; pinch to zoom for detail. PC panes large
+// enough for the PTY keep the natural 1:1 render.
 function refitTerminal(instance, container) {
   const element = instance?.term?.element;
   if (!element || !container) return;
   element.style.transformOrigin = "top left";
   element.style.transform = "";
   container.style.height = "";
-  const natural = element.offsetWidth;
-  const available = container.clientWidth;
-  if (!natural || !available) return;
-  const scale = Math.min(1, available / natural);
+  const screen = element.querySelector(".xterm-screen");
+  const naturalWidth = screen?.offsetWidth || element.offsetWidth;
+  const naturalHeight = screen?.offsetHeight || element.offsetHeight;
+  const availableWidth = container.clientWidth;
+  const availableHeight = container.clientHeight;
+  if (!naturalWidth || !naturalHeight || !availableWidth || !availableHeight) return;
+  const scale = Math.min(
+    1,
+    availableWidth / naturalWidth,
+    availableHeight / naturalHeight
+  );
   if (scale < 1) {
     element.style.transform = `scale(${scale})`;
-    container.style.height = `${Math.ceil(element.offsetHeight * scale)}px`;
   }
 }
 

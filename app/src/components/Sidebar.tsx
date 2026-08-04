@@ -15,6 +15,7 @@ import type {
   LayoutNode,
   LeafNode,
   Project,
+  ProjectFolder,
 } from "../types";
 import { collectAgentIdsInOrder } from "../lib/layout";
 import { isAgentRuntimeActive } from "../lib/agentActivity";
@@ -22,6 +23,8 @@ import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 const LS_COLLAPSED_MACHINES = "multiagent.collapsedMachines.v1";
+const LS_COLLAPSED_PROJECT_FOLDERS =
+  "multiagent.collapsedProjectFolders.v1";
 const LS_ACTIVE_ONLY = "multiagent.activeOnly.v1";
 
 const SCREEN_COLORS = [
@@ -52,6 +55,14 @@ type MachineGroup = {
 function loadCollapsedMachines(): Set<string> {
   try {
     const raw = localStorage.getItem(LS_COLLAPSED_MACHINES);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch {}
+  return new Set();
+}
+
+function loadCollapsedProjectFolders(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_COLLAPSED_PROJECT_FOLDERS);
     if (raw) return new Set(JSON.parse(raw) as string[]);
   } catch {}
   return new Set();
@@ -106,6 +117,7 @@ function loadExpandedProjects(projects: Project[]) {
 
 export function Sidebar({
   projects,
+  projectFolders,
   agents,
   groups,
   activeProjectId,
@@ -121,16 +133,20 @@ export function Sidebar({
   onRenameSession,
   onContextMenu,
   onNewProject,
+  onNewProjectFolder,
   onNewSessionForProject,
   onDeactivate,
   onDragStart,
   onDragEnd,
-  onReorderProject,
+  onMoveProject,
+  onReorderProjectFolder,
   onProjectContextMenu,
+  onProjectFolderContextMenu,
   sessionPickerMode = false,
   detachedLabel = "다른 창",
 }: {
   projects: Project[];
+  projectFolders: ProjectFolder[];
   agents: Agent[];
   groups: Group[];
   activeProjectId: string | null;
@@ -146,12 +162,28 @@ export function Sidebar({
   onRenameSession: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
   onNewProject: () => void;
+  onNewProjectFolder: (machineKey: string) => void;
   onNewSessionForProject: (projectId: string) => void;
   onDeactivate: (id: string) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
-  onReorderProject: (draggedId: string, targetId: string, before: boolean) => void;
+  onMoveProject: (
+    projectId: string,
+    projectFolderId: string | null,
+    targetProjectId?: string,
+    before?: boolean
+  ) => void;
+  onReorderProjectFolder: (
+    draggedId: string,
+    targetId: string,
+    before: boolean
+  ) => void;
   onProjectContextMenu: (projectId: string, x: number, y: number) => void;
+  onProjectFolderContextMenu: (
+    projectFolderId: string,
+    x: number,
+    y: number
+  ) => void;
   sessionPickerMode?: boolean;
   detachedLabel?: string;
 }) {
@@ -163,6 +195,16 @@ export function Sidebar({
     before: boolean;
   } | null>(null);
   const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
+  const [draggingProjectFolderId, setDraggingProjectFolderId] = useState<
+    string | null
+  >(null);
+  const [projectFolderDropTarget, setProjectFolderDropTarget] = useState<{
+    id: string;
+    before: boolean;
+  } | null>(null);
+  const [projectIntoFolderTarget, setProjectIntoFolderTarget] = useState<
+    string | null
+  >(null);
   const [searchQuery, setSearchQuery] = useState("");
   const pendingSessionClickRef = useRef<PendingSessionClick | null>(null);
 
@@ -191,6 +233,9 @@ export function Sidebar({
   const [collapsedMachineIds, setCollapsedMachineIds] = useState<Set<string>>(
     () => loadCollapsedMachines()
   );
+  const [collapsedProjectFolderIds, setCollapsedProjectFolderIds] = useState<
+    Set<string>
+  >(() => loadCollapsedProjectFolders());
 
   useEffect(() => {
     try {
@@ -201,11 +246,29 @@ export function Sidebar({
     } catch {}
   }, [collapsedMachineIds]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LS_COLLAPSED_PROJECT_FOLDERS,
+        JSON.stringify(Array.from(collapsedProjectFolderIds))
+      );
+    } catch {}
+  }, [collapsedProjectFolderIds]);
+
   const toggleMachineExpanded = (machineId: string) => {
     setCollapsedMachineIds((current) => {
       const next = new Set(current);
       if (next.has(machineId)) next.delete(machineId);
       else next.add(machineId);
+      return next;
+    });
+  };
+
+  const toggleProjectFolderExpanded = (projectFolderId: string) => {
+    setCollapsedProjectFolderIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectFolderId)) next.delete(projectFolderId);
+      else next.add(projectFolderId);
       return next;
     });
   };
@@ -342,11 +405,13 @@ export function Sidebar({
   // live status. Returns null to hide the whole project.
   const filterSections = (
     projectId: string,
-    projectName: string
+    projectName: string,
+    ancestorMatchesSearch = false
   ): Section[] | null => {
     const sections = sectionsByProject.get(projectId) ?? [];
     const projectMatchesSearch =
-      searchTerm.length > 0 && projectName.toLowerCase().includes(searchTerm);
+      ancestorMatchesSearch ||
+      (searchTerm.length > 0 && projectName.toLowerCase().includes(searchTerm));
     let result = sections;
     if (searchTerm && !projectMatchesSearch) {
       result = sections
@@ -408,10 +473,20 @@ export function Sidebar({
       }
     }
     const result: MachineGroup[] = [];
-    if (local.length > 0) {
+    if (
+      local.length > 0 ||
+      projectFolders.some((folder) => folder.machineKey === "local")
+    ) {
       result.push({ id: "local", kind: "local", label: "This PC", projects: local });
     }
-    const hostIds = Array.from(byHost.keys()).sort((a, b) => {
+    const hostIds = Array.from(
+      new Set([
+        ...byHost.keys(),
+        ...projectFolders
+          .filter((folder) => folder.machineKey.startsWith("ssh:"))
+          .map((folder) => folder.machineKey.slice(4)),
+      ])
+    ).sort((a, b) => {
       const la = hostById.get(a)?.label ?? a;
       const lb = hostById.get(b)?.label ?? b;
       return la.localeCompare(lb);
@@ -423,15 +498,17 @@ export function Sidebar({
         kind: "ssh",
         label: host?.label ?? "(unknown host)",
         hostSummary: host ? sshHostSummary(host) : undefined,
-        projects: byHost.get(hostId)!,
+        projects: byHost.get(hostId) ?? [],
       });
     }
     return result;
-  }, [projects]);
+  }, [projectFolders, projects]);
 
   // Only show machine headers once at least one remote project exists; a
   // local-only setup stays flat as before.
-  const groupByMachine = projects.some((p) => p.sshHostId);
+  const groupByMachine =
+    projects.some((p) => p.sshHostId) ||
+    projectFolders.some((folder) => folder.machineKey.startsWith("ssh:"));
   const machineExpanded = (machineId: string) =>
     searchTerm.length > 0 || activeOnly || !collapsedMachineIds.has(machineId);
 
@@ -643,8 +720,16 @@ export function Sidebar({
     );
   };
 
-  const renderProject = (project: Project) => {
-    const sections = filterSections(project.id, project.name);
+  const renderProject = (
+    project: Project,
+    effectiveProjectFolderId: string | null = null,
+    ancestorMatchesSearch = false
+  ) => {
+    const sections = filterSections(
+      project.id,
+      project.name,
+      ancestorMatchesSearch
+    );
     if (sections === null) return null;
     const expanded =
       searchTerm.length > 0 || activeOnly || expandedProjectIds.has(project.id);
@@ -712,7 +797,12 @@ export function Sidebar({
           setProjectDropTarget(null);
           setDraggingProjectId(null);
           if (target && draggedId !== project.id) {
-            onReorderProject(draggedId, project.id, target.before);
+            onMoveProject(
+              draggedId,
+              effectiveProjectFolderId,
+              project.id,
+              target.before
+            );
           }
         }}
         onDragEnd={() => {
@@ -795,6 +885,236 @@ export function Sidebar({
     );
   };
 
+  const renderMachineProjects = (machine: MachineGroup) => {
+    const machineFolders = projectFolders.filter(
+      (folder) => folder.machineKey === machine.id
+    );
+    if (machineFolders.length === 0) {
+      return machine.projects.map((project) => renderProject(project));
+    }
+
+    const validFolderIds = new Set(machineFolders.map((folder) => folder.id));
+    const buckets: Array<{
+      key: string;
+      folder: ProjectFolder | null;
+      name: string;
+      projects: Project[];
+    }> = machineFolders.map((folder) => ({
+      key: folder.id,
+      folder,
+      name: folder.name,
+      projects: machine.projects.filter(
+        (project) => project.projectFolderId === folder.id
+      ),
+    }));
+    const uncategorized = machine.projects.filter(
+      (project) =>
+        !project.projectFolderId || !validFolderIds.has(project.projectFolderId)
+    );
+    if (uncategorized.length > 0) {
+      buckets.push({
+        key: `uncategorized:${machine.id}`,
+        folder: null,
+        name: "미분류",
+        projects: uncategorized,
+      });
+    }
+
+    return buckets.map((bucket) => {
+      const folderMatchesSearch =
+        searchTerm.length > 0 && bucket.name.toLowerCase().includes(searchTerm);
+      const visibleProjects = bucket.projects.filter(
+        (project) =>
+          filterSections(
+            project.id,
+            project.name,
+            folderMatchesSearch
+          ) !== null
+      );
+      if (
+        (searchTerm || activeOnly) &&
+        visibleProjects.length === 0 &&
+        !folderMatchesSearch
+      ) {
+        return null;
+      }
+
+      const expanded =
+        searchTerm.length > 0 ||
+        activeOnly ||
+        !collapsedProjectFolderIds.has(bucket.key);
+      const isIntoTarget = projectIntoFolderTarget === bucket.key;
+      const isFolderDropTarget =
+        bucket.folder && projectFolderDropTarget?.id === bucket.folder.id;
+      const dropBefore =
+        isFolderDropTarget && projectFolderDropTarget?.before;
+      const dropAfter =
+        isFolderDropTarget && !projectFolderDropTarget?.before;
+
+      return (
+        <div
+          key={bucket.key}
+          className={[
+            "project-folder-node",
+            isIntoTarget ? "project-folder-drop-inside" : "",
+            dropBefore ? "project-folder-drop-before" : "",
+            dropAfter ? "project-folder-drop-after" : "",
+            draggingProjectFolderId === bucket.folder?.id
+              ? "project-folder-dragging"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          <div
+            className="project-folder-row"
+            draggable={!sessionPickerMode && !!bucket.folder}
+            onDragStart={(event) => {
+              if (!bucket.folder || sessionPickerMode) {
+                event.preventDefault();
+                return;
+              }
+              event.stopPropagation();
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(
+                "application/x-multiagent-project-folder",
+                bucket.folder.id
+              );
+              setDraggingProjectFolderId(bucket.folder.id);
+            }}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes(
+                  "application/x-multiagent-project"
+                )
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+                setProjectIntoFolderTarget(bucket.key);
+                return;
+              }
+              if (
+                bucket.folder &&
+                event.dataTransfer.types.includes(
+                  "application/x-multiagent-project-folder"
+                )
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const before = event.clientY - rect.top < rect.height / 2;
+                setProjectFolderDropTarget({
+                  id: bucket.folder.id,
+                  before,
+                });
+              }
+            }}
+            onDragLeave={(event) => {
+              const next = event.relatedTarget as Node | null;
+              if (next && event.currentTarget.contains(next)) return;
+              setProjectIntoFolderTarget((current) =>
+                current === bucket.key ? null : current
+              );
+              if (bucket.folder) {
+                setProjectFolderDropTarget((current) =>
+                  current?.id === bucket.folder!.id ? null : current
+                );
+              }
+            }}
+            onDrop={(event) => {
+              const draggedProjectId = event.dataTransfer.getData(
+                "application/x-multiagent-project"
+              );
+              if (draggedProjectId) {
+                event.preventDefault();
+                event.stopPropagation();
+                onMoveProject(
+                  draggedProjectId,
+                  bucket.folder?.id ?? null
+                );
+              } else if (bucket.folder) {
+                const draggedFolderId = event.dataTransfer.getData(
+                  "application/x-multiagent-project-folder"
+                );
+                if (draggedFolderId && draggedFolderId !== bucket.folder.id) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onReorderProjectFolder(
+                    draggedFolderId,
+                    bucket.folder.id,
+                    projectFolderDropTarget?.before ?? true
+                  );
+                }
+              }
+              setProjectIntoFolderTarget(null);
+              setProjectDropTarget(null);
+              setProjectFolderDropTarget(null);
+              setDraggingProjectId(null);
+              setDraggingProjectFolderId(null);
+            }}
+            onDragEnd={() => {
+              setProjectIntoFolderTarget(null);
+              setProjectDropTarget(null);
+              setProjectFolderDropTarget(null);
+              setDraggingProjectFolderId(null);
+            }}
+            onContextMenu={(event) => {
+              if (!bucket.folder || sessionPickerMode) return;
+              event.preventDefault();
+              onProjectFolderContextMenu(
+                bucket.folder.id,
+                event.clientX,
+                event.clientY
+              );
+            }}
+          >
+            <button
+              className="project-folder-caret-btn"
+              onClick={() => toggleProjectFolderExpanded(bucket.key)}
+              title={expanded ? "폴더 접기" : "폴더 펼치기"}
+            >
+              {expanded ? "v" : ">"}
+            </button>
+            <button
+              className="project-folder-item"
+              onClick={() => toggleProjectFolderExpanded(bucket.key)}
+              title={
+                bucket.folder
+                  ? `${bucket.name} · 우클릭으로 관리`
+                  : "폴더에 속하지 않은 프로젝트"
+              }
+            >
+              <span className="project-folder-icon" aria-hidden="true">
+                {expanded ? "▾" : "▸"}
+              </span>
+              <span className="project-folder-name">{bucket.name}</span>
+              <span className="project-folder-count">
+                {bucket.projects.length}
+              </span>
+            </button>
+          </div>
+          {expanded && (
+            <div className="project-folder-projects">
+              {visibleProjects.map((project) =>
+                renderProject(
+                  project,
+                  bucket.folder?.id ?? null,
+                  folderMatchesSearch
+                )
+              )}
+              {bucket.projects.length === 0 && (
+                <div className="empty-hint project-folder-empty-hint">
+                  프로젝트를 여기로 끌어오세요
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    });
+  };
+
   return (
     <aside className="sidebar">
       <div className="project-tree">
@@ -811,6 +1131,14 @@ export function Sidebar({
             aria-pressed={activeOnly}
           >
             ●
+          </button>
+          <button
+            className="section-action-btn project-folder-create-btn"
+            onClick={() => onNewProjectFolder("local")}
+            title="새 프로젝트 폴더"
+            aria-label="새 프로젝트 폴더"
+          >
+            ▣
           </button>
           <button
             className="section-action-btn"
@@ -883,10 +1211,41 @@ export function Sidebar({
         )}
         {groupByMachine
           ? machineGroups.map((group) => {
-              const visible = group.projects.filter(
-                (p) => filterSections(p.id, p.name) !== null
+              const machineFolders = projectFolders.filter(
+                (folder) => folder.machineKey === group.id
               );
-              if (visible.length === 0) return null;
+              const folderById = new Map(
+                machineFolders.map((folder) => [folder.id, folder])
+              );
+              const visible = group.projects.filter(
+                (project) => {
+                  const folder = project.projectFolderId
+                    ? folderById.get(project.projectFolderId)
+                    : null;
+                  const folderMatches =
+                    searchTerm.length > 0 &&
+                    !!folder?.name.toLowerCase().includes(searchTerm);
+                  return (
+                    filterSections(
+                      project.id,
+                      project.name,
+                      folderMatches
+                    ) !== null
+                  );
+                }
+              );
+              const emptyFolderMatches = machineFolders.some(
+                (folder) =>
+                  searchTerm.length > 0 &&
+                  folder.name.toLowerCase().includes(searchTerm)
+              );
+              if (
+                visible.length === 0 &&
+                !emptyFolderMatches &&
+                (searchTerm.length > 0 || activeOnly || machineFolders.length === 0)
+              ) {
+                return null;
+              }
               const mExpanded = machineExpanded(group.id);
               return (
                 <div key={group.id} className="machine-node">
@@ -910,16 +1269,34 @@ export function Sidebar({
                         <span className="project-ssh-badge">SSH</span>
                       )}
                     </div>
+                    {!sessionPickerMode && (
+                      <button
+                        className="machine-add-folder-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onNewProjectFolder(group.id);
+                        }}
+                        title={`${group.label}에 프로젝트 폴더 추가`}
+                        aria-label={`${group.label}에 프로젝트 폴더 추가`}
+                      >
+                        +
+                      </button>
+                    )}
                   </div>
                   {mExpanded && (
                     <div className="machine-projects">
-                      {visible.map((project) => renderProject(project))}
+                      {renderMachineProjects(group)}
                     </div>
                   )}
                 </div>
               );
             })
-          : projects.map((project) => renderProject(project))}
+          : renderMachineProjects({
+              id: "local",
+              kind: "local",
+              label: "This PC",
+              projects,
+            })}
         {projects.length === 0 && (
           <div className="empty-hint">Click + to add a project</div>
         )}

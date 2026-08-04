@@ -2,6 +2,7 @@ import {
   LS_AGENTS,
   LS_GROUPS,
   LS_LAYOUT_LEGACY,
+  LS_PROJECT_FOLDERS,
   LS_PROJECTS,
   LS_VIEW,
   toolForId,
@@ -13,8 +14,10 @@ import type {
   LayoutNode,
   Path,
   Project,
+  ProjectFolder,
   StoredAgent,
   StoredProject,
+  StoredProjectFolder,
 } from "../types";
 import {
   activeAgentInLeaf,
@@ -62,6 +65,7 @@ function loadStoredProjects(rawAgents: StoredAgent[]): Project[] {
           lastOpenedAt: project.lastOpenedAt,
           sshHostId: project.sshHostId || undefined,
           remoteFolder: project.remoteFolder || undefined,
+          projectFolderId: project.projectFolderId || undefined,
         });
       }
     }
@@ -103,6 +107,35 @@ function loadStoredProjects(rawAgents: StoredAgent[]): Project[] {
     (a, b) =>
       (b.lastOpenedAt ?? b.createdAt) - (a.lastOpenedAt ?? a.createdAt)
   );
+}
+
+function loadStoredProjectFolders(): ProjectFolder[] {
+  try {
+    const raw = localStorage.getItem(LS_PROJECT_FOLDERS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as StoredProjectFolder[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (folder) =>
+          !!folder &&
+          typeof folder.id === "string" &&
+          folder.id.length > 0 &&
+          typeof folder.name === "string" &&
+          folder.name.trim().length > 0
+      )
+      .map((folder) => ({
+        id: folder.id,
+        name: folder.name.trim(),
+        machineKey:
+          typeof folder.machineKey === "string" && folder.machineKey
+            ? folder.machineKey
+            : "local",
+        createdAt: folder.createdAt || Date.now(),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[] {
@@ -400,6 +433,7 @@ export function loadStoredView(
 
 export type Bootstrap = {
   projects: Project[];
+  projectFolders: ProjectFolder[];
   agents: Agent[];
   groups: Group[];
   activeProjectId: string | null;
@@ -416,6 +450,7 @@ export function loadBootstrap(
 ): Bootstrap {
   const rawAgents = readStoredAgents();
   const projects = loadStoredProjects(rawAgents);
+  const projectFolders = loadStoredProjectFolders();
   const agents = loadStoredAgents(rawAgents, projects);
   const agentProjectIds = new Map(agents.map((a) => [a.id, a.projectId]));
   const groups = loadStoredGroups(
@@ -431,6 +466,7 @@ export function loadBootstrap(
       : null;
   return {
     projects,
+    projectFolders,
     agents,
     groups,
     activeProjectId: savedProjectId ?? projects[0]?.id ?? null,

@@ -470,8 +470,22 @@ export class LocalDashboardService {
   }
 
   isLocalOrigin(request) {
-    const origin = request.headers.origin;
-    return !origin || origin.includes("127.0.0.1") || origin.includes("localhost");
+    if (String(request.headers["sec-fetch-site"] || "").toLowerCase() === "cross-site") {
+      return false;
+    }
+    const origin = String(request.headers.origin || "").trim().toLowerCase();
+    if (!origin) return true;
+    const forwardedHost = String(
+      request.headers["x-forwarded-host"] || request.headers.host || ""
+    )
+      .split(",")[0]
+      .trim()
+      .toLowerCase();
+    if (!forwardedHost) return false;
+    return new Set([
+      `http://${forwardedHost}`,
+      `https://${forwardedHost}`,
+    ]).has(origin);
   }
 
   loadConfig() {
@@ -529,7 +543,11 @@ export class LocalDashboardService {
             const id = String(body.id || "").trim();
             const data = String(body.data || "");
             if (!id || !data || data.length > 8 * 1024) { sendJson(response, 400, { error: "invalid input" }); return; }
-            sendJson(response, p.writePty?.(id, data) === false ? 409 : 200, { ok: true });
+            if (p.writePty?.(id, data) === false) {
+              sendJson(response, 409, { error: "session is not active" });
+              return;
+            }
+            sendJson(response, 200, { ok: true });
             return;
           }
           if (request.method === "POST" && url.pathname === "/api/attachment") {
