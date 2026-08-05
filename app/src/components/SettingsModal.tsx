@@ -1600,9 +1600,9 @@ export function SettingsModal({
           <div className="field-label">External diff program</div>
           <div className="app-about-card">
             <div className="app-update-message">
-              Source Control에서 파일의 diff 아이콘(⇄)이나 우클릭 메뉴를 누르면 이 프로그램에 비교할
-              파일 두 개(변경 전 · 작업 트리)를 인자로 넘겨 실행합니다. 대부분의 diff 프로그램은 경로 두
-              개만 주면 됩니다.
+              Source Control에서 텍스트 파일을 더블클릭하거나 diff 아이콘(⇄)·우클릭 메뉴를 누르면 이
+              프로그램에 비교할 파일 두 개(변경 전 · 작업 트리)를 인자로 넘겨 실행합니다. HTML과 이미지,
+              바이너리 파일의 더블클릭은 기존처럼 문서 뷰어로 엽니다.
             </div>
             <label className="field app-remote-field">
               <span className="field-label">Diff program</span>

@@ -147,6 +147,63 @@ const CODE_EXT_SET = new Set([
   "astro",
 ]);
 
+const SCM_TEXT_DIFF_EXT_SET = new Set([
+  ...CODE_EXT_SET,
+  "md",
+  "markdown",
+  "txt",
+  "log",
+  "csv",
+  "tsv",
+  "env",
+  "editorconfig",
+  "gitattributes",
+  "gitignore",
+  "gitmodules",
+  "lock",
+  "properties",
+  "cfg",
+  "config",
+  "cmake",
+  "gradle",
+  "mk",
+  "make",
+  "hlsl",
+  "glsl",
+  "vert",
+  "frag",
+  "usf",
+  "ush",
+  "uproject",
+  "uplugin",
+  "sln",
+  "csproj",
+  "vcxproj",
+  "props",
+  "targets",
+  "proto",
+  "graphql",
+  "gql",
+  "tex",
+]);
+
+const SCM_TEXT_DIFF_NAMES = new Set([
+  "dockerfile",
+  "jenkinsfile",
+  "makefile",
+  "cmakelists.txt",
+  "license",
+  "readme",
+]);
+
+export function shouldDiffGitChangeOnDoubleClick(relativePath: string) {
+  const name = baseName(relativePath).toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot + 1) : "";
+  if (ext === "html" || ext === "htm") return false;
+  return SCM_TEXT_DIFF_NAMES.has(name) || SCM_TEXT_DIFF_EXT_SET.has(ext);
+}
+
 function fileIconClass(name: string) {
   const dot = name.lastIndexOf(".");
   const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
@@ -1842,21 +1899,28 @@ function SourceControlView({
     lastClickedRef.current = relativePath;
   };
 
-  const changeRow = (entry: GitChangeEntry, staged: boolean) => (
+  const changeRow = (entry: GitChangeEntry, staged: boolean) => {
+    const doubleClickDiff = shouldDiffGitChangeOnDoubleClick(entry.relative_path);
+    return (
     <div
       key={`${staged ? "s" : "u"}:${entry.relative_path}`}
       className={`scm-row git-${entry.status} ${
         selected.has(entry.relative_path) ? "scm-row-selected" : ""
       }`}
       onClick={(event) => handleRowClick(event, entry.relative_path)}
-      onDoubleClick={() => onOpenFile(entry.relative_path)}
+      onDoubleClick={() => {
+        if (doubleClickDiff) openDiff(entry.relative_path, staged);
+        else onOpenFile(entry.relative_path);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
         setHistory(null);
         setCtx({ x: event.clientX, y: event.clientY, entry, staged });
       }}
-      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: 열기 · 우클릭: 메뉴)`}
+      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: ${
+        doubleClickDiff ? "외부 diff" : "열기"
+      } · 우클릭: 메뉴)`}
     >
       <input
         type="checkbox"
@@ -1909,7 +1973,8 @@ function SourceControlView({
         {staged ? "−" : "+"}
       </span>
     </div>
-  );
+    );
+  };
 
   const selectedPaths = [...selected];
 

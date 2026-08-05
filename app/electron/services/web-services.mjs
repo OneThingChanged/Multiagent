@@ -498,6 +498,7 @@ export class LocalDashboardService {
     this.state = {};
     this.server = null;
     this.port = null;
+    this.usageRefreshAt = 0;
     this.config = { enabled: false, serverPort: defaultPort };
     this.loadConfig();
   }
@@ -570,6 +571,23 @@ export class LocalDashboardService {
         }
         if (p) {
           // Full Remote PWA on loopback (no login needed locally).
+          if (request.method === "GET" && url.pathname === "/api/usage") {
+            const refreshRequested = url.searchParams.get("refresh") === "1";
+            const refresh = refreshRequested && Date.now() - this.usageRefreshAt >= 30_000;
+            if (refresh) this.usageRefreshAt = Date.now();
+            try {
+              const usage = await p.usageProvider?.(refresh);
+              sendJson(response, 200, usage ?? { updatedAt: 0, limits: [], tokens: {} });
+            } catch (error) {
+              sendJson(response, 500, {
+                error: error?.message || "usage unavailable",
+                updatedAt: 0,
+                limits: [],
+                tokens: {},
+              });
+            }
+            return;
+          }
           if (request.method === "POST" && url.pathname === "/api/input") {
             if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
             const body = await readJson(request);
@@ -712,7 +730,7 @@ export class RemoteDashboardService {
     this.chatProvider = chatProvider ?? (() => null);
     this.restartSession = restartSession ?? (() => false);
     this.cancelSession = cancelSession ?? (() => false);
-    this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [] }));
+    this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [], tokens: {} }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
     this.pushService = pushService ?? new RemotePushService({ baseDir });
@@ -1087,12 +1105,13 @@ export class RemoteDashboardService {
           if (refresh) this.usageRefreshAt = Date.now();
           try {
             const usage = await this.usageProvider(refresh);
-            sendJson(response, 200, usage ?? { updatedAt: 0, limits: [] });
+            sendJson(response, 200, usage ?? { updatedAt: 0, limits: [], tokens: {} });
           } catch (error) {
             sendJson(response, 500, {
               error: error?.message || "usage limits unavailable",
               updatedAt: 0,
               limits: [],
+              tokens: {},
             });
           }
           return;

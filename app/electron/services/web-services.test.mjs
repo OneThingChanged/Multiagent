@@ -48,6 +48,15 @@ describe("Electron dashboard server", () => {
             credits: { hasCredits: false, unlimited: false, balance: null },
             updatedAt: 1_785_484_800_000,
           }],
+          tokens: {
+            events: 12,
+            inputTokens: 1_000,
+            outputTokens: 250,
+            cacheReadTokens: 400,
+            cacheWriteTokens: 50,
+            reasoningOutputTokens: 75,
+            totalTokens: 1_775,
+          },
         };
       },
       stateProvider: () => ({
@@ -160,6 +169,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="documentsView"');
     expect(pageBody).toContain('id="documentList" role="tree"');
     expect(pageBody).toContain('id="usageView"');
+    expect(pageBody).toContain('id="usageTotalTokens"');
     expect(pageBody).toContain('id="mobileSessionsButton"');
     expect(pageBody).toContain('data-filter="active"');
     expect(pageBody).toContain('data-filter="recovering"');
@@ -180,6 +190,7 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function appendDocumentTree(container, node, projectId, query");
     expect(appScriptBody).toContain("const documentExpandedFolders = new Map()");
     expect(appScriptBody).toContain("function renderUsage()");
+    expect(appScriptBody).toContain("function formatTokenCount(value)");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
     expect(appScriptBody).toContain("function requestSessionActivation(agentId");
@@ -232,6 +243,7 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(stylesBody).not.toContain("max-height: 625px");
     expect(stylesBody).toContain(".usage-provider-grid");
+    expect(stylesBody).toContain(".usage-token-grid");
     expect(stylesBody).toContain(".usage-remaining-progress");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
     expect(stylesBody).toContain(".composer-main-row");
@@ -253,7 +265,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v49');
+    expect(workerBody).toContain('multiagent-remote-v50');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -273,6 +285,11 @@ describe("Electron dashboard server", () => {
     expect(usageBody.limits[0]).toMatchObject({
       limitId: "codex",
       primary: { usedPercent: 42, windowMinutes: 300 },
+    });
+    expect(usageBody.tokens).toMatchObject({
+      events: 12,
+      inputTokens: 1_000,
+      totalTokens: 1_775,
     });
     expect(usageRefreshes).toEqual([true, false]);
     expect(throttledUsage.status).toBe(200);
@@ -604,6 +621,11 @@ describe("Electron dashboard server", () => {
         },
       }),
       providers: {
+        usageProvider: async () => ({
+          updatedAt: 0,
+          limits: [],
+          tokens: { events: 2, inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+        }),
         writePty: (id, data) => {
           if (id === "agent-offline") return false;
           writes.push({ id, data });
@@ -627,6 +649,8 @@ describe("Electron dashboard server", () => {
     expect(page).toContain("Remote Monitor");
     const state = await fetch(`${status.url}/api/state`).then((r) => r.json());
     expect(state.pwa).toBe(true);
+    const usage = await fetch(`${status.url}/api/usage?refresh=1`).then((r) => r.json());
+    expect(usage.tokens).toMatchObject({ events: 2, totalTokens: 25 });
     const chat = await fetch(`${status.url}/api/chat?id=agent-9`).then((r) => r.json());
     expect(chat.blocks[0].text).toBe("hi agent-9");
     const docs = await fetch(`${status.url}/api/docs?projectId=local-project`).then((r) => r.json());

@@ -3,6 +3,7 @@ import {
   collectKindFilterPaths,
   fileKindOf,
   projectRelativeFromScope,
+  shouldDiffGitChangeOnDoubleClick,
   shouldRefreshGitForHook,
 } from "./FileTreePanel";
 
@@ -100,6 +101,24 @@ describe("collectKindFilterPaths", () => {
     const result = collectKindFilterPaths(entries, new Set());
     expect(result.matchingFiles.size).toBe(0);
     expect(result.visibleDirs.size).toBe(0);
+  });
+});
+
+describe("shouldDiffGitChangeOnDoubleClick", () => {
+  it("uses the external diff for source and text files", () => {
+    expect(shouldDiffGitChangeOnDoubleClick("Source/main.cpp")).toBe(true);
+    expect(shouldDiffGitChangeOnDoubleClick("Config/DefaultEditor.ini")).toBe(true);
+    expect(shouldDiffGitChangeOnDoubleClick("README.md")).toBe(true);
+    expect(shouldDiffGitChangeOnDoubleClick("UnrealTF.uproject")).toBe(true);
+    expect(shouldDiffGitChangeOnDoubleClick("Dockerfile")).toBe(true);
+  });
+
+  it("keeps HTML and non-text assets on the normal open action", () => {
+    expect(shouldDiffGitChangeOnDoubleClick("Docs/report.html")).toBe(false);
+    expect(shouldDiffGitChangeOnDoubleClick("Docs/page.HTM")).toBe(false);
+    expect(shouldDiffGitChangeOnDoubleClick("Content/Hero.uasset")).toBe(false);
+    expect(shouldDiffGitChangeOnDoubleClick("Images/preview.png")).toBe(false);
+    expect(shouldDiffGitChangeOnDoubleClick("Build/archive.zip")).toBe(false);
   });
 });
 

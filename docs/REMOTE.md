@@ -24,7 +24,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts. Desktop can show every pane; mobile uses pane tabs and streams only the selected terminal
 - **Sessions**: per-project session list with status filters and search. The `Active` filter combines working, needs-answer, recovering/starting, done, and waiting sessions while excluding inactive sessions. A restored PTY remains **Recovering** until its AI CLI emits a hook; it is never counted as working merely because the process started. The selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project and browse its `.md`/`.markdown`/`.html`/`.htm` files in a collapsible folder tree. Search keeps only matching documents and their parent folders visible, while the tree and preview use the full remaining viewport with independent scrolling. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
-- **Usage**: a dedicated account-limit view for Codex and Claude. It shows the remaining percentage for each rolling window, reset time, plan, extra-usage availability, and the oldest provider refresh time
+- **Usage**: a combined token/account view. It shows cumulative total, input, output, cache read/write, and reasoning tokens alongside Codex/Claude rolling-window remaining percentage, reset time, plan, and extra-usage availability
 - **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change
 - **APK download**: after login and desktop approval, the top bar shows an `APK` button when the desktop build contains `app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk`. The Remote server streams that file directly and supports interrupted-download resume
 - Mobile Screens switch to pane tabs instead of small splits, navigation lists appear as a slide menu, and non-monitor views reclaim the status-summary space
@@ -64,7 +64,7 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `GET /manifest.webmanifest` | PWA install manifest |
 | `GET /sw.js` | offline shell / notification service worker |
 | `GET /api/state` | projects, sessions, hooks, recent output state |
-| `GET /api/usage?refresh=1` | current Codex/Claude account-limit snapshots. `refresh=1` requests a live refresh and is throttled to once every 30 seconds |
+| `GET /api/usage?refresh=1` | cumulative token totals plus current Codex/Claude account-limit snapshots. `refresh=1` requests a live limit refresh and is throttled to once every 30 seconds |
 | `GET /api/push/public-key` | current server VAPID public key for an approved PWA client |
 | `POST /api/push/subscription` | register/update an approved same-origin Web Push subscription |
 | `DELETE /api/push/subscription` | remove the caller's same-origin Web Push subscription |

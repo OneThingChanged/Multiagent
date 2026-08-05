@@ -80,7 +80,7 @@
         </button>
         <button class="overview-button usage-button" id="usageButton" type="button">
           <span class="overview-icon">◔</span>
-          <span><strong>Usage</strong><small>남은 사용량 · 초기화</small></span>
+          <span><strong>Usage</strong><small>토큰 · 계정 한도</small></span>
           <b id="usageProviderCount">0</b>
         </button>
 
@@ -188,28 +188,71 @@
         <section class="usage-view" id="usageView" hidden>
           <div class="view-head">
             <div>
-              <span class="eyebrow">ACCOUNT LIMITS</span>
-              <h2>남은 사용량</h2>
-              <p>Codex와 Claude 계정 한도, 초기화 시각을 확인합니다.</p>
+              <span class="eyebrow">TOKEN USAGE &amp; ACCOUNT LIMITS</span>
+              <h2>사용량</h2>
+              <p>누적 토큰과 Codex·Claude 계정 한도를 함께 확인합니다.</p>
             </div>
             <button class="small-button" id="refreshUsageButton" type="button">새로고침</button>
           </div>
-          <div class="usage-summary-grid">
-            <article>
-              <span>가장 적은 잔여량</span>
-              <strong id="usageRemainingSummary">—</strong>
-            </article>
-            <article>
-              <span>연결된 제공자</span>
-              <strong id="usageProviderSummary">0</strong>
-            </article>
-            <article>
-              <span>마지막 갱신</span>
-              <strong id="usageUpdatedSummary">확인 중</strong>
-            </article>
-          </div>
-          <p class="usage-message" id="usageMessage">사용량 정보를 불러오는 중입니다.</p>
-          <div class="usage-provider-grid" id="usageProviderGrid"></div>
+          <section class="usage-section" aria-labelledby="usageTokenHeading">
+            <div class="usage-section-head">
+              <div>
+                <span class="eyebrow">TOKEN USAGE</span>
+                <h3 id="usageTokenHeading">누적 토큰</h3>
+              </div>
+              <span id="usageTokenEvents">사용 기록 확인 중</span>
+            </div>
+            <div class="usage-token-grid">
+              <article class="usage-token-total">
+                <span>전체 토큰</span>
+                <strong id="usageTotalTokens">—</strong>
+              </article>
+              <article>
+                <span>입력</span>
+                <strong id="usageInputTokens">—</strong>
+              </article>
+              <article>
+                <span>출력</span>
+                <strong id="usageOutputTokens">—</strong>
+              </article>
+              <article>
+                <span>캐시 읽기</span>
+                <strong id="usageCacheReadTokens">—</strong>
+              </article>
+              <article>
+                <span>캐시 쓰기</span>
+                <strong id="usageCacheWriteTokens">—</strong>
+              </article>
+              <article>
+                <span>추론 출력</span>
+                <strong id="usageReasoningTokens">—</strong>
+              </article>
+            </div>
+          </section>
+          <section class="usage-section" aria-labelledby="usageLimitHeading">
+            <div class="usage-section-head">
+              <div>
+                <span class="eyebrow">ACCOUNT LIMITS</span>
+                <h3 id="usageLimitHeading">남은 계정 한도</h3>
+              </div>
+            </div>
+            <div class="usage-summary-grid">
+              <article>
+                <span>가장 적은 잔여량</span>
+                <strong id="usageRemainingSummary">—</strong>
+              </article>
+              <article>
+                <span>연결된 제공자</span>
+                <strong id="usageProviderSummary">0</strong>
+              </article>
+              <article>
+                <span>마지막 갱신</span>
+                <strong id="usageUpdatedSummary">확인 중</strong>
+              </article>
+            </div>
+            <p class="usage-message" id="usageMessage">사용량 정보를 불러오는 중입니다.</p>
+            <div class="usage-provider-grid" id="usageProviderGrid"></div>
+          </section>
         </section>
 
         <section class="session-view" id="sessionView" hidden>

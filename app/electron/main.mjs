@@ -482,9 +482,18 @@ function writeMiraControlAgentInput({
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
 
+async function browserUsageSummary(refresh = false) {
+  const rateLimits = await usageIndex.getRateLimits(refresh);
+  return {
+    ...rateLimits,
+    tokens: usageIndex.dashboardSummary(),
+  };
+}
+
 // Session capabilities shared by every web surface (Remote + local Dashboard):
 // send input, stream the live terminal, read the chat transcript, restart.
 const sessionProviders = {
+  usageProvider: browserUsageSummary,
   writePty(id, data) {
     const agentId = asString(id).trim();
     const syncedAgent = (monitorService?.state?.agents || [])
@@ -576,7 +585,6 @@ let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
   stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
-  usageProvider: (refresh) => usageIndex.getRateLimits(refresh),
   ...sessionProviders,
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });

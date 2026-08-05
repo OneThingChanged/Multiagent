@@ -66,6 +66,13 @@ const ui = {
   filePreviewImage: $("#filePreviewImage"),
   usageView: $("#usageView"),
   refreshUsageButton: $("#refreshUsageButton"),
+  usageTokenEvents: $("#usageTokenEvents"),
+  usageTotalTokens: $("#usageTotalTokens"),
+  usageInputTokens: $("#usageInputTokens"),
+  usageOutputTokens: $("#usageOutputTokens"),
+  usageCacheReadTokens: $("#usageCacheReadTokens"),
+  usageCacheWriteTokens: $("#usageCacheWriteTokens"),
+  usageReasoningTokens: $("#usageReasoningTokens"),
   usageRemainingSummary: $("#usageRemainingSummary"),
   usageProviderSummary: $("#usageProviderSummary"),
   usageUpdatedSummary: $("#usageUpdatedSummary"),
@@ -1668,6 +1675,15 @@ function formatUsageUpdated(updatedAt) {
   return `${Math.floor(hours / 24)}일 전`;
 }
 
+function tokenCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.trunc(number) : 0;
+}
+
+function formatTokenCount(value) {
+  return new Intl.NumberFormat("ko-KR").format(tokenCount(value));
+}
+
 function usageProviderMeta(limit) {
   const id = text(limit?.limitId).toLowerCase();
   if (id === "codex" || id.startsWith("codex")) {
@@ -1743,6 +1759,7 @@ function usageWindowCard(window, index) {
 
 function renderUsage() {
   const groups = usageGroups();
+  const tokens = usageSummary?.tokens || {};
   const windows = groups.flatMap((group) => group.limits.flatMap((limit) => (
     [limit?.primary, limit?.secondary].filter((window) => (
       window && Number.isFinite(Number(window.usedPercent))
@@ -1756,6 +1773,13 @@ function renderUsage() {
     ...groups.flatMap((group) => group.limits.map((limit) => Number(limit?.updatedAt) || 0)),
   );
   ui.usageProviderCount.textContent = String(groups.length);
+  ui.usageTokenEvents.textContent = `${formatTokenCount(tokens.events)}개 사용 기록 기준`;
+  ui.usageTotalTokens.textContent = formatTokenCount(tokens.totalTokens);
+  ui.usageInputTokens.textContent = formatTokenCount(tokens.inputTokens);
+  ui.usageOutputTokens.textContent = formatTokenCount(tokens.outputTokens);
+  ui.usageCacheReadTokens.textContent = formatTokenCount(tokens.cacheReadTokens);
+  ui.usageCacheWriteTokens.textContent = formatTokenCount(tokens.cacheWriteTokens);
+  ui.usageReasoningTokens.textContent = formatTokenCount(tokens.reasoningOutputTokens);
   ui.usageProviderSummary.textContent = String(groups.length);
   ui.usageRemainingSummary.textContent = remaining == null
     ? "—"
@@ -1850,6 +1874,7 @@ async function loadUsage(refresh = false) {
     usageSummary = {
       updatedAt: Number(result?.updatedAt) || 0,
       limits: Array.isArray(result?.limits) ? result.limits : [],
+      tokens: result?.tokens && typeof result.tokens === "object" ? result.tokens : {},
     };
     usageLoadedAt = Date.now();
   } catch (error) {
