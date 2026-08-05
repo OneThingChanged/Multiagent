@@ -1931,7 +1931,7 @@ function updateComposerSendState() {
       ? initializingTerminal
         ? "세션 초기화가 끝나면 첨부할 수 있습니다"
         : "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
-    : "이미지 첨부 · 클립보드 붙여넣기 지원";
+    : "이미지 첨부 · 클립보드 붙여넣기 · 드래그 앤 드롭 지원";
 }
 
 function resizeComposerInput() {
@@ -2092,6 +2092,41 @@ function handleComposerImagePaste(event) {
   event.preventDefault();
   const added = addAttachments(files, { source: "clipboard" });
   if (added > 0) showToast(`클립보드 이미지 ${added}개를 첨부했습니다.`);
+}
+
+function hasDraggedFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function clearComposerDragState() {
+  ui.composerForm.classList.remove("drag-active");
+}
+
+function handleComposerImageDragEnter(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  ui.composerForm.classList.add("drag-active");
+}
+
+function handleComposerImageDragOver(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  ui.composerForm.classList.add("drag-active");
+}
+
+function handleComposerImageDragLeave(event) {
+  if (!ui.composerForm.contains(event.relatedTarget)) clearComposerDragState();
+}
+
+function handleComposerImageDrop(event) {
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (!files.length) return;
+  event.preventDefault();
+  event.stopPropagation();
+  clearComposerDragState();
+  const added = addAttachments(files, { source: "drop" });
+  if (added > 0) showToast(`드롭한 이미지 ${added}개를 첨부했습니다.`);
 }
 
 function attachmentMessage(message, attachments) {
@@ -3324,6 +3359,11 @@ ui.attachmentInput.addEventListener("change", () => {
   ui.attachmentInput.value = "";
 });
 ui.messageInput.addEventListener("paste", handleComposerImagePaste);
+ui.composerForm.addEventListener("dragenter", handleComposerImageDragEnter);
+ui.composerForm.addEventListener("dragover", handleComposerImageDragOver);
+ui.composerForm.addEventListener("dragleave", handleComposerImageDragLeave);
+ui.composerForm.addEventListener("drop", handleComposerImageDrop);
+window.addEventListener("dragend", clearComposerDragState);
 setInterval(() => { void drainQueue(); }, 500);
 // ---- Slash-command autocomplete (composer) ----
 const SLASH_CLAUDE = [["clear","대화 컨텍스트 지우기"],["compact","대화 요약·압축"],["model","모델 변경"],["review","코드 리뷰"],["init","CLAUDE.md 생성"],["agents","서브에이전트"],["cost","토큰/비용"],["config","설정"],["memory","메모리"],["status","상태"],["resume","세션 재개"],["export","내보내기"],["help","도움말"]];

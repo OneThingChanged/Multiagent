@@ -149,7 +149,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("/pwa/terminal-touch.js");
     expect(pageBody).toContain('id="attachmentButton"');
     expect(pageBody).toContain('id="attachmentInput"');
-    expect(pageBody).toContain('aria-label="이미지 첨부 또는 클립보드 붙여넣기"');
+    expect(pageBody).toContain('aria-label="이미지 첨부, 붙여넣기 또는 드래그 앤 드롭"');
     expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
     expect(pageBody).toContain('id="androidDownloadButton"');
@@ -194,6 +194,9 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function handleComposerImagePaste(event)");
     expect(appScriptBody).toContain('addEventListener("paste", handleComposerImagePaste)');
     expect(appScriptBody).toContain('addAttachments(files, { source: "clipboard" })');
+    expect(appScriptBody).toContain("function handleComposerImageDrop(event)");
+    expect(appScriptBody).toContain('addEventListener("drop", handleComposerImageDrop)');
+    expect(appScriptBody).toContain('addAttachments(files, { source: "drop" })');
     expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
     expect(appScriptBody).toContain("function ensureBackgroundPush(registration)");
     expect(appScriptBody).toContain("function syncVisualViewport()");
@@ -229,6 +232,7 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain("max-height: min(220px, 34dvh)");
     expect(stylesBody).toContain(".composer-main-row { display: flex; align-items: flex-end");
     expect(stylesBody).toContain(".composer-attachment");
+    expect(stylesBody).toContain(".composer.drag-active::after");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
@@ -240,7 +244,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v46');
+    expect(workerBody).toContain('multiagent-remote-v47');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);

@@ -680,7 +680,9 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .terminal-mount { margin: 0; padding: 8px; border-radius: 10px; background: #050d14; overflow: hidden; }
 .terminal-mount .xterm, .screen-terminal-mount .xterm { padding: 0; }
 .screen-terminal-mount { min-height: 0; overflow: hidden; border-radius: 8px; background: #050d14; }
-.composer { padding: 7px; }
+.composer { position: relative; padding: 7px; }
+.composer.drag-active { border-color: rgba(80, 223, 208, 0.78); box-shadow: 0 0 0 2px rgba(80, 223, 208, 0.14), 0 0 24px rgba(80, 223, 208, 0.12); }
+.composer.drag-active::after { content: "이미지를 놓아 첨부"; position: absolute; inset: 4px; z-index: 20; display: grid; place-items: center; border: 1px dashed rgba(80, 223, 208, 0.82); border-radius: 9px; color: #d9fffa; background: rgba(5, 22, 29, 0.92); font-size: 12px; font-weight: 800; letter-spacing: 0.02em; pointer-events: none; }
 .composer-ac { display: flex; flex-direction: column; margin-bottom: 8px; max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: rgba(9, 20, 30, 0.95); }
 .composer-ac-item { display: flex; align-items: baseline; gap: 10px; padding: 7px 11px; border: none; background: none; color: #cfe0ec; font-size: 11.5px; text-align: left; cursor: pointer; }
 .composer-ac-item.on { background: rgba(80, 223, 208, 0.16); }
