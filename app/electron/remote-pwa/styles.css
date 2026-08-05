@@ -700,13 +700,13 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .composer-attachment.error .composer-attachment-name { color: var(--red); }
 .composer-attachment-remove { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 16px; cursor: pointer; }
 .composer-attachment-remove:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
-.composer-main-row { display: flex; align-items: stretch; min-width: 0; min-height: 42px; gap: 6px; }
-.composer-attach-button { flex: 0 0 42px; width: 42px; min-height: 42px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: var(--cyan); background: rgba(9, 20, 30, 0.9); font-size: 21px; line-height: 1; cursor: pointer; }
+.composer-main-row { display: flex; align-items: flex-end; min-width: 0; min-height: 42px; gap: 6px; }
+.composer-attach-button { flex: 0 0 42px; width: 42px; height: 42px; min-height: 42px; padding: 0; border: 1px solid var(--line); border-radius: 9px; color: var(--cyan); background: rgba(9, 20, 30, 0.9); font-size: 21px; line-height: 1; cursor: pointer; }
 .composer-attach-button:hover { border-color: var(--line-strong); background: rgba(80, 223, 208, 0.08); }
 .composer-attach-button:disabled { cursor: not-allowed; opacity: 0.4; }
-.composer textarea { flex: 1 1 auto; width: auto; min-width: 0; height: 42px; min-height: 42px; max-height: min(112px, 22dvh); resize: none; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: #050d14; font-size: 13px; line-height: 1.45; }
+.composer textarea { flex: 1 1 auto; width: auto; min-width: 0; height: 42px; min-height: 42px; max-height: min(220px, 34dvh); resize: none; overflow-y: hidden; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: #050d14; font-size: 13px; line-height: 1.45; }
 .composer textarea:focus { border-color: #3e7192; }
-.send-button { flex: 0 0 auto; min-width: 58px; min-height: 42px; padding: 0 12px; font-size: 10px; }
+.send-button { flex: 0 0 auto; min-width: 58px; height: 42px; min-height: 42px; padding: 0 12px; font-size: 10px; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.45; }
 .mobile-nav { display: none; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 100; max-width: min(380px, calc(100vw - 36px)); padding: 11px 14px; border: 1px solid #315775; border-radius: 10px; color: #dcebf3; background: rgba(12, 29, 42, 0.96); box-shadow: var(--shadow); font-size: 11px; }
@@ -1066,14 +1066,14 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .app-shell[data-view="session"] .composer textarea {
     height: 44px;
     min-height: 44px;
-    max-height: 18dvh;
+    max-height: min(180px, 32dvh);
     padding: 7px 9px;
     font-size: 14px;
   }
   .app-shell[data-view="session"] .composer-ac { max-height: 24dvh; }
   .app-shell[data-view="session"] .composer-queue { max-height: 80px; }
   .app-shell[data-view="session"] .composer-attach-button,
-  .app-shell[data-view="session"] .send-button { min-height: 44px; }
+  .app-shell[data-view="session"] .send-button { height: 44px; min-height: 44px; }
   .app-shell[data-view="session"] .chat-user { max-width: 92%; font-size: 14px; }
   .app-shell[data-view="session"] .chat-md { font-size: 14px; line-height: 1.68; }
   .app-shell[data-view="session"] .chat-work > summary,

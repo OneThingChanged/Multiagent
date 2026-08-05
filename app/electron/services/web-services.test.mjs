@@ -149,6 +149,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("/pwa/terminal-touch.js");
     expect(pageBody).toContain('id="attachmentButton"');
     expect(pageBody).toContain('id="attachmentInput"');
+    expect(pageBody).toContain('aria-label="이미지 첨부 또는 클립보드 붙여넣기"');
     expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
     expect(pageBody).toContain('id="androidDownloadButton"');
@@ -189,9 +190,16 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain('inactive && sessionViewMode !== "chat"');
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
+    expect(appScriptBody).toContain("function clipboardImageFiles(event)");
+    expect(appScriptBody).toContain("function handleComposerImagePaste(event)");
+    expect(appScriptBody).toContain('addEventListener("paste", handleComposerImagePaste)');
+    expect(appScriptBody).toContain('addAttachments(files, { source: "clipboard" })');
     expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
     expect(appScriptBody).toContain("function ensureBackgroundPush(registration)");
     expect(appScriptBody).toContain("function syncVisualViewport()");
+    expect(appScriptBody).toContain("function resizeComposerInput()");
+    expect(appScriptBody).toContain("input.scrollHeight + borderHeight");
+    expect(appScriptBody).toContain('input.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden"');
     expect(appScriptBody).toContain('style.setProperty("--visual-viewport-height"');
     expect(appScriptBody).toContain('classList.toggle("keyboard-visible"');
     expect(appScriptBody).toContain("availableHeight / naturalHeight");
@@ -218,6 +226,8 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
     expect(stylesBody).toContain(".composer-main-row");
     expect(stylesBody).toContain(".composer textarea { flex: 1 1 auto");
+    expect(stylesBody).toContain("max-height: min(220px, 34dvh)");
+    expect(stylesBody).toContain(".composer-main-row { display: flex; align-items: flex-end");
     expect(stylesBody).toContain(".composer-attachment");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
@@ -230,7 +240,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v44');
+    expect(workerBody).toContain('multiagent-remote-v46');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);

@@ -992,6 +992,7 @@ function renderSession() {
     button.type = "button";
     button.addEventListener("click", () => {
       ui.messageInput.value = option;
+      resizeComposerInput();
       ui.messageInput.focus();
     });
     optionFragment.appendChild(button);
@@ -1889,6 +1890,13 @@ async function sendInput(agentId, message) {
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
 const ACCEPTED_ATTACHMENT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+const ATTACHMENT_EXTENSIONS = new Map([
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/gif", "gif"],
+  ["image/webp", "webp"],
+  ["image/bmp", "bmp"],
+]);
 
 function currentAttachments() {
   const agent = selectedAgent();
@@ -1923,7 +1931,26 @@ function updateComposerSendState() {
       ? initializingTerminal
         ? "세션 초기화가 끝나면 첨부할 수 있습니다"
         : "비활성 세션은 채팅 모드에서 활성화할 수 있습니다"
-    : "이미지 첨부";
+    : "이미지 첨부 · 클립보드 붙여넣기 지원";
+}
+
+function resizeComposerInput() {
+  const input = ui.messageInput;
+  if (!input) return;
+  input.style.height = "auto";
+  const styles = getComputedStyle(input);
+  const minHeight = Number.parseFloat(styles.minHeight) || 42;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight || 700;
+  const fallbackMaxHeight = isMobile()
+    ? Math.min(180, viewportHeight * 0.32)
+    : Math.min(220, viewportHeight * 0.34);
+  const maxHeight = Number.parseFloat(styles.maxHeight) || fallbackMaxHeight;
+  const borderHeight = (Number.parseFloat(styles.borderTopWidth) || 0)
+    + (Number.parseFloat(styles.borderBottomWidth) || 0);
+  const contentHeight = Math.max(input.scrollHeight + borderHeight, minHeight);
+  const nextHeight = Math.min(contentHeight, maxHeight);
+  input.style.height = `${Math.ceil(nextHeight)}px`;
+  input.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
 }
 
 function renderComposerAttachments() {
@@ -1976,7 +2003,7 @@ async function uploadAttachment(agentId, attachment, file) {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: agentId, name: file.name, type: file.type, data }),
+      body: JSON.stringify({ id: agentId, name: attachment.name, type: file.type, data }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -1990,18 +2017,35 @@ async function uploadAttachment(agentId, attachment, file) {
   renderComposerAttachments();
 }
 
-function addAttachments(files) {
+function attachmentFileName(file, source, index) {
+  const name = String(file?.name || "").trim();
+  if (name) return name;
+  const extension = ATTACHMENT_EXTENSIONS.get(file?.type) || "png";
+  return source === "clipboard"
+    ? `clipboard-image-${Date.now()}-${index + 1}.${extension}`
+    : `image-${Date.now()}-${index + 1}.${extension}`;
+}
+
+function addAttachments(files, { source = "picker" } = {}) {
   const agent = selectedAgent();
   if (!agent) {
     showToast("세션을 먼저 선택하세요.");
-    return;
+    return 0;
   }
   if (agent.sshHostId) {
     showToast("SSH 세션에는 로컬 이미지를 첨부할 수 없습니다.");
-    return;
+    return 0;
+  }
+  if (
+    sessionViewMode === "term" &&
+    ["offline", "recovering", "starting"].includes(statusOf(agent))
+  ) {
+    showToast("세션이 활성화된 뒤 이미지를 첨부할 수 있습니다.");
+    return 0;
   }
   const draft = currentAttachments();
-  for (const file of files) {
+  let added = 0;
+  for (const [index, file] of files.entries()) {
     if (draft.length >= MAX_ATTACHMENTS) {
       showToast(`이미지는 최대 ${MAX_ATTACHMENTS}개까지 첨부할 수 있습니다.`);
       break;
@@ -2016,16 +2060,38 @@ function addAttachments(files) {
     }
     const attachment = {
       token: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
-      name: file.name,
+      name: attachmentFileName(file, source, index),
       preview: URL.createObjectURL(file),
       path: "",
       uploading: true,
       error: "",
     };
     draft.push(attachment);
+    added += 1;
     void uploadAttachment(agent.id, attachment, file);
   }
   renderComposerAttachments();
+  return added;
+}
+
+function clipboardImageFiles(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return [];
+  const itemFiles = Array.from(clipboard.items || [])
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file) => file && ACCEPTED_ATTACHMENT_TYPES.has(file.type));
+  if (itemFiles.length) return itemFiles;
+  return Array.from(clipboard.files || [])
+    .filter((file) => ACCEPTED_ATTACHMENT_TYPES.has(file.type));
+}
+
+function handleComposerImagePaste(event) {
+  const files = clipboardImageFiles(event);
+  if (!files.length) return;
+  event.preventDefault();
+  const added = addAttachments(files, { source: "clipboard" });
+  if (added > 0) showToast(`클립보드 이미지 ${added}개를 첨부했습니다.`);
 }
 
 function attachmentMessage(message, attachments) {
@@ -2223,6 +2289,7 @@ async function sendSelectedMessage() {
   }
   if (queueAgentId !== agent.id) { messageQueue.length = 0; queueAgentId = agent.id; }
   ui.messageInput.value = "";
+  resizeComposerInput();
   attachments.forEach((attachment) => URL.revokeObjectURL(attachment.preview));
   attachmentDrafts.delete(agent.id);
   renderComposerAttachments();
@@ -2531,6 +2598,7 @@ function syncVisualViewport() {
   clearTimeout(viewportLayoutTimer);
   viewportLayoutTimer = setTimeout(() => {
     refitAllTerminals();
+    resizeComposerInput();
     if (keyboardVisible && focused === ui.messageInput) {
       ui.messageInput.scrollIntoView({ block: "nearest" });
     }
@@ -3255,6 +3323,7 @@ ui.attachmentInput.addEventListener("change", () => {
   addAttachments([...ui.attachmentInput.files]);
   ui.attachmentInput.value = "";
 });
+ui.messageInput.addEventListener("paste", handleComposerImagePaste);
 setInterval(() => { void drainQueue(); }, 500);
 // ---- Slash-command autocomplete (composer) ----
 const SLASH_CLAUDE = [["clear","대화 컨텍스트 지우기"],["compact","대화 요약·압축"],["model","모델 변경"],["review","코드 리뷰"],["init","CLAUDE.md 생성"],["agents","서브에이전트"],["cost","토큰/비용"],["config","설정"],["memory","메모리"],["status","상태"],["resume","세션 재개"],["export","내보내기"],["help","도움말"]];
@@ -3301,9 +3370,11 @@ function acceptComposerAc(i) {
   ui.messageInput.setSelectionRange(caret, caret);
   acTrigger = null; acItems = [];
   renderComposerAc();
+  resizeComposerInput();
   ui.messageInput.focus();
 }
 ui.messageInput.addEventListener("input", () => {
+  resizeComposerInput();
   refreshComposerAc();
   updateComposerSendState();
 });
@@ -3421,6 +3492,7 @@ applyNavCollapsed(
   || (selection.type === "session" && compactWorkspaceMedia.matches),
 );
 syncVisualViewport();
+resizeComposerInput();
 applyScreenAvailability();
 updateComposerSendState();
 setActiveFilter(activeFilter);
