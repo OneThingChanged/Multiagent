@@ -3,7 +3,8 @@ const base = require("./package.json").build;
 module.exports = {
   ...base,
   appId: "com.jintae.multiagent.company.electron",
-  productName: "MultiAgentCompany Electron",
+  productName: "MultiAgentCompany",
+  executableName: "MultiAgentCompany",
   extraMetadata: {
     multiAgentVariant: "company",
   },
@@ -20,7 +21,9 @@ module.exports = {
   ],
   nsis: {
     ...base.nsis,
-    artifactName: "MultiAgentCompany-Electron-Setup-${version}-${arch}.${ext}",
+    artifactName: "MultiAgentCompany-Setup-${version}-${arch}.${ext}",
+    shortcutName: "MultiAgentCompany",
+    uninstallDisplayName: "MultiAgentCompany ${version}",
   },
   publish: [
     {

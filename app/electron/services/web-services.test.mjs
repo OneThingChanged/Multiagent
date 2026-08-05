@@ -150,6 +150,9 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="attachmentButton"');
     expect(pageBody).toContain('id="attachmentInput"');
     expect(pageBody).toContain('aria-label="이미지 첨부, 붙여넣기 또는 드래그 앤 드롭"');
+    expect(pageBody).toContain('id="filePreviewOverlay"');
+    expect(pageBody).toContain('id="filePreviewMarkdown"');
+    expect(pageBody).toContain('id="filePreviewImage"');
     expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
     expect(pageBody).toContain('id="androidDownloadButton"');
@@ -197,6 +200,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function handleComposerImageDrop(event)");
     expect(appScriptBody).toContain('addEventListener("drop", handleComposerImageDrop)');
     expect(appScriptBody).toContain('addAttachments(files, { source: "drop" })');
+    expect(appScriptBody).toContain("function openChatFilePreview(projectId, rawPath, kind)");
+    expect(appScriptBody).toContain('fetch(`/api/files/image?${query}`');
+    expect(appScriptBody).toContain('closest(".chat-file-link")');
+    expect(appScriptBody).toContain("CHAT_FILE_PATH_RE");
     expect(appScriptBody).toContain("function syncMobileAppDownload(info)");
     expect(appScriptBody).toContain("function ensureBackgroundPush(registration)");
     expect(appScriptBody).toContain("function syncVisualViewport()");
@@ -233,6 +240,8 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".composer-main-row { display: flex; align-items: flex-end");
     expect(stylesBody).toContain(".composer-attachment");
     expect(stylesBody).toContain(".composer.drag-active::after");
+    expect(stylesBody).toContain(".file-preview-overlay");
+    expect(stylesBody).toContain(".chat-file-link");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
@@ -244,7 +253,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v47');
+    expect(workerBody).toContain('multiagent-remote-v49');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -302,6 +311,10 @@ describe("Electron dashboard server", () => {
     fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), "<h1>Preview</h1><script>throw new Error('blocked')</script>");
+    const imageBytes = Buffer.from("89504e470d0a1a0a00000000", "hex");
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.png"), imageBytes);
+    fs.writeFileSync(path.join(projectRoot, "docs", "large.png"), "");
+    fs.truncateSync(path.join(projectRoot, "docs", "large.png"), 25 * 1024 * 1024 + 1);
     fs.writeFileSync(path.join(projectRoot, "notes.txt"), "not allowed");
     fs.writeFileSync(path.join(projectRoot, "node_modules", "hidden.md"), "# hidden");
     fs.writeFileSync(path.join(root, "outside.md"), "# outside");
@@ -332,6 +345,22 @@ describe("Electron dashboard server", () => {
     const html = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "docs/preview.html" })}`,
     ).then((response) => response.json());
+    const absoluteMarkdown = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: path.join(projectRoot, "docs", "README.md") })}`,
+    );
+    const image = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "docs/preview.png" })}`,
+    );
+    const imageBody = Buffer.from(await image.arrayBuffer());
+    const imageTraversal = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "../outside.md" })}`,
+    );
+    const imageUnsupported = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "notes.txt" })}`,
+    );
+    const imageOversized = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "docs/large.png" })}`,
+    );
     const traversal = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "../outside.md" })}`,
     );
@@ -353,6 +382,14 @@ describe("Electron dashboard server", () => {
     expect(markdown).toMatchObject({ kind: "markdown", path: "docs/README.md", content: "# Remote 문서\n" });
     expect(html.kind).toBe("html");
     expect(html.content).toContain("<script>");
+    expect(absoluteMarkdown.status).toBe(200);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(imageBody).toEqual(imageBytes);
+    expect(imageTraversal.status).toBe(403);
+    expect(imageUnsupported.status).toBe(415);
+    expect(imageOversized.status).toBe(413);
     expect(traversal.status).toBe(403);
     expect(unsupported.status).toBe(415);
     expect(oversized.status).toBe(413);
@@ -549,6 +586,7 @@ describe("Electron dashboard server", () => {
     roots.push(root);
     fs.mkdirSync(path.join(root, "docs"));
     fs.writeFileSync(path.join(root, "docs", "local.md"), "# Local dashboard");
+    fs.writeFileSync(path.join(root, "docs", "local.png"), Buffer.from("89504e470d0a1a0a", "hex"));
     const writes = [];
     const cancellations = [];
     const service = new LocalDashboardService({
@@ -593,6 +631,11 @@ describe("Electron dashboard server", () => {
     expect(chat.blocks[0].text).toBe("hi agent-9");
     const docs = await fetch(`${status.url}/api/docs?projectId=local-project`).then((r) => r.json());
     expect(docs.documents).toContainEqual({ name: "local.md", path: "docs/local.md", kind: "markdown" });
+    const image = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local-project", path: "docs/local.png" })}`,
+    );
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
     const input = await fetch(`${status.url}/api/input`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: status.url },

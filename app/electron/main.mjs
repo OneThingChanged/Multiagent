@@ -58,6 +58,7 @@ import {
 import { UsageService } from "./services/usage-service.mjs";
 import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
+import { cleanupLegacyElectronShortcuts } from "./services/windows-shortcut-cleanup.mjs";
 import { discoverGitSubmodules } from "./services/git-submodules.mjs";
 import { isGitRepository, runGit } from "./services/git-command.mjs";
 import {
@@ -3697,6 +3698,16 @@ console.log(
 );
 if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
   console.log("[electron] ready");
+  const smokeMode = bridgeSmoke || closeSmoke || workspaceSmoke || securitySmoke || singleInstanceSmoke;
+  if (process.platform === "win32" && app.isPackaged && !smokeMode) {
+    const removedShortcuts = cleanupLegacyElectronShortcuts({
+      appDataDir: app.getPath("appData"),
+      readShortcutLink: (shortcutPath) => shell.readShortcutLink(shortcutPath),
+    });
+    if (removedShortcuts.length > 0) {
+      console.log(`[electron] removed ${removedShortcuts.length} legacy Electron shortcut(s)`);
+    }
+  }
   // Custom top bar replaces the native File/Edit/View/Window menu.
   Menu.setApplicationMenu(null);
   if (!bridgeSmoke) {

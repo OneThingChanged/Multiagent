@@ -47,6 +47,17 @@ const REMOTE_DOCUMENT_SKIPPED_DIRS = new Set([
 ]);
 const MAX_REMOTE_DOCUMENT_FILES = 500;
 const MAX_REMOTE_DOCUMENT_BYTES = 2 * 1024 * 1024;
+const MAX_REMOTE_IMAGE_BYTES = 25 * 1024 * 1024;
+const REMOTE_IMAGE_EXTENSIONS = new Map([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".bmp", "image/bmp"],
+  [".svg", "image/svg+xml"],
+  [".ico", "image/x-icon"],
+]);
 const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
 const REMOTE_ATTACHMENT_TYPES = new Map([
@@ -328,13 +339,12 @@ async function listRemoteDocuments(snapshot, projectId) {
   };
 }
 
-async function readRemoteDocument(snapshot, projectId, requestedPath) {
+async function resolveRemoteProjectFile(snapshot, projectId, requestedPath) {
   const { project, root } = documentProjectRoot(snapshot, projectId);
   const raw = String(requestedPath || "").trim().replaceAll("\\", "/");
-  if (!raw || path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)) {
-    throw new RemoteDocumentError(400, "올바른 상대 문서 경로가 필요합니다.");
-  }
-  const candidate = path.resolve(root, ...raw.split("/"));
+  if (!raw) throw new RemoteDocumentError(400, "올바른 파일 경로가 필요합니다.");
+  const absolute = path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw);
+  const candidate = absolute ? path.resolve(raw) : path.resolve(root, ...raw.split("/"));
   if (!isInsideDocumentRoot(root, candidate)) {
     throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
   }
@@ -347,10 +357,15 @@ async function readRemoteDocument(snapshot, projectId, requestedPath) {
   if (!isInsideDocumentRoot(root, resolved)) {
     throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
   }
+  const stats = await fsPromises.stat(resolved);
+  if (!stats.isFile()) throw new RemoteDocumentError(404, "파일을 찾을 수 없습니다.");
+  return { project, root, resolved, stats };
+}
+
+async function readRemoteDocument(snapshot, projectId, requestedPath) {
+  const { project, root, resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath);
   const kind = REMOTE_DOCUMENT_EXTENSIONS.get(path.extname(resolved).toLowerCase());
   if (!kind) throw new RemoteDocumentError(415, "Markdown과 HTML 파일만 열 수 있습니다.");
-  const stats = await fsPromises.stat(resolved);
-  if (!stats.isFile()) throw new RemoteDocumentError(404, "문서 파일을 찾을 수 없습니다.");
   if (stats.size > MAX_REMOTE_DOCUMENT_BYTES) {
     throw new RemoteDocumentError(413, "2MB보다 큰 문서는 Remote에서 열 수 없습니다.");
   }
@@ -363,6 +378,24 @@ async function readRemoteDocument(snapshot, projectId, requestedPath) {
     modifiedAt: stats.mtime.toISOString(),
     content: await fsPromises.readFile(resolved, "utf8"),
   };
+}
+
+async function sendRemoteImage(response, snapshot, projectId, requestedPath) {
+  const { resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath);
+  const contentType = REMOTE_IMAGE_EXTENSIONS.get(path.extname(resolved).toLowerCase());
+  if (!contentType) throw new RemoteDocumentError(415, "지원하지 않는 이미지 형식입니다.");
+  if (stats.size > MAX_REMOTE_IMAGE_BYTES) {
+    throw new RemoteDocumentError(413, "25MB보다 큰 이미지는 Remote에서 열 수 없습니다.");
+  }
+  response.writeHead(200, {
+    "content-type": contentType,
+    "content-length": stats.size,
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "cross-origin-resource-policy": "same-origin",
+    "x-content-type-options": "nosniff",
+  });
+  await pipeline(fs.createReadStream(resolved), response);
 }
 
 function sendRemoteDocumentError(response, error) {
@@ -614,6 +647,20 @@ export class LocalDashboardService {
               ));
             } catch (error) {
               sendRemoteDocumentError(response, error);
+            }
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/files/image") {
+            try {
+              await sendRemoteImage(
+                response,
+                this.snapshot(),
+                url.searchParams.get("projectId"),
+                url.searchParams.get("path"),
+              );
+            } catch (error) {
+              if (!response.headersSent) sendRemoteDocumentError(response, error);
+              else response.destroy(error);
             }
             return;
           }
@@ -1161,6 +1208,20 @@ export class RemoteDashboardService {
             ));
           } catch (error) {
             sendRemoteDocumentError(response, error);
+          }
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/files/image") {
+          try {
+            await sendRemoteImage(
+              response,
+              { view: this.view },
+              url.searchParams.get("projectId"),
+              url.searchParams.get("path"),
+            );
+          } catch (error) {
+            if (!response.headersSent) sendRemoteDocumentError(response, error);
+            else response.destroy(error);
           }
           return;
         }

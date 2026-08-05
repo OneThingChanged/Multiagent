@@ -39,8 +39,8 @@ npm run electron:dist:all
 
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-npm run tauri -- signer sign electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe
-npm run tauri -- signer sign electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe
+npm run tauri -- signer sign electron-dist/MultiAgent-Setup-<ver>-x64.exe
+npm run tauri -- signer sign electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe
 npm run release:electron-transition-manifest
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
@@ -56,12 +56,20 @@ provide Remote·Tunnel.
 
 | variant | product name | Electron identifier | updater manifests | remote features |
 |---|---|---|---|---|
-| standard | `MultiAgent Electron` | `com.jintae.multiagent.electron` | `latest.yml`, `latest.json` | included, including bundled Android APK |
-| company | `MultiAgentCompany Electron` | `com.jintae.multiagent.company.electron` | `latest-company.yml`, `latest-company.json` | excluded |
+| standard | `MultiAgent` | `com.jintae.multiagent.electron` | `latest.yml`, `latest.json` | included, including bundled Android APK |
+| company | `MultiAgentCompany` | `com.jintae.multiagent.company.electron` | `latest-company.yml`, `latest-company.json` | excluded |
 
 Both variants use the same version but different identifiers and updater endpoints. So a
 user who installs standard only gets standard updates, and company only gets company
 updates.
+
+The `.electron` suffix remains in the internal Windows AppUserModelID to preserve update
+and taskbar identity compatibility, but it is not user-facing. Packaged executables,
+shortcuts, uninstall entries, and window names are `MultiAgent` or `MultiAgentCompany`.
+Fresh installs use the same product name for the directory under `%LOCALAPPDATA%\Programs`;
+existing installs keep their registered directory during an in-place update. On first
+packaged startup, only stale `Electron.lnk` shortcuts that point to a development
+`node_modules\electron\dist\electron.exe` are removed.
 
 Company still packages the shared `electron/remote-pwa` Dashboard shell. The loopback
 Dashboard and external Remote service use the same static files, so excluding that whole
@@ -149,9 +157,9 @@ npm run electron:dist:all
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 
-npm run tauri -- signer sign "electron-dist\MultiAgent-Electron-Setup-<ver>-x64.exe"
+npm run tauri -- signer sign "electron-dist\MultiAgent-Setup-<ver>-x64.exe"
 if ($LASTEXITCODE -ne 0) { throw "standard installer signing failed" }
-npm run tauri -- signer sign "electron-dist\company\MultiAgentCompany-Electron-Setup-<ver>-x64.exe"
+npm run tauri -- signer sign "electron-dist\company\MultiAgentCompany-Setup-<ver>-x64.exe"
 if ($LASTEXITCODE -ne 0) { throw "company installer signing failed" }
 npm run release:electron-transition-manifest
 $releaseCode = $LASTEXITCODE
@@ -170,15 +178,15 @@ beside their matching installers.
 
 ```
 app/electron-dist/
-  MultiAgent-Electron-Setup-<ver>-x64.exe
-  MultiAgent-Electron-Setup-<ver>-x64.exe.blockmap
-  MultiAgent-Electron-Setup-<ver>-x64.exe.sig
+  MultiAgent-Setup-<ver>-x64.exe
+  MultiAgent-Setup-<ver>-x64.exe.blockmap
+  MultiAgent-Setup-<ver>-x64.exe.sig
   latest.yml
   latest.json
   company/
-    MultiAgentCompany-Electron-Setup-<ver>-x64.exe
-    MultiAgentCompany-Electron-Setup-<ver>-x64.exe.blockmap
-    MultiAgentCompany-Electron-Setup-<ver>-x64.exe.sig
+    MultiAgentCompany-Setup-<ver>-x64.exe
+    MultiAgentCompany-Setup-<ver>-x64.exe.blockmap
+    MultiAgentCompany-Setup-<ver>-x64.exe.sig
     latest-company.yml
     latest-company.json
 
@@ -217,14 +225,14 @@ Key point: **do not keep it as a draft — publish immediately + mark Latest.** 
 ```bash
 gh release create v<ver> --title "v<ver> — <title>" --notes "..." \
   --latest \
-  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe \
-  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe.blockmap \
-  app/electron-dist/MultiAgent-Electron-Setup-<ver>-x64.exe.sig \
+  app/electron-dist/MultiAgent-Setup-<ver>-x64.exe \
+  app/electron-dist/MultiAgent-Setup-<ver>-x64.exe.blockmap \
+  app/electron-dist/MultiAgent-Setup-<ver>-x64.exe.sig \
   app/electron-dist/latest.yml \
   app/electron-dist/latest.json \
-  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe \
-  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe.blockmap \
-  app/electron-dist/company/MultiAgentCompany-Electron-Setup-<ver>-x64.exe.sig \
+  app/electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe \
+  app/electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe.blockmap \
+  app/electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe.sig \
   app/electron-dist/company/latest-company.yml \
   app/electron-dist/company/latest-company.json \
   app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk

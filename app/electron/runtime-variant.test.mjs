@@ -9,6 +9,7 @@ describe("Electron runtime variant", () => {
   it("uses the standard identity and update channel by default", () => {
     expect(resolveRuntimeVariant()).toMatchObject({
       id: "standard",
+      displayName: "MultiAgent",
       appUserModelId: "com.jintae.multiagent.electron",
       localDataDirectory: "com.jintae.multiagent",
       updaterChannel: "latest",
@@ -19,7 +20,7 @@ describe("Electron runtime variant", () => {
   it("uses the Company identity, data folder, and update channel", () => {
     expect(resolveRuntimeVariant({ packageVariant: "company" })).toMatchObject({
       id: "company",
-      displayName: "MultiAgentCompany Electron",
+      displayName: "MultiAgentCompany",
       appUserModelId: "com.jintae.multiagent.company.electron",
       localDataDirectory: "com.jintae.multiagent.company",
       updaterChannel: "latest-company",
@@ -39,5 +40,29 @@ describe("Electron runtime variant", () => {
     expect(companyBuild.files).toContain("electron/**");
     expect(companyBuild.files).toContain("!electron/remote-pwa/downloads/**");
     expect(companyBuild.files).not.toContain("!electron/remote-pwa/**");
+  });
+
+  it("uses product-facing Windows executable and shortcut names", () => {
+    const standardBuild = require("../package.json").build;
+    const companyBuild = require("../electron-builder.company.cjs");
+
+    expect(standardBuild).toMatchObject({
+      productName: "MultiAgent",
+      executableName: "MultiAgent",
+      nsis: {
+        shortcutName: "MultiAgent",
+        uninstallDisplayName: "MultiAgent ${version}",
+        artifactName: "MultiAgent-Setup-${version}-${arch}.${ext}",
+      },
+    });
+    expect(companyBuild).toMatchObject({
+      productName: "MultiAgentCompany",
+      executableName: "MultiAgentCompany",
+      nsis: {
+        shortcutName: "MultiAgentCompany",
+        uninstallDisplayName: "MultiAgentCompany ${version}",
+        artifactName: "MultiAgentCompany-Setup-${version}-${arch}.${ext}",
+      },
+    });
   });
 });

@@ -38,6 +38,10 @@ const ui = {
   screenLayout: $("#screenLayout"),
   screenOpenSession: $("#screenOpenSession"),
   documentsView: $("#documentsView"),
+  documentSidebar: $("#documentSidebar"),
+  documentSidebarToggle: $("#documentSidebarToggle"),
+  documentSidebarClose: $("#documentSidebarClose"),
+  documentSidebarBackdrop: $("#documentSidebarBackdrop"),
   documentProjectSelect: $("#documentProjectSelect"),
   documentSearchInput: $("#documentSearchInput"),
   refreshDocumentsButton: $("#refreshDocumentsButton"),
@@ -51,6 +55,15 @@ const ui = {
   documentMessage: $("#documentMessage"),
   documentMarkdown: $("#documentMarkdown"),
   documentHtml: $("#documentHtml"),
+  filePreviewOverlay: $("#filePreviewOverlay"),
+  filePreviewTitle: $("#filePreviewTitle"),
+  filePreviewPath: $("#filePreviewPath"),
+  filePreviewKind: $("#filePreviewKind"),
+  filePreviewClose: $("#filePreviewClose"),
+  filePreviewMessage: $("#filePreviewMessage"),
+  filePreviewMarkdown: $("#filePreviewMarkdown"),
+  filePreviewImageWrap: $("#filePreviewImageWrap"),
+  filePreviewImage: $("#filePreviewImage"),
   usageView: $("#usageView"),
   refreshUsageButton: $("#refreshUsageButton"),
   usageRemainingSummary: $("#usageRemainingSummary"),
@@ -127,6 +140,7 @@ let selection = initialUrl.searchParams.get("usage") === "1"
     ? { type: "session", id: initialUrl.searchParams.get("agent") }
     : { type: "monitor", id: null };
 let selectedDocumentPath = initialUrl.searchParams.get("file") || null;
+let documentSidebarOpen = selection.type === "documents" && !selectedDocumentPath;
 let returnScreenId = null;
 let mobilePaneId = null;
 let deferredInstallPrompt = null;
@@ -151,6 +165,9 @@ let documentContentLoading = false;
 let documentContentError = "";
 let documentProjectsRenderKey = "";
 let documentListRenderKey = "";
+let filePreviewRequest = 0;
+let filePreviewObjectUrl = "";
+let filePreviewPreviousFocus = null;
 let usageSummary = null;
 let usageLoading = false;
 let usageRefreshing = false;
@@ -421,6 +438,24 @@ function showToast(message) {
   ui.toast.textContent = message;
   ui.toast.hidden = false;
   toastTimer = setTimeout(() => { ui.toast.hidden = true; }, 2800);
+}
+
+function syncDocumentSidebar() {
+  const mobile = isMobile();
+  const open = selection.type === "documents" && mobile && documentSidebarOpen;
+  if (!open && mobile && ui.documentSidebar.contains(document.activeElement)) {
+    ui.documentSidebarToggle.focus({ preventScroll: true });
+  }
+  ui.documentsView.classList.toggle("document-sidebar-open", open);
+  ui.documentSidebarToggle.setAttribute("aria-expanded", String(open));
+  ui.documentSidebarToggle.setAttribute("aria-label", open ? "문서 목록 닫기" : "문서 목록 열기");
+  ui.documentSidebar.toggleAttribute("inert", mobile && !open);
+  ui.documentSidebar.setAttribute("aria-hidden", String(mobile && !open));
+}
+
+function setDocumentSidebarOpen(open) {
+  documentSidebarOpen = Boolean(open);
+  syncDocumentSidebar();
 }
 
 function updateUrl() {
@@ -828,10 +863,10 @@ function renderScreenChat(container, data, agent) {
     for (const range of visible) {
       if (range.user) {
         const turn = make("div", "chat-turn user");
-        turn.appendChild(make("div", "chat-user", blocks[range.start].text));
+        turn.appendChild(renderChatUser(blocks[range.start].text, agent));
         fragment.appendChild(turn);
       } else {
-        fragment.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end)));
+        fragment.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end), agent));
       }
     }
   }
@@ -1310,6 +1345,7 @@ function appendDocumentTree(container, node, projectId, query, depth = 0) {
       renderDocuments();
       updateUrl();
       void loadDocument(projectId, file.path);
+      if (isMobile()) setDocumentSidebarOpen(false);
     });
     container.appendChild(button);
   }
@@ -1433,6 +1469,75 @@ function renderDocumentPreview() {
       ui.documentMarkdown.innerHTML = documentMarkdownToHtml(documentContent.content || "");
       ui.documentMarkdown.scrollTop = 0;
     }
+  }
+}
+
+function resetFilePreviewContent() {
+  if (filePreviewObjectUrl) {
+    URL.revokeObjectURL(filePreviewObjectUrl);
+    filePreviewObjectUrl = "";
+  }
+  ui.filePreviewImage.removeAttribute("src");
+  ui.filePreviewImage.alt = "";
+  ui.filePreviewMarkdown.replaceChildren();
+  ui.filePreviewMarkdown.hidden = true;
+  ui.filePreviewImageWrap.hidden = true;
+  ui.filePreviewMessage.hidden = false;
+}
+
+function closeFilePreview() {
+  filePreviewRequest += 1;
+  resetFilePreviewContent();
+  ui.filePreviewOverlay.hidden = true;
+  document.documentElement.classList.remove("file-preview-open");
+  const previousFocus = filePreviewPreviousFocus;
+  filePreviewPreviousFocus = null;
+  previousFocus?.focus?.();
+}
+
+async function openChatFilePreview(projectId, rawPath, kind) {
+  const path = cleanChatFilePath(rawPath);
+  if (!projectId || !path || !["markdown", "image"].includes(kind)) return;
+  const requestId = ++filePreviewRequest;
+  if (ui.filePreviewOverlay.hidden) filePreviewPreviousFocus = document.activeElement;
+  resetFilePreviewContent();
+  ui.filePreviewOverlay.hidden = false;
+  document.documentElement.classList.add("file-preview-open");
+  ui.filePreviewTitle.textContent = path.split(/[\\/]/).pop() || path;
+  ui.filePreviewPath.textContent = path;
+  ui.filePreviewKind.textContent = kind === "markdown" ? "MARKDOWN" : "IMAGE";
+  ui.filePreviewMessage.textContent = "파일을 불러오는 중…";
+  ui.filePreviewClose.focus();
+
+  try {
+    const query = new URLSearchParams({ projectId, path });
+    if (kind === "markdown") {
+      const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error(await apiError(response));
+      const result = await response.json();
+      if (requestId !== filePreviewRequest) return;
+      ui.filePreviewTitle.textContent = result.name || ui.filePreviewTitle.textContent;
+      ui.filePreviewPath.textContent = result.path || path;
+      ui.filePreviewMarkdown.innerHTML = documentMarkdownToHtml(result.content || "");
+      ui.filePreviewMessage.hidden = true;
+      ui.filePreviewMarkdown.hidden = false;
+      ui.filePreviewMarkdown.scrollTop = 0;
+      return;
+    }
+
+    const response = await fetch(`/api/files/image?${query}`, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) throw new Error(await apiError(response));
+    const blob = await response.blob();
+    if (requestId !== filePreviewRequest) return;
+    filePreviewObjectUrl = URL.createObjectURL(blob);
+    ui.filePreviewImage.src = filePreviewObjectUrl;
+    ui.filePreviewImage.alt = ui.filePreviewTitle.textContent;
+    ui.filePreviewMessage.hidden = true;
+    ui.filePreviewImageWrap.hidden = false;
+  } catch (error) {
+    if (requestId !== filePreviewRequest) return;
+    ui.filePreviewMessage.hidden = false;
+    ui.filePreviewMessage.textContent = `파일을 열지 못했습니다: ${error.message || error}`;
   }
 }
 
@@ -1767,6 +1872,7 @@ function renderSelection() {
   ui.documentsView.hidden = selection.type !== "documents";
   ui.usageView.hidden = selection.type !== "usage";
   ui.sessionView.hidden = selection.type !== "session";
+  syncDocumentSidebar();
   if (selection.type === "monitor") renderMonitor();
   if (selection.type === "screen") renderScreen();
   if (selection.type === "documents") renderDocuments();
@@ -1855,6 +1961,7 @@ function selectDocuments(projectId = null) {
     documentContent = null;
     documentContentKey = "";
     documentContentError = "";
+    documentSidebarOpen = true;
   }
   updateUrl();
   renderNavigation();
@@ -2676,14 +2783,66 @@ let chatRequestSeq = 0;
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-function inlineMd(text) {
-  let out = escapeHtml(text);
+const CHAT_FILE_PATH_RE = /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()[\]{},;]+[\\/])*[^\s"'<>|:*?()[\]{},;]+\.(?:md|markdown|png|jpe?g|gif|webp|bmp|svg|ico)(?::\d+(?::\d+)?)?/gi;
+
+function cleanChatFilePath(value) {
+  let result = String(value ?? "").trim()
+    .replace(/^[<`"']+/, "")
+    .replace(/[>`"']+$/, "")
+    .replace(/(:\d+)(?::\d+)?$/, "")
+    .split(/[?#]/)[0];
+  try { result = decodeURIComponent(result); } catch {}
+  return result.trim();
+}
+
+function chatFileKind(value) {
+  const path = cleanChatFilePath(value);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return null;
+  if (/\.(?:md|markdown)$/i.test(path)) return "markdown";
+  if (/\.(?:png|jpe?g|gif|webp|bmp|svg|ico)$/i.test(path)) return "image";
+  return null;
+}
+
+function chatFileMarkup(rawPath, label, agent, { code = false } = {}) {
+  const kind = chatFileKind(rawPath);
+  const projectId = text(agent?.projectId);
+  const path = cleanChatFilePath(rawPath);
+  const safeLabel = escapeHtml(label || path);
+  if (!kind || !projectId || !path) return code ? `<code>${safeLabel}</code>` : safeLabel;
+  return `<button type="button" class="chat-file-link${code ? " chat-file-code" : ""}" data-chat-file-project="${escapeHtml(projectId)}" data-chat-file-path="${escapeHtml(path)}" data-chat-file-kind="${kind}" title="${escapeHtml(path)}">${safeLabel}</button>`;
+}
+
+function inlineMd(text, agent = null) {
+  const tokens = [];
+  const stash = (html) => {
+    const token = `\u0000CHAT${tokens.length}\u0000`;
+    tokens.push(html);
+    return token;
+  };
+  let source = String(text ?? "");
+  source = source.replace(/`([^`\n]+)`/g, (_match, code) => (
+    chatFileKind(code)
+      ? stash(chatFileMarkup(code, code, agent, { code: true }))
+      : stash(`<code>${escapeHtml(code)}</code>`)
+  ));
+  source = source.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, rawTarget) => {
+    const target = String(rawTarget).trim().replace(/^<|>$/g, "");
+    if (/^https?:\/\//i.test(target)) {
+      return stash(`<a href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+    }
+    return chatFileKind(target) ? stash(chatFileMarkup(target, label, agent)) : match;
+  });
+  source = source.replace(/https?:\/\/[^\s<]+/g, (url) => (
+    stash(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`)
+  ));
+  source = source.replace(CHAT_FILE_PATH_RE, (path) => stash(chatFileMarkup(path, path, agent, { code: true })));
+  let out = escapeHtml(source);
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  out = out.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  out = out.replace(/\u0000CHAT(\d+)\u0000/g, (_match, index) => tokens[Number(index)] || "");
   return out;
 }
-function mdToHtml(text) {
+function mdToHtml(text, agent = null) {
   const lines = String(text).split(/\r?\n/);
   let html = "";
   let inList = false;
@@ -2691,14 +2850,21 @@ function mdToHtml(text) {
   for (const line of lines) {
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
-    if (heading) { closeList(); html += `<h4>${inlineMd(heading[2])}</h4>`; }
-    else if (bullet) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inlineMd(bullet[1])}</li>`; }
+    if (heading) { closeList(); html += `<h4>${inlineMd(heading[2], agent)}</h4>`; }
+    else if (bullet) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inlineMd(bullet[1], agent)}</li>`; }
     else if (!line.trim()) { closeList(); }
-    else { closeList(); html += `<p>${inlineMd(line)}</p>`; }
+    else { closeList(); html += `<p>${inlineMd(line, agent)}</p>`; }
   }
   closeList();
   return html;
 }
+
+function renderChatUser(text, agent) {
+  const node = make("div", "chat-user");
+  node.innerHTML = inlineMd(text, agent);
+  return node;
+}
+
 function toolLabel(tool) {
   let arg = tool.summary || "";
   if (!arg) {
@@ -2723,7 +2889,7 @@ function renderDiff(diff) {
   return box;
 }
 
-function renderAssistantTurn(run) {
+function renderAssistantTurn(run, agent = null) {
   const turn = make("div", "chat-turn");
   const role = make("div", "chat-role");
   role.append(make("span", "av", "✦"), document.createTextNode("Assistant"));
@@ -2754,7 +2920,7 @@ function renderAssistantTurn(run) {
       bodyNodes.push(d);
     } else if (block.kind === "text") {
       const md = make("div", "chat-md");
-      md.innerHTML = mdToHtml(block.text);
+      md.innerHTML = mdToHtml(block.text, agent);
       bodyNodes.push(md);
     } else if (block.kind === "image") {
       bodyNodes.push(make("div", "chat-md", "🖼 이미지"));
@@ -2877,13 +3043,14 @@ function renderChat(data) {
       });
       frag.appendChild(more);
     }
+    const agent = selectedAgent();
     for (const range of ranges.slice(hidden)) {
       if (range.user) {
         const turn = make("div", "chat-turn user");
-        turn.appendChild(make("div", "chat-user", blocks[range.start].text));
+        turn.appendChild(renderChatUser(blocks[range.start].text, agent));
         frag.appendChild(turn);
       } else {
-        frag.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end)));
+        frag.appendChild(renderAssistantTurn(blocks.slice(range.start, range.end), agent));
       }
     }
   }
@@ -3312,7 +3479,39 @@ ui.documentMarkdown.addEventListener("click", (event) => {
   renderDocuments();
   updateUrl();
   void loadDocument(selection.id, match.path);
+  if (isMobile()) setDocumentSidebarOpen(false);
 });
+ui.documentSidebarToggle.addEventListener("click", () => {
+  setDocumentSidebarOpen(!documentSidebarOpen);
+});
+ui.documentSidebarClose.addEventListener("click", () => setDocumentSidebarOpen(false));
+ui.documentSidebarBackdrop.addEventListener("click", () => setDocumentSidebarOpen(false));
+ui.appShell.addEventListener("click", (event) => {
+  const link = event.target.closest(".chat-file-link");
+  if (!link) return;
+  event.preventDefault();
+  void openChatFilePreview(
+    String(link.dataset.chatFileProject || ""),
+    String(link.dataset.chatFilePath || ""),
+    String(link.dataset.chatFileKind || ""),
+  );
+});
+ui.filePreviewClose.addEventListener("click", closeFilePreview);
+ui.filePreviewOverlay.addEventListener("click", (event) => {
+  if (event.target === ui.filePreviewOverlay) closeFilePreview();
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (selection.type === "documents" && documentSidebarOpen && isMobile()) {
+    event.preventDefault();
+    setDocumentSidebarOpen(false);
+    return;
+  }
+  if (ui.filePreviewOverlay.hidden) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeFilePreview();
+}, true);
 ui.sidebarToggle.addEventListener("click", () => {
   // Mobile: open/close the drawer. Tablet/desktop: collapse the fixed sidebar.
   if (isMobile()) {
@@ -3506,6 +3705,7 @@ function toggleNavCollapsed() {
 mobileMedia.addEventListener("change", () => {
   applyScreenAvailability();
   renderNavigation();
+  syncDocumentSidebar();
   syncTerminal();
   updateSidebarToggleState();
   refitAllTerminals();

@@ -1,7 +1,7 @@
 const VARIANTS = Object.freeze({
   standard: Object.freeze({
     id: "standard",
-    displayName: "MultiAgent Electron",
+    displayName: "MultiAgent",
     appUserModelId: "com.jintae.multiagent.electron",
     localDataDirectory: "com.jintae.multiagent",
     updaterChannel: "latest",
@@ -9,7 +9,7 @@ const VARIANTS = Object.freeze({
   }),
   company: Object.freeze({
     id: "company",
-    displayName: "MultiAgentCompany Electron",
+    displayName: "MultiAgentCompany",
     appUserModelId: "com.jintae.multiagent.company.electron",
     localDataDirectory: "com.jintae.multiagent.company",
     updaterChannel: "latest-company",

@@ -16,7 +16,7 @@ const executable = path.join(
   "electron-dist",
   ...(company ? ["company"] : []),
   "win-unpacked",
-  company ? "MultiAgentCompany Electron.exe" : "MultiAgent Electron.exe"
+  company ? "MultiAgentCompany.exe" : "MultiAgent.exe"
 );
 const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
 const variantMarker = `variant=${company ? "company" : "standard"}`;

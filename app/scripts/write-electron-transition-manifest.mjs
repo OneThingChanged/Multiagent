@@ -11,13 +11,13 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
 const variants = [
   {
     name: "MultiAgent",
-    setupName: `MultiAgent-Electron-Setup-${version}-x64.exe`,
+    setupName: `MultiAgent-Setup-${version}-x64.exe`,
     directory: join(appDir, "electron-dist"),
     manifestName: "latest.json",
   },
   {
     name: "MultiAgentCompany",
-    setupName: `MultiAgentCompany-Electron-Setup-${version}-x64.exe`,
+    setupName: `MultiAgentCompany-Setup-${version}-x64.exe`,
     directory: join(appDir, "electron-dist", "company"),
     manifestName: "latest-company.json",
   },
