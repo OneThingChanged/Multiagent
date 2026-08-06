@@ -121,7 +121,12 @@ const SHARED_WORKSPACE_KEYS = new Set([
   "multiagent.sshHosts.v1",
 ]);
 const SKIPPED_DOC_DIRS = new Set([
+  ".build-tools",
+  ".claude",
+  ".codex",
   ".git",
+  ".qwen",
+  ".tmp",
   "node_modules",
   "target",
   "dist",

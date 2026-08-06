@@ -3832,6 +3832,13 @@ body.files-resizing .files-resizer::after {
   font-weight: 600;
   color: var(--docs-heading);
 }
+.scm-selbar-empty {
+  background: transparent;
+}
+.scm-selbar-empty .scm-selbar-count {
+  color: var(--docs-muted);
+  font-weight: 500;
+}
 .scm-selbar button {
   font: inherit;
   font-size: 11px;

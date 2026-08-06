@@ -34,9 +34,14 @@ const REMOTE_DOCUMENT_EXTENSIONS = new Map([
   [".htm", "html"],
 ]);
 const REMOTE_DOCUMENT_SKIPPED_DIRS = new Set([
+  ".build-tools",
   ".cache",
+  ".claude",
+  ".codex",
   ".git",
   ".next",
+  ".qwen",
+  ".tmp",
   ".venv",
   "__pycache__",
   "build",
@@ -57,6 +62,10 @@ const REMOTE_IMAGE_EXTENSIONS = new Map([
   [".bmp", "image/bmp"],
   [".svg", "image/svg+xml"],
   [".ico", "image/x-icon"],
+]);
+const REMOTE_PREVIEW_ASSET_EXTENSIONS = new Map([
+  ...REMOTE_IMAGE_EXTENSIONS,
+  [".css", "text/css; charset=utf-8"],
 ]);
 const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
@@ -89,7 +98,7 @@ const REMOTE_CSP = [
   "font-src 'self'",
   "form-action 'self' https://github.com",
   "frame-ancestors 'none'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "manifest-src 'self'",
   "object-src 'none'",
   "script-src 'self'",
@@ -270,7 +279,12 @@ function documentProjects(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
 }
 
-function documentProjectRoot(snapshot, projectId) {
+function documentAgents(snapshot) {
+  if (Array.isArray(snapshot?.agents)) return snapshot.agents;
+  return Array.isArray(snapshot?.view?.agents) ? snapshot.view.agents : [];
+}
+
+function documentProjectRoot(snapshot, projectId, agentId = null) {
   const id = String(projectId || "").trim();
   const project = documentProjects(snapshot).find((candidate) => String(candidate?.id || "") === id);
   if (!project) throw new RemoteDocumentError(404, "프로젝트를 찾을 수 없습니다.");
@@ -288,7 +302,31 @@ function documentProjectRoot(snapshot, projectId) {
   if (!fs.statSync(root).isDirectory()) {
     throw new RemoteDocumentError(404, "프로젝트 폴더를 찾을 수 없습니다.");
   }
-  return { project, root };
+  let baseRoot = root;
+  const requestedAgentId = String(agentId || "").trim();
+  if (requestedAgentId) {
+    const agent = documentAgents(snapshot).find(
+      (candidate) => String(candidate?.id || "") === requestedAgentId,
+    );
+    if (!agent || String(agent.projectId || "") !== id) {
+      throw new RemoteDocumentError(404, "세션 작업 폴더를 찾을 수 없습니다.");
+    }
+    if (agent.sshHostId) {
+      throw new RemoteDocumentError(409, "SSH 세션의 원격 파일 보기는 아직 지원하지 않습니다.");
+    }
+    const agentFolder = String(agent.folder || "").trim();
+    if (agentFolder) {
+      try {
+        baseRoot = fs.realpathSync(agentFolder);
+      } catch {
+        throw new RemoteDocumentError(404, "세션 작업 폴더를 찾을 수 없습니다.");
+      }
+      if (!fs.statSync(baseRoot).isDirectory() || !isInsideDocumentRoot(root, baseRoot)) {
+        throw new RemoteDocumentError(403, "세션 작업 폴더가 프로젝트 밖에 있습니다.");
+      }
+    }
+  }
+  return { project, root, baseRoot };
 }
 
 function isInsideDocumentRoot(root, candidate) {
@@ -339,12 +377,12 @@ async function listRemoteDocuments(snapshot, projectId) {
   };
 }
 
-async function resolveRemoteProjectFile(snapshot, projectId, requestedPath) {
-  const { project, root } = documentProjectRoot(snapshot, projectId);
+async function resolveRemoteProjectFile(snapshot, projectId, requestedPath, agentId = null) {
+  const { project, root, baseRoot } = documentProjectRoot(snapshot, projectId, agentId);
   const raw = String(requestedPath || "").trim().replaceAll("\\", "/");
   if (!raw) throw new RemoteDocumentError(400, "올바른 파일 경로가 필요합니다.");
   const absolute = path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw);
-  const candidate = absolute ? path.resolve(raw) : path.resolve(root, ...raw.split("/"));
+  const candidate = absolute ? path.resolve(raw) : path.resolve(baseRoot, ...raw.split("/"));
   if (!isInsideDocumentRoot(root, candidate)) {
     throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
   }
@@ -359,11 +397,16 @@ async function resolveRemoteProjectFile(snapshot, projectId, requestedPath) {
   }
   const stats = await fsPromises.stat(resolved);
   if (!stats.isFile()) throw new RemoteDocumentError(404, "파일을 찾을 수 없습니다.");
-  return { project, root, resolved, stats };
+  return { project, root, baseRoot, resolved, stats };
 }
 
-async function readRemoteDocument(snapshot, projectId, requestedPath) {
-  const { project, root, resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath);
+async function readRemoteDocument(snapshot, projectId, requestedPath, agentId = null) {
+  const { project, root, baseRoot, resolved, stats } = await resolveRemoteProjectFile(
+    snapshot,
+    projectId,
+    requestedPath,
+    agentId,
+  );
   const kind = REMOTE_DOCUMENT_EXTENSIONS.get(path.extname(resolved).toLowerCase());
   if (!kind) throw new RemoteDocumentError(415, "Markdown과 HTML 파일만 열 수 있습니다.");
   if (stats.size > MAX_REMOTE_DOCUMENT_BYTES) {
@@ -373,6 +416,7 @@ async function readRemoteDocument(snapshot, projectId, requestedPath) {
     project: { id: project.id, name: project.name },
     name: path.basename(resolved),
     path: path.relative(root, resolved).split(path.sep).join("/"),
+    basePath: path.relative(baseRoot, resolved).split(path.sep).join("/"),
     kind,
     size: stats.size,
     modifiedAt: stats.mtime.toISOString(),
@@ -380,8 +424,8 @@ async function readRemoteDocument(snapshot, projectId, requestedPath) {
   };
 }
 
-async function sendRemoteImage(response, snapshot, projectId, requestedPath) {
-  const { resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath);
+async function sendRemoteImage(response, snapshot, projectId, requestedPath, agentId = null) {
+  const { resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath, agentId);
   const contentType = REMOTE_IMAGE_EXTENSIONS.get(path.extname(resolved).toLowerCase());
   if (!contentType) throw new RemoteDocumentError(415, "지원하지 않는 이미지 형식입니다.");
   if (stats.size > MAX_REMOTE_IMAGE_BYTES) {
@@ -392,6 +436,27 @@ async function sendRemoteImage(response, snapshot, projectId, requestedPath) {
     "content-length": stats.size,
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; sandbox",
+    "cross-origin-resource-policy": "same-origin",
+    "x-content-type-options": "nosniff",
+  });
+  await pipeline(fs.createReadStream(resolved), response);
+}
+
+async function sendRemotePreviewAsset(response, snapshot, projectId, requestedPath, agentId = null) {
+  const { resolved, stats } = await resolveRemoteProjectFile(snapshot, projectId, requestedPath, agentId);
+  const extension = path.extname(resolved).toLowerCase();
+  const contentType = REMOTE_PREVIEW_ASSET_EXTENSIONS.get(extension);
+  if (!contentType) throw new RemoteDocumentError(415, "지원하지 않는 HTML 자산 형식입니다.");
+  const limit = extension === ".css" ? MAX_REMOTE_DOCUMENT_BYTES : MAX_REMOTE_IMAGE_BYTES;
+  if (stats.size > limit) {
+    throw new RemoteDocumentError(413, extension === ".css"
+      ? "2MB보다 큰 스타일시트는 Remote에서 열 수 없습니다."
+      : "25MB보다 큰 이미지는 Remote에서 열 수 없습니다.");
+  }
+  response.writeHead(200, {
+    "content-type": contentType,
+    "content-length": stats.size,
+    "cache-control": "no-store",
     "cross-origin-resource-policy": "same-origin",
     "x-content-type-options": "nosniff",
   });
@@ -662,6 +727,7 @@ export class LocalDashboardService {
                 this.snapshot(),
                 url.searchParams.get("projectId"),
                 url.searchParams.get("path"),
+                url.searchParams.get("agentId"),
               ));
             } catch (error) {
               sendRemoteDocumentError(response, error);
@@ -675,6 +741,22 @@ export class LocalDashboardService {
                 this.snapshot(),
                 url.searchParams.get("projectId"),
                 url.searchParams.get("path"),
+                url.searchParams.get("agentId"),
+              );
+            } catch (error) {
+              if (!response.headersSent) sendRemoteDocumentError(response, error);
+              else response.destroy(error);
+            }
+            return;
+          }
+          if (request.method === "GET" && url.pathname === "/api/files/asset") {
+            try {
+              await sendRemotePreviewAsset(
+                response,
+                this.snapshot(),
+                url.searchParams.get("projectId"),
+                url.searchParams.get("path"),
+                url.searchParams.get("agentId"),
               );
             } catch (error) {
               if (!response.headersSent) sendRemoteDocumentError(response, error);
@@ -1210,7 +1292,7 @@ export class RemoteDashboardService {
         if (request.method === "GET" && url.pathname === "/api/docs") {
           try {
             sendJson(response, 200, await listRemoteDocuments(
-              { view: this.view },
+              { agents: this.agents, view: this.view },
               url.searchParams.get("projectId"),
             ));
           } catch (error) {
@@ -1221,9 +1303,10 @@ export class RemoteDashboardService {
         if (request.method === "GET" && url.pathname === "/api/docs/read") {
           try {
             sendJson(response, 200, await readRemoteDocument(
-              { view: this.view },
+              { agents: this.agents, view: this.view },
               url.searchParams.get("projectId"),
               url.searchParams.get("path"),
+              url.searchParams.get("agentId"),
             ));
           } catch (error) {
             sendRemoteDocumentError(response, error);
@@ -1234,9 +1317,25 @@ export class RemoteDashboardService {
           try {
             await sendRemoteImage(
               response,
-              { view: this.view },
+              { agents: this.agents, view: this.view },
               url.searchParams.get("projectId"),
               url.searchParams.get("path"),
+              url.searchParams.get("agentId"),
+            );
+          } catch (error) {
+            if (!response.headersSent) sendRemoteDocumentError(response, error);
+            else response.destroy(error);
+          }
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/files/asset") {
+          try {
+            await sendRemotePreviewAsset(
+              response,
+              { agents: this.agents, view: this.view },
+              url.searchParams.get("projectId"),
+              url.searchParams.get("path"),
+              url.searchParams.get("agentId"),
             );
           } catch (error) {
             if (!response.headersSent) sendRemoteDocumentError(response, error);

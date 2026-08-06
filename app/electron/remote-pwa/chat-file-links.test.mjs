@@ -28,27 +28,32 @@ function loadChatFileLinkFunctions() {
 
 describe("Remote chat file links", () => {
   const links = loadChatFileLinkFunctions();
-  const agent = { projectId: "project-1" };
+  const agent = { id: "agent-1", projectId: "project-1" };
 
   it("links plain, code-formatted, and Markdown-linked project files", () => {
     const html = links.inlineMd([
       "docs/README.md",
       "`images/result.png`",
       "[상세 문서](docs/guide.markdown)",
+      "[HTML 결과](reports/result.html)",
     ].join("\n"), agent);
 
     expect(html).toContain('data-chat-file-path="docs/README.md"');
     expect(html).toContain('data-chat-file-kind="markdown"');
     expect(html).toContain('data-chat-file-path="images/result.png"');
     expect(html).toContain('data-chat-file-kind="image"');
+    expect(html).toContain('data-chat-file-agent="agent-1"');
+    expect(html).toContain('data-chat-file-path="reports/result.html"');
+    expect(html).toContain('data-chat-file-kind="html"');
     expect(html).toContain(">상세 문서</button>");
-    expect(html.match(/class="chat-file-link/g)).toHaveLength(3);
+    expect(html.match(/class="chat-file-link/g)).toHaveLength(4);
   });
 
   it("normalizes terminal line suffixes and preserves Windows paths", () => {
     expect(links.cleanChatFilePath("C:\\Project\\docs\\README.md:72:4"))
       .toBe("C:\\Project\\docs\\README.md");
     expect(links.chatFileKind("C:\\Project\\shots\\result.webp")).toBe("image");
+    expect(links.chatFileKind("reports/result.htm")).toBe("html");
   });
 
   it("keeps external image URLs external and does not link without a project", () => {

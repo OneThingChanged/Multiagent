@@ -44,7 +44,7 @@
 ### Markdown Document Viewer Scan Limits
 - Markdown scan collects up to 500 files for performance protection
 - Single Markdown files over 2MB are not read
-- Internal/large folders like `node_modules`, `target`, `dist`, `.git`, `.claude`, `.codex` are excluded from scanning
+- Internal/large folders like `node_modules`, `target`, `dist`, `.git`, `.build-tools`, `.claude`, `.codex`, `.qwen` are excluded from scanning
 
 ### Hook Dependency
 - Work status uses Codex's 6 hook kinds and Claude's 8 hook kinds. `working/waiting/blocked/done` is managed separately from PTY survival.

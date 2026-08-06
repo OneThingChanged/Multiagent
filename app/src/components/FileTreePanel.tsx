@@ -2074,31 +2074,38 @@ function SourceControlView({
             : `Commit (${changes.staged.length})`}
         </button>
       </div>
-      {selectedPaths.length > 0 && (
-        <div className="scm-selbar">
-          <span className="scm-selbar-count">{selectedPaths.length}개 선택</span>
-          <button onClick={() => stage(selectedPaths)} disabled={busy}>
-            Stage
-          </button>
-          <button onClick={() => unstage(selectedPaths)} disabled={busy}>
-            Unstage
-          </button>
-          <button
-            className="scm-selbar-discard"
-            onClick={() => discard(selectedPaths)}
-            disabled={busy}
-          >
-            Discard
-          </button>
-          <button
-            className="scm-selbar-clear"
-            onClick={() => setSelected(new Set())}
-            title="선택 해제"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <div className={`scm-selbar${selectedPaths.length === 0 ? " scm-selbar-empty" : ""}`}>
+        <span className="scm-selbar-count">
+          {selectedPaths.length > 0 ? `${selectedPaths.length}개 선택` : "선택 없음"}
+        </span>
+        <button
+          onClick={() => stage(selectedPaths)}
+          disabled={busy || selectedPaths.length === 0}
+        >
+          Stage
+        </button>
+        <button
+          onClick={() => unstage(selectedPaths)}
+          disabled={busy || selectedPaths.length === 0}
+        >
+          Unstage
+        </button>
+        <button
+          className="scm-selbar-discard"
+          onClick={() => discard(selectedPaths)}
+          disabled={busy || selectedPaths.length === 0}
+        >
+          Discard
+        </button>
+        <button
+          className="scm-selbar-clear"
+          onClick={() => setSelected(new Set())}
+          disabled={selectedPaths.length === 0}
+          title="선택 해제"
+        >
+          ×
+        </button>
+      </div>
       <div className="file-tree-body">
         <div className="scm-section">
           Staged <span className="scm-count">{changes.staged.length}</span>

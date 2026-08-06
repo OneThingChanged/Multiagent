@@ -23,12 +23,15 @@ describe("Remote mobile document layout", () => {
 
   it("uses an off-canvas drawer instead of stacking the tree above the preview", () => {
     expect(css).toContain('.documents-view.document-sidebar-open .document-sidebar { transform: translateX(0); }');
+    expect(css).toContain('.documents-view.document-sidebar-open .document-preview { visibility: hidden; }');
+    expect(css).toContain('width: 100%;');
     expect(css).toContain('.document-preview { width: 100%; height: 100%; }');
     expect(css).not.toContain('grid-template-rows: minmax(120px, 34%) minmax(0, 1fr)');
   });
 
   it("closes the drawer after a mobile document selection", () => {
     expect(script).toContain('if (isMobile()) setDocumentSidebarOpen(false);');
+    expect(script).toContain('selectedDocumentPath = isMobile() ? null : (documents[0]?.path || null);');
     expect(script).toContain('ui.documentSidebarBackdrop.addEventListener("click", () => setDocumentSidebarOpen(false));');
   });
 });

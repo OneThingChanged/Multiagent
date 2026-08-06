@@ -161,6 +161,7 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('aria-label="이미지 첨부, 붙여넣기 또는 드래그 앤 드롭"');
     expect(pageBody).toContain('id="filePreviewOverlay"');
     expect(pageBody).toContain('id="filePreviewMarkdown"');
+    expect(pageBody).toContain('id="filePreviewHtml"');
     expect(pageBody).toContain('id="filePreviewImage"');
     expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
@@ -211,7 +212,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function handleComposerImageDrop(event)");
     expect(appScriptBody).toContain('addEventListener("drop", handleComposerImageDrop)');
     expect(appScriptBody).toContain('addAttachments(files, { source: "drop" })');
-    expect(appScriptBody).toContain("function openChatFilePreview(projectId, rawPath, kind)");
+    expect(appScriptBody).toContain("function openChatFilePreview(agentId, projectId, rawPath, kind)");
+    expect(appScriptBody).toContain('if (/\\.(?:html|htm)$/i.test(path)) return "html";');
+    expect(appScriptBody).toContain("function inlineRemoteHtmlAssets(html, context)");
+    expect(appScriptBody).toContain('fetch(`/api/files/asset?${query}`');
     expect(appScriptBody).toContain('fetch(`/api/files/image?${query}`');
     expect(appScriptBody).toContain('closest(".chat-file-link")');
     expect(appScriptBody).toContain("CHAT_FILE_PATH_RE");
@@ -253,6 +257,7 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".composer-attachment");
     expect(stylesBody).toContain(".composer.drag-active::after");
     expect(stylesBody).toContain(".file-preview-overlay");
+    expect(stylesBody).toContain(".file-preview-html");
     expect(stylesBody).toContain(".chat-file-link");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
@@ -265,7 +270,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v50');
+    expect(workerBody).toContain('multiagent-remote-v52');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -326,14 +331,19 @@ describe("Electron dashboard server", () => {
     const projectRoot = path.join(root, "project");
     fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, ".build-tools", "android-sdk"), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, ".codex"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), "<h1>Preview</h1><script>throw new Error('blocked')</script>");
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.css"), "body { background: url(preview.png); }");
     const imageBytes = Buffer.from("89504e470d0a1a0a00000000", "hex");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.png"), imageBytes);
     fs.writeFileSync(path.join(projectRoot, "docs", "large.png"), "");
     fs.truncateSync(path.join(projectRoot, "docs", "large.png"), 25 * 1024 * 1024 + 1);
     fs.writeFileSync(path.join(projectRoot, "notes.txt"), "not allowed");
     fs.writeFileSync(path.join(projectRoot, "node_modules", "hidden.md"), "# hidden");
+    fs.writeFileSync(path.join(projectRoot, ".build-tools", "android-sdk", "cmake.org.html"), "<h1>Build tool</h1>");
+    fs.writeFileSync(path.join(projectRoot, ".codex", "instructions.md"), "# internal");
     fs.writeFileSync(path.join(root, "outside.md"), "# outside");
     fs.writeFileSync(path.join(projectRoot, "docs", "large.md"), Buffer.alloc(2 * 1024 * 1024 + 1, 65));
 
@@ -352,6 +362,10 @@ describe("Electron dashboard server", () => {
       agents: [],
       groups: [],
     });
+    service.syncAgents([
+      { id: "agent-local", projectId: "local", folder: path.join(projectRoot, "docs") },
+      { id: "agent-outside", projectId: "local", folder: root },
+    ]);
     const status = await service.start();
 
     const listResponse = await fetch(`${status.url}/api/docs?projectId=local`);
@@ -369,6 +383,18 @@ describe("Electron dashboard server", () => {
       `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "docs/preview.png" })}`,
     );
     const imageBody = Buffer.from(await image.arrayBuffer());
+    const cwdMarkdown = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "README.md" })}`,
+    ).then((response) => response.json());
+    const cwdImage = await fetch(
+      `${status.url}/api/files/asset?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "preview.png" })}`,
+    );
+    const cwdCss = await fetch(
+      `${status.url}/api/files/asset?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "preview.css" })}`,
+    );
+    const outsideAgent = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", agentId: "agent-outside", path: "outside.md" })}`,
+    );
     const imageTraversal = await fetch(
       `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "../outside.md" })}`,
     );
@@ -396,6 +422,8 @@ describe("Electron dashboard server", () => {
       "docs/README.md",
     ]);
     expect(list.documents.some((document) => document.path.includes("node_modules"))).toBe(false);
+    expect(list.documents.some((document) => document.path.includes(".build-tools"))).toBe(false);
+    expect(list.documents.some((document) => document.path.includes(".codex"))).toBe(false);
     expect(markdown).toMatchObject({ kind: "markdown", path: "docs/README.md", content: "# Remote 문서\n" });
     expect(html.kind).toBe("html");
     expect(html.content).toContain("<script>");
@@ -404,6 +432,13 @@ describe("Electron dashboard server", () => {
     expect(image.headers.get("content-type")).toBe("image/png");
     expect(image.headers.get("x-content-type-options")).toBe("nosniff");
     expect(imageBody).toEqual(imageBytes);
+    expect(cwdMarkdown).toMatchObject({ kind: "markdown", basePath: "README.md", path: "docs/README.md" });
+    expect(cwdImage.status).toBe(200);
+    expect(cwdImage.headers.get("content-type")).toBe("image/png");
+    expect(cwdCss.status).toBe(200);
+    expect(cwdCss.headers.get("content-type")).toContain("text/css");
+    expect(await cwdCss.text()).toContain("url(preview.png)");
+    expect(outsideAgent.status).toBe(403);
     expect(imageTraversal.status).toBe(403);
     expect(imageUnsupported.status).toBe(415);
     expect(imageOversized.status).toBe(413);

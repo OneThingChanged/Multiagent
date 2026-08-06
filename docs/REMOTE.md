@@ -2,7 +2,7 @@
 
 A Standard-only mobile remote for checking desktop MultiAgent sessions from a phone/tablet, giving short commands, and viewing local project Markdown/HTML documents. On Electron apps 0.5.31+, `app/electron/services/web-services.mjs` provides the server and `app/electron/remote-pwa/` provides the shared mobile UI. That UI can be opened in a browser/PWA or through the native Android shell under `mobile/`.
 
-Company builds hide the Remote tab in Settings, reject Remote·Tunnel commands in main IPC, and exclude `electron/remote-pwa/**` from packaging.
+Company builds hide the Remote tab in Settings and reject Remote·Tunnel commands in main IPC. They still package the shared `electron/remote-pwa/` shell because the loopback Dashboard uses it, but exclude `electron/remote-pwa/downloads/**` and keep external Remote/Tunnel runtime features disabled.
 
 ## Overall Flow
 
@@ -20,10 +20,10 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 
 ## Remote Screen Layout
 
-- **Monitor**: separates working · needs-answer · done · waiting · inactive sessions into lanes, with status counts at a glance
+- **Status model**: working · needs-answer · done · waiting · inactive states still drive filters, badges, hooks, and notifications, but the desktop-oriented Monitor board itself is omitted from Remote navigation
 - **Screens**: read-only sync of the desktop's split Screens and pane/tab layouts. Desktop can show every pane; mobile uses pane tabs and streams only the selected terminal
 - **Sessions**: per-project session list with status filters and search. The `Active` filter combines working, needs-answer, recovering/starting, done, and waiting sessions while excluding inactive sessions. A restored PTY remains **Recovering** until its AI CLI emits a hook; it is never counted as working merely because the process started. The selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
-- **Documents**: choose a local project and browse its `.md`/`.markdown`/`.html`/`.htm` files in a collapsible folder tree. Search keeps only matching documents and their parent folders visible, while the tree and preview use the full remaining viewport with independent scrolling. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
+- **Documents**: choose a local project and browse its `.md`/`.markdown`/`.html`/`.htm` files in a collapsible folder tree. Generated/internal roots such as `.build-tools`, `.claude`, `.codex`, `.qwen`, `node_modules`, `build`, and `target` are excluded. Search keeps only matching documents and their parent folders visible. On phones the document tree is a dedicated full-screen drawer; selecting a file closes it and gives the Markdown/HTML preview the full remaining viewport. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - **Usage**: a combined token/account view. It shows cumulative total, input, output, cache read/write, and reasoning tokens alongside Codex/Claude rolling-window remaining percentage, reset time, plan, and extra-usage availability
 - **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change
 - **APK download**: after login and desktop approval, the top bar shows an `APK` button when the desktop build contains `app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk`. The Remote server streams that file directly and supports interrupted-download resume
@@ -39,7 +39,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - Sending a message to an inactive Session from **Chat** mode requests activation, keeps the message in a bounded pending queue, and sends it once the PTY reports ready. If activation does not complete within 30 seconds the pending message is cancelled with an error. Inactive Terminal mode remains read-only so raw key input cannot accidentally race session startup
 - The Session composer accepts images from the attachment button, clipboard paste, or drag and drop. PNG, JPEG, GIF, WebP, and BMP files use the same preview/upload queue without interfering with ordinary text paste; the existing four-image and 8MB-per-image limits still apply
 - The Session composer grows with multi-line input instead of staying at two lines. It expands to a viewport-bounded height, then switches to internal scrolling so the conversation and send controls remain visible with a mobile keyboard open
-- Project-local Markdown and image paths shown in Remote chat are clickable. They open in an in-app overlay viewer without leaving the conversation; image reads are limited to supported formats, 25MB, and the owning project root
+- Project-local Markdown, HTML, and image paths shown in Remote chat are clickable, including inline-code paths, Markdown links, and `file:line` output. Relative paths resolve from the selected session's configured working folder; absolute paths and `..` are accepted only when the final real path remains inside the owning project. Markdown and images open in the overlay viewer, while HTML uses a script-disabled sandbox and inlines project-local stylesheets/images without leaving the conversation
 - Messages entered while a session is recovering/starting stay queued until initialization completes. Raw Terminal input is blocked during that interval. A `SessionStart` or another live agent hook marks the CLI ready; a live PTY falls back to ready after 20 seconds if the ready hook was lost, without ever reporting the fallback as active work
 - Pressing **Stop** (or Esc in the Remote chat composer) calls the dedicated cancellation endpoint. The host writes Esc to the live PTY and emits a synthetic `cancelled` hook, clearing the stale working activity without treating the turn as successfully completed. The live session returns to waiting/idle immediately and can accept the next queued or newly entered message
 - Every Screen pane has its own **Chat / Terminal** switch. Chat mode shows the selected tab's recent parsed conversation, tool groups, working indicator, and interactive prompts without leaving the multi-pane Screen
@@ -75,7 +75,9 @@ Screen selection changes only inside the Remote browser and does not change the 
 | `POST /api/session/restart` | request activation of an inactive session |
 | `POST /api/session/cancel` | interrupt an active turn and publish a `cancelled` hook so the live session returns to idle |
 | `GET /api/docs?projectId=...` | list up to 500 Markdown/HTML documents under one synchronized local project |
-| `GET /api/docs/read?projectId=...&path=...` | read one Markdown/HTML document inside that project (2MB limit) |
+| `GET /api/docs/read?projectId=...&path=...&agentId=...` | read one Markdown/HTML document inside that project (2MB limit); optional `agentId` resolves relative paths from that session's configured working folder |
+| `GET /api/files/image?projectId=...&path=...&agentId=...` | stream a supported project image for the overlay viewer (25MB limit) |
+| `GET /api/files/asset?projectId=...&path=...&agentId=...` | stream a project-local image or CSS asset while constructing a sandboxed HTML preview |
 | `GET/HEAD /downloads/MultiAgent-Mobile.apk` | download the bundled ARM64 Android client APK; login/approval required, byte ranges supported |
 | `GET /auth/mode` | returns web/device mode based on OAuth config |
 | `POST /auth/start` | start GitHub Device Flow |
@@ -123,7 +125,7 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 
 - The server listens on `127.0.0.1` only; external exposure goes through Cloudflare HTTPS.
 - All APIs check login + approval. Only direct loopback requests are allowed without approval, for local diagnostics.
-- Document paths are resolved against a synchronized local project root. Absolute paths, `..` traversal outside the project, symbolic-link escapes, unsupported extensions, files over 2MB, and SSH projects are rejected. Dependency/build/cache folders are skipped while listing.
+- Document paths are resolved from the selected session's configured folder when an agent id is supplied, then confined to its synchronized local project root. Absolute paths, `..` traversal outside the project, symbolic-link escapes, unsupported extensions, oversized files, and SSH projects are rejected. Dependency/build/cache folders are skipped while listing.
 - Markdown raw HTML is escaped before rendering. HTML previews use an iframe without `allow-scripts` or `allow-same-origin`, so document scripts and parent-window access are blocked.
 - PTY input and cancellation allow same-origin JSON POST only; cross-site requests, wrong Content-Type, empty values, over-8KB input, and exited sessions are rejected.
 - Image uploads use the same approval and same-origin boundary. The server ignores client file paths, accepts five raster MIME types only, verifies their file signatures, caps decoded files at 8MB, and writes random names under `remote-attachments` in the app data folder.
@@ -145,13 +147,13 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
    - Browser: choose **Install app / Add to Home Screen** and tap the notification button. The success message must say that background notifications are enabled. HTTPS is required away from localhost; on iPhone/iPad, Web Push requires a Home Screen-installed PWA
    - Android: tap the `APK` button in the Remote top bar, install the downloaded file, enter the same HTTPS tunnel URL, and complete the existing GitHub login/approval flow.
 
-The first screen after connecting is Monitor. Tapping a top status card filters to that status; **SCREENS** on the left opens split screens, **SESSIONS** opens individual sessions, **Documents** opens the local project document browser, and **Usage** opens account limits. On mobile, one combined **Sessions** button opens the sidebar containing both Screens and individual sessions; the one-line bottom bar is Monitor/Sessions/Documents/Usage. Opening any non-monitor view hides the monitor summary so the selected content can use the phone's full dynamic viewport.
+After connecting, the root route opens the first available **Screen**, then falls back to an active **Session**, **Documents**, or **Usage**. The desktop-oriented Monitor overview and global status cards are intentionally omitted. On mobile, one combined **Sessions** button opens the sidebar containing Screens and individual sessions; the one-line bottom bar switches between Sessions, Documents, and Usage so the selected content can use the full dynamic viewport.
 
 Background completion delivery requires the desktop MultiAgent process and an internet connection to remain available. Closing all workspace windows is fine because the system tray keeps hooks and Web Push alive; choosing **Exit** from the tray stops delivery. Keep the Remote tunnel/server available as well so tapping a notification can reopen the session.
 
 The Usage tab emphasizes the amount **remaining** even though provider APIs report `used_percent`. Codex values come from recent local Codex transcript rate-limit metadata; Claude values come from Claude Code's local OAuth usage endpoint. A provider can therefore be absent until its local session/credential has supplied a snapshot. The refresh button requests current values, while the server protects the upstream check with a 30-second throttle.
 
-Document browsing is local-project only. SSH project files and relative HTML assets such as external CSS/images are not transferred in this version; self-contained HTML and inline styles render normally.
+Document browsing is local-project only. SSH project files are not transferred in this version. Sandboxed HTML previews can inline project-local CSS and image references, but scripts, external navigation privileges, fonts, and arbitrary binary assets remain unavailable.
 
 ## Native Android Client
 

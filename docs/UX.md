@@ -146,7 +146,7 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - Commit message input + **Stage All** / **Commit** buttons (commit also via `Ctrl+Enter`)
 - **Commit behavior** (VS Code style): if there are staged items, `Commit (N)` = commit only those (selected commit). If nothing is staged, `Commit All (N)` = stage all then commit. Enabled whenever there is a message + changes, so there is no dead end
 - **Row selection**: single click = toggle checkbox, **Shift+click = range select**. Double-click launches the configured external diff for source/config/text changes; HTML and non-text assets keep the normal document-viewer open action
-- **Multi-select batch bar**: with items selected, a top bar shows `N selected · Stage · Unstage · Discard · ×` — handle many files at once
+- **Multi-select batch bar**: a fixed-height toolbar slot always remains above the groups. It shows disabled `선택 없음` when empty, then `N selected · Stage · Unstage · Discard · ×` after selection. Reserving the slot prevents the first click from shifting rows and breaking a double-click
 - **Staged / Changes** groups: row hover shows `+`/`−` (stage/unstage) and `↺` (Discard) buttons. Partial staging (`MM`) shows on both sides
 - **Discard**: after a confirmation dialog — modified/deleted (M/D) are restored to the last commit state via `git restore`, untracked (U) goes to the trash, staged-new (A) is unstaged then trashed. May fail if the file is locked by another program (e.g., Unreal Editor)
 - Per-file `+added/−deleted` line counts and status colors, with the 8 most recent commits at the bottom
