@@ -1054,7 +1054,7 @@ function renderSession() {
       if (nearBottom) requestAnimationFrame(() => { ui.outputText.scrollTop = ui.outputText.scrollHeight; });
     }
   }
-  const canReturn = returnScreenId && screenGroups().some((screen) => screen.id === returnScreenId);
+  const canReturn = !isMobile() && returnScreenId && screenGroups().some((screen) => screen.id === returnScreenId);
   ui.backToScreenButton.hidden = !canReturn;
 }
 
@@ -2123,7 +2123,13 @@ function selectMonitor(filter = activeFilter) {
 }
 
 function selectScreen(id) {
-  if (!screenGroups().some((screen) => screen.id === id)) return;
+  const screen = screenGroups().find((candidate) => candidate.id === id);
+  if (!screen) return;
+  if (isMobile()) {
+    const agentId = preferredSessionId(screen);
+    if (agentId) selectSession(agentId);
+    return;
+  }
   selection = { type: "screen", id };
   returnScreenId = id;
   mobilePaneId = null;
@@ -2137,7 +2143,7 @@ function selectScreen(id) {
 function selectSession(id, fromScreenId = null) {
   if (!agentMap().has(id)) return;
   selection = { type: "session", id };
-  returnScreenId = fromScreenId;
+  returnScreenId = isMobile() ? null : fromScreenId;
   if (!isMobile() && compactWorkspaceMedia.matches) applyNavCollapsed(true);
   updateUrl();
   renderNavigation();
@@ -3375,10 +3381,12 @@ function setSessionViewMode(mode) {
   updateComposerSendState();
 }
 
-// Mobile Screen mode renders one pane at a time and keeps the same navigation
-// entry as desktop. Refit the selected terminal after a viewport transition.
 function applyScreenAvailability() {
-  if (ui.screensSection) ui.screensSection.hidden = false;
+  const mobile = isMobile();
+  if (ui.screensSection) ui.screensSection.hidden = mobile;
+  ui.searchInput.placeholder = mobile
+    ? "프로젝트 · 세션 검색"
+    : "Screen · 프로젝트 · 세션 검색";
 }
 
 async function showNotification(title, body, tag, agentId) {
@@ -3414,9 +3422,21 @@ function processActivityNotifications(agents) {
   firstSnapshot = false;
 }
 
+function preferredSessionId(screen = null) {
+  const ids = screen?.memberIds?.length
+    ? screen.memberIds
+    : allAgents().map((agent) => agent.id);
+  const agents = ids.map((id) => agentMap().get(id)).filter(Boolean);
+  return agents.find((agent) => statusOf(agent) !== "offline")?.id
+    || agents[0]?.id
+    || null;
+}
+
 function defaultWorkspaceSelection() {
-  const screen = screenGroups()[0];
-  if (screen) return { type: "screen", id: screen.id };
+  if (!isMobile()) {
+    const screen = screenGroups()[0];
+    if (screen) return { type: "screen", id: screen.id };
+  }
   const agents = allAgents();
   const agent = agents.find((candidate) => statusOf(candidate) !== "offline") || agents[0];
   if (agent) return { type: "session", id: agent.id };
@@ -3428,13 +3448,24 @@ function defaultWorkspaceSelection() {
 function validateSelection() {
   if (selection.type === "monitor") selection = defaultWorkspaceSelection();
   if (selection.type === "session" && !agentMap().has(selection.id)) selection = defaultWorkspaceSelection();
-  if (selection.type === "screen" && !screenGroups().some((screen) => screen.id === selection.id)) selection = defaultWorkspaceSelection();
+  if (selection.type === "screen") {
+    const screen = screenGroups().find((candidate) => candidate.id === selection.id);
+    if (isMobile()) {
+      const agentId = preferredSessionId(screen);
+      selection = agentId ? { type: "session", id: agentId } : defaultWorkspaceSelection();
+      returnScreenId = null;
+      mobilePaneId = null;
+      screenRenderKey = "";
+    } else if (!screen) {
+      selection = defaultWorkspaceSelection();
+    }
+  }
   if (selection.type === "documents" && !localDocumentProjects().some((project) => project.id === selection.id)) {
     const fallback = localDocumentProjects()[0];
     selection = fallback ? { type: "documents", id: fallback.id } : defaultWorkspaceSelection();
     selectedDocumentPath = null;
   }
-  returnScreenId = selection.type === "screen" ? selection.id : returnScreenId;
+  returnScreenId = !isMobile() && selection.type === "screen" ? selection.id : returnScreenId;
 }
 
 function syncMobileAppDownload(info) {
@@ -3929,10 +3960,14 @@ function toggleNavCollapsed() {
   applyNavCollapsed(collapsed);
 }
 
-// React to viewport changes: enable/disable Screen mode and re-fit terminals.
+// Screen mode is desktop-only. Crossing into the mobile breakpoint moves an
+// open Screen to one of its sessions and rewrites the URL to ?agent=... .
 mobileMedia.addEventListener("change", () => {
   applyScreenAvailability();
+  validateSelection();
   renderNavigation();
+  renderSelection();
+  updateUrl();
   syncDocumentSidebar();
   syncTerminal();
   updateSidebarToggleState();

@@ -1077,6 +1077,7 @@ function App() {
         id: a.id,
         projectId: a.projectId,
         name: a.name,
+        folder: a.folder,
         status: a.status,
         aiToolId: a.aiToolId,
       })),

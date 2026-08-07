@@ -270,7 +270,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v52');
+    expect(workerBody).toContain('multiagent-remote-v53');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -359,12 +359,17 @@ describe("Electron dashboard server", () => {
         { id: "local", name: "Local", folder: projectRoot },
         { id: "ssh", name: "SSH", folder: "/remote/project", sshHostId: "host-1" },
       ],
-      agents: [],
+      agents: [
+        { id: "agent-root", projectId: "local" },
+        { id: "agent-local", projectId: "local", folder: path.join(projectRoot, "docs") },
+        { id: "agent-outside", projectId: "local", folder: root },
+      ],
       groups: [],
     });
     service.syncAgents([
-      { id: "agent-local", projectId: "local", folder: path.join(projectRoot, "docs") },
-      { id: "agent-outside", projectId: "local", folder: root },
+      { id: "agent-root", name: "Root", status: "done", tool: "codex" },
+      { id: "agent-local", name: "Docs", status: "done", tool: "codex" },
+      { id: "agent-outside", name: "Outside", status: "done", tool: "codex" },
     ]);
     const status = await service.start();
 
@@ -388,6 +393,9 @@ describe("Electron dashboard server", () => {
     ).then((response) => response.json());
     const cwdImage = await fetch(
       `${status.url}/api/files/asset?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "preview.png" })}`,
+    );
+    const projectRelativeImage = await fetch(
+      `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", agentId: "agent-root", path: "docs/preview.png" })}`,
     );
     const cwdCss = await fetch(
       `${status.url}/api/files/asset?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "preview.css" })}`,
@@ -435,6 +443,8 @@ describe("Electron dashboard server", () => {
     expect(cwdMarkdown).toMatchObject({ kind: "markdown", basePath: "README.md", path: "docs/README.md" });
     expect(cwdImage.status).toBe(200);
     expect(cwdImage.headers.get("content-type")).toBe("image/png");
+    expect(projectRelativeImage.status).toBe(200);
+    expect(projectRelativeImage.headers.get("content-type")).toBe("image/png");
     expect(cwdCss.status).toBe(200);
     expect(cwdCss.headers.get("content-type")).toContain("text/css");
     expect(await cwdCss.text()).toContain("url(preview.png)");

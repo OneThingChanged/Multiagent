@@ -280,8 +280,19 @@ function documentProjects(snapshot) {
 }
 
 function documentAgents(snapshot) {
-  if (Array.isArray(snapshot?.agents)) return snapshot.agents;
-  return Array.isArray(snapshot?.view?.agents) ? snapshot.view.agents : [];
+  const liveAgents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
+  const viewAgents = Array.isArray(snapshot?.view?.agents) ? snapshot.view.agents : [];
+  const merged = new Map();
+  for (const agent of liveAgents) {
+    const id = String(agent?.id || "").trim();
+    if (id) merged.set(id, agent);
+  }
+  for (const agent of viewAgents) {
+    const id = String(agent?.id || "").trim();
+    if (!id) continue;
+    merged.set(id, { ...(merged.get(id) || {}), ...agent });
+  }
+  return [...merged.values()];
 }
 
 function documentProjectRoot(snapshot, projectId, agentId = null) {
