@@ -270,7 +270,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v53');
+    expect(workerBody).toContain('multiagent-remote-v54');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -329,12 +329,15 @@ describe("Electron dashboard server", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-docs-"));
     roots.push(root);
     const projectRoot = path.join(root, "project");
+    const otherProjectRoot = path.join(root, "other-project");
     fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
+    fs.mkdirSync(otherProjectRoot, { recursive: true });
     fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, ".build-tools", "android-sdk"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, ".codex"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), "<h1>Preview</h1><script>throw new Error('blocked')</script>");
+    fs.writeFileSync(path.join(otherProjectRoot, "other.html"), "<h1>Other project</h1>");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.css"), "body { background: url(preview.png); }");
     const imageBytes = Buffer.from("89504e470d0a1a0a00000000", "hex");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.png"), imageBytes);
@@ -357,6 +360,7 @@ describe("Electron dashboard server", () => {
     service.syncView({
       projects: [
         { id: "local", name: "Local", folder: projectRoot },
+        { id: "other", name: "Other", folder: otherProjectRoot },
         { id: "ssh", name: "SSH", folder: "/remote/project", sshHostId: "host-1" },
       ],
       agents: [
@@ -370,6 +374,7 @@ describe("Electron dashboard server", () => {
       { id: "agent-root", name: "Root", status: "done", tool: "codex" },
       { id: "agent-local", name: "Docs", status: "done", tool: "codex" },
       { id: "agent-outside", name: "Outside", status: "done", tool: "codex" },
+      { id: "agent-live-only", name: "Legacy", status: "done", tool: "codex" },
     ]);
     const status = await service.start();
 
@@ -384,6 +389,19 @@ describe("Electron dashboard server", () => {
     const absoluteMarkdown = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: path.join(projectRoot, "docs", "README.md") })}`,
     );
+    const slashDriveMarkdown = process.platform === "win32"
+      ? await fetch(`${status.url}/api/docs/read?${new URLSearchParams({
+        projectId: "local",
+        path: `/${path.join(projectRoot, "docs", "README.md").replaceAll("\\", "/")}`,
+      })}`)
+      : null;
+    const otherProjectHtml = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({
+        projectId: "local",
+        agentId: "agent-local",
+        path: path.join(otherProjectRoot, "other.html"),
+      })}`,
+    ).then((response) => response.json());
     const image = await fetch(
       `${status.url}/api/files/image?${new URLSearchParams({ projectId: "local", path: "docs/preview.png" })}`,
     );
@@ -391,6 +409,9 @@ describe("Electron dashboard server", () => {
     const cwdMarkdown = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "README.md" })}`,
     ).then((response) => response.json());
+    const legacyAgentMarkdown = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", agentId: "agent-live-only", path: "docs/README.md" })}`,
+    );
     const cwdImage = await fetch(
       `${status.url}/api/files/asset?${new URLSearchParams({ projectId: "local", agentId: "agent-local", path: "preview.png" })}`,
     );
@@ -415,6 +436,9 @@ describe("Electron dashboard server", () => {
     const traversal = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "../outside.md" })}`,
     );
+    const absoluteOutside = await fetch(
+      `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: path.join(root, "outside.md") })}`,
+    );
     const unsupported = await fetch(
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "notes.txt" })}`,
     );
@@ -436,11 +460,18 @@ describe("Electron dashboard server", () => {
     expect(html.kind).toBe("html");
     expect(html.content).toContain("<script>");
     expect(absoluteMarkdown.status).toBe(200);
+    if (slashDriveMarkdown) expect(slashDriveMarkdown.status).toBe(200);
+    expect(otherProjectHtml).toMatchObject({
+      project: { id: "other", name: "Other" },
+      path: "other.html",
+      basePath: "other.html",
+    });
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/png");
     expect(image.headers.get("x-content-type-options")).toBe("nosniff");
     expect(imageBody).toEqual(imageBytes);
     expect(cwdMarkdown).toMatchObject({ kind: "markdown", basePath: "README.md", path: "docs/README.md" });
+    expect(legacyAgentMarkdown.status).toBe(200);
     expect(cwdImage.status).toBe(200);
     expect(cwdImage.headers.get("content-type")).toBe("image/png");
     expect(projectRelativeImage.status).toBe(200);
@@ -453,6 +484,7 @@ describe("Electron dashboard server", () => {
     expect(imageUnsupported.status).toBe(415);
     expect(imageOversized.status).toBe(413);
     expect(traversal.status).toBe(403);
+    expect(absoluteOutside.status).toBe(403);
     expect(unsupported.status).toBe(415);
     expect(oversized.status).toBe(413);
     expect(ssh.status).toBe(409);

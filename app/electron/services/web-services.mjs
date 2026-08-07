@@ -319,21 +319,23 @@ function documentProjectRoot(snapshot, projectId, agentId = null) {
     const agent = documentAgents(snapshot).find(
       (candidate) => String(candidate?.id || "") === requestedAgentId,
     );
-    if (!agent || String(agent.projectId || "") !== id) {
-      throw new RemoteDocumentError(404, "세션 작업 폴더를 찾을 수 없습니다.");
-    }
-    if (agent.sshHostId) {
-      throw new RemoteDocumentError(409, "SSH 세션의 원격 파일 보기는 아직 지원하지 않습니다.");
-    }
-    const agentFolder = String(agent.folder || "").trim();
-    if (agentFolder) {
-      try {
-        baseRoot = fs.realpathSync(agentFolder);
-      } catch {
-        throw new RemoteDocumentError(404, "세션 작업 폴더를 찾을 수 없습니다.");
+    // Restored or older clients can briefly publish live agent data without
+    // project/folder metadata. Fall back to the selected project root, which
+    // preserves the same sandbox boundary until richer view data arrives.
+    if (agent && (!agent.projectId || String(agent.projectId) === id)) {
+      if (agent.sshHostId) {
+        throw new RemoteDocumentError(409, "SSH 세션의 원격 파일 보기는 아직 지원하지 않습니다.");
       }
-      if (!fs.statSync(baseRoot).isDirectory() || !isInsideDocumentRoot(root, baseRoot)) {
-        throw new RemoteDocumentError(403, "세션 작업 폴더가 프로젝트 밖에 있습니다.");
+      const agentFolder = String(agent.folder || "").trim();
+      if (agentFolder) {
+        try {
+          baseRoot = fs.realpathSync(agentFolder);
+        } catch {
+          throw new RemoteDocumentError(404, "세션 작업 폴더를 찾을 수 없습니다.");
+        }
+        if (!fs.statSync(baseRoot).isDirectory() || !isInsideDocumentRoot(root, baseRoot)) {
+          throw new RemoteDocumentError(403, "세션 작업 폴더가 프로젝트 밖에 있습니다.");
+        }
       }
     }
   }
@@ -343,6 +345,37 @@ function documentProjectRoot(snapshot, projectId, agentId = null) {
 function isInsideDocumentRoot(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizeRemoteRequestedPath(requestedPath) {
+  const raw = String(requestedPath || "").trim().replaceAll("\\", "/");
+  // Markdown renderers sometimes turn G:/path into /G:/path. Treat that as a
+  // Windows drive path instead of a POSIX root.
+  return /^\/[A-Za-z]:\//.test(raw) ? raw.slice(1) : raw;
+}
+
+function documentProjectRootForAbsolutePath(snapshot, candidate) {
+  const matches = [];
+  for (const project of documentProjects(snapshot)) {
+    if (project?.sshHostId) continue;
+    const folder = String(project?.folder || "").trim();
+    if (!folder) continue;
+    try {
+      const root = fs.realpathSync(folder);
+      if (fs.statSync(root).isDirectory() && isInsideDocumentRoot(root, candidate)) {
+        matches.push({ project, root, baseRoot: root });
+      }
+    } catch {
+      // A stale project must not prevent another registered project from
+      // owning the requested path.
+    }
+  }
+  if (!matches.length) {
+    throw new RemoteDocumentError(403, "등록된 프로젝트 밖의 파일은 열 수 없습니다.");
+  }
+  // Nested project roots are valid; the most specific registered root wins.
+  matches.sort((left, right) => right.root.length - left.root.length);
+  return matches[0];
 }
 
 async function collectRemoteDocuments(root, directory, output) {
@@ -389,11 +422,14 @@ async function listRemoteDocuments(snapshot, projectId) {
 }
 
 async function resolveRemoteProjectFile(snapshot, projectId, requestedPath, agentId = null) {
-  const { project, root, baseRoot } = documentProjectRoot(snapshot, projectId, agentId);
-  const raw = String(requestedPath || "").trim().replaceAll("\\", "/");
+  const raw = normalizeRemoteRequestedPath(requestedPath);
   if (!raw) throw new RemoteDocumentError(400, "올바른 파일 경로가 필요합니다.");
   const absolute = path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw);
-  const candidate = absolute ? path.resolve(raw) : path.resolve(baseRoot, ...raw.split("/"));
+  const absoluteCandidate = absolute ? path.resolve(raw) : null;
+  const { project, root, baseRoot } = absolute
+    ? documentProjectRootForAbsolutePath(snapshot, absoluteCandidate)
+    : documentProjectRoot(snapshot, projectId, agentId);
+  const candidate = absoluteCandidate ?? path.resolve(baseRoot, ...raw.split("/"));
   if (!isInsideDocumentRoot(root, candidate)) {
     throw new RemoteDocumentError(403, "프로젝트 밖의 파일은 열 수 없습니다.");
   }

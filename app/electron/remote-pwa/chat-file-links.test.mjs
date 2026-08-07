@@ -20,7 +20,7 @@ function loadChatFileLinkFunctions() {
   context.globalThis = context;
   vm.runInNewContext(
     `${source.slice(start, end)}\n` +
-      "globalThis.chatFileLinks = { cleanChatFilePath, chatFileKind, inlineMd };",
+      "globalThis.chatFileLinks = { cleanChatFilePath, isAbsoluteChatFilePath, chatFileKind, inlineMd };",
     context,
   );
   return context.chatFileLinks;
@@ -54,6 +54,11 @@ describe("Remote chat file links", () => {
       .toBe("C:\\Project\\docs\\README.md");
     expect(links.chatFileKind("C:\\Project\\shots\\result.webp")).toBe("image");
     expect(links.chatFileKind("reports/result.htm")).toBe("html");
+    expect(links.cleanChatFilePath("/G:/Project/docs/report.html"))
+      .toBe("G:/Project/docs/report.html");
+    expect(links.isAbsoluteChatFilePath("/G:/Project/docs/report.html")).toBe(true);
+    expect(links.inlineMd("/G:/Project/docs/report.html", agent))
+      .toContain('data-chat-file-path="G:/Project/docs/report.html"');
   });
 
   it("keeps external image URLs external and does not link without a project", () => {

@@ -1685,9 +1685,12 @@ async function openChatFilePreview(agentId, projectId, rawPath, kind) {
       if (requestId !== filePreviewRequest) return;
       ui.filePreviewTitle.textContent = result.name || ui.filePreviewTitle.textContent;
       ui.filePreviewPath.textContent = result.path || path;
+      const resolvedProjectId = text(result.project?.id) || projectId;
       const context = {
-        agentId,
-        projectId,
+        // Absolute paths are returned project-relative by the server. Resolve
+        // their assets from that project root, not the originating session cwd.
+        agentId: resolvedProjectId === projectId && !isAbsoluteChatFilePath(path) ? agentId : "",
+        projectId: resolvedProjectId,
         path: result.basePath || path,
         displayPath: result.path || path,
         kind: result.kind || kind,
@@ -2990,7 +2993,7 @@ let chatRequestSeq = 0;
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-const CHAT_FILE_PATH_RE = /(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()[\]{},;]+[\\/])*[^\s"'<>|:*?()[\]{},;]+\.(?:md|markdown|html?|png|jpe?g|gif|webp|bmp|svg|ico)(?::\d+(?::\d+)?)?/gi;
+const CHAT_FILE_PATH_RE = /(?:\/?[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[^\s"'<>|:*?()[\]{},;]+[\\/])*[^\s"'<>|:*?()[\]{},;]+\.(?:md|markdown|html?|png|jpe?g|gif|webp|bmp|svg|ico)(?::\d+(?::\d+)?)?/gi;
 
 function cleanChatFilePath(value) {
   let result = String(value ?? "").trim()
@@ -2999,7 +3002,12 @@ function cleanChatFilePath(value) {
     .replace(/(:\d+)(?::\d+)?$/, "")
     .split(/[?#]/)[0];
   try { result = decodeURIComponent(result); } catch {}
-  return result.trim();
+  result = result.trim();
+  return /^\/[A-Za-z]:[\\/]/.test(result) ? result.slice(1) : result;
+}
+
+function isAbsoluteChatFilePath(value) {
+  return /^[A-Za-z]:[\\/]/.test(cleanChatFilePath(value));
 }
 
 function chatFileKind(value) {
