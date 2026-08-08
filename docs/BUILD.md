@@ -71,6 +71,33 @@ Prerequisites:
 - Android SDK Platform 36 and Build Tools
 - Android NDK 27.1.12297006 and CMake 3.22.1 for the Expo native build
 
+Native completion/question notifications additionally require an Expo/EAS project and
+an Android Firebase app for package `com.OneThingChanged.multiagent.mobile`. Keep the files
+and credentials outside the repository, then inject only their local locations:
+
+```powershell
+$env:MULTIAGENT_EXPO_PROJECT_ID='your-expo-project-uuid'
+$env:MULTIAGENT_GOOGLE_SERVICES_JSON='C:\secure\multiagent\google-services.json'
+$env:MULTIAGENT_ANDROID_KEYSTORE_PATH='C:\secure\multiagent\multiagent-release.keystore'
+$env:MULTIAGENT_ANDROID_KEYSTORE_PASSWORD='<local secret>'
+$env:MULTIAGENT_ANDROID_KEY_ALIAS='multiagent'
+$env:MULTIAGENT_ANDROID_KEY_PASSWORD='<local secret>'
+```
+
+Create/link the Expo project under the distributor account and upload its Firebase
+service-account key as the project's Android **FCM V1** credential in the Expo/EAS
+credentials dashboard. The service-account JSON is needed for that one-time credential
+setup, but it is not used by this repository or bundled into the APK. Download the
+Android app's `google-services.json` from Firebase to the protected path above. None of
+these steps requires a Play Store listing.
+
+`mobile/app.config.mjs` reads those variables during prebuild. Do not copy
+`google-services.json`, service-account JSON, an Expo access token, a JKS/keystore, or
+passwords into tracked source. `.gitignore` blocks the common credential filenames;
+`mobile/.env.example` contains placeholders only. If Expo Push enhanced security is
+enabled, set `MULTIAGENT_EXPO_ACCESS_TOKEN` only in the desktop process environment.
+The Remote service reads it at runtime and never persists or sends it to a browser.
+
 Build an installable ARM64 APK:
 
 ```powershell
@@ -81,6 +108,11 @@ npm run typecheck
 npm run prebuild:android
 npm run apk
 ```
+
+Run `npx expo config --type public` before prebuild and confirm `extra.eas.projectId`
+and `android.googleServicesFile` point at the intended account/configuration. A build
+without those injected values can still render the Remote WebView, but native push-token
+registration will report that the APK is not push configured.
 
 The generated file is
 `mobile/android/app/build/outputs/apk/release/app-release.apk`. The checked-in
@@ -104,10 +136,20 @@ stream the APK efficiently. Standard installers include it; Company installers
 continue to exclude the entire Remote PWA tree. The authenticated Remote top bar
 shows the APK button only when this file exists.
 
-The prototype Release task uses the generated Android debug identity. It is
-suitable for direct device installation and repeatable local testing, but not
-for Play Store publishing. A store release needs a protected upload key, release
-signing configuration, and an AAB pipeline.
+`npm run apk` refuses to build unless all four release-signing variables are present and
+the keystore path exists. The Expo config plugin repeats this check inside Gradle so a
+direct `assembleRelease` cannot silently fall back to the public debug key. For local
+compile verification only, `npm run apk:verify` explicitly permits debug signing; never
+publish that artifact. Keep one stable release keystore outside Git and back it up,
+because losing/changing it prevents an installed APK from accepting an in-place update.
+Play Store registration is not required for APK sideloading; store publication
+additionally needs an upload key and AAB pipeline.
+
+APK builds distributed through desktop release `0.5.98` and earlier used Expo's shared
+debug certificate. The first securely signed APK cannot update those installations in
+place: uninstall the old APK once, install the new release-signed APK, and keep using the
+same protected release keystore for every later update. Do not bypass the guard by
+publishing an `apk:verify` artifact merely to preserve the old debug signature.
 
 Company Electron uses the `com.jintae.multiagent.company.electron` identifier and the
 `%LOCALAPPDATA%\com.jintae.multiagent.company` shared snapshot, and blocks Remote/Tunnel

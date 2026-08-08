@@ -341,6 +341,13 @@ function publishAgentHookEvent(eventName, payload) {
       remoteService.notifyAgentDone(payload).catch((error) => {
         console.warn("[electron] remote completion push failed", error?.message || error);
       });
+    } else if (
+      payload.event === "waiting" &&
+      (payload.interactive_question || payload.tool_name === "AskUserQuestion")
+    ) {
+      remoteService.notifyAgentQuestion(payload).catch((error) => {
+        console.warn("[electron] remote question push failed", error?.message || error);
+      });
     }
   }
   sendEventToAll(eventName, payload);

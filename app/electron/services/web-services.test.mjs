@@ -577,9 +577,21 @@ describe("Electron dashboard server", () => {
         calls.push({ type: "unsubscribe", login, endpoint });
         return { subscribed: false };
       },
+      subscribeNative(login, value) {
+        calls.push({ type: "subscribe-native", login, value });
+        return { subscribed: true };
+      },
+      unsubscribeNative(login, token) {
+        calls.push({ type: "unsubscribe-native", login, token });
+        return { subscribed: false };
+      },
       removeLogin: () => {},
       async notifyDone(value) {
-        calls.push({ type: "notify", value });
+        calls.push({ type: "notify-done", value });
+        return { sent: 1 };
+      },
+      async notifyQuestion(value) {
+        calls.push({ type: "notify-question", value });
         return { sent: 1 };
       },
     };
@@ -608,17 +620,42 @@ describe("Electron dashboard server", () => {
       headers: { origin: "https://evil.example", "content-type": "application/json" },
       body: JSON.stringify(value),
     });
+    const nativeValue = {
+      token: "ExponentPushToken[device_token_12345]",
+      platform: "android",
+    };
+    const nativeSubscribed = await fetch(`${status.url}/api/push/native-subscription`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: JSON.stringify(nativeValue),
+    });
     await service.notifyAgentDone({
       id: "agent-1",
       event: "done",
       session_id: "session-1",
     });
+    await service.notifyAgentQuestion({
+      id: "agent-1",
+      event: "waiting",
+      session_id: "session-1",
+      interactive_question: true,
+    });
 
     expect(subscribed.status).toBe(201);
+    expect(nativeSubscribed.status).toBe(201);
     expect(blocked.status).toBe(403);
     expect(calls).toContainEqual({ type: "subscribe", login: "__local__", value });
+    expect(calls).toContainEqual({ type: "subscribe-native", login: "__local__", value: nativeValue });
     expect(calls).toContainEqual({
-      type: "notify",
+      type: "notify-done",
+      value: {
+        agentId: "agent-1",
+        sessionId: "session-1",
+        title: "ProjectA / Build",
+      },
+    });
+    expect(calls).toContainEqual({
+      type: "notify-question",
       value: {
         agentId: "agent-1",
         sessionId: "session-1",

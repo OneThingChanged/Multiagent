@@ -79,7 +79,10 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data?.text() || "작업이 완료되었습니다." };
   }
-  const agentId = payload.agentId || null;
+  const candidateAgentId = String(payload.agentId || "").trim();
+  const agentId = /^[A-Za-z0-9._:-]{1,128}$/.test(candidateAgentId)
+    ? candidateAgentId
+    : null;
   const title = payload.title || "MultiAgent";
   event.waitUntil(self.registration.showNotification(title, {
     body: payload.body || "작업이 완료되었습니다.",
@@ -90,7 +93,7 @@ self.addEventListener("push", (event) => {
     timestamp: Number(payload.timestamp) || Date.now(),
     data: {
       agentId,
-      url: payload.url || (agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/"),
+      url: agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/",
     },
   }));
 });
@@ -106,7 +109,7 @@ self.addEventListener("notificationclick", (event) => {
         existing.postMessage({ type: "open-agent", agentId });
         return;
       }
-      const target = event.notification.data?.url || (agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/");
+      const target = agentId ? `/?agent=${encodeURIComponent(agentId)}` : "/";
       await self.clients.openWindow(target);
     })
   );

@@ -862,7 +862,7 @@ export class RemoteDashboardService {
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [], tokens: {} }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
-    this.pushService = pushService ?? new RemotePushService({ baseDir });
+    this.pushService = pushService ?? new RemotePushService({ baseDir, fetchImpl });
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -921,6 +921,18 @@ export class RemoteDashboardService {
 
   notifyAgentDone(payload) {
     if (payload?.event !== "done" || !payload?.id) return Promise.resolve(null);
+    return this.notifyAgentEvent(payload, "done");
+  }
+
+  notifyAgentQuestion(payload) {
+    if (payload?.event !== "waiting" || !payload?.id) return Promise.resolve(null);
+    if (!payload?.interactive_question && payload?.tool_name !== "AskUserQuestion") {
+      return Promise.resolve(null);
+    }
+    return this.notifyAgentEvent(payload, "question");
+  }
+
+  notifyAgentEvent(payload, kind) {
     const agent = this.agents.find((entry) => entry.id === payload.id) ?? null;
     const viewAgent = Array.isArray(this.view?.agents)
       ? this.view.agents.find((entry) => entry.id === payload.id)
@@ -932,11 +944,14 @@ export class RemoteDashboardService {
       agent?.project || agent?.projectName || project?.name || "MultiAgent",
     ).trim();
     const agentName = String(agent?.name || payload.id).trim();
-    return this.pushService.notifyDone({
+    const notification = {
       agentId: payload.id,
       sessionId: payload.session_id,
       title: `${projectName} / ${agentName}`,
-    });
+    };
+    return kind === "question"
+      ? this.pushService.notifyQuestion(notification)
+      : this.pushService.notifyDone(notification);
   }
 
   sign(login) {
@@ -1188,7 +1203,7 @@ export class RemoteDashboardService {
         }
         if (
           ["POST", "DELETE"].includes(request.method) &&
-          url.pathname === "/api/push/subscription"
+          ["/api/push/subscription", "/api/push/native-subscription"].includes(url.pathname)
         ) {
           if (!this.isSameOrigin(request)) {
             sendJson(response, 403, { error: "cross-origin request blocked" });
@@ -1205,9 +1220,14 @@ export class RemoteDashboardService {
           }
           try {
             const body = await readJson(request);
+            const native = url.pathname === "/api/push/native-subscription";
             const result = request.method === "POST"
-              ? this.pushService.subscribe(pushLogin, body)
-              : this.pushService.unsubscribe(pushLogin, body.endpoint);
+              ? native
+                ? this.pushService.subscribeNative(pushLogin, body)
+                : this.pushService.subscribe(pushLogin, body)
+              : native
+                ? this.pushService.unsubscribeNative(pushLogin, body.token)
+                : this.pushService.unsubscribe(pushLogin, body.endpoint);
             sendJson(response, request.method === "POST" ? 201 : 200, result);
           } catch (error) {
             sendJson(response, 400, { error: error?.message || "invalid push subscription" });

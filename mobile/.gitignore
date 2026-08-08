@@ -13,6 +13,7 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -31,7 +32,16 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
 .env*.local
+
+# Firebase / store credentials (inject by environment; never commit)
+google-services.json
+GoogleService-Info.plist
+credentials*.json
+service-account*.json
 
 # typescript
 *.tsbuildinfo

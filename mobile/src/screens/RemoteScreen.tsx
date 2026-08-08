@@ -12,32 +12,54 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   WebView,
+  type WebViewMessageEvent,
   type WebViewNavigation,
 } from "react-native-webview";
 import {
   isAllowedInAppNavigation,
   remoteAppUrl,
 } from "../lib/remoteUrl";
+import {
+  isTrustedNativeBridgeUrl,
+  nativeBridgeEventScript,
+  normalizeNotificationOpenData,
+  parseNativeBridgeRequest,
+} from "../lib/notificationBridge";
+import {
+  Notifications,
+  registerNativePushAsync,
+  type NativePushRegistration,
+} from "../lib/nativePush";
 
 type Props = {
   baseUrl: string;
   onDisconnect: () => void;
 };
 
-const NATIVE_BOOTSTRAP = `
-  window.__MULTIAGENT_NATIVE_APP__ = true;
-  document.documentElement.dataset.nativeApp = "true";
-  true;
-`;
-
 export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
   const webView = useRef<WebView>(null);
+  const pageLoaded = useRef(false);
+  const nativeRegistration = useRef<NativePushRegistration | null>(null);
+  const pendingOpen = useRef<{ agentId: string; url: string } | null>(null);
+  const handledNotification = useRef("");
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [toolbarCollapsed, setToolbarCollapsed] = useState(true);
   const appUrl = useMemo(() => remoteAppUrl(baseUrl), [baseUrl]);
   const hostname = useMemo(() => new URL(baseUrl).host, [baseUrl]);
+  const remoteOrigin = useMemo(() => new URL(baseUrl).origin, [baseUrl]);
+  const nativeBootstrap = useMemo(() => `
+    if (location.origin === ${JSON.stringify(remoteOrigin)}) {
+      window.__MULTIAGENT_NATIVE_APP__ = true;
+      document.documentElement.dataset.nativeApp = "true";
+    }
+    true;
+  `, [remoteOrigin]);
+
+  const isRemotePage = (url: string) => {
+    return isTrustedNativeBridgeUrl(baseUrl, url);
+  };
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
@@ -56,6 +78,51 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
     );
     return () => subscription.remove();
   }, [canGoBack, toolbarCollapsed]);
+
+  const dispatchToPage = (eventName: string, detail: unknown) => {
+    if (!pageLoaded.current) return false;
+    webView.current?.injectJavaScript(nativeBridgeEventScript(eventName, detail));
+    return true;
+  };
+
+  const deliverRegistration = (
+    registration: NativePushRegistration,
+    userInitiated = false,
+  ) => {
+    nativeRegistration.current = registration;
+    dispatchToPage("multiagent:native-push-registration", {
+      ...registration,
+      userInitiated,
+    });
+  };
+
+  const deliverNotificationOpen = (response: Notifications.NotificationResponse | null) => {
+    if (!response || handledNotification.current === response.notification.request.identifier) return;
+    const target = normalizeNotificationOpenData(response.notification.request.content.data);
+    if (!target) return;
+    handledNotification.current = response.notification.request.identifier;
+    if (!dispatchToPage("multiagent:native-notification-open", target)) {
+      pendingOpen.current = target;
+    }
+  };
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(deliverNotificationOpen);
+    void Notifications.getLastNotificationResponseAsync().then(deliverNotificationOpen);
+    void registerNativePushAsync(false).then((registration) => {
+      if (registration.ok) deliverRegistration(registration);
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const handleNativeMessage = (event: WebViewMessageEvent) => {
+    if (!isRemotePage(event.nativeEvent.url)) return;
+    const request = parseNativeBridgeRequest(event.nativeEvent.data);
+    if (!request) return;
+    void registerNativePushAsync(true).then((registration) => {
+      deliverRegistration(registration, true);
+    });
+  };
 
   const navigationChanged = (state: WebViewNavigation) => {
     setCanGoBack(state.canGoBack);
@@ -144,7 +211,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
           ref={webView}
           source={{ uri: appUrl }}
           originWhitelist={["https://*", "http://*"]}
-          injectedJavaScriptBeforeContentLoaded={NATIVE_BOOTSTRAP}
+          injectedJavaScriptBeforeContentLoaded={nativeBootstrap}
           javaScriptEnabled
           domStorageEnabled
           sharedCookiesEnabled
@@ -158,11 +225,26 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
           applicationNameForUserAgent="MultiAgentMobile/0.1.0"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
+          onMessage={handleNativeMessage}
           onLoadStart={() => {
+            pageLoaded.current = false;
             setLoading(true);
             setLoadError("");
           }}
-          onLoadEnd={() => setLoading(false)}
+          onLoadEnd={(event) => {
+            pageLoaded.current = isRemotePage(event.nativeEvent.url);
+            setLoading(false);
+            if (pageLoaded.current && nativeRegistration.current) {
+              dispatchToPage("multiagent:native-push-registration", {
+                ...nativeRegistration.current,
+                userInitiated: false,
+              });
+            }
+            if (pageLoaded.current && pendingOpen.current) {
+              dispatchToPage("multiagent:native-notification-open", pendingOpen.current);
+              pendingOpen.current = null;
+            }
+          }}
           onError={(event) => {
             setLoading(false);
             setLoadError(

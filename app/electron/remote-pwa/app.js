@@ -158,6 +158,7 @@ let toastTimer = null;
 let screenRenderKey = "";
 let previousActivity = new Map();
 let backgroundPushEnabled = false;
+let nativePushToken = "";
 const leafTabSelection = new Map();
 const screenDrafts = new Map();
 const screenPaneModes = new Map();
@@ -3401,7 +3402,7 @@ async function showNotification(title, body, tag, agentId) {
   if (!("Notification" in window)
     || localStorage.getItem("multiagent.remote.notifications") !== "on"
     || window.Notification.permission !== "granted"
-    || (backgroundPushEnabled && String(tag).startsWith("done:"))) return;
+    || (backgroundPushEnabled && /^(?:done|question):/.test(String(tag)))) return;
   const options = { body, tag, renotify: true, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", data: { agentId } };
   try {
     const registration = await navigator.serviceWorker?.ready;
@@ -3586,6 +3587,13 @@ async function ensureBackgroundPush(registration) {
 }
 
 async function enableNotifications() {
+  if (window.__MULTIAGENT_NATIVE_APP__ && window.ReactNativeWebView?.postMessage) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: "multiagent:enable-native-push",
+    }));
+    showToast("휴대폰 알림 권한을 확인하는 중입니다.");
+    return;
+  }
   if (!("Notification" in window)) {
     showToast("이 브라우저는 알림을 지원하지 않습니다.");
     return;
@@ -3605,6 +3613,50 @@ async function enableNotifications() {
       ? "앱을 닫아도 작업 완료 알림을 받습니다."
       : "PWA 실행 중 완료와 질문 알림을 받습니다.");
   }
+}
+
+async function registerNativePushSubscription(detail) {
+  if (!detail?.ok) {
+    if (detail?.userInitiated && !detail?.skipped) {
+      showToast(text(detail?.error) || "휴대폰 알림을 켜지 못했습니다.");
+    }
+    return;
+  }
+  const token = text(detail.token);
+  const platform = text(detail.platform);
+  if (!token || !["android", "ios"].includes(platform)) return;
+  try {
+    const response = await fetch("/api/push/native-subscription", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, platform }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    nativePushToken = token;
+    backgroundPushEnabled = true;
+    localStorage.setItem("multiagent.remote.notifications", "on");
+    ui.notifyButton.classList.add("enabled");
+    ui.notifyButton.title = "휴대폰 백그라운드 알림 켜짐";
+    if (detail?.userInitiated) {
+      showToast("앱을 닫아도 완료와 응답 필요 알림을 받습니다.");
+    }
+  } catch {
+    if (detail?.userInitiated) {
+      showToast("휴대폰 알림을 Remote 서버에 등록하지 못했습니다.");
+    }
+  }
+}
+
+async function unregisterNativePushSubscription() {
+  if (!nativePushToken) return;
+  await fetch("/api/push/native-subscription", {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: nativePushToken }),
+  }).catch(() => {});
+  nativePushToken = "";
 }
 
 async function installPwa() {
@@ -3920,6 +3972,7 @@ ui.copyOutputButton.addEventListener("click", async () => {
 ui.notifyButton.addEventListener("click", enableNotifications);
 ui.installButton.addEventListener("click", installPwa);
 ui.logoutButton.addEventListener("click", async () => {
+  await unregisterNativePushSubscription();
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
   location.reload();
 });
@@ -3939,6 +3992,13 @@ addEventListener("offline", () => { setConnection("offline", "오프라인"); })
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void fetchState({ quiet: true }); });
 navigator.serviceWorker?.addEventListener("message", (event) => {
   if (event.data?.type === "open-agent" && event.data.agentId) selectSession(event.data.agentId);
+});
+addEventListener("multiagent:native-push-registration", (event) => {
+  void registerNativePushSubscription(event.detail);
+});
+addEventListener("multiagent:native-notification-open", (event) => {
+  const agentId = text(event.detail?.agentId);
+  if (agentId && agentMap().has(agentId)) selectSession(agentId);
 });
 
 // Collapsible sidebar (tablet/desktop) — persisted across sessions.
@@ -3994,9 +4054,14 @@ window.visualViewport?.addEventListener("scroll", syncVisualViewport);
 document.addEventListener("focusin", () => setTimeout(syncVisualViewport, 0));
 document.addEventListener("focusout", () => setTimeout(syncVisualViewport, 80));
 
-if (localStorage.getItem("multiagent.remote.notifications") === "on" && window.Notification?.permission === "granted") {
+if (
+  localStorage.getItem("multiagent.remote.notifications") === "on" &&
+  (window.__MULTIAGENT_NATIVE_APP__ || window.Notification?.permission === "granted")
+) {
   ui.notifyButton.classList.add("enabled");
-  ui.notifyButton.title = "알림 켜짐";
+  ui.notifyButton.title = window.__MULTIAGENT_NATIVE_APP__
+    ? "휴대폰 알림 등록 확인 중"
+    : "알림 켜짐";
 }
 applyNavCollapsed(
   localStorage.getItem(NAV_COLLAPSE_KEY) === "1"

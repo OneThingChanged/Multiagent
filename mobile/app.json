@@ -27,6 +27,15 @@
     },
     "plugins": [
       "expo-system-ui",
+      "./plugins/withReleaseSigning.mjs",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#55E4D4",
+          "defaultChannel": "multiagent-agent-events"
+        }
+      ],
       [
         "expo-build-properties",
         {

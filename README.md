@@ -40,7 +40,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 - **Document tabs** — Markdown (GFM + syntax highlight), sandboxed HTML, images, and read-only text open next to your terminals; clicking paths in terminal output opens them inline
 
 ### Remote Access
-- **Remote PWA** — monitor and nudge sessions from a phone browser over a Cloudflare Tunnel, protected by GitHub login + owner approval (standard builds only)
+- **Remote PWA / Android app** — monitor and nudge sessions over a Cloudflare Tunnel, protected by GitHub login + owner approval; browser Web Push and configured native APK builds can report completion or required answers in the background (standard builds only)
 - **SSH remote sessions** — run agents on another machine over SSH; Windows remotes get full status dots and resume via a reverse hook tunnel
 
 ### Monitoring & Usage

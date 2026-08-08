@@ -19,6 +19,11 @@ pnpm-debug.log*
 # Tauri updater signing keys — never commit private keys
 /signing/
 *.key
+*.keystore
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+credentials*.json
 
 # OS/editor files
 .DS_Store
