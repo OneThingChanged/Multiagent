@@ -140,8 +140,10 @@ npm run typecheck
 npx expo-doctor
 ```
 
-The APK in `app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk` must be the
-verified mobile Release build before packaging.
+Before packaging, set `MULTIAGENT_MOBILE_APK_PATH` to the verified mobile Release APK and
+`MULTIAGENT_ANDROID_CERT_SHA256` to the public SHA-256 fingerprint of the protected
+release signing certificate. Standard packaging independently verifies the APK with
+Android SDK `apksigner` and `aapt2`; source-tree/debug APKs are excluded unconditionally.
 
 ### 3. Signed Build
 
@@ -152,6 +154,8 @@ NSIS files for legacy Tauri transition manifests. Even without a password,
 
 ```powershell
 cd "K:\AI\MultiAgent\app"
+$env:MULTIAGENT_MOBILE_APK_PATH = 'K:\AI\MultiAgent\mobile\android\app\build\outputs\apk\release\app-release.apk'
+$env:MULTIAGENT_ANDROID_CERT_SHA256 = '<release certificate SHA-256>'
 npm run electron:dist:all
 
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
@@ -183,15 +187,15 @@ app/electron-dist/
   MultiAgent-Setup-<ver>-x64.exe.sig
   latest.yml
   latest.json
+  mobile/
+    MultiAgent-Mobile.apk
+    MultiAgent-Mobile.metadata.json
   company/
     MultiAgentCompany-Setup-<ver>-x64.exe
     MultiAgentCompany-Setup-<ver>-x64.exe.blockmap
     MultiAgentCompany-Setup-<ver>-x64.exe.sig
     latest-company.yml
     latest-company.json
-
-app/electron/remote-pwa/downloads/
-  MultiAgent-Mobile.apk
 ```
 
 ### 5. Writing the latest Manifest
@@ -235,7 +239,8 @@ gh release create v<ver> --title "v<ver> — <title>" --notes "..." \
   app/electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe.sig \
   app/electron-dist/company/latest-company.yml \
   app/electron-dist/company/latest-company.json \
-  app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk
+  app/electron-dist/mobile/MultiAgent-Mobile.apk \
+  app/electron-dist/mobile/MultiAgent-Mobile.metadata.json
 ```
 
 To update/add assets on an existing release:
@@ -262,7 +267,8 @@ curl -sL "https://github.com/OneThingChanged/Multiagent/releases/download/v<ver>
 ## Common Pitfalls (Checklist)
 
 - [ ] Are `package.json`, `package-lock.json`, Tauri config/Cargo sources, and Cargo.lock on the same version?
-- [ ] Does the Remote-bundled APK match the verified mobile Release APK?
+- [ ] Did standard packaging verify the external release APK's package, non-debuggable flag, arm64 ABI, and certificate fingerprint?
+- [ ] Is the APK absent from Git/source inputs and present only under `electron-dist/mobile` plus the standard installer's `resources/mobile`?
 - [ ] Did `npm run electron:dist:all` create both NSIS installers, blockmaps, and YAML manifests?
 - [ ] Were both NSIS files signed with `TAURI_SIGNING_PRIVATE_KEY` (+ empty password)?
 - [ ] Is the `signature` in `latest.json` / `latest-company.json` the contents of each variant's **NSIS setup.exe.sig**?

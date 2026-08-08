@@ -19,8 +19,8 @@
     "electron:packaged-smoke": "node scripts/electron-packaged-smoke.mjs",
     "electron:company-packaged-smoke": "node scripts/electron-packaged-smoke.mjs --company",
     "electron:company-packaged-lifecycle-smoke": "node scripts/electron-lifecycle-smoke.mjs --packaged --company",
-    "electron:pack": "npm run build && electron-builder --dir",
-    "electron:dist": "npm run build && electron-builder --win nsis",
+    "electron:pack": "node scripts/build-electron-standard.mjs --dir",
+    "electron:dist": "node scripts/build-electron-standard.mjs",
     "electron:dist:company": "node scripts/build-electron-company.mjs",
     "electron:dist:all": "node scripts/build-electron-all.mjs",
     "tauri": "tauri",
@@ -78,12 +78,12 @@
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "node_modules/node-pty/**",
-      "electron/remote-pwa/downloads/**"
+      "node_modules/node-pty/**"
     ],
     "files": [
       "dist/**",
       "electron/**",
+      "!electron/remote-pwa/downloads/**",
       "package.json",
       "src-tauri/icons/icon.ico",
       "node_modules/node-pty/**",

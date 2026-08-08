@@ -54,6 +54,13 @@ Only NSIS installers are produced; portable executables are intentionally not bu
 | company | `npm run electron:dist:company` | `latest-company.yml` |
 | both | `npm run electron:dist:all` | both channels |
 
+Standard `electron:pack` / `electron:dist` builds fail closed unless
+`MULTIAGENT_MOBILE_APK_PATH` points to a release APK and
+`MULTIAGENT_ANDROID_CERT_SHA256` matches its signing certificate. The guard uses Android
+SDK `apksigner` and `aapt2` to reject a wrong package id, a debug certificate, a
+debuggable manifest, or an APK without `arm64-v8a`. Company builds never consume these
+variables and never contain the APK.
+
 The Company build keeps `electron/remote-pwa`'s shared HTML/CSS/JavaScript shell because
 the loopback Dashboard serves those files too. It excludes only
 `electron/remote-pwa/downloads/**` (the downloadable Android APK); external Remote/Tunnel
@@ -82,6 +89,7 @@ $env:MULTIAGENT_ANDROID_KEYSTORE_PATH='C:\secure\multiagent\multiagent-release.k
 $env:MULTIAGENT_ANDROID_KEYSTORE_PASSWORD='<local secret>'
 $env:MULTIAGENT_ANDROID_KEY_ALIAS='multiagent'
 $env:MULTIAGENT_ANDROID_KEY_PASSWORD='<local secret>'
+$env:MULTIAGENT_ANDROID_CERT_SHA256='<64-digit public release certificate fingerprint>'
 ```
 
 Create/link the Expo project under the distributor account and upload its Firebase
@@ -118,23 +126,28 @@ The generated file is
 `mobile/android/app/build/outputs/apk/release/app-release.apk`. The checked-in
 source excludes generated `mobile/android/`, local SDK/JDK caches, and
 `mobile/artifacts/`. Regenerate the Android project with Expo prebuild when
-needed. The verified server-distribution copy is tracked separately at
-`app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk`.
+needed. APK binaries are not tracked in Git and ordinary Electron builds exclude
+`electron/remote-pwa/downloads/**`.
 
-To publish that APK through the desktop Remote server, copy the verified build
-to its stable bundled path before building the standard Electron installer:
+Point the standard Electron release at the generated APK. Obtain the public SHA-256
+certificate fingerprint with `keytool -list -v` from the protected release keystore and
+set it without separators (or with colons; the verifier normalizes both forms):
 
 ```powershell
-Copy-Item `
-  mobile\android\app\build\outputs\apk\release\app-release.apk `
-  app\electron\remote-pwa\downloads\MultiAgent-Mobile.apk `
-  -Force
+$env:MULTIAGENT_MOBILE_APK_PATH = `
+  'K:\AI\MultiAgent\mobile\android\app\build\outputs\apk\release\app-release.apk'
+$env:MULTIAGENT_ANDROID_CERT_SHA256 = '<release certificate SHA-256>'
+
+cd K:\AI\MultiAgent\app
+npm run electron:dist
 ```
 
-`electron/remote-pwa/downloads/**` is unpacked from ASAR so the Remote server can
-stream the APK efficiently. Standard installers include it; Company installers
-continue to exclude the entire Remote PWA tree. The authenticated Remote top bar
-shows the APK button only when this file exists.
+The verified APK is copied by Electron Builder into the standard installation's
+`resources/mobile/MultiAgent-Mobile.apk`; it never enters `app.asar` or the source tree.
+The build also stages a publishable copy plus non-secret hash/certificate metadata under
+`app/electron-dist/mobile/`. The authenticated Remote top bar shows the APK button only
+when that packaged resource exists. Company installers keep the shared Dashboard shell
+but do not include the mobile resource.
 
 `npm run apk` refuses to build unless all four release-signing variables are present and
 the keystore path exists. The Expo config plugin repeats this check inside Gradle so a

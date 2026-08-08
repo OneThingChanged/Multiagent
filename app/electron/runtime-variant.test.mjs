@@ -36,9 +36,12 @@ describe("Electron runtime variant", () => {
   });
 
   it("keeps shared Dashboard assets but excludes the Remote APK from Company", () => {
+    const standardBuild = require("../package.json").build;
     const companyBuild = require("../electron-builder.company.cjs");
     expect(companyBuild.files).toContain("electron/**");
     expect(companyBuild.files).toContain("!electron/remote-pwa/downloads/**");
+    expect(standardBuild.files).toContain("!electron/remote-pwa/downloads/**");
+    expect(standardBuild.asarUnpack).not.toContain("electron/remote-pwa/downloads/**");
     expect(companyBuild.files).not.toContain("!electron/remote-pwa/**");
   });
 

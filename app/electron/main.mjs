@@ -594,11 +594,16 @@ usageDashboard = new LocalDashboardService({
     usage: usageIndex.dashboardSummary(),
   }),
 });
+const configuredMobileApkPath = asString(process.env.MULTIAGENT_MOBILE_APK_PATH).trim();
+const remoteMobileApkPath = app.isPackaged
+  ? path.join(process.resourcesPath, "mobile", "MultiAgent-Mobile.apk")
+  : configuredMobileApkPath || undefined;
 let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
   stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
   ...sessionProviders,
+  mobileApkPath: remoteMobileApkPath,
   requestAccess(login) {
     sendEventToAll("remote:access-request", { login });
   },

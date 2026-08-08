@@ -40,12 +40,17 @@ for (const entry of [
   }
 }
 const apkEntry = "\\electron\\remote-pwa\\downloads\\MultiAgent-Mobile.apk";
-if (company && asarEntries.has(apkEntry)) {
-  console.error("Company package unexpectedly contains the Remote APK.");
+if (asarEntries.has(apkEntry)) {
+  console.error("Packaged app unexpectedly contains a source-tree Remote APK.");
   process.exit(1);
 }
-if (!company && !asarEntries.has(apkEntry)) {
-  console.error("Standard package is missing the Remote APK.");
+const stagedApk = path.join(path.dirname(executable), "resources", "mobile", "MultiAgent-Mobile.apk");
+if (company && fs.existsSync(stagedApk)) {
+  console.error("Company package unexpectedly contains the verified Remote APK resource.");
+  process.exit(1);
+}
+if (!company && !fs.statSync(stagedApk, { throwIfNoEntry: false })?.isFile()) {
+  console.error("Standard package is missing the verified Remote APK resource.");
   process.exit(1);
 }
 

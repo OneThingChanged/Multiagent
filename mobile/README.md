@@ -26,15 +26,17 @@ npm run apk
 
 The generated ARM64 Release APK is written to
 `android/app/build/outputs/apk/release/app-release.apk` and supports Android 7.0
-or later. The prototype build uses the generated debug signing identity so it
-can be installed directly for testing; store distribution requires a dedicated
-upload key and an AAB release pipeline.
+or later. `npm run apk` requires the protected project release keystore and
+refuses to fall back to debug signing. `npm run apk:verify` is compile-only and
+must never be published. Play Store distribution additionally requires an AAB
+upload pipeline, but sideloaded release APKs do not require a store listing.
 
-Copy a verified APK to
-`../app/electron/remote-pwa/downloads/MultiAgent-Mobile.apk` before building the
-standard desktop installer. Approved Remote browser users then see an `APK`
-button in the top bar and can download it directly from their desktop Remote
-server.
+Set `MULTIAGENT_MOBILE_APK_PATH` to the verified APK and
+`MULTIAGENT_ANDROID_CERT_SHA256` to the release certificate fingerprint before
+building the standard desktop installer. Its packaging guard verifies the
+signature, package id, non-debuggable manifest, and ARM64 ABI, then stages the
+APK outside `app.asar`. APK binaries and signing credentials are never tracked
+in Git. Approved Remote browser users then see an `APK` button in the top bar.
 
 ## Connection
 

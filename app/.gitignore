@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Release APKs are external, verified build inputs. Never keep a mobile binary,
+# keystore, Firebase credential, or signing password in the desktop source tree.
+electron/remote-pwa/downloads/*.apk
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

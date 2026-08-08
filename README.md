@@ -102,6 +102,10 @@ npm run electron:dist:all      # Electron standard + company
 ```
 
 Tauri artifacts land in `app/src-tauri/target/release/bundle/` (the NSIS `*-setup.exe` is the recommended installer); Electron artifacts land in `app/electron-dist/`.
+Standard Electron packaging requires an external release-signed Android APK plus its
+allowed certificate SHA-256 in `MULTIAGENT_MOBILE_APK_PATH` and
+`MULTIAGENT_ANDROID_CERT_SHA256`; it fails before packaging rather than bundling a
+source-tree or debug APK. Company packaging remains APK-free.
 
 ## Build Variants
 
