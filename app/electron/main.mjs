@@ -499,6 +499,7 @@ async function browserUsageSummary(refresh = false) {
   return {
     ...rateLimits,
     tokens: usageIndex.dashboardSummary(),
+    ...usageIndex.usageOverview(),
   };
 }
 

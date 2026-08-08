@@ -502,6 +502,77 @@ html[data-native-app="true"] .android-download-button { display: none !important
 }
 .usage-section-head h3 { margin: 3px 0 0; font-size: 15px; }
 .usage-section-head > span { color: var(--muted); font-size: 9px; }
+.usage-period-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.usage-period-grid article {
+  display: grid;
+  min-width: 0;
+  min-height: 96px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(14, 35, 45, 0.94), rgba(7, 19, 29, 0.94));
+}
+.usage-period-grid span { color: var(--muted); font-size: 9px; font-weight: 800; }
+.usage-period-grid strong {
+  align-self: end;
+  overflow-wrap: anywhere;
+  color: var(--cyan);
+  font-size: 25px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.usage-period-grid article:nth-child(2) strong { color: var(--green); }
+.usage-period-grid article:nth-child(3) strong { color: var(--blue); }
+.usage-period-grid small { margin-top: 7px; color: var(--muted); font-size: 8px; }
+.usage-chart-panel {
+  margin-bottom: 14px;
+  padding: 12px 13px 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(9, 25, 36, 0.92), rgba(5, 16, 25, 0.9));
+}
+.usage-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.usage-chart-head > div { display: grid; gap: 3px; }
+.usage-chart-head strong { color: #dcebf3; font-size: 11px; }
+.usage-chart-head span { color: var(--muted); font-size: 8px; }
+.usage-chart-head > span { color: var(--cyan); font-weight: 800; white-space: nowrap; }
+.usage-chart { width: 100%; min-height: 210px; }
+.usage-chart svg { display: block; width: 100%; max-width: 100%; }
+.usage-chart-grid-line { stroke: rgba(113, 137, 154, 0.16); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.usage-chart-axis-label { fill: var(--muted); font-family: inherit; font-size: 8px; font-variant-numeric: tabular-nums; }
+.usage-chart-date-label { fill: #7890a1; }
+.usage-chart-bar { fill: var(--cyan); opacity: 0.72; transition: opacity 120ms ease; }
+.usage-chart-bar:hover { opacity: 1; }
+.usage-chart-bar.today { fill: var(--green); opacity: 1; }
+.usage-chart-empty {
+  display: grid;
+  min-height: 150px;
+  margin: 0;
+  place-items: center;
+  color: var(--muted);
+  font-size: 9px;
+}
+.usage-breakdown-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 1px 9px;
+}
+.usage-breakdown-head strong { color: #dcebf3; font-size: 10px; }
+.usage-breakdown-head span { color: var(--muted); font-size: 8px; }
 .usage-token-grid,
 .usage-summary-grid {
   display: grid;
@@ -1040,6 +1111,9 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .document-markdown { min-height: 0; padding: 18px 14px 40px; font-size: 13px; }
   .document-html { min-height: 0; }
   .usage-summary-grid { gap: 7px; }
+  .usage-period-grid { gap: 7px; }
+  .usage-period-grid article { min-height: 76px; padding: 10px; }
+  .usage-period-grid strong { font-size: 19px; }
   .usage-token-grid { gap: 7px; }
   .usage-token-grid article,
   .usage-summary-grid article { min-height: 66px; padding: 10px; }
@@ -1242,6 +1316,14 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .usage-view .view-head { align-items: flex-start; }
   .usage-view .view-head p { max-width: 220px; }
   .usage-summary-grid { grid-template-columns: 1fr 1fr; }
+  .usage-period-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .usage-period-grid article { min-height: 70px; padding: 9px; }
+  .usage-period-grid strong { font-size: 16px; }
+  .usage-period-grid small { font-size: 7px; }
+  .usage-chart-panel { padding: 10px 7px 5px; }
+  .usage-chart { min-height: 210px; }
+  .usage-chart-head { padding: 0 5px; }
+  .usage-breakdown-head { align-items: flex-start; flex-direction: column; gap: 3px; }
   .usage-token-grid { grid-template-columns: 1fr 1fr; }
   .usage-token-total { grid-column: 1 / -1; }
   .usage-summary-grid article:first-child { grid-column: 1 / -1; }

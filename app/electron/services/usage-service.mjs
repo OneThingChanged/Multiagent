@@ -32,6 +32,24 @@ function sameFolder(left, right) {
   return normalize(left) === normalize(right);
 }
 
+function localDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function normalizedTokenTotals(row = {}) {
+  return {
+    events: number(row.events),
+    inputTokens: number(row.inputTokens),
+    outputTokens: number(row.outputTokens),
+    cacheReadTokens: number(row.cacheReadTokens),
+    cacheWriteTokens: number(row.cacheWriteTokens),
+    reasoningOutputTokens: number(row.reasoningOutputTokens),
+    totalTokens: number(row.totalTokens),
+  };
+}
+
 export class UsageService {
   constructor(databasePath, sessionService, options = {}) {
     this.databasePath = databasePath;
@@ -529,13 +547,74 @@ export class UsageService {
   }
 
   dashboardSummary() {
-    const db = this.db();
-    const totals = db.prepare(`SELECT COUNT(*) events, COALESCE(SUM(input_tokens),0) inputTokens,
+    return this.tokenTotals();
+  }
+
+  tokenTotals(startAt = null, endAt = null) {
+    const clauses = [];
+    const params = [];
+    if (startAt != null && Number.isFinite(Number(startAt))) {
+      clauses.push("ts >= ?");
+      params.push(Math.floor(Number(startAt) / 1000));
+    }
+    if (endAt != null && Number.isFinite(Number(endAt))) {
+      clauses.push("ts < ?");
+      params.push(Math.floor(Number(endAt) / 1000));
+    }
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const totals = this.db().prepare(`SELECT COUNT(*) events, COALESCE(SUM(input_tokens),0) inputTokens,
       COALESCE(SUM(output_tokens),0) outputTokens, COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
       COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
       COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
-      COALESCE(SUM(total_tokens),0) totalTokens FROM usage_events`).get();
-    return Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number(value)]));
+      COALESCE(SUM(total_tokens),0) totalTokens FROM usage_events${where}`).get(...params);
+    return normalizedTokenTotals(totals);
+  }
+
+  usageOverview(now = Date.now()) {
+    const current = new Date(now);
+    if (!Number.isFinite(current.getTime())) throw new TypeError("usage overview requires a valid date");
+
+    const dayStart = new Date(current);
+    dayStart.setHours(0, 0, 0, 0);
+    const weekStart = new Date(dayStart);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const monthStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1);
+    const tomorrow = new Date(dayStart);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const timelineStart = new Date(dayStart);
+    timelineStart.setDate(timelineStart.getDate() - 29);
+
+    const rows = this.db().prepare(`SELECT
+      strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') date,
+      COUNT(*) events,
+      COALESCE(SUM(input_tokens),0) inputTokens,
+      COALESCE(SUM(output_tokens),0) outputTokens,
+      COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
+      COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
+      COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
+      COALESCE(SUM(total_tokens),0) totalTokens
+      FROM usage_events WHERE ts >= ? AND ts < ?
+      GROUP BY date ORDER BY date`).all(
+      Math.floor(timelineStart.getTime() / 1000),
+      Math.floor(tomorrow.getTime() / 1000),
+    );
+    const totalsByDate = new Map(rows.map((row) => [String(row.date), normalizedTokenTotals(row)]));
+    const timeline = [];
+    for (let offset = 0; offset < 30; offset += 1) {
+      const date = new Date(timelineStart);
+      date.setDate(date.getDate() + offset);
+      const key = localDateKey(date);
+      timeline.push({ date: key, ...normalizedTokenTotals(totalsByDate.get(key)) });
+    }
+
+    return {
+      periods: {
+        day: this.tokenTotals(dayStart.getTime(), tomorrow.getTime()),
+        week: this.tokenTotals(weekStart.getTime(), tomorrow.getTime()),
+        month: this.tokenTotals(monthStart.getTime(), tomorrow.getTime()),
+      },
+      timeline,
+    };
   }
 
   close() {

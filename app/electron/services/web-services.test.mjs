@@ -57,6 +57,15 @@ describe("Electron dashboard server", () => {
             reasoningOutputTokens: 75,
             totalTokens: 1_775,
           },
+          periods: {
+            day: { events: 2, totalTokens: 180 },
+            week: { events: 8, totalTokens: 920 },
+            month: { events: 12, totalTokens: 1_775 },
+          },
+          timeline: [
+            { date: "2026-08-07", events: 1, totalTokens: 120 },
+            { date: "2026-08-08", events: 2, totalTokens: 180 },
+          ],
         };
       },
       stateProvider: () => ({
@@ -171,6 +180,10 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="documentList" role="tree"');
     expect(pageBody).toContain('id="usageView"');
     expect(pageBody).toContain('id="usageTotalTokens"');
+    expect(pageBody).toContain('id="usageDailyTokens"');
+    expect(pageBody).toContain('id="usageWeeklyTokens"');
+    expect(pageBody).toContain('id="usageMonthlyTokens"');
+    expect(pageBody).toContain('id="usageChart"');
     expect(pageBody).toContain('id="mobileSessionsButton"');
     expect(pageBody).toContain('data-filter="active"');
     expect(pageBody).toContain('data-filter="recovering"');
@@ -191,6 +204,7 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function appendDocumentTree(container, node, projectId, query");
     expect(appScriptBody).toContain("const documentExpandedFolders = new Map()");
     expect(appScriptBody).toContain("function renderUsage()");
+    expect(appScriptBody).toContain("function renderUsageChart()");
     expect(appScriptBody).toContain("function formatTokenCount(value)");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
@@ -248,6 +262,8 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).not.toContain("max-height: 625px");
     expect(stylesBody).toContain(".usage-provider-grid");
     expect(stylesBody).toContain(".usage-token-grid");
+    expect(stylesBody).toContain(".usage-period-grid");
+    expect(stylesBody).toContain(".usage-chart-bar");
     expect(stylesBody).toContain(".usage-remaining-progress");
     expect(stylesBody).toContain('.app-shell[data-view="session"] .chat-view');
     expect(stylesBody).toContain(".composer-main-row");
@@ -270,7 +286,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v54');
+    expect(workerBody).toContain('multiagent-remote-v55');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -296,6 +312,12 @@ describe("Electron dashboard server", () => {
       inputTokens: 1_000,
       totalTokens: 1_775,
     });
+    expect(usageBody.periods).toMatchObject({
+      day: { totalTokens: 180 },
+      week: { totalTokens: 920 },
+      month: { totalTokens: 1_775 },
+    });
+    expect(usageBody.timeline).toHaveLength(2);
     expect(usageRefreshes).toEqual([true, false]);
     expect(throttledUsage.status).toBe(200);
     expect(apkDownload.status).toBe(200);

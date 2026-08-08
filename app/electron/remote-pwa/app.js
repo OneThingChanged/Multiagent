@@ -74,6 +74,15 @@ const ui = {
   usageCacheReadTokens: $("#usageCacheReadTokens"),
   usageCacheWriteTokens: $("#usageCacheWriteTokens"),
   usageReasoningTokens: $("#usageReasoningTokens"),
+  usageDailyTokens: $("#usageDailyTokens"),
+  usageDailyMeta: $("#usageDailyMeta"),
+  usageWeeklyTokens: $("#usageWeeklyTokens"),
+  usageWeeklyMeta: $("#usageWeeklyMeta"),
+  usageMonthlyTokens: $("#usageMonthlyTokens"),
+  usageMonthlyMeta: $("#usageMonthlyMeta"),
+  usageChart: $("#usageChart"),
+  usageChartSummary: $("#usageChartSummary"),
+  usageChartEmpty: $("#usageChartEmpty"),
   usageRemainingSummary: $("#usageRemainingSummary"),
   usageProviderSummary: $("#usageProviderSummary"),
   usageUpdatedSummary: $("#usageUpdatedSummary"),
@@ -1864,6 +1873,114 @@ function formatTokenCount(value) {
   return new Intl.NumberFormat("ko-KR").format(tokenCount(value));
 }
 
+function formatCompactTokenCount(value) {
+  return new Intl.NumberFormat("ko-KR", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(tokenCount(value));
+}
+
+function usagePeriodMeta(period) {
+  return `${formatTokenCount(period?.events)}개 기록`;
+}
+
+function usageDateLabel(value) {
+  const [, month = "", day = ""] = text(value).split("-");
+  return month && day ? `${Number(month)}/${Number(day)}` : text(value);
+}
+
+function usageSvgNode(name, attributes = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+  return node;
+}
+
+function renderUsageChart() {
+  const timeline = Array.isArray(usageSummary?.timeline)
+    ? usageSummary.timeline.slice(-30)
+    : [];
+  const total = timeline.reduce((sum, bucket) => sum + tokenCount(bucket?.totalTokens), 0);
+  const maximum = Math.max(0, ...timeline.map((bucket) => tokenCount(bucket?.totalTokens)));
+  ui.usageChartSummary.textContent = `30일 합계 ${formatTokenCount(total)}`;
+  ui.usageChartEmpty.hidden = maximum > 0;
+  ui.usageChart.hidden = maximum <= 0;
+  ui.usageChart.replaceChildren();
+  if (maximum <= 0 || timeline.length === 0) return;
+
+  const width = Math.max(360, Math.round(ui.usageChart.clientWidth || 920));
+  const height = width < 600 ? 210 : 250;
+  const margin = { top: 16, right: 12, bottom: 34, left: 54 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const slotWidth = plotWidth / timeline.length;
+  const barWidth = Math.max(4, Math.min(18, slotWidth * 0.62));
+  const svg = usageSvgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "xMidYMid meet",
+    width: "100%",
+    height,
+    "aria-hidden": "true",
+    focusable: "false",
+  });
+
+  for (let step = 0; step <= 4; step += 1) {
+    const ratio = step / 4;
+    const y = margin.top + plotHeight * ratio;
+    const value = Math.round(maximum * (1 - ratio));
+    svg.appendChild(usageSvgNode("line", {
+      class: "usage-chart-grid-line",
+      x1: margin.left,
+      x2: width - margin.right,
+      y1: y,
+      y2: y,
+    }));
+    const label = usageSvgNode("text", {
+      class: "usage-chart-axis-label",
+      x: margin.left - 8,
+      y: y + 3,
+      "text-anchor": "end",
+    });
+    label.textContent = formatCompactTokenCount(value);
+    svg.appendChild(label);
+  }
+
+  timeline.forEach((bucket, index) => {
+    const value = tokenCount(bucket?.totalTokens);
+    const barHeight = value > 0 ? Math.max(2, (value / maximum) * plotHeight) : 0;
+    const x = margin.left + index * slotWidth + (slotWidth - barWidth) / 2;
+    const y = margin.top + plotHeight - barHeight;
+    const bar = usageSvgNode("rect", {
+      class: `usage-chart-bar${index === timeline.length - 1 ? " today" : ""}`,
+      x,
+      y,
+      width: barWidth,
+      height: barHeight,
+      rx: Math.min(4, barWidth / 2),
+    });
+    const title = usageSvgNode("title");
+    title.textContent = `${usageDateLabel(bucket?.date)} · ${formatTokenCount(value)} 토큰 · ${formatTokenCount(bucket?.events)}개 기록`;
+    bar.appendChild(title);
+    svg.appendChild(bar);
+
+    if (index === 0 || index === timeline.length - 1 || index % 7 === 0) {
+      const label = usageSvgNode("text", {
+        class: "usage-chart-axis-label usage-chart-date-label",
+        x: margin.left + index * slotWidth + slotWidth / 2,
+        y: height - 9,
+        "text-anchor": "middle",
+      });
+      label.textContent = usageDateLabel(bucket?.date);
+      svg.appendChild(label);
+    }
+  });
+
+  ui.usageChart.setAttribute(
+    "aria-label",
+    `최근 30일 토큰 사용량 그래프. 합계 ${formatTokenCount(total)} 토큰, 최고 일간 ${formatTokenCount(maximum)} 토큰`,
+  );
+  ui.usageChart.appendChild(svg);
+}
+
 function usageProviderMeta(limit) {
   const id = text(limit?.limitId).toLowerCase();
   if (id === "codex" || id.startsWith("codex")) {
@@ -1940,6 +2057,7 @@ function usageWindowCard(window, index) {
 function renderUsage() {
   const groups = usageGroups();
   const tokens = usageSummary?.tokens || {};
+  const periods = usageSummary?.periods || {};
   const windows = groups.flatMap((group) => group.limits.flatMap((limit) => (
     [limit?.primary, limit?.secondary].filter((window) => (
       window && Number.isFinite(Number(window.usedPercent))
@@ -1960,6 +2078,13 @@ function renderUsage() {
   ui.usageCacheReadTokens.textContent = formatTokenCount(tokens.cacheReadTokens);
   ui.usageCacheWriteTokens.textContent = formatTokenCount(tokens.cacheWriteTokens);
   ui.usageReasoningTokens.textContent = formatTokenCount(tokens.reasoningOutputTokens);
+  ui.usageDailyTokens.textContent = formatTokenCount(periods.day?.totalTokens);
+  ui.usageDailyMeta.textContent = usagePeriodMeta(periods.day);
+  ui.usageWeeklyTokens.textContent = formatTokenCount(periods.week?.totalTokens);
+  ui.usageWeeklyMeta.textContent = usagePeriodMeta(periods.week);
+  ui.usageMonthlyTokens.textContent = formatTokenCount(periods.month?.totalTokens);
+  ui.usageMonthlyMeta.textContent = usagePeriodMeta(periods.month);
+  renderUsageChart();
   ui.usageProviderSummary.textContent = String(groups.length);
   ui.usageRemainingSummary.textContent = remaining == null
     ? "—"
@@ -2055,6 +2180,8 @@ async function loadUsage(refresh = false) {
       updatedAt: Number(result?.updatedAt) || 0,
       limits: Array.isArray(result?.limits) ? result.limits : [],
       tokens: result?.tokens && typeof result.tokens === "object" ? result.tokens : {},
+      periods: result?.periods && typeof result.periods === "object" ? result.periods : {},
+      timeline: Array.isArray(result?.timeline) ? result.timeline : [],
     };
     usageLoadedAt = Date.now();
   } catch (error) {

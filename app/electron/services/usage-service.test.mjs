@@ -29,6 +29,46 @@ describe("Electron usage index", () => {
     service.close();
   });
 
+  it("returns calendar day, week, month totals and a zero-filled 30-day timeline", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-periods-")); roots.push(root);
+    const service = new UsageService(path.join(root, "usage.db"), { scan: async () => [] });
+    const now = new Date(2026, 7, 8, 12, 0, 0);
+    const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+    const weekStart = new Date(dayStart);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const monthStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1);
+    const event = service.db().prepare(`INSERT INTO usage_events (
+      source_key, ts, tool, input_tokens, total_tokens, raw_kind
+    ) VALUES (?, ?, 'codex', ?, ?, 'test')`);
+    const add = (key, date, tokens) => event.run(
+      key,
+      Math.floor(date.getTime() / 1000),
+      tokens,
+      tokens,
+    );
+    const today = new Date(dayStart); today.setHours(10);
+    const thisWeek = new Date(weekStart); thisWeek.setDate(thisWeek.getDate() + 1); thisWeek.setHours(10);
+    const thisMonth = new Date(monthStart); thisMonth.setHours(10);
+    const previousMonth = new Date(monthStart); previousMonth.setDate(previousMonth.getDate() - 1); previousMonth.setHours(10);
+    const old = new Date(dayStart); old.setDate(old.getDate() - 40); old.setHours(10);
+    add("today", today, 100);
+    add("week", thisWeek, 200);
+    add("month", thisMonth, 300);
+    add("previous-month", previousMonth, 400);
+    add("old", old, 500);
+
+    const overview = service.usageOverview(now.getTime());
+    expect(overview.periods.day).toMatchObject({ events: 1, totalTokens: 100 });
+    expect(overview.periods.week).toMatchObject({ events: 2, totalTokens: 300 });
+    expect(overview.periods.month).toMatchObject({ events: 3, totalTokens: 600 });
+    expect(overview.timeline).toHaveLength(30);
+    expect(overview.timeline.reduce((sum, bucket) => sum + bucket.totalTokens, 0)).toBe(1_000);
+    expect(overview.timeline.at(-1)).toMatchObject({ totalTokens: 100, events: 1 });
+    expect(overview.timeline.some((bucket) => bucket.totalTokens === 0)).toBe(true);
+    expect(service.dashboardSummary()).toMatchObject({ events: 5, totalTokens: 1_500 });
+    service.close();
+  });
+
   it("refreshes a current limit from the tail of a recent transcript", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-tail-")); roots.push(root);
     const transcript = path.join(root, "session.jsonl");

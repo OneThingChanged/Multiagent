@@ -198,9 +198,41 @@
             <div class="usage-section-head">
               <div>
                 <span class="eyebrow">TOKEN USAGE</span>
-                <h3 id="usageTokenHeading">누적 토큰</h3>
+                <h3 id="usageTokenHeading">기간별 토큰 사용량</h3>
               </div>
               <span id="usageTokenEvents">사용 기록 확인 중</span>
+            </div>
+            <div class="usage-period-grid" aria-label="일간 주간 월간 토큰 사용량">
+              <article>
+                <span>오늘</span>
+                <strong id="usageDailyTokens">—</strong>
+                <small id="usageDailyMeta">0개 기록</small>
+              </article>
+              <article>
+                <span>이번 주</span>
+                <strong id="usageWeeklyTokens">—</strong>
+                <small id="usageWeeklyMeta">0개 기록</small>
+              </article>
+              <article>
+                <span>이번 달</span>
+                <strong id="usageMonthlyTokens">—</strong>
+                <small id="usageMonthlyMeta">0개 기록</small>
+              </article>
+            </div>
+            <div class="usage-chart-panel">
+              <div class="usage-chart-head">
+                <div>
+                  <strong>최근 30일 추이</strong>
+                  <span>하루 단위 전체 토큰</span>
+                </div>
+                <span id="usageChartSummary">—</span>
+              </div>
+              <div class="usage-chart" id="usageChart" role="img" aria-label="최근 30일 일별 토큰 사용량 그래프"></div>
+              <p class="usage-chart-empty" id="usageChartEmpty" hidden>최근 30일간 집계된 토큰이 없습니다.</p>
+            </div>
+            <div class="usage-breakdown-head">
+              <strong>전체 누적 상세</strong>
+              <span>저장된 모든 사용 기록</span>
             </div>
             <div class="usage-token-grid">
               <article class="usage-token-total">
