@@ -244,6 +244,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("availableHeight / naturalHeight");
     expect(appScriptBody).not.toContain("Math.ceil(element.offsetHeight * scale)");
     expect(appScriptBody).toContain('fetch("/api/push/subscription"');
+    expect(appScriptBody).toContain('fetch("/api/monitor/device"');
+    expect(appScriptBody).toContain('type: "multiagent:start-native-monitor"');
+    expect(appScriptBody).not.toContain("/api/push/native-subscription");
+    expect(appScriptBody).not.toContain("ExpoPushToken");
     expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
     expect(appScriptBody).toContain("MultiAgentTerminalTouch?.install");
     expect(touchScriptBody).toContain("function scrollLinesImmediately");
@@ -585,7 +589,7 @@ describe("Electron dashboard server", () => {
     expect(cancellations).toEqual(["agent-1", "agent-offline"]);
   });
 
-  it("authenticates push subscriptions and forwards done hooks to background delivery", async () => {
+  it("authenticates browser and foreground-service monitoring and forwards hook events", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-push-api-"));
     roots.push(root);
     const calls = [];
@@ -599,14 +603,6 @@ describe("Electron dashboard server", () => {
         calls.push({ type: "unsubscribe", login, endpoint });
         return { subscribed: false };
       },
-      subscribeNative(login, value) {
-        calls.push({ type: "subscribe-native", login, value });
-        return { subscribed: true };
-      },
-      unsubscribeNative(login, token) {
-        calls.push({ type: "unsubscribe-native", login, token });
-        return { subscribed: false };
-      },
       removeLogin: () => {},
       async notifyDone(value) {
         calls.push({ type: "notify-done", value });
@@ -617,11 +613,23 @@ describe("Electron dashboard server", () => {
         return { sent: 1 };
       },
     };
+    const deviceMonitorService = {
+      issue(login) {
+        calls.push({ type: "issue-device", login });
+        return { token: `ma1_${"A".repeat(43)}`, deviceId: "device-1", cursor: 100, expiresAt: 200 };
+      },
+      publish(value) {
+        calls.push({ type: "publish-device", value });
+      },
+      removeLogin: () => {},
+      close: () => {},
+    };
     const service = new RemoteDashboardService({
       baseDir: root,
       stateProvider: () => ({}),
       writePty: () => false,
       pushService,
+      deviceMonitorService,
     });
     services.push(service);
     service.config.server_port = 0;
@@ -642,14 +650,10 @@ describe("Electron dashboard server", () => {
       headers: { origin: "https://evil.example", "content-type": "application/json" },
       body: JSON.stringify(value),
     });
-    const nativeValue = {
-      token: "ExponentPushToken[device_token_12345]",
-      platform: "android",
-    };
-    const nativeSubscribed = await fetch(`${status.url}/api/push/native-subscription`, {
+    const deviceIssued = await fetch(`${status.url}/api/monitor/device`, {
       method: "POST",
       headers: { origin: status.url, "content-type": "application/json" },
-      body: JSON.stringify(nativeValue),
+      body: "{}",
     });
     await service.notifyAgentDone({
       id: "agent-1",
@@ -664,10 +668,28 @@ describe("Electron dashboard server", () => {
     });
 
     expect(subscribed.status).toBe(201);
-    expect(nativeSubscribed.status).toBe(201);
+    expect(deviceIssued.status).toBe(201);
     expect(blocked.status).toBe(403);
     expect(calls).toContainEqual({ type: "subscribe", login: "__local__", value });
-    expect(calls).toContainEqual({ type: "subscribe-native", login: "__local__", value: nativeValue });
+    expect(calls).toContainEqual({ type: "issue-device", login: "__local__" });
+    expect(calls).toContainEqual({
+      type: "publish-device",
+      value: {
+        type: "agent-done",
+        agentId: "agent-1",
+        sessionId: "session-1",
+        title: "ProjectA / Build",
+      },
+    });
+    expect(calls).toContainEqual({
+      type: "publish-device",
+      value: {
+        type: "agent-question",
+        agentId: "agent-1",
+        sessionId: "session-1",
+        title: "ProjectA / Build",
+      },
+    });
     expect(calls).toContainEqual({
       type: "notify-done",
       value: {
@@ -684,6 +706,64 @@ describe("Electron dashboard server", () => {
         title: "ProjectA / Build",
       },
     });
+  });
+
+  it("issues revocable foreground-service tokens and long-polls privacy-safe events", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-monitor-api-"));
+    roots.push(root);
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => false,
+    });
+    services.push(service);
+    service.config.server_port = 0;
+    service.syncAgents([{ id: "agent-1", name: "Build", project: "ProjectA" }]);
+    const status = await service.start();
+
+    const blocked = await fetch(`${status.url}/api/monitor/device`, {
+      method: "POST",
+      headers: { origin: "https://evil.example", "content-type": "application/json" },
+      body: "{}",
+    });
+    const issuedResponse = await fetch(`${status.url}/api/monitor/device`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: "{}",
+    });
+    const issued = await issuedResponse.json();
+    const polling = fetch(`${status.url}/api/monitor/device?cursor=${issued.cursor}`, {
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+    await service.notifyAgentDone({
+      id: "agent-1",
+      event: "done",
+      session_id: "session-1",
+      terminal_output: "SECRET terminal output",
+    });
+    const eventResponse = await polling;
+    const eventBody = await eventResponse.json();
+    const revoked = await fetch(`${status.url}/api/monitor/device`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+    const rejected = await fetch(`${status.url}/api/monitor/device?cursor=${eventBody.cursor}`, {
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+
+    expect(blocked.status).toBe(403);
+    expect(issuedResponse.status).toBe(201);
+    expect(issued.token).toMatch(/^ma1_[A-Za-z0-9_-]{43}$/);
+    expect(eventResponse.status).toBe(200);
+    expect(eventBody.events).toEqual([expect.objectContaining({
+      type: "agent-done",
+      agentId: "agent-1",
+      title: "ProjectA / Build",
+      body: "작업이 완료되었습니다.",
+    })]);
+    expect(JSON.stringify(eventBody)).not.toContain("SECRET");
+    expect(revoked.status).toBe(200);
+    expect(rejected.status).toBe(401);
   });
 
   it("stores bounded same-origin image attachments and rejects spoofed or cross-origin files", async () => {

@@ -45,7 +45,7 @@ Switch / add as tab / split right·down / rename alias / **Deactivate session** 
 |---|---|
 | Working/Done detection | Claude/Codex hooks (UserPromptSubmit/Stop) → local HTTP → status dot (yellow pulse / green) |
 | Notifications | on completion: in-app toast + optional OS notification + **notification sound** (system sound / custom file / Korean TTS / off, chosen in Settings). OS notifications are silent while an app sound is enabled to prevent duplicate audio |
-| Remote background notifications | approved PWA clients register a VAPID Web Push subscription; a `done` hook sends an encrypted completion notification through the service worker even when the PWA window is closed |
+| Remote background notifications | approved PWA clients use VAPID Web Push. The sideloaded Android APK can instead run an account-free Foreground Service that receives privacy-safe completion/question events from the user's own Remote endpoint while its ongoing notification is active |
 | Desktop Pet | an always-on-top, non-focusable pet window showing idle/working/done plus working/completed counts. Clicking the working badge shows session·tool·latest question; clicking an item/completion balloon jumps to that session |
 | Session resume | capture session_id via SessionStart hook → `codex resume`/`claude --resume` on next run ([RESUME.md](RESUME.md)) |
 | Scrollback restore | save scrollback just before exit → restore on restart |

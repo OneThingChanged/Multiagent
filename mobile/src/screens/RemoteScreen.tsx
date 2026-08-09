@@ -22,14 +22,15 @@ import {
 import {
   isTrustedNativeBridgeUrl,
   nativeBridgeEventScript,
-  normalizeNotificationOpenData,
+  normalizeNotificationOpenUrl,
   parseNativeBridgeRequest,
 } from "../lib/notificationBridge";
 import {
-  Notifications,
-  registerNativePushAsync,
-  type NativePushRegistration,
-} from "../lib/nativePush";
+  foregroundMonitorStatus,
+  startForegroundMonitor,
+  stopForegroundMonitor,
+  type ForegroundMonitorState,
+} from "../lib/foregroundMonitor";
 
 type Props = {
   baseUrl: string;
@@ -39,9 +40,8 @@ type Props = {
 export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
   const webView = useRef<WebView>(null);
   const pageLoaded = useRef(false);
-  const nativeRegistration = useRef<NativePushRegistration | null>(null);
+  const nativeMonitorState = useRef<ForegroundMonitorState | null>(null);
   const pendingOpen = useRef<{ agentId: string; url: string } | null>(null);
-  const handledNotification = useRef("");
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -85,33 +85,29 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
     return true;
   };
 
-  const deliverRegistration = (
-    registration: NativePushRegistration,
+  const deliverMonitorState = (
+    state: ForegroundMonitorState,
     userInitiated = false,
   ) => {
-    nativeRegistration.current = registration;
-    dispatchToPage("multiagent:native-push-registration", {
-      ...registration,
+    nativeMonitorState.current = state;
+    dispatchToPage("multiagent:native-monitor-state", {
+      ...state,
       userInitiated,
     });
   };
 
-  const deliverNotificationOpen = (response: Notifications.NotificationResponse | null) => {
-    if (!response || handledNotification.current === response.notification.request.identifier) return;
-    const target = normalizeNotificationOpenData(response.notification.request.content.data);
+  const deliverNotificationOpen = (url: string | null | undefined) => {
+    const target = normalizeNotificationOpenUrl(url);
     if (!target) return;
-    handledNotification.current = response.notification.request.identifier;
     if (!dispatchToPage("multiagent:native-notification-open", target)) {
       pendingOpen.current = target;
     }
   };
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(deliverNotificationOpen);
-    void Notifications.getLastNotificationResponseAsync().then(deliverNotificationOpen);
-    void registerNativePushAsync(false).then((registration) => {
-      if (registration.ok) deliverRegistration(registration);
-    });
+    const subscription = Linking.addEventListener("url", (event) => deliverNotificationOpen(event.url));
+    void Linking.getInitialURL().then(deliverNotificationOpen);
+    void foregroundMonitorStatus().then((state) => deliverMonitorState(state));
     return () => subscription.remove();
   }, []);
 
@@ -119,9 +115,13 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
     if (!isRemotePage(event.nativeEvent.url)) return;
     const request = parseNativeBridgeRequest(event.nativeEvent.data);
     if (!request) return;
-    void registerNativePushAsync(true).then((registration) => {
-      deliverRegistration(registration, true);
-    });
+    if (request.type === "multiagent:start-native-monitor") {
+      void startForegroundMonitor(remoteOrigin, request.token, request.cursor)
+        .then((state) => deliverMonitorState(state, true));
+      return;
+    }
+    void stopForegroundMonitor(request.revoke)
+      .then((state) => deliverMonitorState(state, true));
   };
 
   const navigationChanged = (state: WebViewNavigation) => {
@@ -234,9 +234,9 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
           onLoadEnd={(event) => {
             pageLoaded.current = isRemotePage(event.nativeEvent.url);
             setLoading(false);
-            if (pageLoaded.current && nativeRegistration.current) {
-              dispatchToPage("multiagent:native-push-registration", {
-                ...nativeRegistration.current,
+            if (pageLoaded.current && nativeMonitorState.current) {
+              dispatchToPage("multiagent:native-monitor-state", {
+                ...nativeMonitorState.current,
                 userInitiated: false,
               });
             }

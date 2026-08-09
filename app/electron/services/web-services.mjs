@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { RemoteDeviceMonitorService } from "./remote-device-monitor-service.mjs";
 import { RemotePushService } from "./remote-push-service.mjs";
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
@@ -845,7 +846,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -862,7 +863,8 @@ export class RemoteDashboardService {
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [], tokens: {} }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
-    this.pushService = pushService ?? new RemotePushService({ baseDir, fetchImpl });
+    this.pushService = pushService ?? new RemotePushService({ baseDir });
+    this.deviceMonitorService = deviceMonitorService ?? new RemoteDeviceMonitorService({ baseDir });
     this.server = null;
     this.port = null;
     this.agents = [];
@@ -895,6 +897,7 @@ export class RemoteDashboardService {
       !this.access.approved.some((value) => value.toLowerCase() === previousOwner.toLowerCase())
     ) {
       this.pushService.removeLogin(previousOwner);
+      this.deviceMonitorService.removeLogin(previousOwner);
     }
     return this.config;
   }
@@ -916,6 +919,7 @@ export class RemoteDashboardService {
     this.access.approved = this.access.approved.filter((value) => value.toLowerCase() !== login.toLowerCase());
     await this.save(this.accessPath, this.access);
     this.pushService.removeLogin(login);
+    this.deviceMonitorService.removeLogin(login);
     return this.accessList();
   }
 
@@ -949,6 +953,10 @@ export class RemoteDashboardService {
       sessionId: payload.session_id,
       title: `${projectName} / ${agentName}`,
     };
+    this.deviceMonitorService.publish({
+      type: kind === "question" ? "agent-question" : "agent-done",
+      ...notification,
+    });
     return kind === "question"
       ? this.pushService.notifyQuestion(notification)
       : this.pushService.notifyDone(notification);
@@ -1174,6 +1182,33 @@ export class RemoteDashboardService {
           "/icons/icon-512.png",
         ].includes(url.pathname);
         if (publicAsset && sendRemoteAsset(response, url.pathname)) return;
+        if (
+          ["GET", "DELETE"].includes(request.method) &&
+          url.pathname === "/api/monitor/device"
+        ) {
+          const match = String(request.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
+          const token = match?.[1] || "";
+          if (request.method === "DELETE") {
+            const result = this.deviceMonitorService.revoke(token);
+            sendJson(response, result.revoked ? 200 : 401, result, { "cache-control": "no-store" });
+            return;
+          }
+          const controller = new AbortController();
+          response.once("close", () => controller.abort());
+          try {
+            const result = await this.deviceMonitorService.poll(
+              token,
+              url.searchParams.get("cursor"),
+              controller.signal,
+            );
+            if (!response.destroyed) sendJson(response, 200, result, { "cache-control": "no-store" });
+          } catch (error) {
+            if (!response.destroyed) sendJson(response, error?.statusCode || 400, {
+              error: error?.message || "device monitor request failed",
+            }, { "cache-control": "no-store" });
+          }
+          return;
+        }
         const login = this.sessionLogin(request);
         const approved = this.isDirectLocal(request) || this.isApproved(login);
         if (!approved) {
@@ -1201,9 +1236,33 @@ export class RemoteDashboardService {
           });
           return;
         }
+        if (request.method === "POST" && url.pathname === "/api/monitor/device") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          const deviceLogin = login || (this.isDirectLocal(request) ? "__local__" : "");
+          if (!deviceLogin) {
+            sendJson(response, 401, { error: "authenticated login required" });
+            return;
+          }
+          try {
+            await readJson(request);
+            sendJson(response, 201, this.deviceMonitorService.issue(deviceLogin), {
+              "cache-control": "no-store",
+            });
+          } catch (error) {
+            sendJson(response, 400, { error: error?.message || "invalid device request" });
+          }
+          return;
+        }
         if (
           ["POST", "DELETE"].includes(request.method) &&
-          ["/api/push/subscription", "/api/push/native-subscription"].includes(url.pathname)
+          url.pathname === "/api/push/subscription"
         ) {
           if (!this.isSameOrigin(request)) {
             sendJson(response, 403, { error: "cross-origin request blocked" });
@@ -1220,14 +1279,9 @@ export class RemoteDashboardService {
           }
           try {
             const body = await readJson(request);
-            const native = url.pathname === "/api/push/native-subscription";
             const result = request.method === "POST"
-              ? native
-                ? this.pushService.subscribeNative(pushLogin, body)
-                : this.pushService.subscribe(pushLogin, body)
-              : native
-                ? this.pushService.unsubscribeNative(pushLogin, body.token)
-                : this.pushService.unsubscribe(pushLogin, body.endpoint);
+              ? this.pushService.subscribe(pushLogin, body)
+              : this.pushService.unsubscribe(pushLogin, body.endpoint);
             sendJson(response, request.method === "POST" ? 201 : 200, result);
           } catch (error) {
             sendJson(response, 400, { error: error?.message || "invalid push subscription" });
@@ -1424,6 +1478,7 @@ export class RemoteDashboardService {
 
   async stop() {
     const server = this.server; this.server = null; this.port = null;
+    this.deviceMonitorService.close();
     if (server) {
       // Long-lived SSE terminal streams keep connections open; force them shut
       // so shutdown (and app quit) never blocks on server.close().

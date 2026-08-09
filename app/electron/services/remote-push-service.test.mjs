@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  normalizeNativePushSubscription,
   normalizePushSubscription,
   RemotePushService,
 } from "./remote-push-service.mjs";
@@ -30,43 +29,32 @@ describe("RemotePushService", () => {
       .toThrow("invalid push subscription");
   });
 
-  it("accepts only Expo native push tokens and known platforms", () => {
-    const value = { token: "ExponentPushToken[device_token_12345]", platform: "Android" };
-    expect(normalizeNativePushSubscription(value)).toEqual({
-      token: value.token,
-      platform: "android",
-    });
-    expect(() => normalizeNativePushSubscription({ token: "fcm-secret", platform: "android" }))
-      .toThrow("invalid native push subscription");
-    expect(() => normalizeNativePushSubscription({ token: value.token, platform: "windows" }))
-      .toThrow("invalid native push subscription");
-  });
-
-  it("persists VAPID keys and subscriptions without exposing the private key", () => {
+  it("persists VAPID keys and subscriptions without exposing the private key or legacy native tokens", () => {
     const root = createRoot();
+    fs.writeFileSync(path.join(root, "remote-push.json"), JSON.stringify({
+      version: 2,
+      vapid: { publicKey: "public-vapid", privateKey: "private-vapid" },
+      nativeSubscriptions: [{
+        login: "owner",
+        token: "ExponentPushToken[legacy_device_token]",
+        platform: "android",
+      }],
+    }));
     const webPushImpl = {
       generateVAPIDKeys: () => ({ publicKey: "public-vapid", privateKey: "private-vapid" }),
       sendNotification: async () => {},
     };
     const first = new RemotePushService({ baseDir: root, webPushImpl, now: () => 100 });
     first.subscribe("Owner", subscription());
-    first.subscribeNative("Owner", {
-      token: "ExponentPushToken[device_token_12345]",
-      platform: "android",
-    });
 
     const second = new RemotePushService({ baseDir: root, webPushImpl, now: () => 200 });
     expect(second.publicKey()).toBe("public-vapid");
     expect(second.subscriptions).toHaveLength(1);
     expect(second.subscriptions[0]).toMatchObject({ login: "owner", ...subscription() });
-    expect(second.nativeSubscriptions).toEqual([
-      expect.objectContaining({
-        login: "owner",
-        token: "ExponentPushToken[device_token_12345]",
-        platform: "android",
-      }),
-    ]);
     expect(second.publicKey()).not.toContain("private");
+    const saved = fs.readFileSync(path.join(root, "remote-push.json"), "utf8");
+    expect(saved).not.toContain("nativeSubscriptions");
+    expect(saved).not.toContain("legacy_device_token");
   });
 
   it("sends completion pushes, deduplicates hook bursts, and prunes expired endpoints", async () => {
@@ -91,8 +79,6 @@ describe("RemotePushService", () => {
     });
     expect(result).toEqual({
       sent: 1,
-      webSent: 1,
-      nativeSent: 0,
       removed: 1,
       duplicate: false,
     });
@@ -109,67 +95,8 @@ describe("RemotePushService", () => {
     expect(await service.notifyDone({ agentId: "agent-1", sessionId: "session-1" }))
       .toEqual({
         sent: 0,
-        webSent: 0,
-        nativeSent: 0,
         removed: 0,
         duplicate: true,
       });
-  });
-
-  it("sends privacy-safe native completion and question pushes and removes invalid devices", async () => {
-    const root = createRoot();
-    const requests = [];
-    const fetchImpl = async (url, options) => {
-      requests.push({ url, options, messages: JSON.parse(options.body) });
-      return {
-        ok: true,
-        async json() {
-          return {
-            data: [
-              { status: "ok", id: "ticket-1" },
-              { status: "error", details: { error: "DeviceNotRegistered" } },
-            ],
-          };
-        },
-      };
-    };
-    const webPushImpl = {
-      generateVAPIDKeys: () => ({ publicKey: "public-vapid", privateKey: "private-vapid" }),
-      sendNotification: async () => {},
-    };
-    const service = new RemotePushService({
-      baseDir: root,
-      webPushImpl,
-      fetchImpl,
-      expoAccessToken: "local-expo-access-token",
-      now: () => 2_000,
-    });
-    service.subscribeNative("owner", { token: "ExponentPushToken[device_token_12345]", platform: "android" });
-    service.subscribeNative("owner", { token: "ExpoPushToken[expired_device_12345]", platform: "android" });
-
-    const result = await service.notifyQuestion({
-      agentId: "agent-1",
-      sessionId: "session-1",
-      title: "ProjectA / Build",
-      body: "SECRET prompt and terminal output",
-    });
-
-    expect(result).toEqual({
-      sent: 1,
-      webSent: 0,
-      nativeSent: 1,
-      removed: 1,
-      duplicate: false,
-    });
-    expect(requests[0].url).toBe("https://exp.host/--/api/v2/push/send");
-    expect(requests[0].options.headers.authorization).toBe("Bearer local-expo-access-token");
-    expect(requests[0].messages[0]).toMatchObject({
-      title: "ProjectA / Build",
-      body: "응답이 필요합니다.",
-      channelId: "multiagent-agent-events",
-      data: { type: "agent-question", agentId: "agent-1", url: "/?agent=agent-1" },
-    });
-    expect(JSON.stringify(requests[0].messages)).not.toContain("SECRET");
-    expect(service.nativeSubscriptions).toHaveLength(1);
   });
 });

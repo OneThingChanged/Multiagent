@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const EXPECTED_PACKAGE = "com.OneThingChanged.multiagent.mobile";
+const EXPECTED_PACKAGE = "com.onethingchanged.multiagent.mobile";
 
 function normalizeFingerprint(value) {
   return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase();

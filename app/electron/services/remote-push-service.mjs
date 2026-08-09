@@ -3,11 +3,9 @@ import path from "node:path";
 import webPush from "web-push";
 
 const MAX_SUBSCRIPTIONS = 64;
-const MAX_NATIVE_SUBSCRIPTIONS = 64;
 const MAX_ENDPOINT_LENGTH = 4096;
 const MAX_KEY_LENGTH = 1024;
 const EVENT_DEDUPE_MS = 5_000;
-const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -40,18 +38,6 @@ export function normalizePushSubscription(value) {
   return { endpoint, keys: { p256dh, auth } };
 }
 
-export function normalizeNativePushSubscription(value) {
-  const token = clean(value?.token);
-  const platform = clean(value?.platform).toLowerCase();
-  if (
-    !/^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{10,256}\]$/.test(token) ||
-    !["android", "ios"].includes(platform)
-  ) {
-    throw new TypeError("invalid native push subscription");
-  }
-  return { token, platform };
-}
-
 function validVapidKeys(value) {
   return Boolean(clean(value?.publicKey) && clean(value?.privateKey));
 }
@@ -60,19 +46,14 @@ export class RemotePushService {
   constructor({
     baseDir,
     webPushImpl = webPush,
-    fetchImpl = globalThis.fetch,
     now = () => Date.now(),
-    expoAccessToken = process.env.MULTIAGENT_EXPO_ACCESS_TOKEN,
   }) {
     this.file = path.join(baseDir, "remote-push.json");
     this.webPush = webPushImpl;
-    this.fetch = fetchImpl;
-    this.expoAccessToken = clean(expoAccessToken);
     this.now = now;
     this.recentEvents = new Map();
     this.vapid = null;
     this.subscriptions = [];
-    this.nativeSubscriptions = [];
     this.load();
   }
 
@@ -101,23 +82,6 @@ export class RemotePushService {
           }
         }).slice(-MAX_SUBSCRIPTIONS)
       : [];
-    this.nativeSubscriptions = Array.isArray(stored?.nativeSubscriptions)
-      ? stored.nativeSubscriptions.flatMap((entry) => {
-          try {
-            const subscription = normalizeNativePushSubscription(entry);
-            const login = normalizeLogin(entry.login);
-            if (!login) return [];
-            return [{
-              login,
-              ...subscription,
-              createdAt: Number(entry.createdAt) || this.now(),
-              updatedAt: Number(entry.updatedAt) || this.now(),
-            }];
-          } catch {
-            return [];
-          }
-        }).slice(-MAX_NATIVE_SUBSCRIPTIONS)
-      : [];
     this.save();
   }
 
@@ -127,10 +91,9 @@ export class RemotePushService {
     fs.writeFileSync(
       temporary,
       JSON.stringify({
-        version: 2,
+        version: 3,
         vapid: this.vapid,
         subscriptions: this.subscriptions,
-        nativeSubscriptions: this.nativeSubscriptions,
       }, null, 2),
       { encoding: "utf8", mode: 0o600 },
     );
@@ -172,45 +135,12 @@ export class RemotePushService {
     return { subscribed: false };
   }
 
-  subscribeNative(loginValue, value) {
-    const login = normalizeLogin(loginValue);
-    if (!login) throw new TypeError("login required");
-    const subscription = normalizeNativePushSubscription(value);
-    const existing = this.nativeSubscriptions.find((entry) => entry.token === subscription.token);
-    const now = this.now();
-    if (existing) {
-      existing.login = login;
-      existing.platform = subscription.platform;
-      existing.updatedAt = now;
-    } else {
-      this.nativeSubscriptions.push({ login, ...subscription, createdAt: now, updatedAt: now });
-      if (this.nativeSubscriptions.length > MAX_NATIVE_SUBSCRIPTIONS) {
-        this.nativeSubscriptions.splice(0, this.nativeSubscriptions.length - MAX_NATIVE_SUBSCRIPTIONS);
-      }
-    }
-    this.save();
-    return { subscribed: true };
-  }
-
-  unsubscribeNative(loginValue, tokenValue) {
-    const login = normalizeLogin(loginValue);
-    const token = clean(tokenValue);
-    const before = this.nativeSubscriptions.length;
-    this.nativeSubscriptions = this.nativeSubscriptions.filter(
-      (entry) => entry.login !== login || entry.token !== token,
-    );
-    if (this.nativeSubscriptions.length !== before) this.save();
-    return { subscribed: false };
-  }
-
   removeLogin(loginValue) {
     const login = normalizeLogin(loginValue);
     if (!login) return;
     const before = this.subscriptions.length;
     this.subscriptions = this.subscriptions.filter((entry) => entry.login !== login);
-    const nativeBefore = this.nativeSubscriptions.length;
-    this.nativeSubscriptions = this.nativeSubscriptions.filter((entry) => entry.login !== login);
-    if (this.subscriptions.length !== before || this.nativeSubscriptions.length !== nativeBefore) this.save();
+    if (this.subscriptions.length !== before) this.save();
   }
 
   async notifyDone({ agentId, sessionId, title }) {
@@ -235,8 +165,8 @@ export class RemotePushService {
 
   async notifyEvent({ type, agentId, sessionId, title, urgency }) {
     const id = clean(agentId);
-    if (!id || (this.subscriptions.length === 0 && this.nativeSubscriptions.length === 0)) {
-      return { sent: 0, webSent: 0, nativeSent: 0, removed: 0, duplicate: false };
+    if (!id || this.subscriptions.length === 0) {
+      return { sent: 0, removed: 0, duplicate: false };
     }
     const now = this.now();
     const eventKey = `${clean(type)}:${id}`;
@@ -246,7 +176,7 @@ export class RemotePushService {
       previous.sessionId === clean(sessionId) &&
       now - previous.at < EVENT_DEDUPE_MS
     ) {
-      return { sent: 0, webSent: 0, nativeSent: 0, removed: 0, duplicate: true };
+      return { sent: 0, removed: 0, duplicate: true };
     }
     this.recentEvents.set(eventKey, { sessionId: clean(sessionId), at: now });
     for (const [key, value] of this.recentEvents) {
@@ -293,59 +223,13 @@ export class RemotePushService {
       }
     }));
 
-    const expiredNative = new Set();
-    let nativeSent = 0;
-    if (this.nativeSubscriptions.length > 0 && typeof this.fetch === "function") {
-      try {
-        const headers = {
-          accept: "application/json",
-          "accept-encoding": "gzip, deflate",
-          "content-type": "application/json",
-        };
-        if (this.expoAccessToken) headers.authorization = `Bearer ${this.expoAccessToken}`;
-        const response = await this.fetch(EXPO_PUSH_URL, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(this.nativeSubscriptions.map((entry) => ({
-            to: entry.token,
-            sound: "default",
-            title: notification.title,
-            body: notification.body,
-            priority: urgency === "high" ? "high" : "default",
-            channelId: "multiagent-agent-events",
-            ttl: 60 * 60,
-            data: {
-              type: notification.type,
-              agentId: notification.agentId,
-              url: notification.url,
-            },
-          }))),
-        });
-        if (response.ok) {
-          const result = await response.json().catch(() => null);
-          const tickets = Array.isArray(result?.data) ? result.data : [];
-          tickets.forEach((ticket, index) => {
-            const token = this.nativeSubscriptions[index]?.token;
-            if (!token) return;
-            if (ticket?.status === "ok") nativeSent += 1;
-            if (ticket?.details?.error === "DeviceNotRegistered") expiredNative.add(token);
-          });
-        }
-      } catch {
-        // A transient Expo/network failure must not affect local hook processing.
-      }
-    }
-
-    if (expiredWeb.size > 0 || expiredNative.size > 0) {
+    if (expiredWeb.size > 0) {
       this.subscriptions = this.subscriptions.filter((entry) => !expiredWeb.has(entry.endpoint));
-      this.nativeSubscriptions = this.nativeSubscriptions.filter((entry) => !expiredNative.has(entry.token));
       this.save();
     }
     return {
-      sent: webSent + nativeSent,
-      webSent,
-      nativeSent,
-      removed: expiredWeb.size + expiredNative.size,
+      sent: webSent,
+      removed: expiredWeb.size,
       duplicate: false,
     };
   }

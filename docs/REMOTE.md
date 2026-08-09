@@ -25,7 +25,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - **Sessions**: per-project session list with status filters and search. The `Active` filter combines working, needs-answer, recovering/starting, done, and waiting sessions while excluding inactive sessions. A restored PTY remains **Recovering** until its AI CLI emits a hook; it is never counted as working merely because the process started. The selected session opens in a compact full-height chat/terminal view with a keyboard-safe composer
 - **Documents**: choose a local project and browse its `.md`/`.markdown`/`.html`/`.htm` files in a collapsible folder tree. Generated/internal roots such as `.build-tools`, `.claude`, `.codex`, `.qwen`, `node_modules`, `build`, and `target` are excluded. Search keeps only matching documents and their parent folders visible. On phones the document tree is a dedicated full-screen drawer; selecting a file closes it and gives the Markdown/HTML preview the full remaining viewport. Markdown supports headings, lists, task items, tables, code fences, and relative links to another listed document. HTML runs in a script-disabled sandbox iframe
 - **Usage**: a combined token/account view. It shows today/this-week/this-month token totals, a recent 30-day daily graph, cumulative input/output/cache read/write/reasoning details, and Codex/Claude rolling-window remaining percentage, reset time, plan, and extra-usage availability
-- **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change. A push-enabled build registers an Expo device token through the authenticated PWA and can show generic completion/question notifications while the WebView is closed
+- **Android app**: stores one approved Remote endpoint and loads the same PWA in a constrained native WebView. Its connection bar starts collapsed so the chat/terminal keeps nearly the full screen; expand it for back, reload, or address change. A user-enabled `remoteMessaging` Foreground Service keeps an authenticated long-poll connection and shows generic local completion/question notifications without Firebase, FCM, or Expo Push
 - **APK download**: after login and desktop approval, the top bar shows an `APK` button when a standard packaged build contains the separately verified `resources/mobile/MultiAgent-Mobile.apk`. Development can point at the same release artifact with `MULTIAGENT_MOBILE_APK_PATH`. The Remote server streams that file directly and supports interrupted-download resume
 - On phone widths, navigation lists appear as a slide menu and Screen mode is unavailable. A root visit opens an active Session, and an old `?screen=` link redirects to an available session from that Screen
 - Session detail automatically collapses the fixed left navigation at tablet/small-desktop widths (up to 1180px). In this focus layout the global header is removed, and a single compact row contains the navigation button, session name/status, and Chat/Terminal switch
@@ -49,7 +49,7 @@ The Remote server does not listen on an external NIC; it binds to loopback only.
 - Session detail always exposes a header button for collapsing or restoring the left Screen/Session list on desktop/tablet; on mobile the same control opens the Session-only navigation drawer
 - `Ctrl/⌘ + Enter` to send, copy recent output
 - Browser **Install app / Add to Home Screen** support
-- Browser/PWA completion and interactive-question notifications use Web Push after permission and subscription are enabled. A configured Android APK uses Expo Push for the same two hook events even when the native app is backgrounded or closed. Tapping either notification reopens the matching Session
+- Browser/PWA completion and interactive-question notifications use Web Push after permission and subscription are enabled. The Android APK instead uses its own Foreground Service while the required ongoing notification is visible. It continues when the WebView is backgrounded and can survive removing the task, but force-stop/service termination disables delivery until the user enables it again. Tapping an event notification reopens the matching Session
 - Offline, only the app shell opens; session API/input are network-only
 
 The loopback Dashboard preview uses the same PWA and accepts PTY input from the browser's actual same-origin host, including a LAN hostname or a trusted reverse proxy's forwarded host. Cross-site origins remain blocked. This lets a Dashboard page forwarded to another computer send text without weakening the Remote server's login and approval boundary.
@@ -69,8 +69,9 @@ Desktop/tablet Screen selection changes only inside the Remote browser and does 
 | `GET /api/push/public-key` | current server VAPID public key for an approved PWA client |
 | `POST /api/push/subscription` | register/update an approved same-origin Web Push subscription |
 | `DELETE /api/push/subscription` | remove the caller's same-origin Web Push subscription |
-| `POST /api/push/native-subscription` | register/update the approved Android/iOS client's Expo Push token |
-| `DELETE /api/push/native-subscription` | remove the caller's native token, including native-app logout |
+| `POST /api/monitor/device` | issue a revocable, notification-only Android token to an approved same-origin session |
+| `GET /api/monitor/device?cursor=...` | authenticated long-poll for privacy-safe completion/question events; Bearer device token required |
+| `DELETE /api/monitor/device` | revoke the calling Android device token; Bearer device token required |
 | `POST /api/input` | deliver input to the active PTY. JSON, same-origin, 8KB limit |
 | `POST /api/attachment` | save one same-origin image attachment under app data. JSON data URL, 8MB decoded limit |
 | `GET /api/stream?id=...` | SSE backfill and live PTY output for the xterm view |
@@ -135,8 +136,9 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 - PWA responses use strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, and a restricted Permissions Policy.
 - The service worker caches only the static shell; `/api/**`, `/auth/**`, and all POSTs are never cached.
 - Account-limit requests use the same login/approval boundary as session state. The browser receives only normalized percentages, reset times, plan labels, and credit state; local OAuth credentials are never exposed.
-- Push subscription writes require the same login/approval and same-origin checks as PTY input. VAPID keys, browser endpoints, and Expo device tokens are stored only in `%LOCALAPPDATA%\com.jintae.multiagent\remote-push.json` with owner-only file mode where supported; there is no endpoint that lists tokens. Revoking an account removes all of its subscriptions, native logout removes that APK's token, expired Web Push endpoints and immediately rejected Expo devices are pruned. Lock-screen payloads contain only project/session display names, the agent id, and the generic text `작업이 완료되었습니다.` or `응답이 필요합니다.`—never prompts, terminal output, file paths, or tool input
-- The native WebView bridge accepts only the notification-enable message. Notification taps discard arbitrary URLs and derive a same-origin `?agent=` route from a validated agent id. Public Remote endpoints must use HTTPS
+- Browser Push subscription writes require the same login/approval and same-origin checks as PTY input. VAPID keys and browser endpoints are stored only in `%LOCALAPPDATA%\com.jintae.multiagent\remote-push.json` with owner-only file mode where supported.
+- Android monitor tokens are 256-bit random values issued only to an approved same-origin session. The PC persists only their SHA-256 hashes in `%LOCALAPPDATA%\com.jintae.multiagent\remote-monitor-devices.json`; the raw token is encrypted with Android Keystore. There is no token-list/readback API. Logout revokes the active token, account revocation removes every token owned by that login, and tokens expire after 180 days. Event bodies contain only project/session display names, a validated agent id, and `작업이 완료되었습니다.` or `응답이 필요합니다.`—never prompts, terminal output, file paths, or tool input
+- The native WebView bridge accepts only validated monitor start/stop messages from the configured Remote origin. Public endpoints require HTTPS. Notification taps accept only the `multiagent://open?agent=...` deep link with a restricted agent id and derive a same-origin Remote route
 - APK downloads require the same login/approval check as session APIs, use a fixed server-side file path, are never service-worker cached, and are sent with attachment, no-store, and nosniff headers.
 - Even if a Company renderer is compromised, main re-blocks Remote·Tunnel calls in the disabled command set.
 
@@ -149,11 +151,11 @@ Stored in the Standard local data folder as `remote-config.json`, `remote-access
 5. If not the Owner, approve the approval request on the desktop.
 6. Use either client:
    - Browser: choose **Install app / Add to Home Screen** and tap the notification button. The success message must say that background notifications are enabled. HTTPS is required away from localhost; on iPhone/iPad, Web Push requires a Home Screen-installed PWA
-   - Android: tap the `APK` button in the Remote top bar, install the downloaded file, enter the same HTTPS tunnel URL, complete the existing GitHub login/approval flow, then tap the notification button and grant Android notification permission.
+   - Android: tap the `APK` button in the Remote top bar, install the downloaded file, enter the same HTTPS tunnel URL, complete the existing GitHub login/approval flow, then tap the notification button and grant Android notification permission. Keep the required “MultiAgent monitoring” notification active while background delivery is wanted; tap the Remote notification button again to stop the service and revoke its token.
 
 After connecting, desktop/tablet Remote opens the first available **Screen**, while phone-width Remote opens an active **Session** directly and does not list Screens. Existing mobile `?screen=` URLs are normalized to `?agent=` using a session from that Screen. **Documents** and **Usage** remain the fallbacks. The desktop-oriented Monitor overview and global status cards are intentionally omitted, and the mobile bottom bar switches between Sessions, Documents, and Usage so the selected content can use the full dynamic viewport.
 
-Background delivery requires the desktop MultiAgent process and an internet connection to remain available. Closing all workspace windows is fine because the system tray keeps hooks and Push delivery alive; choosing **Exit** from the tray stops delivery. Keep the Remote tunnel/server available as well so tapping a notification can reopen the session.
+Background delivery requires the desktop MultiAgent process, Remote tunnel/server, phone network, and Android Foreground Service to remain available. Closing all desktop workspace windows is fine because the system tray keeps hooks and delivery alive; choosing **Exit** from the tray stops delivery. Force-stopping the Android app or stopping its ongoing monitor notification also stops delivery.
 
 The Usage tab's token cards use the desktop PC's calendar boundaries: today begins at local midnight, the week begins Monday, and the month begins on day one. Its chart always covers the latest 30 calendar days and keeps inactive days as zero-value columns. These aggregates come only from locally indexed `usage.db` events; SSH session accounting remains unsupported. The account section emphasizes the amount **remaining** even though provider APIs report `used_percent`. Codex values come from recent local Codex transcript rate-limit metadata; Claude values come from Claude Code's local OAuth usage endpoint. A provider can therefore be absent until its local session/credential has supplied a snapshot. The refresh button requests current values, while the server protects the upstream check with a 30-second throttle.
 
@@ -165,11 +167,11 @@ The Android client lives in `mobile/` and intentionally reuses the Remote PWA ra
 
 The saved endpoint reconnects on the next launch. To change it, expand the thin native connection bar and tap the settings button. The current prototype APK targets Android 7.0 or later and ARM64 devices. The download button is hidden inside the native app itself because it is intended for browser/PWA users who have not installed the app yet.
 
-The APK does not need Play Store registration and can continue to be sideloaded from the authenticated Remote download. Native background push does require a project owned by the distributor in Expo/EAS and Firebase/FCM. Build-time IDs/configuration and signing material are injected locally; they are not committed. See `docs/BUILD.md` for the exact setup, APK generation, and desktop bundling flow.
+The APK does not need Play Store registration and can continue to be sideloaded from the authenticated Remote download. Background monitoring uses only the user's MultiAgent Remote server and requires no Firebase/FCM/Expo account or vendor key. Release signing material is injected locally and is never committed. See `docs/BUILD.md` for the APK generation and desktop bundling flow.
 
 ## Remaining Extensions
 
-- Expo receipt follow-up and long-term delivery diagnostics beyond immediate push-ticket errors
-- Server→PWA delta stream or WebSocket to remove polling
+- Foreground monitor connection diagnostics and explicit per-device management UI
+- Server→PWA delta stream or WebSocket to remove browser state polling
 - Explicit control APIs like session pause/resume
 - Sync interval adjustment based on network/battery state

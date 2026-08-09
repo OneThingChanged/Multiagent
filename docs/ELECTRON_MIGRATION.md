@@ -138,7 +138,9 @@ Codex/Claude chat view. On phones, a Session uses the dynamic viewport for a com
 header, scrollable chat/terminal, and composer; one-finger terminal drags scroll the
 normal xterm buffer or forward wheel/page input to an alternate-screen TUI. Screen mode
 streams only the selected pane. Windows namespaced transcript paths are normalized before chat parsing.
-Background Web Push remains later scope.
+Approved browser/PWA clients support VAPID Web Push. The Android APK uses a separate
+`remoteMessaging` Foreground Service with a revocable, hash-at-rest device token; it
+does not depend on Firebase/FCM or an external Push account.
 
 ### Usage
 

@@ -1,13 +1,24 @@
-export type NativeBridgeRequest = {
-  type: "multiagent:enable-native-push";
-};
+export type NativeBridgeRequest =
+  | { type: "multiagent:start-native-monitor"; token: string; cursor: number }
+  | { type: "multiagent:stop-native-monitor"; revoke: boolean };
 
 export function parseNativeBridgeRequest(value: string): NativeBridgeRequest | null {
   try {
     const parsed = JSON.parse(value);
-    return parsed?.type === "multiagent:enable-native-push"
-      ? { type: parsed.type }
-      : null;
+    if (
+      parsed?.type === "multiagent:start-native-monitor" &&
+      /^ma1_[A-Za-z0-9_-]{43}$/.test(String(parsed.token || ""))
+    ) {
+      return {
+        type: parsed.type,
+        token: String(parsed.token),
+        cursor: Number.isFinite(Number(parsed.cursor)) ? Math.max(0, Number(parsed.cursor)) : 0,
+      };
+    }
+    if (parsed?.type === "multiagent:stop-native-monitor") {
+      return { type: parsed.type, revoke: parsed.revoke !== false };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -27,9 +38,15 @@ export function nativeBridgeEventScript(eventName: string, detail: unknown) {
   return `window.dispatchEvent(new CustomEvent(${safeEventName},{detail:${safeDetail}}));true;`;
 }
 
-export function normalizeNotificationOpenData(value: unknown) {
-  const data = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const agentId = String(data.agentId || "").trim();
+export function normalizeNotificationOpenUrl(value: string | null | undefined) {
+  let agentId = "";
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "multiagent:" || url.hostname !== "open") return null;
+    agentId = String(url.searchParams.get("agent") || "").trim();
+  } catch {
+    return null;
+  }
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(agentId)) return null;
   return { agentId, url: `/?agent=${encodeURIComponent(agentId)}` };
 }

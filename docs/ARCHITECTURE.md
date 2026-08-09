@@ -9,6 +9,7 @@ MultiAgent.exe (Electron main process + system tray)
 ├─ local hook HTTP service (127.0.0.1:RANDOM_PORT, Claude/Codex hooks)
 ├─ Remote/Dashboard HTTP services
 │  ├─ VAPID Web Push completion delivery (service worker background notification)
+│  ├─ revocable Android device-token + long-poll event delivery (Foreground Service)
 │  └─ cloudflared child process (only when tunnel is on)
 └─ node-pty session × N
    ├─ PowerShell via Windows ConPTY (local session)
@@ -380,4 +381,4 @@ Most actions process the layout inside `setGroups((prev) => { ... })`, then read
 - `multiagent.scrollback.<agentId>.v1` — per-session scrollback snapshot (for restart restore)
 - (migration) `multiagent.layout.v1` — old single tree. Converted to a single group on first load, then deleted
 
-> Remote/usage settings are stored not in localStorage but as JSON/SQLite in `%LOCALAPPDATA%\com.jintae.multiagent\`: `remote-config.json`, `remote-access.json`, `remote-push.json` (VAPID keypair + per-login browser endpoints and Expo device tokens), `usage-config.json`, `usage.db`, `cloudflared.exe`. Mobile Firebase/Expo configuration and APK signing credentials remain build-machine inputs outside Git.
+> Remote/usage settings are stored not in localStorage but as JSON/SQLite in `%LOCALAPPDATA%\com.jintae.multiagent\`: `remote-config.json`, `remote-access.json`, `remote-push.json` (VAPID keypair + per-login browser endpoints), `remote-monitor-devices.json` (revocable device ids and token hashes only), `usage-config.json`, `usage.db`, `cloudflared.exe`. The Android raw monitor token is encrypted by Android Keystore. APK signing credentials remain build-machine inputs outside Git; Firebase/FCM/Expo Push credentials are not used.

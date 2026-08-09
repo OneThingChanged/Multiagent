@@ -167,7 +167,6 @@ let toastTimer = null;
 let screenRenderKey = "";
 let previousActivity = new Map();
 let backgroundPushEnabled = false;
-let nativePushToken = "";
 const leafTabSelection = new Map();
 const screenDrafts = new Map();
 const screenPaneModes = new Map();
@@ -3715,10 +3714,31 @@ async function ensureBackgroundPush(registration) {
 
 async function enableNotifications() {
   if (window.__MULTIAGENT_NATIVE_APP__ && window.ReactNativeWebView?.postMessage) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-      type: "multiagent:enable-native-push",
-    }));
-    showToast("휴대폰 알림 권한을 확인하는 중입니다.");
+    if (backgroundPushEnabled) {
+      stopNativeMonitor();
+      ui.notifyButton.classList.remove("enabled");
+      ui.notifyButton.title = "휴대폰 모니터링 꺼짐";
+      showToast("백그라운드 모니터링을 중지했습니다.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/monitor/device", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const registration = await response.json();
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "multiagent:start-native-monitor",
+        token: text(registration.token),
+        cursor: Number(registration.cursor) || 0,
+      }));
+      showToast("백그라운드 모니터링을 시작하는 중입니다.");
+    } catch {
+      showToast("알림 전용 기기 토큰을 발급하지 못했습니다.");
+    }
     return;
   }
   if (!("Notification" in window)) {
@@ -3742,48 +3762,35 @@ async function enableNotifications() {
   }
 }
 
-async function registerNativePushSubscription(detail) {
+function applyNativeMonitorState(detail) {
   if (!detail?.ok) {
-    if (detail?.userInitiated && !detail?.skipped) {
-      showToast(text(detail?.error) || "휴대폰 알림을 켜지 못했습니다.");
-    }
+    backgroundPushEnabled = false;
+    ui.notifyButton.classList.remove("enabled");
+    ui.notifyButton.title = "휴대폰 모니터링 꺼짐";
+    if (detail?.userInitiated) showToast(text(detail?.error) || "백그라운드 모니터링을 시작하지 못했습니다.");
     return;
   }
-  const token = text(detail.token);
-  const platform = text(detail.platform);
-  if (!token || !["android", "ios"].includes(platform)) return;
-  try {
-    const response = await fetch("/api/push/native-subscription", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token, platform }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    nativePushToken = token;
-    backgroundPushEnabled = true;
+  backgroundPushEnabled = Boolean(detail.active);
+  ui.notifyButton.classList.toggle("enabled", backgroundPushEnabled);
+  ui.notifyButton.title = backgroundPushEnabled
+    ? "휴대폰 백그라운드 모니터링 켜짐"
+    : "휴대폰 모니터링 꺼짐";
+  if (backgroundPushEnabled) {
     localStorage.setItem("multiagent.remote.notifications", "on");
-    ui.notifyButton.classList.add("enabled");
-    ui.notifyButton.title = "휴대폰 백그라운드 알림 켜짐";
-    if (detail?.userInitiated) {
-      showToast("앱을 닫아도 완료와 응답 필요 알림을 받습니다.");
-    }
-  } catch {
-    if (detail?.userInitiated) {
-      showToast("휴대폰 알림을 Remote 서버에 등록하지 못했습니다.");
-    }
+    if (detail?.userInitiated) showToast("고정 알림이 표시되는 동안 완료와 응답 필요 알림을 받습니다.");
+  } else {
+    localStorage.removeItem("multiagent.remote.notifications");
   }
 }
 
-async function unregisterNativePushSubscription() {
-  if (!nativePushToken) return;
-  await fetch("/api/push/native-subscription", {
-    method: "DELETE",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: nativePushToken }),
-  }).catch(() => {});
-  nativePushToken = "";
+function stopNativeMonitor() {
+  if (!window.__MULTIAGENT_NATIVE_APP__ || !window.ReactNativeWebView?.postMessage) return;
+  window.ReactNativeWebView.postMessage(JSON.stringify({
+    type: "multiagent:stop-native-monitor",
+    revoke: true,
+  }));
+  backgroundPushEnabled = false;
+  localStorage.removeItem("multiagent.remote.notifications");
 }
 
 async function installPwa() {
@@ -4099,7 +4106,7 @@ ui.copyOutputButton.addEventListener("click", async () => {
 ui.notifyButton.addEventListener("click", enableNotifications);
 ui.installButton.addEventListener("click", installPwa);
 ui.logoutButton.addEventListener("click", async () => {
-  await unregisterNativePushSubscription();
+  stopNativeMonitor();
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
   location.reload();
 });
@@ -4120,8 +4127,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) void
 navigator.serviceWorker?.addEventListener("message", (event) => {
   if (event.data?.type === "open-agent" && event.data.agentId) selectSession(event.data.agentId);
 });
-addEventListener("multiagent:native-push-registration", (event) => {
-  void registerNativePushSubscription(event.detail);
+addEventListener("multiagent:native-monitor-state", (event) => {
+  applyNativeMonitorState(event.detail);
 });
 addEventListener("multiagent:native-notification-open", (event) => {
   const agentId = text(event.detail?.agentId);
@@ -4187,7 +4194,7 @@ if (
 ) {
   ui.notifyButton.classList.add("enabled");
   ui.notifyButton.title = window.__MULTIAGENT_NATIVE_APP__
-    ? "휴대폰 알림 등록 확인 중"
+    ? "휴대폰 모니터링 상태 확인 중"
     : "알림 켜짐";
 }
 applyNavCollapsed(

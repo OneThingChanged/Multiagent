@@ -37,7 +37,7 @@ Build and transition manifest generation order:
 cd "K:\AI\MultiAgent\app"
 npm run electron:dist:all
 
-$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath (Join-Path $env:USERPROFILE ".tauri\multiagent.key") -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 npm run tauri -- signer sign electron-dist/MultiAgent-Setup-<ver>-x64.exe
 npm run tauri -- signer sign electron-dist/company/MultiAgentCompany-Setup-<ver>-x64.exe
@@ -80,8 +80,8 @@ runtime variant continues to disable Remote/Tunnel.
 
 | item | value |
 |---|---|
-| private key | `C:\Users\OneThingChanged\.tauri\multiagent.key` |
-| public key | `C:\Users\OneThingChanged\.tauri\multiagent.key.pub` |
+| private key | `%USERPROFILE%\.tauri\multiagent.key` |
+| public key | `%USERPROFILE%\.tauri\multiagent.key.pub` |
 | password | none (created with `--ci`, empty string) |
 | pubkey location | `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
 
@@ -89,9 +89,10 @@ runtime variant continues to disable Remote/Tunnel.
 - The pubkey is baked into the app and distributed. Build `.sig` files verify against this pubkey.
 - Generating a key pair (first time or re-issue):
 
-```bash
-cd K:/AI/MultiAgent/app
-npm run tauri -- signer generate -w "C:/Users/OneThingChanged/.tauri/multiagent.key" --ci --force
+```powershell
+Set-Location "K:\AI\MultiAgent\app"
+$tauriKeyPath = Join-Path $env:USERPROFILE ".tauri\multiagent.key"
+npm run tauri -- signer generate -w "$tauriKeyPath" --ci --force
 ```
 
 > **If you lose the key**, existing users cannot receive auto-updates (signature verification fails). After creating a new key and replacing the pubkey in `tauri.conf.json`, users must **manually install once**. (The key was actually replaced once during the 0.3.x → 0.4.0 transition.)
@@ -158,7 +159,7 @@ $env:MULTIAGENT_MOBILE_APK_PATH = 'K:\AI\MultiAgent\mobile\android\app\build\out
 $env:MULTIAGENT_ANDROID_CERT_SHA256 = '<release certificate SHA-256>'
 npm run electron:dist:all
 
-$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath "C:\Users\OneThingChanged\.tauri\multiagent.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath (Join-Path $env:USERPROFILE ".tauri\multiagent.key") -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 
 npm run tauri -- signer sign "electron-dist\MultiAgent-Setup-<ver>-x64.exe"

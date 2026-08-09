@@ -10,10 +10,10 @@
     "backgroundColor": "#06101a",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.OneThingChanged.multiagent.mobile"
+      "bundleIdentifier": "com.onethingchanged.multiagent.mobile"
     },
     "android": {
-      "package": "com.OneThingChanged.multiagent.mobile",
+      "package": "com.onethingchanged.multiagent.mobile",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#06101A",
@@ -28,14 +28,7 @@
     "plugins": [
       "expo-system-ui",
       "./plugins/withReleaseSigning.mjs",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/android-icon-monochrome.png",
-          "color": "#55E4D4",
-          "defaultChannel": "multiagent-agent-events"
-        }
-      ],
+      "./plugins/withForegroundMonitor.mjs",
       [
         "expo-build-properties",
         {

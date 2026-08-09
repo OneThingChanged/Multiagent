@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   isTrustedNativeBridgeUrl,
   nativeBridgeEventScript,
-  normalizeNotificationOpenData,
+  normalizeNotificationOpenUrl,
   parseNativeBridgeRequest,
 } from "../src/lib/notificationBridge.ts";
 
@@ -14,11 +14,17 @@ test("allows the native token bridge only on the configured Remote origin", () =
   assert.equal(isTrustedNativeBridgeUrl(base, "https://agent.example.com.evil.test/"), false);
 });
 
-test("accepts only the allowlisted WebView push request", () => {
+test("accepts only validated foreground-monitor requests", () => {
+  const token = `ma1_${"A".repeat(43)}`;
   assert.deepEqual(
-    parseNativeBridgeRequest('{"type":"multiagent:enable-native-push","token":"ignored"}'),
-    { type: "multiagent:enable-native-push" },
+    parseNativeBridgeRequest(JSON.stringify({ type: "multiagent:start-native-monitor", token, cursor: 42 })),
+    { type: "multiagent:start-native-monitor", token, cursor: 42 },
   );
+  assert.deepEqual(
+    parseNativeBridgeRequest('{"type":"multiagent:stop-native-monitor"}'),
+    { type: "multiagent:stop-native-monitor", revoke: true },
+  );
+  assert.equal(parseNativeBridgeRequest('{"type":"multiagent:start-native-monitor","token":"bad"}'), null);
   assert.equal(parseNativeBridgeRequest('{"type":"open-external-url"}'), null);
   assert.equal(parseNativeBridgeRequest("not json"), null);
 });
@@ -30,9 +36,10 @@ test("escapes injected event data and never emits a raw script terminator", () =
 });
 
 test("derives a same-origin route from a validated agent id", () => {
-  assert.deepEqual(normalizeNotificationOpenData({ agentId: "agent:build-1", url: "https://evil.test" }), {
+  assert.deepEqual(normalizeNotificationOpenUrl("multiagent://open?agent=agent%3Abuild-1"), {
     agentId: "agent:build-1",
     url: "/?agent=agent%3Abuild-1",
   });
-  assert.equal(normalizeNotificationOpenData({ agentId: "<script>" }), null);
+  assert.equal(normalizeNotificationOpenUrl("https://evil.test/?agent=agent-1"), null);
+  assert.equal(normalizeNotificationOpenUrl("multiagent://open?agent=%3Cscript%3E"), null);
 });
