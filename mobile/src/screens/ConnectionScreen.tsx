@@ -153,7 +153,7 @@ export function ConnectionScreen({
             </Text>
           </View>
 
-          <Text style={styles.version}>Mobile 0.3.0</Text>
+          <Text style={styles.version}>Mobile 0.3.1</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

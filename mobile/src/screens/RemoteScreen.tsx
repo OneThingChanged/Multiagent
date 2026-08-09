@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   WebView,
   type WebViewMessageEvent,
@@ -45,6 +45,7 @@ export function RemoteScreen({
   onNotificationConsumed,
   onManageProfiles,
 }: Props) {
+  const safeAreaInsets = useSafeAreaInsets();
   const baseUrl = profile.baseUrl;
   const webView = useRef<WebView>(null);
   const pageLoaded = useRef(false);
@@ -57,13 +58,21 @@ export function RemoteScreen({
   const appUrl = useMemo(() => remoteAppUrl(baseUrl), [baseUrl]);
   const hostname = useMemo(() => new URL(baseUrl).host, [baseUrl]);
   const remoteOrigin = useMemo(() => new URL(baseUrl).origin, [baseUrl]);
+  const nativeSafeAreaScript = useMemo(() => `
+    document.documentElement.style.setProperty(
+      "--native-safe-area-bottom",
+      ${JSON.stringify(`${Math.max(0, Math.round(safeAreaInsets.bottom))}px`)},
+    );
+    true;
+  `, [safeAreaInsets.bottom]);
   const nativeBootstrap = useMemo(() => `
     if (location.origin === ${JSON.stringify(remoteOrigin)}) {
       window.__MULTIAGENT_NATIVE_APP__ = true;
       document.documentElement.dataset.nativeApp = "true";
+      ${nativeSafeAreaScript}
     }
     true;
-  `, [remoteOrigin]);
+  `, [nativeSafeAreaScript, remoteOrigin]);
 
   const isRemotePage = (url: string) => {
     return isTrustedNativeBridgeUrl(baseUrl, url);
@@ -108,6 +117,13 @@ export function RemoteScreen({
     void foregroundMonitorStatus(profile.id, remoteOrigin).then((state) => deliverMonitorState(state));
   }, [profile.id]);
 
+  // Android edge-to-edge layout can change its bottom inset when rotating or
+  // when a tablet taskbar appears. Keep the already loaded Remote page in sync
+  // without reserving a second native SafeAreaView strip below the WebView.
+  useEffect(() => {
+    if (pageLoaded.current) webView.current?.injectJavaScript(nativeSafeAreaScript);
+  }, [nativeSafeAreaScript]);
+
   useEffect(() => {
     if (!notificationTarget || notificationTarget.profileId !== profile.id) return;
     const target = { agentId: notificationTarget.agentId, url: notificationTarget.url };
@@ -146,7 +162,7 @@ export function RemoteScreen({
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <View
         style={[
           styles.toolbar,
@@ -226,7 +242,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.3.0"
+          applicationNameForUserAgent="MultiAgentMobile/0.3.1"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}
