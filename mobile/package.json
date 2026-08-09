@@ -28,6 +28,7 @@
     "test": "node --test tests/remoteUrl.test.mjs tests/notificationBridge.test.mjs",
     "typecheck": "tsc --noEmit",
     "prebuild:android": "expo prebuild --platform android",
+    "signing:setup": "node scripts/setup-signing.mjs",
     "apk": "node scripts/build-apk.mjs",
     "apk:verify": "node scripts/build-apk.mjs --allow-debug-signing"
   }

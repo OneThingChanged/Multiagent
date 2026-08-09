@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -11,6 +11,17 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const builder = process.platform === "win32"
   ? join(appDir, "node_modules", ".bin", "electron-builder.cmd")
   : join(appDir, "node_modules", ".bin", "electron-builder");
+
+const localMobileMetadata = join(appDir, "..", "mobile", ".release-signing.public.local.json");
+if (existsSync(localMobileMetadata)) {
+  const local = JSON.parse(readFileSync(localMobileMetadata, "utf8"));
+  if (!process.env.MULTIAGENT_MOBILE_APK_PATH && local.apkPath) {
+    process.env.MULTIAGENT_MOBILE_APK_PATH = String(local.apkPath);
+  }
+  if (!process.env.MULTIAGENT_ANDROID_CERT_SHA256 && local.certificateSha256) {
+    process.env.MULTIAGENT_ANDROID_CERT_SHA256 = String(local.certificateSha256);
+  }
+}
 
 function run(command, args) {
   const result = spawnSync(command, args, {

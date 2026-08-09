@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { loadSigningEnvironment } from "./signing-config.mjs";
+
+loadSigningEnvironment();
 
 const allowDebugSigning = process.argv.includes("--allow-debug-signing");
 const required = [

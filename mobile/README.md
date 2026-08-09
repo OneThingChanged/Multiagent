@@ -20,6 +20,7 @@ The first native generation needs JDK 17, Android SDK Platform 36, Android NDK
 27.1.12297006, and CMake 3.22.1:
 
 ```powershell
+npm run signing:setup
 npm run prebuild:android
 npm run apk
 ```
@@ -31,9 +32,10 @@ refuses to fall back to debug signing. `npm run apk:verify` is compile-only and
 must never be published. Play Store distribution additionally requires an AAB
 upload pipeline, but sideloaded release APKs do not require a store listing.
 
-Set `MULTIAGENT_MOBILE_APK_PATH` to the verified APK and
-`MULTIAGENT_ANDROID_CERT_SHA256` to the release certificate fingerprint before
-building the standard desktop installer. Its packaging guard verifies the
+Copy `mobile/.env.example` to the ignored `mobile/.env.signing.local`, replace its one
+password value, and run `npm run signing:setup` once. The setup creates the external
+keystore and local public metadata used automatically by the standard desktop build.
+Its packaging guard verifies the
 signature, package id, non-debuggable manifest, and ARM64 ABI, then stages the
 APK outside `app.asar`. APK binaries and signing credentials are never tracked
 in Git. Approved Remote browser users then see an `APK` button in the top bar.

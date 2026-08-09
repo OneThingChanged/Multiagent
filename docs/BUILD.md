@@ -81,15 +81,16 @@ Prerequisites:
 The APK is built locally with Expo tooling but does not require an Expo/EAS account,
 Firebase project, FCM key, or Play Store registration. Background completion/question
 alerts use the app's own Android Foreground Service and the authenticated MultiAgent
-Remote endpoint. Only the stable release-signing material is injected locally:
+Remote endpoint. Put only the initial password in the Git-ignored
+`mobile/.env.signing.local` file:
 
-```powershell
-$env:MULTIAGENT_ANDROID_KEYSTORE_PATH='C:\secure\multiagent\multiagent-release.keystore'
-$env:MULTIAGENT_ANDROID_KEYSTORE_PASSWORD='<local secret>'
-$env:MULTIAGENT_ANDROID_KEY_ALIAS='multiagent'
-$env:MULTIAGENT_ANDROID_KEY_PASSWORD='<local secret>'
-$env:MULTIAGENT_ANDROID_CERT_SHA256='<64-digit public release certificate fingerprint>'
+```dotenv
+MULTIAGENT_ANDROID_KEYSTORE_PASSWORD=<at least 20 characters>
 ```
+
+Run `npm run signing:setup` once. It creates the PKCS12 keystore outside the repo under
+`%USERPROFILE%\.multiagent-signing`, derives the public certificate SHA-256, and fills the
+remaining ignored local configuration without printing the password.
 
 Do not copy a JKS/keystore or passwords into tracked source. `.gitignore` blocks common
 credential filenames and `mobile/.env.example` contains placeholders only. The generated
@@ -104,6 +105,7 @@ cd K:\AI\MultiAgent\mobile
 npm install
 npm test
 npm run typecheck
+npm run signing:setup
 npm run prebuild:android
 npm run apk
 ```
@@ -121,15 +123,10 @@ source excludes generated `mobile/android/`, local SDK/JDK caches, and
 needed. APK binaries are not tracked in Git and ordinary Electron builds exclude
 `electron/remote-pwa/downloads/**`.
 
-Point the standard Electron release at the generated APK. Obtain the public SHA-256
-certificate fingerprint with `keytool -list -v` from the protected release keystore and
-set it without separators (or with colons; the verifier normalizes both forms):
+The signing setup writes an ignored, non-secret local metadata file. Standard Electron
+packaging reads the APK path and certificate fingerprint from it automatically:
 
 ```powershell
-$env:MULTIAGENT_MOBILE_APK_PATH = `
-  'K:\AI\MultiAgent\mobile\android\app\build\outputs\apk\release\app-release.apk'
-$env:MULTIAGENT_ANDROID_CERT_SHA256 = '<release certificate SHA-256>'
-
 cd K:\AI\MultiAgent\app
 npm run electron:dist
 ```

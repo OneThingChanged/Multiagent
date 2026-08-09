@@ -36,6 +36,7 @@ yarn-error.*
 .env.*
 !.env.example
 .env*.local
+.release-signing.public.local.json
 
 # Firebase / store credentials (inject by environment; never commit)
 google-services.json
