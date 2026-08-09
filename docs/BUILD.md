@@ -114,7 +114,9 @@ After prebuild, verify that the merged manifest contains
 `FOREGROUND_SERVICE_REMOTE_MESSAGING`, `POST_NOTIFICATIONS`, and the non-exported
 `MultiAgentMonitorService`. Starting monitoring is a user action inside the authenticated
 APK. Android shows a required ongoing notification while the service keeps a long-poll
-connection to the user's own Remote endpoint.
+connection for every notification-enabled PC profile. Profile URLs and display names are
+stored in AsyncStorage; raw monitor tokens and cursors are stored only in the Android
+Keystore-encrypted native payload. Only the selected profile owns a visible WebView.
 
 The generated file is
 `mobile/android/app/build/outputs/apk/release/app-release.apk`. The checked-in

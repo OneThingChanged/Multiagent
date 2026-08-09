@@ -22,7 +22,6 @@ import {
 import {
   isTrustedNativeBridgeUrl,
   nativeBridgeEventScript,
-  normalizeNotificationOpenUrl,
   parseNativeBridgeRequest,
 } from "../lib/notificationBridge";
 import {
@@ -31,13 +30,22 @@ import {
   stopForegroundMonitor,
   type ForegroundMonitorState,
 } from "../lib/foregroundMonitor";
+import type { RemoteProfile } from "../lib/profiles";
 
 type Props = {
-  baseUrl: string;
-  onDisconnect: () => void;
+  profile: RemoteProfile;
+  notificationTarget: { profileId: string | null; agentId: string; url: string; nonce: number } | null;
+  onNotificationConsumed: () => void;
+  onManageProfiles: () => void;
 };
 
-export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
+export function RemoteScreen({
+  profile,
+  notificationTarget,
+  onNotificationConsumed,
+  onManageProfiles,
+}: Props) {
+  const baseUrl = profile.baseUrl;
   const webView = useRef<WebView>(null);
   const pageLoaded = useRef(false);
   const nativeMonitorState = useRef<ForegroundMonitorState | null>(null);
@@ -96,31 +104,27 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
     });
   };
 
-  const deliverNotificationOpen = (url: string | null | undefined) => {
-    const target = normalizeNotificationOpenUrl(url);
-    if (!target) return;
-    if (!dispatchToPage("multiagent:native-notification-open", target)) {
-      pendingOpen.current = target;
-    }
-  };
+  useEffect(() => {
+    void foregroundMonitorStatus(profile.id, remoteOrigin).then((state) => deliverMonitorState(state));
+  }, [profile.id]);
 
   useEffect(() => {
-    const subscription = Linking.addEventListener("url", (event) => deliverNotificationOpen(event.url));
-    void Linking.getInitialURL().then(deliverNotificationOpen);
-    void foregroundMonitorStatus().then((state) => deliverMonitorState(state));
-    return () => subscription.remove();
-  }, []);
+    if (!notificationTarget || notificationTarget.profileId !== profile.id) return;
+    const target = { agentId: notificationTarget.agentId, url: notificationTarget.url };
+    if (!dispatchToPage("multiagent:native-notification-open", target)) pendingOpen.current = target;
+    onNotificationConsumed();
+  }, [notificationTarget?.nonce, profile.id]);
 
   const handleNativeMessage = (event: WebViewMessageEvent) => {
     if (!isRemotePage(event.nativeEvent.url)) return;
     const request = parseNativeBridgeRequest(event.nativeEvent.data);
     if (!request) return;
     if (request.type === "multiagent:start-native-monitor") {
-      void startForegroundMonitor(remoteOrigin, request.token, request.cursor)
+      void startForegroundMonitor(profile.id, profile.name, remoteOrigin, request.token, request.cursor)
         .then((state) => deliverMonitorState(state, true));
       return;
     }
-    void stopForegroundMonitor(request.revoke)
+    void stopForegroundMonitor(profile.id, remoteOrigin, request.revoke)
       .then((state) => deliverMonitorState(state, true));
   };
 
@@ -167,7 +171,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
               style={styles.toolButton}
               onPress={() => {
                 if (canGoBack) webView.current?.goBack();
-                else onDisconnect();
+                else onManageProfiles();
               }}
               accessibilityLabel="뒤로"
             >
@@ -175,7 +179,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
             </Pressable>
             <View style={styles.hostBlock}>
               <Text numberOfLines={1} style={styles.hostTitle}>
-                MultiAgent
+                {profile.name}
               </Text>
               <Text numberOfLines={1} style={styles.hostName}>
                 {hostname}
@@ -190,7 +194,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
             </Pressable>
             <Pressable
               style={styles.toolButton}
-              onPress={onDisconnect}
+              onPress={onManageProfiles}
               accessibilityLabel="연결 설정"
             >
               <Text style={styles.toolGlyph}>⚙</Text>
@@ -222,7 +226,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.1.0"
+          applicationNameForUserAgent="MultiAgentMobile/0.3.0"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}
@@ -275,7 +279,7 @@ export function RemoteScreen({ baseUrl, onDisconnect }: Props) {
               >
                 <Text style={styles.retryText}>다시 시도</Text>
               </Pressable>
-              <Pressable style={styles.settingsButton} onPress={onDisconnect}>
+              <Pressable style={styles.settingsButton} onPress={onManageProfiles}>
                 <Text style={styles.settingsText}>주소 변경</Text>
               </Pressable>
             </View>

@@ -40,13 +40,19 @@ export function nativeBridgeEventScript(eventName: string, detail: unknown) {
 
 export function normalizeNotificationOpenUrl(value: string | null | undefined) {
   let agentId = "";
+  let profileId: string | null = null;
   try {
     const url = new URL(String(value || ""));
     if (url.protocol !== "multiagent:" || url.hostname !== "open") return null;
     agentId = String(url.searchParams.get("agent") || "").trim();
+    const requestedProfile = String(url.searchParams.get("profile") || "").trim();
+    if (requestedProfile) {
+      if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestedProfile)) return null;
+      profileId = requestedProfile;
+    }
   } catch {
     return null;
   }
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(agentId)) return null;
-  return { agentId, url: `/?agent=${encodeURIComponent(agentId)}` };
+  return { profileId, agentId, url: `/?agent=${encodeURIComponent(agentId)}` };
 }

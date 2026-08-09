@@ -15,45 +15,85 @@ import java.util.concurrent.Executors
 class MultiAgentMonitorModule(
   private val context: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(context) {
-  private val executor = Executors.newSingleThreadExecutor()
+  private val executor = Executors.newCachedThreadPool()
   private val storage = MonitorStorage(context)
 
   override fun getName() = "MultiAgentMonitor"
 
   @ReactMethod
-  fun startMonitoring(baseUrlValue: String, token: String, cursorValue: Double, promise: Promise) {
+  fun startMonitoring(
+    profileIdValue: String,
+    profileNameValue: String,
+    baseUrlValue: String,
+    token: String,
+    cursorValue: Double,
+    promise: Promise,
+  ) {
     var pending: MonitorConfig? = null
     try {
+      val profileId = profileIdValue.trim()
+      if (!MonitorStorage.PROFILE_ID_PATTERN.matches(profileId)) {
+        throw IllegalArgumentException("잘못된 PC 프로필입니다.")
+      }
       val baseUrl = validateBaseUrl(baseUrlValue)
+      val profileName = profileNameValue.trim().take(60).ifBlank { Uri.parse(baseUrl).host ?: "MultiAgent PC" }
       if (!MonitorStorage.TOKEN_PATTERN.matches(token)) throw IllegalArgumentException("잘못된 기기 토큰입니다.")
-      val previous = storage.load()
-      pending = MonitorConfig(baseUrl, token, cursorValue.toLong().coerceAtLeast(0L))
-      storage.save(pending)
+      val previous = storage.loadAll().find {
+        it.profileId == profileId || it.baseUrl.equals(baseUrl, ignoreCase = true)
+      }
+      pending = MonitorConfig(profileId, profileName, baseUrl, token, cursorValue.toLong().coerceAtLeast(0L))
+      storage.upsert(pending)
       if (previous != null && previous.token != token) executor.execute { revoke(previous) }
       ContextCompat.startForegroundService(
         context,
-        Intent(context, MultiAgentMonitorService::class.java).setAction(MultiAgentMonitorService.ACTION_START),
+        Intent(context, MultiAgentMonitorService::class.java).setAction(MultiAgentMonitorService.ACTION_SYNC),
       )
-      promise.resolve(Arguments.createMap().apply { putBoolean("active", true) })
+      val count = storage.loadAll().size
+      promise.resolve(Arguments.createMap().apply {
+        putBoolean("active", true)
+        putInt("count", count)
+      })
     } catch (error: Throwable) {
-      storage.clear()
-      pending?.let { executor.execute { revoke(it) } }
+      pending?.let {
+        storage.removeConfig(it)
+        executor.execute { revoke(it) }
+      }
       promise.reject("MONITOR_START_FAILED", error.message, error)
     }
   }
 
   @ReactMethod
-  fun stopMonitoring(revokeToken: Boolean, promise: Promise) {
-    val previous = storage.load()
-    storage.clear()
-    context.stopService(Intent(context, MultiAgentMonitorService::class.java))
+  fun stopMonitoring(profileIdValue: String, baseUrlValue: String, revokeToken: Boolean, promise: Promise) {
+    val profileId = profileIdValue.trim()
+    val baseUrl = baseUrlValue.trim().trimEnd('/')
+    val previous = storage.remove(profileId, baseUrl)
+    val remaining = storage.loadAll().size
+    if (remaining == 0) {
+      context.stopService(Intent(context, MultiAgentMonitorService::class.java))
+    } else {
+      ContextCompat.startForegroundService(
+        context,
+        Intent(context, MultiAgentMonitorService::class.java).setAction(MultiAgentMonitorService.ACTION_SYNC),
+      )
+    }
     if (revokeToken && previous != null) executor.execute { revoke(previous) }
-    promise.resolve(Arguments.createMap().apply { putBoolean("active", false) })
+    promise.resolve(Arguments.createMap().apply {
+      putBoolean("active", false)
+      putInt("count", remaining)
+    })
   }
 
   @ReactMethod
-  fun getStatus(promise: Promise) {
-    promise.resolve(Arguments.createMap().apply { putBoolean("active", storage.load() != null) })
+  fun getStatus(profileIdValue: String, baseUrlValue: String, promise: Promise) {
+    val profileId = profileIdValue.trim()
+    val baseUrl = baseUrlValue.trim().trimEnd('/')
+    val configs = storage.loadAll()
+    promise.resolve(Arguments.createMap().apply {
+      putBoolean("active", configs.any {
+        it.profileId == profileId || it.baseUrl.equals(baseUrl, ignoreCase = true)
+      })
+      putInt("count", configs.size)
+    })
   }
 
   private fun validateBaseUrl(value: String): String {

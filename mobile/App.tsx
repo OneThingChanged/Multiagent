@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Linking from "expo-linking";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -12,28 +13,85 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionScreen } from "./src/screens/ConnectionScreen";
 import { RemoteScreen } from "./src/screens/RemoteScreen";
 import { normalizeRemoteUrl } from "./src/lib/remoteUrl";
+import { normalizeNotificationOpenUrl } from "./src/lib/notificationBridge";
+import { stopForegroundMonitor } from "./src/lib/foregroundMonitor";
+import {
+  createRemoteProfile,
+  parseRemoteProfileState,
+  upsertRemoteProfile,
+  type RemoteProfile,
+} from "./src/lib/profiles";
 
-const STORAGE_KEY = "multiagent.mobile.remoteUrl.v1";
+const LEGACY_STORAGE_KEY = "multiagent.mobile.remoteUrl.v1";
+const PROFILE_STORAGE_KEY = "multiagent.mobile.profiles.v2";
+
+type NotificationTarget = NonNullable<ReturnType<typeof normalizeNotificationOpenUrl>> & {
+  nonce: number;
+};
 
 export default function App() {
   const [booting, setBooting] = useState(true);
-  const [remoteUrl, setRemoteUrl] = useState("");
-  const [connectedUrl, setConnectedUrl] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [connectedProfileId, setConnectedProfileId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
+  const [notificationTarget, setNotificationTarget] = useState<NotificationTarget | null>(null);
+  const [pendingLinkVersion, setPendingLinkVersion] = useState(0);
+  const pendingLink = useRef<string | null>(null);
+
+  const persistProfiles = async (nextProfiles: RemoteProfile[], nextSelectedProfileId: string | null) => {
+    await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({
+      profiles: nextProfiles,
+      selectedProfileId: nextSelectedProfileId,
+    }));
+  };
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync("#06101a");
-    void AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (!stored) return;
-        setRemoteUrl(stored);
-        setConnectedUrl(stored);
+    void Promise.all([
+      AsyncStorage.getItem(PROFILE_STORAGE_KEY),
+      AsyncStorage.getItem(LEGACY_STORAGE_KEY),
+    ])
+      .then(([storedProfiles, legacyUrl]) => {
+        const state = parseRemoteProfileState(storedProfiles, legacyUrl);
+        setProfiles(state.profiles);
+        setSelectedProfileId(state.selectedProfileId);
+        setConnectedProfileId(state.selectedProfileId);
+        if (!storedProfiles && state.profiles.length > 0) {
+          void persistProfiles(state.profiles, state.selectedProfileId);
+        }
       })
       .finally(() => setBooting(false));
   }, []);
 
-  const connect = async (value: string) => {
+  useEffect(() => {
+    const queueLink = (url: string | null) => {
+      if (!url) return;
+      pendingLink.current = url;
+      setPendingLinkVersion((version) => version + 1);
+    };
+    const subscription = Linking.addEventListener("url", (event) => queueLink(event.url));
+    void Linking.getInitialURL().then(queueLink);
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (booting || !pendingLink.current) return;
+    const target = normalizeNotificationOpenUrl(pendingLink.current);
+    pendingLink.current = null;
+    if (!target) return;
+    const profile = target.profileId
+      ? profiles.find((item) => item.id === target.profileId)
+      : profiles.find((item) => item.id === selectedProfileId) ?? profiles[0];
+    if (!profile) return;
+    setSelectedProfileId(profile.id);
+    setConnectedProfileId(profile.id);
+    setNotificationTarget({ ...target, profileId: profile.id, nonce: Date.now() });
+    void persistProfiles(profiles, profile.id);
+  }, [booting, pendingLinkVersion, profiles, selectedProfileId]);
+
+  const connect = async (name: string, value: string) => {
     setConnecting(true);
     setConnectionError("");
     try {
@@ -51,9 +109,12 @@ export default function App() {
       } finally {
         clearTimeout(timer);
       }
-      await AsyncStorage.setItem(STORAGE_KEY, normalized);
-      setRemoteUrl(normalized);
-      setConnectedUrl(normalized);
+      const nextProfiles = upsertRemoteProfile(profiles, createRemoteProfile(normalized, name));
+      const profile = nextProfiles.find((item) => item.baseUrl === normalized)!;
+      await persistProfiles(nextProfiles, profile.id);
+      setProfiles(nextProfiles);
+      setSelectedProfileId(profile.id);
+      setConnectedProfileId(profile.id);
     } catch (error) {
       const message =
         error instanceof Error && error.name === "AbortError"
@@ -67,6 +128,27 @@ export default function App() {
     }
   };
 
+  const selectProfile = async (profile: RemoteProfile) => {
+    setConnectionError("");
+    await persistProfiles(profiles, profile.id);
+    setSelectedProfileId(profile.id);
+    setConnectedProfileId(profile.id);
+  };
+
+  const deleteProfile = async (profile: RemoteProfile) => {
+    await stopForegroundMonitor(profile.id, profile.baseUrl, true);
+    const nextProfiles = profiles.filter((item) => item.id !== profile.id);
+    const nextSelected = selectedProfileId === profile.id
+      ? nextProfiles[0]?.id ?? null
+      : selectedProfileId;
+    await persistProfiles(nextProfiles, nextSelected);
+    setProfiles(nextProfiles);
+    setSelectedProfileId(nextSelected);
+    if (connectedProfileId === profile.id) setConnectedProfileId(null);
+  };
+
+  const connectedProfile = profiles.find((profile) => profile.id === connectedProfileId) ?? null;
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
@@ -75,17 +157,23 @@ export default function App() {
           <ActivityIndicator color="#55e4d4" size="large" />
           <Text style={styles.bootText}>MultiAgent 연결 준비 중…</Text>
         </View>
-      ) : connectedUrl ? (
+      ) : connectedProfile ? (
         <RemoteScreen
-          baseUrl={connectedUrl}
-          onDisconnect={() => setConnectedUrl(null)}
+          key={connectedProfile.id}
+          profile={connectedProfile}
+          notificationTarget={notificationTarget?.profileId === connectedProfile.id ? notificationTarget : null}
+          onNotificationConsumed={() => setNotificationTarget(null)}
+          onManageProfiles={() => setConnectedProfileId(null)}
         />
       ) : (
         <ConnectionScreen
-          initialUrl={remoteUrl}
+          profiles={profiles}
+          selectedProfileId={selectedProfileId}
           busy={connecting}
           error={connectionError}
           onConnect={connect}
+          onSelect={selectProfile}
+          onDelete={deleteProfile}
         />
       )}
     </SafeAreaProvider>

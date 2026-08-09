@@ -1,8 +1,9 @@
 # MultiAgent Mobile
 
 Android client shell for the desktop MultiAgent Remote service. The native app
-stores one approved Remote URL and loads the existing mobile-first Remote PWA
-in a constrained WebView.
+stores multiple approved PC profiles and loads the selected PC's mobile-first
+Remote PWA in a constrained WebView. Registered PCs can keep independent
+background monitor connections while only one WebView is visible.
 
 ## Development
 
@@ -44,16 +45,19 @@ in Git. Approved Remote browser users then see an `APK` button in the top bar.
 
 1. Desktop MultiAgent → Settings → Remote.
 2. Start the Remote server and HTTPS tunnel.
-3. Enter the HTTPS tunnel URL in the mobile app.
+3. Enter a PC name and its HTTPS tunnel URL in the mobile app.
 4. Complete the existing GitHub device login and desktop approval flow.
+5. Return to the native connection list to add another PC. Login, approval,
+   and notification enablement are completed independently for each PC.
 
 Quick Tunnel URLs can change after a restart. A named Cloudflare tunnel is
 recommended for a persistent mobile endpoint.
 
 The app accepts plain HTTP only for loopback, the Android emulator host, and
-private IPv4 addresses. Public Remote endpoints must use HTTPS. The last valid
-address is restored automatically on the next launch; expand the thin native
-connection bar and use the settings button to change it.
+private IPv4 addresses. Public Remote endpoints must use HTTPS. Registered
+profiles and the last selected PC are restored automatically on the next
+launch; expand the thin native connection bar and use the settings button to
+switch, add, rename-by-readding, or delete a PC.
 
 ## Background monitoring
 
@@ -61,14 +65,17 @@ The APK does not use Firebase, FCM, Expo Push, or an external notification
 account. After GitHub login and desktop approval, tapping the Remote notification
 button issues a revocable notification-only token and starts an Android
 `remoteMessaging` Foreground Service. Android displays an ongoing “MultiAgent
-monitoring” notification while the service long-polls the user's own Remote
-endpoint. Completion/question events create privacy-safe local notifications;
-tapping one opens the matching Session.
+monitoring” notification while the service independently long-polls every PC
+whose native notification button was enabled. Completion/question events
+include the profile name and create privacy-safe local notifications; tapping
+one switches to the matching PC and opens its Session.
 
 The desktop stores only the token SHA-256 hash in
 `remote-monitor-devices.json`; the APK encrypts the raw token with Android
-Keystore. Logging out stops the service and revokes the token, and revoking the
-Remote account removes every device token for that login. Force-stopping the app
+Keystore as an encrypted per-PC list. Logging out or disabling notifications
+removes only that PC's monitor token; the service continues while another PC
+remains enabled. Revoking a Remote account removes every device token for that
+login on that PC. Force-stopping the app
 or stopping it from Android's active-app controls stops background delivery until
 the user enables it again. Tapping the enabled notification button in Remote also stops the service
-and revokes its current token.
+and revokes that PC's token. Deleting a profile also revokes its stored token.

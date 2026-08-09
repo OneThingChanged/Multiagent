@@ -95,4 +95,4 @@ function withForegroundMonitor(config) {
   return config;
 }
 
-export default createRunOncePlugin(withForegroundMonitor, "multiagent-foreground-monitor", "1.0.0");
+export default createRunOncePlugin(withForegroundMonitor, "multiagent-foreground-monitor", "2.0.0");

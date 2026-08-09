@@ -37,9 +37,16 @@ test("escapes injected event data and never emits a raw script terminator", () =
 
 test("derives a same-origin route from a validated agent id", () => {
   assert.deepEqual(normalizeNotificationOpenUrl("multiagent://open?agent=agent%3Abuild-1"), {
+    profileId: null,
     agentId: "agent:build-1",
     url: "/?agent=agent%3Abuild-1",
   });
+  assert.deepEqual(normalizeNotificationOpenUrl("multiagent://open?profile=pc-work&agent=agent-2"), {
+    profileId: "pc-work",
+    agentId: "agent-2",
+    url: "/?agent=agent-2",
+  });
   assert.equal(normalizeNotificationOpenUrl("https://evil.test/?agent=agent-1"), null);
   assert.equal(normalizeNotificationOpenUrl("multiagent://open?agent=%3Cscript%3E"), null);
+  assert.equal(normalizeNotificationOpenUrl("multiagent://open?profile=%3Cscript%3E&agent=agent-1"), null);
 });
