@@ -202,37 +202,63 @@
               </div>
               <span id="usageTokenEvents">사용 기록 확인 중</span>
             </div>
-            <div class="usage-period-grid" aria-label="일간 주간 월간 토큰 사용량">
+            <div class="usage-history-mode" id="usageHistoryMode" aria-label="사용량 조회 단위">
+              <button type="button" data-usage-period="week">주</button>
+              <button class="selected" type="button" data-usage-period="month">월</button>
+              <button type="button" data-usage-period="year">년</button>
+            </div>
+            <div class="usage-history-toolbar">
+              <div class="usage-history-copy">
+                <strong id="usageHistoryTitle">월간 토큰 사용량</strong>
+                <span id="usageHistoryDescription">연도와 월을 선택하면 일별 사용량을 조회합니다.</span>
+              </div>
+              <div class="usage-history-controls" aria-label="사용량 조회 기간">
+                <button id="usagePreviousPeriod" type="button">이전 달</button>
+                <select id="usageYearSelect" aria-label="조회 연도"></select>
+                <select id="usageMonthSelect" aria-label="조회 월"></select>
+                <select id="usageWeekSelect" aria-label="조회 주차" hidden></select>
+                <button id="usageCurrentPeriod" type="button">이번 달</button>
+                <button id="usageNextPeriod" type="button">다음 달</button>
+              </div>
+              <span class="usage-history-range" id="usageHistoryRange">조회 기간 확인 중</span>
+            </div>
+            <div class="usage-history-quick" id="usageHistoryQuick" aria-label="기간 빠른 선택"></div>
+            <div class="usage-period-grid" aria-label="선택 기간 토큰 통계">
               <article>
-                <span>오늘</span>
-                <strong id="usageDailyTokens">—</strong>
-                <small id="usageDailyMeta">0개 기록</small>
+                <span id="usageSelectedLabel">선택 달</span>
+                <strong id="usageSelectedTotal">—</strong>
+                <small id="usageSelectedMeta">0개 기록</small>
               </article>
               <article>
-                <span>이번 주</span>
-                <strong id="usageWeeklyTokens">—</strong>
-                <small id="usageWeeklyMeta">0개 기록</small>
+                <span id="usageComparisonLabel">전월 대비</span>
+                <strong id="usageComparisonValue">—</strong>
+                <small id="usageComparisonMeta">전월 사용량 확인 중</small>
               </article>
               <article>
-                <span>이번 달</span>
-                <strong id="usageMonthlyTokens">—</strong>
-                <small id="usageMonthlyMeta">0개 기록</small>
+                <span id="usageAverageLabel">하루 평균</span>
+                <strong id="usageAverageValue">—</strong>
+                <small id="usageAverageMeta">집계 기간 확인 중</small>
+              </article>
+              <article>
+                <span id="usagePeakLabel">최고 사용일</span>
+                <strong id="usagePeakValue">—</strong>
+                <small id="usagePeakMeta">—</small>
               </article>
             </div>
             <div class="usage-chart-panel">
               <div class="usage-chart-head">
                 <div>
-                  <strong>최근 30일 추이</strong>
-                  <span>하루 단위 전체 토큰</span>
+                  <strong id="usageChartTitle">월간 일별 사용량</strong>
+                  <span id="usageChartDescription">선택 기간 안의 사용량 분포입니다.</span>
                 </div>
                 <span id="usageChartSummary">—</span>
               </div>
-              <div class="usage-chart" id="usageChart" role="img" aria-label="최근 30일 일별 토큰 사용량 그래프"></div>
-              <p class="usage-chart-empty" id="usageChartEmpty" hidden>최근 30일간 집계된 토큰이 없습니다.</p>
+              <div class="usage-chart" id="usageChart" role="img" aria-label="선택 기간 토큰 사용량 그래프"></div>
+              <p class="usage-chart-empty" id="usageChartEmpty" hidden>선택 기간에 집계된 토큰이 없습니다.</p>
             </div>
             <div class="usage-breakdown-head">
-              <strong>전체 누적 상세</strong>
-              <span>저장된 모든 사용 기록</span>
+              <strong id="usageBreakdownTitle">선택 달 토큰 상세</strong>
+              <span>선택한 기간 합계 기준</span>
             </div>
             <div class="usage-token-grid">
               <article class="usage-token-total">

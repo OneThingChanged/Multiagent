@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MultiAgent · 월별 사용량 시안</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #06131d;
+      --panel: #081a26;
+      --panel-2: #0a202e;
+      --panel-3: #0d2635;
+      --line: #1a3a4b;
+      --line-strong: #28566b;
+      --text: #d7e8f1;
+      --muted: #7390a2;
+      --cyan: #43ddd0;
+      --green: #6ee7ad;
+      --blue: #58b8ff;
+      --amber: #f6bd60;
+      --danger: #ff7d89;
+      --radius: 12px;
+      --font: "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+    }
+
+    button, select { font: inherit; }
+    button, select { color: var(--text); }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 232px minmax(0, 1fr);
+      grid-template-rows: 54px minmax(0, 1fr);
+    }
+
+    .topbar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: #071721;
+    }
+
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+    .brand-mark {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 1px solid #1f6470;
+      border-radius: 8px;
+      background: #0a3340;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 600; }
+    .connection { color: var(--muted); font-size: 11px; }
+    .connection strong { color: var(--green); }
+
+    .sidebar {
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: #071721;
+      padding: 14px;
+    }
+    .nav-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 48px;
+      margin-bottom: 8px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--panel);
+      color: var(--text);
+      text-align: left;
+    }
+    .nav-card.active { border-color: #27828a; background: #0c2a36; }
+    .nav-card span { display: grid; gap: 4px; }
+    .nav-card strong { font-size: 12px; }
+    .nav-card small { color: var(--muted); font-size: 9px; }
+    .count {
+      min-width: 22px;
+      padding: 3px 6px;
+      border-radius: 20px;
+      background: #102c3b;
+      color: #8cb1c4;
+      font-size: 9px;
+      text-align: center;
+    }
+    .side-section { margin: 18px 3px 8px; color: #557789; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+    .session { padding: 11px 10px; border-bottom: 1px solid #102c39; }
+    .session strong { display: block; font-size: 11px; }
+    .session small { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+
+    main { min-width: 0; overflow: auto; padding: 22px; }
+    .content { width: min(1680px, 100%); margin: 0 auto; }
+    .eyebrow { color: var(--cyan); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+    .page-head h1 { margin: 6px 0 5px; font-size: 25px; line-height: 1; }
+    .page-head p { margin: 0; color: var(--muted); font-size: 11px; }
+
+    .refresh {
+      min-height: 34px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: #9db8c7;
+      cursor: pointer;
+    }
+
+    .section {
+      margin-bottom: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(8, 26, 38, .82);
+      padding: 14px;
+    }
+
+    .granularity-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(3, minmax(74px, 1fr));
+      gap: 4px;
+      margin-bottom: 13px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #071923;
+    }
+    .granularity-switch button {
+      min-height: 32px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .granularity-switch button.active {
+      border-color: #24727c;
+      background: #0b3039;
+      color: var(--cyan);
+    }
+
+    .period-toolbar {
+      display: grid;
+      grid-template-columns: auto minmax(240px, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .period-title strong { display: block; font-size: 15px; }
+    .period-title span { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+    .period-controls { display: flex; align-items: center; justify-content: center; gap: 7px; }
+    .period-controls button, .period-controls select {
+      min-height: 36px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #0b2230;
+      cursor: pointer;
+    }
+    .period-controls button { padding: 0 12px; color: #a8c3d1; }
+    .period-controls select { min-width: 104px; padding: 0 28px 0 11px; }
+    .period-controls button:hover, .period-controls select:hover { border-color: var(--cyan); }
+    .period-controls button:disabled { opacity: .35; cursor: not-allowed; }
+    .period-controls [hidden] { display: none; }
+    .current-period {
+      justify-self: end;
+      padding: 8px 11px;
+      border: 1px solid rgba(67, 221, 208, .28);
+      border-radius: 8px;
+      background: rgba(67, 221, 208, .06);
+      color: var(--cyan);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .month-strip {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(56px, 1fr));
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .month-chip {
+      min-width: 56px;
+      min-height: 54px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #081b27;
+      cursor: pointer;
+    }
+    .month-chip span, .month-chip small { display: block; }
+    .month-chip span { font-size: 10px; font-weight: 800; }
+    .month-chip small { margin-top: 5px; color: var(--muted); font-size: 8px; }
+    .month-chip.active { border-color: var(--cyan); background: #0b3039; color: var(--cyan); }
+    .month-chip.future { opacity: .34; cursor: not-allowed; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-bottom: 9px; }
+    .metric {
+      min-height: 96px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #091d29;
+    }
+    .metric span { color: var(--muted); font-size: 9px; font-weight: 800; }
+    .metric strong { display: block; margin-top: 10px; color: var(--cyan); font-size: clamp(20px, 2vw, 28px); font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+    .metric small { display: block; margin-top: 7px; color: var(--muted); font-size: 8px; }
+    .metric.positive strong { color: var(--green); }
+    .metric.accent strong { color: var(--blue); }
+    .metric.warning strong { color: var(--amber); }
+
+    .chart-card { padding: 13px 13px 7px; border: 1px solid var(--line); border-radius: 9px; background: #081b27; }
+    .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 8px; }
+    .chart-head strong { display: block; font-size: 12px; }
+    .chart-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
+    .chart-total { color: var(--cyan) !important; font-size: 9px !important; font-weight: 800; text-align: right; }
+    #usageChart { display: block; width: 100%; height: 270px; }
+
+    .breakdown-head { display: flex; justify-content: space-between; margin: 13px 1px 8px; color: var(--muted); font-size: 9px; }
+    .breakdown-head strong { color: var(--text); font-size: 11px; }
+    .breakdown-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    .breakdown {
+      min-height: 77px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #091d29;
+    }
+    .breakdown span { color: var(--muted); font-size: 9px; }
+    .breakdown strong { display: block; margin-top: 9px; color: var(--cyan); font-size: 19px; font-variant-numeric: tabular-nums; }
+
+    .limits-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .limits-head h2 { margin: 5px 0 0; font-size: 16px; }
+    .limits-head span { color: var(--muted); font-size: 9px; }
+    .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .limit-card { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: #081b27; }
+    .limit-card header { display: flex; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid var(--line); }
+    .limit-card header strong { font-size: 12px; }
+    .limit-card header span { color: var(--muted); font-size: 8px; }
+    .limit-body { padding: 12px; }
+    .limit-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .limit-row span { color: var(--muted); font-size: 9px; }
+    .limit-row strong { color: var(--green); font-size: 14px; }
+    .progress { height: 5px; border-radius: 10px; background: #173341; overflow: hidden; }
+    .progress i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+    .limit-meta { display: flex; justify-content: space-between; margin-top: 7px; color: var(--muted); font-size: 8px; }
+
+    .prototype-note {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      padding: 8px 11px;
+      border: 1px solid #276274;
+      border-radius: 8px;
+      background: #0b2936;
+      color: #a6c7d6;
+      font-size: 9px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .25);
+    }
+
+    @media (max-width: 1050px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .metric-grid { grid-template-columns: 1fr 1fr; }
+      .period-toolbar { grid-template-columns: 1fr auto; }
+      .period-controls { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; overflow-x: auto; }
+      .current-period { grid-column: 2; grid-row: 1; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar { height: 48px; padding: 0 12px; }
+      .connection { display: none; }
+      main { padding: 11px; }
+      .page-head { align-items: flex-start; }
+      .page-head h1 { font-size: 21px; }
+      .page-head p { max-width: 240px; line-height: 1.5; }
+      .section { padding: 10px; }
+      .granularity-switch { display: grid; width: 100%; }
+      .period-toolbar { grid-template-columns: 1fr; }
+      .current-period { grid-column: 1; grid-row: 2; justify-self: stretch; text-align: center; }
+      .period-controls { grid-row: 3; display: grid; grid-template-columns: 1fr 1fr; }
+      .period-controls button, .period-controls select { min-width: 0; width: 100%; }
+      .period-controls .wide { grid-column: 1 / -1; }
+      .month-strip { grid-template-columns: repeat(12, 65px); }
+      .metric-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+      .metric { min-height: 86px; padding: 10px; }
+      .metric strong { font-size: 17px; }
+      #usageChart { height: 220px; }
+      .breakdown-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+      .breakdown:last-child { grid-column: 1 / -1; }
+      .limit-grid { grid-template-columns: 1fr; }
+      .prototype-note { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">M</span>
+        <span>MultiAgent<small>Remote Monitor</small></span>
+      </div>
+      <div class="connection"><strong>● 연결됨</strong> · 마지막 동기화 방금 전</div>
+    </header>
+
+    <aside class="sidebar" aria-label="리모트 탐색">
+      <button class="nav-card" type="button"><span><strong>Documents</strong><small>Markdown · HTML 보기</small></span><b class="count">27</b></button>
+      <button class="nav-card active" type="button"><span><strong>Usage</strong><small>토큰 · 계정 한도</small></span><b class="count">2</b></button>
+      <div class="side-section">SCREENS</div>
+      <div class="session"><strong>Screen 1</strong><small>Weather · ToonShader2(+1)</small></div>
+      <div class="session"><strong>Screen 2</strong><small>PostProcessing · Multiagent</small></div>
+      <div class="side-section">SESSIONS</div>
+      <div class="session"><strong>ToonShader2</strong><small>codex · Working</small></div>
+      <div class="session"><strong>Weather</strong><small>codex · Waiting</small></div>
+      <div class="session"><strong>PostProcessing</strong><small>codex · Done</small></div>
+    </aside>
+
+    <main>
+      <div class="content">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">TOKEN USAGE &amp; ACCOUNT LIMITS</div>
+            <h1>사용량</h1>
+            <p>주·월·년 단위로 이동하며 누적 토큰과 사용 추이를 비교합니다.</p>
+          </div>
+          <button class="refresh" id="refreshButton" type="button">새로고침</button>
+        </div>
+
+        <section class="section" aria-labelledby="periodHeading">
+          <div class="granularity-switch" id="granularitySwitch" aria-label="조회 단위">
+            <button type="button" data-mode="week">주</button>
+            <button class="active" type="button" data-mode="month">월</button>
+            <button type="button" data-mode="year">년</button>
+          </div>
+          <div class="period-toolbar">
+            <div class="period-title">
+              <strong id="periodHeading">월별 토큰 사용량</strong>
+              <span id="periodDescription">연도와 월을 선택하면 과거 기록을 바로 조회합니다.</span>
+            </div>
+            <div class="period-controls" aria-label="조회 기간 선택">
+              <button id="prevPeriod" type="button">이전 달</button>
+              <select id="yearSelect" aria-label="조회 연도"></select>
+              <select id="monthSelect" aria-label="조회 월"></select>
+              <select id="weekSelect" aria-label="조회 주" hidden></select>
+              <button id="currentPeriod" class="wide" type="button">이번 달</button>
+              <button id="nextPeriod" type="button">다음 달</button>
+            </div>
+            <div class="current-period" id="periodRange">조회 기간</div>
+          </div>
+
+          <div class="month-strip" id="monthStrip" aria-label="기간 빠른 선택"></div>
+        </section>
+
+        <section class="section" aria-label="선택 기간 통계">
+          <div class="metric-grid">
+            <article class="metric positive"><span id="primaryMetricLabel">선택한 달</span><strong id="monthTotal">0</strong><small id="eventCount">0개 기록</small></article>
+            <article class="metric"><span id="comparisonMetricLabel">전월 대비</span><strong id="monthDelta">0%</strong><small id="previousMonthText">전월 사용량 0</small></article>
+            <article class="metric accent"><span id="averageMetricLabel">하루 평균</span><strong id="dailyAverage">0</strong><small id="activeDays">0일 사용</small></article>
+            <article class="metric warning"><span id="peakMetricLabel">최고 사용일</span><strong id="peakTotal">0</strong><small id="peakDate">-</small></article>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <div><strong id="chartTitle">일별 사용량</strong><span id="chartDescription">선택 기간 안의 사용량 분포입니다.</span></div>
+              <span class="chart-total" id="chartSummary"></span>
+            </div>
+            <canvas id="usageChart" role="img" aria-label="선택한 월의 일별 토큰 사용량 그래프"></canvas>
+          </div>
+
+          <div class="breakdown-head"><strong id="breakdownTitle">선택 월 토큰 상세</strong><span>선택한 기간 합계 기준</span></div>
+          <div class="breakdown-grid">
+            <article class="breakdown"><span>입력</span><strong id="inputTokens">0</strong></article>
+            <article class="breakdown"><span>출력</span><strong id="outputTokens">0</strong></article>
+            <article class="breakdown"><span>캐시 읽기</span><strong id="cacheReadTokens">0</strong></article>
+            <article class="breakdown"><span>캐시 쓰기</span><strong id="cacheWriteTokens">0</strong></article>
+            <article class="breakdown"><span>추론 출력</span><strong id="reasoningTokens">0</strong></article>
+            <article class="breakdown"><span>전체 기록</span><strong id="allEvents">0</strong></article>
+          </div>
+        </section>
+
+        <section class="section" aria-label="계정 한도">
+          <div class="limits-head"><div><div class="eyebrow">ACCOUNT LIMITS</div><h2>남은 계정 한도</h2></div><span>계정 한도는 선택 월과 무관한 최신 상태입니다.</span></div>
+          <div class="limit-grid">
+            <article class="limit-card">
+              <header><strong>Codex · pro</strong><span>방금 갱신</span></header>
+              <div class="limit-body"><div class="limit-row"><span>주간 한도</span><strong>86% 남음</strong></div><div class="progress"><i style="width:86%"></i></div><div class="limit-meta"><span>14% 사용</span><span>8/16 10:46 초기화</span></div></div>
+            </article>
+            <article class="limit-card">
+              <header><strong>Claude · team</strong><span>6일 전</span></header>
+              <div class="limit-body"><div class="limit-row"><span>5시간 한도</span><strong>98% 남음</strong></div><div class="progress"><i style="width:98%"></i></div><div class="limit-meta"><span>2% 사용</span><span>오늘 17:00 초기화</span></div></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="prototype-note">인터랙티브 시안 · 주/월/년을 전환해보세요</div>
+
+  <script>
+    const CURRENT = { year: 2026, month: 8, day: 9, week: 32 };
+    const FIRST_YEAR = 2024;
+    const number = new Intl.NumberFormat("ko-KR");
+    const compact = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+    const state = { mode: "month", year: CURRENT.year, month: CURRENT.month, week: CURRENT.week };
+    const ui = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
+    let renderedData = null;
+
+    function daysInMonth(year, month) {
+      return new Date(year, month, 0).getDate();
+    }
+
+    function pad(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function formatDate(date) {
+      return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`;
+    }
+
+    function monthSeed(year, month) {
+      return ((year - 2020) * 97 + month * 41) % 211;
+    }
+
+    function buildData(values, labels, range, options = {}) {
+      const total = values.reduce((sum, value) => sum + value, 0);
+      const active = values.filter(Boolean).length;
+      const events = Math.round(total / 2_850_000) + active * 8;
+      return {
+        values,
+        labels,
+        range,
+        total,
+        active,
+        events,
+        input: Math.round(total * .48),
+        output: Math.round(total * .06),
+        cacheRead: Math.round(total * .41),
+        cacheWrite: Math.round(total * .002),
+        reasoning: Math.round(total * .048),
+        ...options,
+      };
+    }
+
+    function createMonthData(year, month) {
+      const days = daysInMonth(year, month);
+      const visibleDays = year === CURRENT.year && month === CURRENT.month ? CURRENT.day : days;
+      const seed = monthSeed(year, month);
+      const values = Array.from({ length: days }, (_, index) => {
+        if (index >= visibleDays) return 0;
+        const wave = Math.sin((index + 1 + seed) * 1.37) * .34 + .72;
+        const weekend = index % 7 === 5 || index % 7 === 6 ? .56 : 1;
+        const spike = (index + seed) % 11 === 0 ? 1.72 : 1;
+        return Math.max(0, Math.round((210_000_000 + seed * 2_700_000) * wave * weekend * spike));
+      });
+      return buildData(
+        values,
+        values.map((_, index) => `${index + 1}일`),
+        `${year}.${pad(month)}.01 — ${year}.${pad(month)}.${pad(visibleDays)}`,
+        {
+          title: `${year}년 ${month}월 일별 사용량`,
+          summary: `${visibleDays}일 합계`,
+          peakUnit: "일",
+          averageDivisor: Math.max(visibleDays, 1),
+          averageMeta: `${visibleDays}일 집계`,
+          currentIndex: year === CURRENT.year && month === CURRENT.month ? CURRENT.day - 1 : -1,
+        },
+      );
+    }
+
+    function isoWeekStart(year, week) {
+      const januaryFourth = new Date(year, 0, 4);
+      const weekday = januaryFourth.getDay() || 7;
+      return new Date(year, 0, 4 - weekday + 1 + (week - 1) * 7);
+    }
+
+    function createWeekData(year, week) {
+      const start = isoWeekStart(year, week);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      const currentDate = new Date(CURRENT.year, CURRENT.month - 1, CURRENT.day, 23, 59, 59);
+      const dayNames = ["월", "화", "수", "목", "금", "토", "일"];
+      const values = dayNames.map((_, index) => {
+        const date = new Date(start);
+        date.setDate(start.getDate() + index);
+        if (date > currentDate) return 0;
+        const seed = Math.floor(date.getTime() / 86_400_000) % 197;
+        const wave = Math.sin(seed * 1.17) * .31 + .76;
+        const weekend = index > 4 ? .54 : 1;
+        return Math.round((430_000_000 + seed * 1_900_000) * wave * weekend);
+      });
+      return buildData(
+        values,
+        dayNames.map((name, index) => {
+          const date = new Date(start);
+          date.setDate(start.getDate() + index);
+          return `${date.getMonth() + 1}/${date.getDate()} ${name}`;
+        }),
+        `${formatDate(start)} — ${formatDate(end)}`,
+        {
+          title: `${year}년 ${week}주차 일별 사용량`,
+          summary: "7일 합계",
+          peakUnit: "일",
+          averageDivisor: 7,
+          averageMeta: `${values.filter(Boolean).length}일 사용`,
+          currentIndex: year === CURRENT.year && week === CURRENT.week ? 6 : -1,
+        },
+      );
+    }
+
+    function createYearData(year) {
+      const monthData = Array.from({ length: 12 }, (_, index) => {
+        const month = index + 1;
+        return year === CURRENT.year && month > CURRENT.month ? null : createMonthData(year, month);
+      });
+      const values = monthData.map((data) => data?.total || 0);
+      const visibleMonths = monthData.filter(Boolean).length;
+      return buildData(
+        values,
+        values.map((_, index) => `${index + 1}월`),
+        `${year}.01.01 — ${year === CURRENT.year ? `${year}.${pad(CURRENT.month)}.${pad(CURRENT.day)}` : `${year}.12.31`}`,
+        {
+          title: `${year}년 월별 사용량`,
+          summary: `${visibleMonths}개월 합계`,
+          peakUnit: "월",
+          averageDivisor: Math.max(visibleMonths, 1),
+          averageMeta: `${visibleMonths}개월 집계`,
+          currentIndex: year === CURRENT.year ? CURRENT.month - 1 : -1,
+        },
+      );
+    }
+
+    function getData(period = state) {
+      if (period.mode === "week") return createWeekData(period.year, period.week);
+      if (period.mode === "year") return createYearData(period.year);
+      return createMonthData(period.year, period.month);
+    }
+
+    function adjacentPeriod(direction, period = state) {
+      const next = { ...period };
+      if (next.mode === "year") next.year += direction;
+      if (next.mode === "month") {
+        next.month += direction;
+        if (next.month < 1) { next.month = 12; next.year -= 1; }
+        if (next.month > 12) { next.month = 1; next.year += 1; }
+      }
+      if (next.mode === "week") {
+        next.week += direction;
+        if (next.week < 1) { next.week = 52; next.year -= 1; }
+        if (next.week > 52) { next.week = 1; next.year += 1; }
+      }
+      return next;
+    }
+
+    function isFuturePeriod(period) {
+      if (period.year > CURRENT.year) return true;
+      if (period.year < CURRENT.year) return false;
+      if (period.mode === "year") return false;
+      if (period.mode === "week") return period.week > CURRENT.week;
+      return period.month > CURRENT.month;
+    }
+
+    function canUsePeriod(period) {
+      return period.year >= FIRST_YEAR && !isFuturePeriod(period);
+    }
+
+    function populateControls() {
+      for (let year = CURRENT.year; year >= FIRST_YEAR; year -= 1) {
+        const option = document.createElement("option");
+        option.value = String(year);
+        option.textContent = `${year}년`;
+        ui.yearSelect.append(option);
+      }
+      for (let month = 1; month <= 12; month += 1) {
+        const option = document.createElement("option");
+        option.value = String(month);
+        option.textContent = `${month}월`;
+        ui.monthSelect.append(option);
+      }
+      for (let week = 1; week <= 52; week += 1) {
+        const option = document.createElement("option");
+        option.value = String(week);
+        option.textContent = `${week}주차`;
+        ui.weekSelect.append(option);
+      }
+    }
+
+    function renderQuickStrip() {
+      ui.monthStrip.replaceChildren();
+      const count = state.mode === "week" ? 52 : 12;
+      ui.monthStrip.style.gridTemplateColumns = `repeat(${count}, minmax(${state.mode === "week" ? 62 : 56}px, 1fr))`;
+      for (let index = 1; index <= count; index += 1) {
+        const period = state.mode === "week"
+          ? { ...state, week: index }
+          : { ...state, mode: "month", month: index };
+        const future = isFuturePeriod(period);
+        const data = future ? null : getData(period);
+        const selected = state.mode === "week" ? index === state.week : state.mode === "month" && index === state.month;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `month-chip${selected ? " active" : ""}${future ? " future" : ""}`;
+        button.disabled = future;
+        button.innerHTML = `<span>${state.mode === "week" ? `${index}주` : `${index}월`}</span><small>${data ? compact.format(data.total) : "-"}</small>`;
+        button.addEventListener("click", () => {
+          if (state.mode === "week") state.week = index;
+          else { state.mode = "month"; state.month = index; }
+          render();
+        });
+        ui.monthStrip.append(button);
+      }
+      const active = ui.monthStrip.querySelector(".active");
+      if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "center" }));
+    }
+
+    function drawChart(data) {
+      const canvas = ui.usageChart;
+      const rect = canvas.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.max(320, Math.round(rect.width * scale));
+      canvas.height = Math.round(rect.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+      const width = rect.width;
+      const height = rect.height;
+      const pad = { top: 12, right: 10, bottom: 28, left: 48 };
+      const plotWidth = width - pad.left - pad.right;
+      const plotHeight = height - pad.top - pad.bottom;
+      const max = Math.max(...data.values, 1);
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
+      ctx.textBaseline = "middle";
+      for (let line = 0; line <= 4; line += 1) {
+        const y = pad.top + plotHeight * (line / 4);
+        ctx.strokeStyle = "rgba(113, 144, 162, .17)";
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+        ctx.fillStyle = "#678697";
+        ctx.textAlign = "right";
+        ctx.fillText(compact.format(max * (1 - line / 4)), pad.left - 8, y);
+      }
+
+      const slot = plotWidth / data.values.length;
+      const barWidth = Math.max(5, Math.min(24, slot * .48));
+      const labelEvery = data.values.length > 20 ? 5 : 1;
+      data.values.forEach((value, index) => {
+        const barHeight = value ? Math.max(2, value / max * plotHeight) : 0;
+        const x = pad.left + slot * index + (slot - barWidth) / 2;
+        const y = pad.top + plotHeight - barHeight;
+        ctx.fillStyle = index === data.currentIndex ? "#6ee7ad" : "rgba(67, 221, 208, .74)";
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, barHeight, 3);
+        ctx.fill();
+        if (index === 0 || (index + 1) % labelEvery === 0 || index === data.values.length - 1) {
+          ctx.fillStyle = "#678697";
+          ctx.textAlign = "center";
+          ctx.fillText(data.labels[index], x + barWidth / 2, height - 11);
+        }
+      });
+    }
+
+    function modeCopy() {
+      if (state.mode === "week") return { unit: "주", previous: "전주", previousButton: "이전 주", currentButton: "이번 주", nextButton: "다음 주", average: "하루", peak: "일", description: "연도와 주차를 선택하면 7일 사용량을 조회합니다." };
+      if (state.mode === "year") return { unit: "연도", previous: "전년", previousButton: "이전 연도", currentButton: "올해", nextButton: "다음 연도", average: "월", peak: "월", description: "연도를 선택하면 12개월 사용량을 비교합니다." };
+      return { unit: "달", previous: "전월", previousButton: "이전 달", currentButton: "이번 달", nextButton: "다음 달", average: "하루", peak: "일", description: "연도와 월을 선택하면 일별 사용량을 조회합니다." };
+    }
+
+    function render() {
+      const data = getData();
+      const previousPeriod = adjacentPeriod(-1);
+      const previousData = getData(previousPeriod);
+      const delta = previousData.total ? (data.total - previousData.total) / previousData.total * 100 : 0;
+      const peak = Math.max(...data.values);
+      const peakIndex = data.values.indexOf(peak);
+      const copy = modeCopy();
+      renderedData = data;
+
+      [...ui.granularitySwitch.querySelectorAll("button")].forEach((button) => button.classList.toggle("active", button.dataset.mode === state.mode));
+      ui.yearSelect.value = String(state.year);
+      ui.monthSelect.value = String(state.month);
+      ui.weekSelect.value = String(state.week);
+      ui.monthSelect.hidden = state.mode !== "month";
+      ui.weekSelect.hidden = state.mode !== "week";
+      [...ui.monthSelect.options].forEach((option) => { option.disabled = state.year === CURRENT.year && Number(option.value) > CURRENT.month; });
+      [...ui.weekSelect.options].forEach((option) => { option.disabled = state.year === CURRENT.year && Number(option.value) > CURRENT.week; });
+
+      ui.periodHeading.textContent = `${state.mode === "week" ? "주간" : state.mode === "year" ? "연간" : "월간"} 토큰 사용량`;
+      ui.periodDescription.textContent = copy.description;
+      ui.periodRange.textContent = data.range;
+      ui.prevPeriod.textContent = copy.previousButton;
+      ui.currentPeriod.textContent = copy.currentButton;
+      ui.nextPeriod.textContent = copy.nextButton;
+      ui.prevPeriod.disabled = !canUsePeriod(previousPeriod);
+      ui.nextPeriod.disabled = !canUsePeriod(adjacentPeriod(1));
+      ui.primaryMetricLabel.textContent = `선택 ${copy.unit}`;
+      ui.comparisonMetricLabel.textContent = `${copy.previous} 대비`;
+      ui.averageMetricLabel.textContent = `${copy.average} 평균`;
+      ui.peakMetricLabel.textContent = `최고 사용${copy.peak}`;
+      ui.breakdownTitle.textContent = `선택 ${copy.unit} 토큰 상세`;
+      ui.monthTotal.textContent = number.format(data.total);
+      ui.eventCount.textContent = `${number.format(data.events)}개 기록`;
+      ui.monthDelta.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
+      ui.monthDelta.style.color = delta >= 0 ? "var(--green)" : "var(--danger)";
+      ui.previousMonthText.textContent = `${copy.previous} 사용량 ${number.format(previousData.total)}`;
+      ui.dailyAverage.textContent = number.format(Math.round(data.total / data.averageDivisor));
+      ui.activeDays.textContent = data.averageMeta;
+      ui.peakTotal.textContent = number.format(peak);
+      ui.peakDate.textContent = data.labels[peakIndex] || "-";
+      ui.chartTitle.textContent = data.title;
+      ui.chartDescription.textContent = state.mode === "year" ? "월별 장기 추세를 비교합니다." : "선택 기간 안의 일별 사용량 분포입니다.";
+      ui.chartSummary.textContent = `${data.summary} ${number.format(data.total)}`;
+      ui.inputTokens.textContent = number.format(data.input);
+      ui.outputTokens.textContent = number.format(data.output);
+      ui.cacheReadTokens.textContent = number.format(data.cacheRead);
+      ui.cacheWriteTokens.textContent = number.format(data.cacheWrite);
+      ui.reasoningTokens.textContent = number.format(data.reasoning);
+      ui.allEvents.textContent = number.format(data.events);
+
+      renderQuickStrip();
+      requestAnimationFrame(() => drawChart(data));
+    }
+
+    ui.granularitySwitch.addEventListener("click", (event) => {
+      const mode = event.target.closest("button")?.dataset.mode;
+      if (!mode || mode === state.mode) return;
+      state.mode = mode;
+      if (mode === "week" && state.year === CURRENT.year) state.week = CURRENT.week;
+      render();
+    });
+    ui.yearSelect.addEventListener("change", () => {
+      state.year = Number(ui.yearSelect.value);
+      if (state.year === CURRENT.year) {
+        state.month = Math.min(state.month, CURRENT.month);
+        state.week = Math.min(state.week, CURRENT.week);
+      }
+      render();
+    });
+    ui.monthSelect.addEventListener("change", () => { state.month = Number(ui.monthSelect.value); render(); });
+    ui.weekSelect.addEventListener("change", () => { state.week = Number(ui.weekSelect.value); render(); });
+    ui.prevPeriod.addEventListener("click", () => Object.assign(state, adjacentPeriod(-1)) && render());
+    ui.nextPeriod.addEventListener("click", () => Object.assign(state, adjacentPeriod(1)) && render());
+    ui.currentPeriod.addEventListener("click", () => {
+      Object.assign(state, { year: CURRENT.year, month: CURRENT.month, week: CURRENT.week });
+      render();
+    });
+    ui.refreshButton.addEventListener("click", () => {
+      ui.refreshButton.textContent = "갱신 완료";
+      window.setTimeout(() => { ui.refreshButton.textContent = "새로고침"; }, 1200);
+      render();
+    });
+    window.addEventListener("resize", () => renderedData && drawChart(renderedData));
+
+    populateControls();
+    render();
+  </script>
+</body>
+</html>

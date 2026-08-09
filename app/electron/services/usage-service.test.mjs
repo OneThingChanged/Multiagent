@@ -69,6 +69,63 @@ describe("Electron usage index", () => {
     service.close();
   });
 
+  it("returns selectable week, month, and year history from the local database", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-history-")); roots.push(root);
+    const service = new UsageService(path.join(root, "usage.db"), { scan: async () => [] });
+    const event = service.db().prepare(`INSERT INTO usage_events (
+      source_key, ts, tool, input_tokens, output_tokens, total_tokens, raw_kind
+    ) VALUES (?, ?, 'codex', ?, ?, ?, 'test')`);
+    const add = (key, year, month, day, tokens) => {
+      const date = new Date(year, month - 1, day, 12, 0, 0);
+      event.run(key, Math.floor(date.getTime() / 1000), tokens - 10, 10, tokens);
+    };
+    add("2025-jan", 2025, 1, 5, 100);
+    add("2025-dec", 2025, 12, 20, 200);
+    add("2026-jul", 2026, 7, 15, 300);
+    add("2026-aug-mon", 2026, 8, 3, 400);
+    add("2026-aug-tue", 2026, 8, 4, 500);
+    add("2026-aug-sat", 2026, 8, 8, 600);
+    const now = new Date(2026, 7, 8, 18, 0, 0).getTime();
+
+    const month = service.usageHistory({ mode: "month", year: 2026, month: 8 }, now);
+    expect(month.selection).toMatchObject({ mode: "month", year: 2026, month: 8 });
+    expect(month.totals).toMatchObject({ events: 3, totalTokens: 1_500 });
+    expect(month.previous.totals).toMatchObject({ events: 1, totalTokens: 300 });
+    expect(month.buckets).toHaveLength(31);
+    expect(month.buckets.find((bucket) => bucket.key === "2026-08-04")).toMatchObject({ totalTokens: 500 });
+    expect(month.quickBuckets).toHaveLength(12);
+    expect(month.quickBuckets[7]).toMatchObject({ value: 8, totalTokens: 1_500 });
+    expect(month.availableYears).toEqual([2026, 2025]);
+
+    const week = service.usageHistory({ mode: "week", year: 2026, week: 32 }, now);
+    expect(week.totals).toMatchObject({ events: 3, totalTokens: 1_500 });
+    expect(week.buckets).toHaveLength(7);
+    expect(week.quickBuckets).toHaveLength(53);
+    expect(week.quickBuckets[31]).toMatchObject({ value: 32, totalTokens: 1_500 });
+
+    const year = service.usageHistory({ mode: "year", year: 2025 }, now);
+    expect(year.totals).toMatchObject({ events: 2, totalTokens: 300 });
+    expect(year.buckets).toHaveLength(12);
+    expect(year.buckets[0]).toMatchObject({ label: "1월", totalTokens: 100 });
+    expect(year.buckets[11]).toMatchObject({ label: "12월", totalTokens: 200 });
+    expect(() => service.usageHistory({ mode: "month", year: 2026, month: 9 }, now)).toThrow(/future/);
+    service.close();
+  });
+
+  it("uses the ISO week-year at calendar year boundaries", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-weekyear-")); roots.push(root);
+    const service = new UsageService(path.join(root, "usage.db"), { scan: async () => [] });
+    const now = new Date(2027, 0, 1, 12, 0, 0).getTime();
+
+    const history = service.usageHistory({ mode: "week", year: 2026, week: 53 }, now);
+
+    expect(history.current).toMatchObject({ year: 2027, weekYear: 2026, week: 53 });
+    expect(history.selection).toMatchObject({ mode: "week", year: 2026, week: 53 });
+    expect(history.availableYears[0]).toBe(2026);
+    expect(() => service.usageHistory({ mode: "week", year: 2027, week: 1 }, now)).toThrow(/out of range/);
+    service.close();
+  });
+
   it("refreshes a current limit from the tail of a recent transcript", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-tail-")); roots.push(root);
     const transcript = path.join(root, "session.jsonl");

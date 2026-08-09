@@ -74,15 +74,35 @@ const ui = {
   usageCacheReadTokens: $("#usageCacheReadTokens"),
   usageCacheWriteTokens: $("#usageCacheWriteTokens"),
   usageReasoningTokens: $("#usageReasoningTokens"),
-  usageDailyTokens: $("#usageDailyTokens"),
-  usageDailyMeta: $("#usageDailyMeta"),
-  usageWeeklyTokens: $("#usageWeeklyTokens"),
-  usageWeeklyMeta: $("#usageWeeklyMeta"),
-  usageMonthlyTokens: $("#usageMonthlyTokens"),
-  usageMonthlyMeta: $("#usageMonthlyMeta"),
+  usageHistoryMode: $("#usageHistoryMode"),
+  usageHistoryTitle: $("#usageHistoryTitle"),
+  usageHistoryDescription: $("#usageHistoryDescription"),
+  usagePreviousPeriod: $("#usagePreviousPeriod"),
+  usageYearSelect: $("#usageYearSelect"),
+  usageMonthSelect: $("#usageMonthSelect"),
+  usageWeekSelect: $("#usageWeekSelect"),
+  usageCurrentPeriod: $("#usageCurrentPeriod"),
+  usageNextPeriod: $("#usageNextPeriod"),
+  usageHistoryRange: $("#usageHistoryRange"),
+  usageHistoryQuick: $("#usageHistoryQuick"),
+  usageSelectedLabel: $("#usageSelectedLabel"),
+  usageSelectedTotal: $("#usageSelectedTotal"),
+  usageSelectedMeta: $("#usageSelectedMeta"),
+  usageComparisonLabel: $("#usageComparisonLabel"),
+  usageComparisonValue: $("#usageComparisonValue"),
+  usageComparisonMeta: $("#usageComparisonMeta"),
+  usageAverageLabel: $("#usageAverageLabel"),
+  usageAverageValue: $("#usageAverageValue"),
+  usageAverageMeta: $("#usageAverageMeta"),
+  usagePeakLabel: $("#usagePeakLabel"),
+  usagePeakValue: $("#usagePeakValue"),
+  usagePeakMeta: $("#usagePeakMeta"),
+  usageChartTitle: $("#usageChartTitle"),
+  usageChartDescription: $("#usageChartDescription"),
   usageChart: $("#usageChart"),
   usageChartSummary: $("#usageChartSummary"),
   usageChartEmpty: $("#usageChartEmpty"),
+  usageBreakdownTitle: $("#usageBreakdownTitle"),
   usageRemainingSummary: $("#usageRemainingSummary"),
   usageProviderSummary: $("#usageProviderSummary"),
   usageUpdatedSummary: $("#usageUpdatedSummary"),
@@ -192,6 +212,15 @@ let usageRefreshing = false;
 let usageError = "";
 let usageLoadedAt = 0;
 let usageLoadAttempted = false;
+const usageNow = new Date();
+let usageSelection = {
+  mode: "month",
+  year: usageNow.getFullYear(),
+  month: usageNow.getMonth() + 1,
+  week: null,
+};
+let usageRequestSerial = 0;
+let usageQuickRenderKey = "";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -1895,12 +1924,10 @@ function usageSvgNode(name, attributes = {}) {
 }
 
 function renderUsageChart() {
-  const timeline = Array.isArray(usageSummary?.timeline)
-    ? usageSummary.timeline.slice(-30)
-    : [];
-  const total = timeline.reduce((sum, bucket) => sum + tokenCount(bucket?.totalTokens), 0);
+  const history = usageSummary?.history || {};
+  const timeline = Array.isArray(history.buckets) ? history.buckets : [];
+  const total = tokenCount(history?.totals?.totalTokens);
   const maximum = Math.max(0, ...timeline.map((bucket) => tokenCount(bucket?.totalTokens)));
-  ui.usageChartSummary.textContent = `30일 합계 ${formatTokenCount(total)}`;
   ui.usageChartEmpty.hidden = maximum > 0;
   ui.usageChart.hidden = maximum <= 0;
   ui.usageChart.replaceChildren();
@@ -1912,7 +1939,9 @@ function renderUsageChart() {
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   const slotWidth = plotWidth / timeline.length;
-  const barWidth = Math.max(4, Math.min(18, slotWidth * 0.62));
+  const barWidth = Math.max(4, Math.min(24, slotWidth * 0.56));
+  const labelEvery = timeline.length > 20 ? 7 : 1;
+  const currentKey = text(history?.range?.endDate);
   const svg = usageSvgNode("svg", {
     viewBox: `0 0 ${width} ${height}`,
     preserveAspectRatio: "xMidYMid meet",
@@ -1948,8 +1977,11 @@ function renderUsageChart() {
     const barHeight = value > 0 ? Math.max(2, (value / maximum) * plotHeight) : 0;
     const x = margin.left + index * slotWidth + (slotWidth - barWidth) / 2;
     const y = margin.top + plotHeight - barHeight;
+    const bucketKey = text(bucket?.key || bucket?.date);
+    const selectedCurrent = bucketKey === currentKey
+      || (history?.selection?.mode === "year" && bucketKey === currentKey.slice(0, 7));
     const bar = usageSvgNode("rect", {
-      class: `usage-chart-bar${index === timeline.length - 1 ? " today" : ""}`,
+      class: `usage-chart-bar${selectedCurrent ? " today" : ""}`,
       x,
       y,
       width: barWidth,
@@ -1957,25 +1989,25 @@ function renderUsageChart() {
       rx: Math.min(4, barWidth / 2),
     });
     const title = usageSvgNode("title");
-    title.textContent = `${usageDateLabel(bucket?.date)} · ${formatTokenCount(value)} 토큰 · ${formatTokenCount(bucket?.events)}개 기록`;
+    title.textContent = `${text(bucket?.label) || usageDateLabel(bucketKey)} · ${formatTokenCount(value)} 토큰 · ${formatTokenCount(bucket?.events)}개 기록`;
     bar.appendChild(title);
     svg.appendChild(bar);
 
-    if (index === 0 || index === timeline.length - 1 || index % 7 === 0) {
+    if (index === 0 || index === timeline.length - 1 || (index + 1) % labelEvery === 0) {
       const label = usageSvgNode("text", {
         class: "usage-chart-axis-label usage-chart-date-label",
         x: margin.left + index * slotWidth + slotWidth / 2,
         y: height - 9,
         "text-anchor": "middle",
       });
-      label.textContent = usageDateLabel(bucket?.date);
+      label.textContent = text(bucket?.label) || usageDateLabel(bucketKey);
       svg.appendChild(label);
     }
   });
 
   ui.usageChart.setAttribute(
     "aria-label",
-    `최근 30일 토큰 사용량 그래프. 합계 ${formatTokenCount(total)} 토큰, 최고 일간 ${formatTokenCount(maximum)} 토큰`,
+    `선택 기간 토큰 사용량 그래프. 합계 ${formatTokenCount(total)} 토큰, 최고 구간 ${formatTokenCount(maximum)} 토큰`,
   );
   ui.usageChart.appendChild(svg);
 }
@@ -2053,10 +2085,218 @@ function usageWindowCard(window, index) {
   return card;
 }
 
+function usageHistoryCopy(mode) {
+  if (mode === "week") return {
+    heading: "주간 토큰 사용량",
+    description: "연도와 주차를 선택하면 7일 사용량을 조회합니다.",
+    unit: "주",
+    previous: "전주",
+    previousButton: "이전 주",
+    currentButton: "이번 주",
+    nextButton: "다음 주",
+    average: "하루",
+    peak: "일",
+  };
+  if (mode === "year") return {
+    heading: "연간 토큰 사용량",
+    description: "연도를 선택하면 12개월 사용량을 비교합니다.",
+    unit: "연도",
+    previous: "전년",
+    previousButton: "이전 연도",
+    currentButton: "올해",
+    nextButton: "다음 연도",
+    average: "월",
+    peak: "월",
+  };
+  return {
+    heading: "월간 토큰 사용량",
+    description: "연도와 월을 선택하면 일별 사용량을 조회합니다.",
+    unit: "달",
+    previous: "전월",
+    previousButton: "이전 달",
+    currentButton: "이번 달",
+    nextButton: "다음 달",
+    average: "하루",
+    peak: "일",
+  };
+}
+
+function usageWeeksInYear(year) {
+  const date = new Date(year, 11, 28);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7));
+  const start = new Date(date.getFullYear(), 0, 1);
+  return Math.ceil((((date - start) / 86_400_000) + 1) / 7);
+}
+
+function adjacentUsageSelection(direction, selection = usageSelection) {
+  const next = { ...selection };
+  if (next.mode === "year") next.year += direction;
+  if (next.mode === "month") {
+    next.month += direction;
+    if (next.month < 1) { next.month = 12; next.year -= 1; }
+    if (next.month > 12) { next.month = 1; next.year += 1; }
+  }
+  if (next.mode === "week") {
+    next.week += direction;
+    if (next.week < 1) {
+      next.year -= 1;
+      next.week = usageWeeksInYear(next.year);
+    } else if (next.week > usageWeeksInYear(next.year)) {
+      next.year += 1;
+      next.week = 1;
+    }
+  }
+  return next;
+}
+
+function canSelectUsagePeriod(selection, history = usageSummary?.history) {
+  const current = history?.current || {};
+  const availableYears = Array.isArray(history?.availableYears) ? history.availableYears : [];
+  const latestYear = selection.mode === "week"
+    ? Number(current.weekYear ?? current.year)
+    : Number(current.year);
+  const earliestYear = availableYears.length > 0 ? Math.min(...availableYears) : latestYear || usageNow.getFullYear();
+  if (selection.year < earliestYear || selection.year > latestYear) return false;
+  if (selection.year < latestYear) return true;
+  if (selection.mode === "year") return true;
+  if (selection.mode === "week") return selection.week <= Number(current.week);
+  return selection.month <= Number(current.month);
+}
+
+function replaceSelectOptions(select, values, selectedValue, label) {
+  const signature = JSON.stringify(values);
+  if (select.dataset.options !== signature) {
+    select.dataset.options = signature;
+    select.replaceChildren(...values.map((value) => {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = label(value);
+      return option;
+    }));
+  }
+  select.value = String(selectedValue);
+}
+
+function renderUsageHistory() {
+  const history = usageSummary?.history;
+  if (!history?.selection) return;
+  usageSelection = { ...usageSelection, ...history.selection };
+  const copy = usageHistoryCopy(usageSelection.mode);
+  const totals = history.totals || {};
+  const previousTotals = history.previous?.totals || {};
+  const buckets = Array.isArray(history.buckets) ? history.buckets : [];
+  const quickBuckets = Array.isArray(history.quickBuckets) ? history.quickBuckets : [];
+  const total = tokenCount(totals.totalTokens);
+  const previousTotal = tokenCount(previousTotals.totalTokens);
+  const delta = previousTotal > 0 ? ((total - previousTotal) / previousTotal) * 100 : null;
+  const visibleEnd = text(history.range?.endDate);
+  const visibleBuckets = buckets.filter((bucket) => {
+    const key = text(bucket?.key);
+    return usageSelection.mode === "year" ? key <= visibleEnd.slice(0, 7) : key <= visibleEnd;
+  });
+  const averageDivisor = Math.max(1, visibleBuckets.length);
+  const peak = visibleBuckets.reduce((best, bucket) => (
+    tokenCount(bucket?.totalTokens) > tokenCount(best?.totalTokens) ? bucket : best
+  ), null);
+
+  ui.usageHistoryTitle.textContent = copy.heading;
+  ui.usageHistoryDescription.textContent = copy.description;
+  ui.usageHistoryRange.textContent = `${text(history.range?.startDate)} — ${visibleEnd}`;
+  ui.usagePreviousPeriod.textContent = copy.previousButton;
+  ui.usageCurrentPeriod.textContent = copy.currentButton;
+  ui.usageNextPeriod.textContent = copy.nextButton;
+  ui.usagePreviousPeriod.disabled = !canSelectUsagePeriod(adjacentUsageSelection(-1), history);
+  ui.usageNextPeriod.disabled = !canSelectUsagePeriod(adjacentUsageSelection(1), history);
+  for (const button of ui.usageHistoryMode.querySelectorAll("button")) {
+    button.classList.toggle("selected", button.dataset.usagePeriod === usageSelection.mode);
+  }
+
+  const years = Array.isArray(history.availableYears) && history.availableYears.length > 0
+    ? history.availableYears
+    : [history.current?.year || usageSelection.year];
+  replaceSelectOptions(ui.usageYearSelect, years, usageSelection.year, (value) => `${value}년`);
+  replaceSelectOptions(ui.usageMonthSelect, Array.from({ length: 12 }, (_, index) => index + 1), usageSelection.month, (value) => `${value}월`);
+  replaceSelectOptions(ui.usageWeekSelect, Array.from({ length: usageWeeksInYear(usageSelection.year) }, (_, index) => index + 1), usageSelection.week, (value) => `${value}주차`);
+  ui.usageMonthSelect.hidden = usageSelection.mode !== "month";
+  ui.usageWeekSelect.hidden = usageSelection.mode !== "week";
+  for (const option of ui.usageMonthSelect.options) {
+    option.disabled = usageSelection.year === Number(history.current?.year) && Number(option.value) > Number(history.current?.month);
+  }
+  for (const option of ui.usageWeekSelect.options) {
+    option.disabled = usageSelection.year === Number(history.current?.weekYear ?? history.current?.year)
+      && Number(option.value) > Number(history.current?.week);
+  }
+
+  const quickRenderKey = JSON.stringify([
+    usageSelection.mode,
+    usageSelection.year,
+    usageSelection.month,
+    usageSelection.week,
+    history.current,
+    quickBuckets.map((bucket) => [bucket?.value, bucket?.totalTokens]),
+  ]);
+  if (quickRenderKey !== usageQuickRenderKey) {
+    usageQuickRenderKey = quickRenderKey;
+    const quickFragment = document.createDocumentFragment();
+    for (const bucket of quickBuckets) {
+      const value = Number(bucket?.value);
+      const period = usageSelection.mode === "week"
+        ? { ...usageSelection, week: value }
+        : { ...usageSelection, mode: "month", month: value };
+      const button = make("button");
+      button.type = "button";
+      button.dataset.value = String(value);
+      button.disabled = !canSelectUsagePeriod(period, history);
+      const selected = usageSelection.mode === "week"
+        ? value === usageSelection.week
+        : usageSelection.mode === "month" && value === usageSelection.month;
+      button.classList.toggle("selected", selected);
+      button.append(
+        make("span", "", text(bucket?.label)),
+        make("small", "", formatCompactTokenCount(bucket?.totalTokens)),
+      );
+      quickFragment.appendChild(button);
+    }
+    ui.usageHistoryQuick.replaceChildren(quickFragment);
+    requestAnimationFrame(() => ui.usageHistoryQuick.querySelector(".selected")?.scrollIntoView({ block: "nearest", inline: "center" }));
+  }
+
+  ui.usageSelectedLabel.textContent = `선택 ${copy.unit}`;
+  ui.usageSelectedTotal.textContent = formatTokenCount(total);
+  ui.usageSelectedMeta.textContent = usagePeriodMeta(totals);
+  ui.usageComparisonLabel.textContent = `${copy.previous} 대비`;
+  ui.usageComparisonValue.textContent = delta == null ? "—" : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
+  ui.usageComparisonValue.className = delta == null ? "" : delta >= 0 ? "usage-summary-healthy" : "usage-summary-critical";
+  ui.usageComparisonMeta.textContent = `${copy.previous} 사용량 ${formatTokenCount(previousTotal)}`;
+  ui.usageAverageLabel.textContent = `${copy.average} 평균`;
+  ui.usageAverageValue.textContent = formatTokenCount(Math.round(total / averageDivisor));
+  ui.usageAverageMeta.textContent = `${visibleBuckets.length}${usageSelection.mode === "year" ? "개월" : "일"} 집계`;
+  ui.usagePeakLabel.textContent = `최고 사용${copy.peak}`;
+  ui.usagePeakValue.textContent = formatTokenCount(peak?.totalTokens);
+  ui.usagePeakMeta.textContent = text(peak?.label) || "—";
+  ui.usageChartTitle.textContent = usageSelection.mode === "year"
+    ? `${usageSelection.year}년 월별 사용량`
+    : usageSelection.mode === "week"
+      ? `${usageSelection.year}년 ${usageSelection.week}주차 일별 사용량`
+      : `${usageSelection.year}년 ${usageSelection.month}월 일별 사용량`;
+  ui.usageChartDescription.textContent = usageSelection.mode === "year"
+    ? "월별 장기 추세를 비교합니다."
+    : "선택 기간 안의 일별 사용량 분포입니다.";
+  ui.usageChartSummary.textContent = `${visibleBuckets.length}${usageSelection.mode === "year" ? "개월" : "일"} 합계 ${formatTokenCount(total)}`;
+  ui.usageBreakdownTitle.textContent = `선택 ${copy.unit} 토큰 상세`;
+  ui.usageTotalTokens.textContent = formatTokenCount(totals.totalTokens);
+  ui.usageInputTokens.textContent = formatTokenCount(totals.inputTokens);
+  ui.usageOutputTokens.textContent = formatTokenCount(totals.outputTokens);
+  ui.usageCacheReadTokens.textContent = formatTokenCount(totals.cacheReadTokens);
+  ui.usageCacheWriteTokens.textContent = formatTokenCount(totals.cacheWriteTokens);
+  ui.usageReasoningTokens.textContent = formatTokenCount(totals.reasoningOutputTokens);
+  renderUsageChart();
+}
+
 function renderUsage() {
   const groups = usageGroups();
   const tokens = usageSummary?.tokens || {};
-  const periods = usageSummary?.periods || {};
   const windows = groups.flatMap((group) => group.limits.flatMap((limit) => (
     [limit?.primary, limit?.secondary].filter((window) => (
       window && Number.isFinite(Number(window.usedPercent))
@@ -2071,19 +2311,7 @@ function renderUsage() {
   );
   ui.usageProviderCount.textContent = String(groups.length);
   ui.usageTokenEvents.textContent = `${formatTokenCount(tokens.events)}개 사용 기록 기준`;
-  ui.usageTotalTokens.textContent = formatTokenCount(tokens.totalTokens);
-  ui.usageInputTokens.textContent = formatTokenCount(tokens.inputTokens);
-  ui.usageOutputTokens.textContent = formatTokenCount(tokens.outputTokens);
-  ui.usageCacheReadTokens.textContent = formatTokenCount(tokens.cacheReadTokens);
-  ui.usageCacheWriteTokens.textContent = formatTokenCount(tokens.cacheWriteTokens);
-  ui.usageReasoningTokens.textContent = formatTokenCount(tokens.reasoningOutputTokens);
-  ui.usageDailyTokens.textContent = formatTokenCount(periods.day?.totalTokens);
-  ui.usageDailyMeta.textContent = usagePeriodMeta(periods.day);
-  ui.usageWeeklyTokens.textContent = formatTokenCount(periods.week?.totalTokens);
-  ui.usageWeeklyMeta.textContent = usagePeriodMeta(periods.week);
-  ui.usageMonthlyTokens.textContent = formatTokenCount(periods.month?.totalTokens);
-  ui.usageMonthlyMeta.textContent = usagePeriodMeta(periods.month);
-  renderUsageChart();
+  renderUsageHistory();
   ui.usageProviderSummary.textContent = String(groups.length);
   ui.usageRemainingSummary.textContent = remaining == null
     ? "—"
@@ -2158,14 +2386,21 @@ function renderUsage() {
 }
 
 async function loadUsage(refresh = false) {
-  if (usageLoading) return;
+  const requestSerial = ++usageRequestSerial;
   usageLoadAttempted = true;
   usageLoading = true;
   usageRefreshing = refresh;
   usageError = "";
   renderUsage();
   try {
-    const response = await fetch(`/api/usage${refresh ? "?refresh=1" : ""}`, {
+    const query = new URLSearchParams({
+      period: usageSelection.mode,
+      year: String(usageSelection.year),
+    });
+    if (usageSelection.mode === "month") query.set("month", String(usageSelection.month));
+    if (usageSelection.mode === "week" && usageSelection.week != null) query.set("week", String(usageSelection.week));
+    if (refresh) query.set("refresh", "1");
+    const response = await fetch(`/api/usage?${query}`, {
       cache: "no-store",
       credentials: "same-origin",
     });
@@ -2175,17 +2410,24 @@ async function loadUsage(refresh = false) {
     }
     const result = await response.json();
     if (!response.ok) throw new Error(text(result?.error) || `HTTP ${response.status}`);
+    if (requestSerial !== usageRequestSerial) return;
     usageSummary = {
       updatedAt: Number(result?.updatedAt) || 0,
       limits: Array.isArray(result?.limits) ? result.limits : [],
       tokens: result?.tokens && typeof result.tokens === "object" ? result.tokens : {},
       periods: result?.periods && typeof result.periods === "object" ? result.periods : {},
       timeline: Array.isArray(result?.timeline) ? result.timeline : [],
+      history: result?.history && typeof result.history === "object" ? result.history : null,
     };
+    if (usageSummary.history?.selection) {
+      usageSelection = { ...usageSelection, ...usageSummary.history.selection };
+    }
     usageLoadedAt = Date.now();
   } catch (error) {
+    if (requestSerial !== usageRequestSerial) return;
     usageError = error instanceof Error ? error.message : String(error);
   } finally {
+    if (requestSerial !== usageRequestSerial) return;
     usageLoading = false;
     usageRefreshing = false;
     renderUsage();
@@ -3830,6 +4072,79 @@ ui.overviewButton.addEventListener("click", () => selectMonitor("all"));
 ui.documentsButton.addEventListener("click", () => selectDocuments(selection.type === "documents" ? selection.id : null));
 ui.usageButton.addEventListener("click", selectUsage);
 ui.refreshUsageButton.addEventListener("click", () => { void loadUsage(true); });
+ui.usageHistoryMode.addEventListener("click", (event) => {
+  const mode = event.target.closest("button")?.dataset.usagePeriod;
+  if (!["week", "month", "year"].includes(mode) || mode === usageSelection.mode) return;
+  const current = usageSummary?.history?.current || {
+    year: usageNow.getFullYear(),
+    month: usageNow.getMonth() + 1,
+    week: usageSelection.week || 1,
+  };
+  usageSelection = { ...usageSelection, mode };
+  if (mode === "week") {
+    const currentWeekYear = Number(current.weekYear ?? current.year);
+    usageSelection.year = Math.min(usageSelection.year, currentWeekYear);
+    usageSelection.week = usageSelection.year === currentWeekYear
+      ? Number(current.week)
+      : Math.min(Number(usageSelection.week) || 1, usageWeeksInYear(usageSelection.year));
+  }
+  if (mode !== "week") usageSelection.year = Math.min(usageSelection.year, Number(current.year));
+  if (mode === "month" && usageSelection.year === Number(current.year)) usageSelection.month = Math.min(usageSelection.month, Number(current.month));
+  void loadUsage();
+});
+ui.usageYearSelect.addEventListener("change", () => {
+  const current = usageSummary?.history?.current || {};
+  usageSelection.year = Number(ui.usageYearSelect.value);
+  usageSelection.week = Math.min(Number(usageSelection.week) || 1, usageWeeksInYear(usageSelection.year));
+  if (usageSelection.year === Number(current.year)) {
+    usageSelection.month = Math.min(usageSelection.month, Number(current.month));
+  }
+  if (usageSelection.mode === "week" && usageSelection.year === Number(current.weekYear ?? current.year)) {
+    usageSelection.week = Math.min(usageSelection.week || Number(current.week), Number(current.week));
+  }
+  void loadUsage();
+});
+ui.usageMonthSelect.addEventListener("change", () => {
+  usageSelection.month = Number(ui.usageMonthSelect.value);
+  void loadUsage();
+});
+ui.usageWeekSelect.addEventListener("change", () => {
+  usageSelection.week = Number(ui.usageWeekSelect.value);
+  void loadUsage();
+});
+ui.usagePreviousPeriod.addEventListener("click", () => {
+  usageSelection = adjacentUsageSelection(-1);
+  void loadUsage();
+});
+ui.usageNextPeriod.addEventListener("click", () => {
+  const next = adjacentUsageSelection(1);
+  if (!canSelectUsagePeriod(next)) return;
+  usageSelection = next;
+  void loadUsage();
+});
+ui.usageCurrentPeriod.addEventListener("click", () => {
+  const current = usageSummary?.history?.current || {};
+  usageSelection = {
+    ...usageSelection,
+    year: usageSelection.mode === "week"
+      ? Number(current.weekYear ?? current.year) || usageNow.getFullYear()
+      : Number(current.year) || usageNow.getFullYear(),
+    month: Number(current.month) || usageNow.getMonth() + 1,
+    week: Number(current.week) || usageSelection.week,
+  };
+  void loadUsage();
+});
+ui.usageHistoryQuick.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-value]");
+  if (!button || button.disabled) return;
+  const value = Number(button.dataset.value);
+  if (usageSelection.mode === "week") usageSelection.week = value;
+  else {
+    usageSelection.mode = "month";
+    usageSelection.month = value;
+  }
+  void loadUsage();
+});
 ui.summaryGrid.addEventListener("click", (event) => {
   const card = event.target.closest("[data-summary-filter]");
   if (card) selectMonitor(card.dataset.summaryFilter);

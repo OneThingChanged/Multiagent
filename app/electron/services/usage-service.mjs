@@ -50,6 +50,83 @@ function normalizedTokenTotals(row = {}) {
   };
 }
 
+const TOKEN_TOTAL_FIELDS = [
+  "events",
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningOutputTokens",
+  "totalTokens",
+];
+
+function sumTokenTotals(rows = []) {
+  const total = normalizedTokenTotals();
+  for (const row of rows) {
+    const normalized = normalizedTokenTotals(row);
+    for (const field of TOKEN_TOTAL_FIELDS) total[field] += normalized[field];
+  }
+  return total;
+}
+
+function isoWeekStart(year, week) {
+  const januaryFourth = new Date(year, 0, 4);
+  januaryFourth.setHours(0, 0, 0, 0);
+  const weekday = januaryFourth.getDay() || 7;
+  const start = new Date(januaryFourth);
+  start.setDate(start.getDate() - weekday + 1 + (week - 1) * 7);
+  return start;
+}
+
+function isoWeekParts(value) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7));
+  const yearStart = new Date(date.getFullYear(), 0, 1);
+  return {
+    year: date.getFullYear(),
+    week: Math.ceil((((date - yearStart) / 86_400_000) + 1) / 7),
+  };
+}
+
+function isoWeekNumber(value) {
+  return isoWeekParts(value).week;
+}
+
+function isoWeeksInYear(year) {
+  return isoWeekNumber(new Date(year, 11, 28));
+}
+
+function usageHistorySelection(selection, now) {
+  const current = new Date(now);
+  if (!Number.isFinite(current.getTime())) throw new TypeError("usage history requires a valid date");
+  const mode = ["week", "month", "year"].includes(selection?.mode)
+    ? selection.mode
+    : "month";
+  const currentIsoWeek = isoWeekParts(current);
+  const latestYear = mode === "week" ? currentIsoWeek.year : current.getFullYear();
+  const year = Number.isInteger(Number(selection?.year))
+    ? Number(selection.year)
+    : latestYear;
+  if (year < 2000 || year > latestYear) throw new RangeError("usage history year is out of range");
+  const currentWeek = currentIsoWeek.week;
+  const month = Number.isInteger(Number(selection?.month))
+    ? Number(selection.month)
+    : current.getMonth() + 1;
+  const week = Number.isInteger(Number(selection?.week))
+    ? Number(selection.week)
+    : currentWeek;
+  if (month < 1 || month > 12) throw new RangeError("usage history month is out of range");
+  if (week < 1 || week > isoWeeksInYear(year)) throw new RangeError("usage history week is out of range");
+  if (year === current.getFullYear() && mode === "month" && month > current.getMonth() + 1) {
+    throw new RangeError("usage history month is in the future");
+  }
+  if (year === currentIsoWeek.year && mode === "week" && week > currentWeek) {
+    throw new RangeError("usage history week is in the future");
+  }
+  return { mode, year, month, week };
+}
+
 export class UsageService {
   constructor(databasePath, sessionService, options = {}) {
     this.databasePath = databasePath;
@@ -568,6 +645,149 @@ export class UsageService {
       COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
       COALESCE(SUM(total_tokens),0) totalTokens FROM usage_events${where}`).get(...params);
     return normalizedTokenTotals(totals);
+  }
+
+  tokenBuckets(startAt, endAt, bucket = "day") {
+    const format = bucket === "month" ? "%Y-%m" : "%Y-%m-%d";
+    const rows = this.db().prepare(`SELECT
+      strftime('${format}', ts, 'unixepoch', 'localtime') bucketKey,
+      COUNT(*) events,
+      COALESCE(SUM(input_tokens),0) inputTokens,
+      COALESCE(SUM(output_tokens),0) outputTokens,
+      COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
+      COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
+      COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
+      COALESCE(SUM(total_tokens),0) totalTokens
+      FROM usage_events WHERE ts >= ? AND ts < ?
+      GROUP BY bucketKey ORDER BY bucketKey`).all(
+      Math.floor(Number(startAt) / 1000),
+      Math.floor(Number(endAt) / 1000),
+    );
+    return new Map(rows.map((row) => [String(row.bucketKey), normalizedTokenTotals(row)]));
+  }
+
+  usageHistory(selection = null, now = Date.now()) {
+    const current = new Date(now);
+    const selected = usageHistorySelection(selection, current.getTime());
+    const currentYear = current.getFullYear();
+    const currentMonth = current.getMonth() + 1;
+    const currentIsoWeek = isoWeekParts(current);
+    const currentWeek = currentIsoWeek.week;
+
+    const rangeFor = (period) => {
+      if (period.mode === "year") {
+        return {
+          start: new Date(period.year, 0, 1),
+          end: new Date(period.year + 1, 0, 1),
+        };
+      }
+      if (period.mode === "week") {
+        const start = isoWeekStart(period.year, period.week);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+        return { start, end };
+      }
+      return {
+        start: new Date(period.year, period.month - 1, 1),
+        end: new Date(period.year, period.month, 1),
+      };
+    };
+    const adjacent = (period, direction) => {
+      const result = { ...period };
+      if (result.mode === "year") result.year += direction;
+      if (result.mode === "month") {
+        result.month += direction;
+        if (result.month < 1) { result.month = 12; result.year -= 1; }
+        if (result.month > 12) { result.month = 1; result.year += 1; }
+      }
+      if (result.mode === "week") {
+        result.week += direction;
+        if (result.week < 1) {
+          result.year -= 1;
+          result.week = isoWeeksInYear(result.year);
+        } else if (result.week > isoWeeksInYear(result.year)) {
+          result.year += 1;
+          result.week = 1;
+        }
+      }
+      return result;
+    };
+    const selectedRange = rangeFor(selected);
+    const previous = adjacent(selected, -1);
+    const previousRange = rangeFor(previous);
+    const totals = this.tokenTotals(selectedRange.start.getTime(), selectedRange.end.getTime());
+    const previousTotals = this.tokenTotals(previousRange.start.getTime(), previousRange.end.getTime());
+    const buckets = [];
+
+    if (selected.mode === "year") {
+      const totalsByMonth = this.tokenBuckets(selectedRange.start.getTime(), selectedRange.end.getTime(), "month");
+      for (let month = 1; month <= 12; month += 1) {
+        const key = `${selected.year}-${String(month).padStart(2, "0")}`;
+        buckets.push({ key, label: `${month}월`, ...normalizedTokenTotals(totalsByMonth.get(key)) });
+      }
+    } else {
+      const totalsByDate = this.tokenBuckets(selectedRange.start.getTime(), selectedRange.end.getTime());
+      for (let date = new Date(selectedRange.start); date < selectedRange.end; date.setDate(date.getDate() + 1)) {
+        const key = localDateKey(date);
+        buckets.push({ key, label: selected.mode === "week"
+          ? `${date.getMonth() + 1}/${date.getDate()}`
+          : `${date.getDate()}일`, ...normalizedTokenTotals(totalsByDate.get(key)) });
+      }
+    }
+
+    const yearStart = new Date(selected.year, 0, 1);
+    const yearEnd = new Date(selected.year + 1, 0, 1);
+    const monthlyTotals = this.tokenBuckets(yearStart.getTime(), yearEnd.getTime(), "month");
+    const quickBuckets = [];
+    if (selected.mode === "week") {
+      const firstWeekStart = isoWeekStart(selected.year, 1);
+      const lastWeekEnd = isoWeekStart(selected.year, isoWeeksInYear(selected.year));
+      lastWeekEnd.setDate(lastWeekEnd.getDate() + 7);
+      const dailyTotals = this.tokenBuckets(firstWeekStart.getTime(), lastWeekEnd.getTime());
+      for (let week = 1; week <= isoWeeksInYear(selected.year); week += 1) {
+        const start = isoWeekStart(selected.year, week);
+        const rows = [];
+        for (let offset = 0; offset < 7; offset += 1) {
+          const date = new Date(start);
+          date.setDate(date.getDate() + offset);
+          rows.push(dailyTotals.get(localDateKey(date)));
+        }
+        quickBuckets.push({ value: week, label: `${week}주`, ...sumTokenTotals(rows) });
+      }
+    } else {
+      for (let month = 1; month <= 12; month += 1) {
+        const key = `${selected.year}-${String(month).padStart(2, "0")}`;
+        quickBuckets.push({ value: month, label: `${month}월`, ...normalizedTokenTotals(monthlyTotals.get(key)) });
+      }
+    }
+
+    const earliest = number(this.db().prepare("SELECT MIN(ts) earliest FROM usage_events").get()?.earliest);
+    const earliestYear = earliest > 0 ? new Date(earliest * 1000).getFullYear() : currentYear;
+    const latestSelectionYear = selected.mode === "week" ? currentIsoWeek.year : currentYear;
+    const endDisplay = new Date(selectedRange.end);
+    endDisplay.setDate(endDisplay.getDate() - 1);
+    const todayEnd = new Date(current);
+    todayEnd.setHours(23, 59, 59, 999);
+    const displayedEnd = endDisplay > todayEnd ? current : endDisplay;
+
+    return {
+      selection: selected,
+      current: { year: currentYear, month: currentMonth, week: currentWeek, weekYear: currentIsoWeek.year },
+      availableYears: Array.from(
+        { length: Math.max(1, latestSelectionYear - Math.max(2000, earliestYear) + 1) },
+        (_, index) => latestSelectionYear - index,
+      ),
+      range: {
+        startAt: selectedRange.start.getTime(),
+        endAt: selectedRange.end.getTime(),
+        startDate: localDateKey(selectedRange.start),
+        endDate: localDateKey(displayedEnd),
+      },
+      totals,
+      previous: { selection: previous, totals: previousTotals },
+      buckets,
+      quickBuckets,
+    };
   }
 
   usageOverview(now = Date.now()) {

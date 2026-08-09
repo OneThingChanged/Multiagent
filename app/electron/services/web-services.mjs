@@ -109,6 +109,24 @@ const REMOTE_CSP = [
   "worker-src 'self'",
 ].join("; ");
 
+function remoteUsageHistorySelection(url) {
+  const mode = String(url.searchParams.get("period") || "").trim().toLowerCase();
+  const hasHistoryQuery = mode || ["year", "month", "week"]
+    .some((name) => url.searchParams.has(name));
+  if (!hasHistoryQuery) return { selection: null };
+  if (!["week", "month", "year"].includes(mode)) {
+    return { error: "period must be week, month, or year" };
+  }
+  const selection = { mode };
+  for (const name of ["year", "month", "week"]) {
+    const raw = url.searchParams.get(name);
+    if (raw == null || raw === "") continue;
+    if (!/^\d{1,4}$/.test(raw)) return { error: `${name} must be an integer` };
+    selection[name] = Number(raw);
+  }
+  return { selection };
+}
+
 function sendRemoteAsset(response, pathname) {
   const asset = REMOTE_PWA_ASSETS.get(pathname);
   if (!asset) return false;
@@ -685,14 +703,19 @@ export class LocalDashboardService {
         if (p) {
           // Full Remote PWA on loopback (no login needed locally).
           if (request.method === "GET" && url.pathname === "/api/usage") {
+            const historyRequest = remoteUsageHistorySelection(url);
+            if (historyRequest.error) {
+              sendJson(response, 400, { error: historyRequest.error });
+              return;
+            }
             const refreshRequested = url.searchParams.get("refresh") === "1";
             const refresh = refreshRequested && Date.now() - this.usageRefreshAt >= 30_000;
             if (refresh) this.usageRefreshAt = Date.now();
             try {
-              const usage = await p.usageProvider?.(refresh);
+              const usage = await p.usageProvider?.(refresh, historyRequest.selection);
               sendJson(response, 200, usage ?? { updatedAt: 0, limits: [], tokens: {} });
             } catch (error) {
-              sendJson(response, 500, {
+              sendJson(response, error instanceof RangeError ? 400 : 500, {
                 error: error?.message || "usage unavailable",
                 updatedAt: 0,
                 limits: [],
@@ -1303,14 +1326,19 @@ export class RemoteDashboardService {
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/usage") {
+          const historyRequest = remoteUsageHistorySelection(url);
+          if (historyRequest.error) {
+            sendJson(response, 400, { error: historyRequest.error });
+            return;
+          }
           const refreshRequested = url.searchParams.get("refresh") === "1";
           const refresh = refreshRequested && Date.now() - this.usageRefreshAt >= 30_000;
           if (refresh) this.usageRefreshAt = Date.now();
           try {
-            const usage = await this.usageProvider(refresh);
+            const usage = await this.usageProvider(refresh, historyRequest.selection);
             sendJson(response, 200, usage ?? { updatedAt: 0, limits: [], tokens: {} });
           } catch (error) {
-            sendJson(response, 500, {
+            sendJson(response, error instanceof RangeError ? 400 : 500, {
               error: error?.message || "usage limits unavailable",
               updatedAt: 0,
               limits: [],

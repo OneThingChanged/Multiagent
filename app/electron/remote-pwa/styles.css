@@ -502,9 +502,96 @@ html[data-native-app="true"] .android-download-button { display: none !important
 }
 .usage-section-head h3 { margin: 3px 0 0; font-size: 15px; }
 .usage-section-head > span { color: var(--muted); font-size: 9px; }
+.usage-history-mode {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 4px;
+  margin-bottom: 11px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(4, 14, 22, 0.82);
+}
+.usage-history-mode button {
+  min-height: 31px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 800;
+  cursor: pointer;
+}
+.usage-history-mode button.selected {
+  border-color: rgba(80, 223, 208, 0.4);
+  color: var(--cyan);
+  background: rgba(80, 223, 208, 0.09);
+}
+.usage-history-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(340px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.usage-history-copy { display: grid; gap: 4px; }
+.usage-history-copy strong { color: #dcebf3; font-size: 12px; }
+.usage-history-copy span { color: var(--muted); font-size: 8px; }
+.usage-history-controls { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.usage-history-controls button,
+.usage-history-controls select {
+  min-width: 88px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: #b7ccd7;
+  background: #0a1f2c;
+  font-size: 9px;
+  cursor: pointer;
+}
+.usage-history-controls button:hover,
+.usage-history-controls select:hover { border-color: rgba(80, 223, 208, 0.72); }
+.usage-history-controls button:disabled { opacity: 0.36; cursor: not-allowed; }
+.usage-history-controls [hidden] { display: none; }
+.usage-history-range {
+  justify-self: end;
+  padding: 8px 10px;
+  border: 1px solid rgba(80, 223, 208, 0.24);
+  border-radius: 8px;
+  color: var(--cyan);
+  background: rgba(80, 223, 208, 0.05);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.usage-history-quick {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(58px, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.usage-history-quick button {
+  min-height: 50px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #9bb5c4;
+  background: #071923;
+  cursor: pointer;
+}
+.usage-history-quick button span,
+.usage-history-quick button small { display: block; }
+.usage-history-quick button span { font-size: 9px; font-weight: 800; }
+.usage-history-quick button small { margin-top: 5px; color: var(--muted); font-size: 7px; }
+.usage-history-quick button.selected { border-color: var(--cyan); color: var(--cyan); background: rgba(80, 223, 208, 0.08); }
+.usage-history-quick button:disabled { opacity: 0.34; cursor: not-allowed; }
 .usage-period-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -528,6 +615,7 @@ html[data-native-app="true"] .android-download-button { display: none !important
 }
 .usage-period-grid article:nth-child(2) strong { color: var(--green); }
 .usage-period-grid article:nth-child(3) strong { color: var(--blue); }
+.usage-period-grid article:nth-child(4) strong { color: var(--amber); }
 .usage-period-grid small { margin-top: 7px; color: var(--muted); font-size: 8px; }
 .usage-chart-panel {
   margin-bottom: 14px;
@@ -1111,6 +1199,9 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .document-markdown { min-height: 0; padding: 18px 14px 40px; font-size: 13px; }
   .document-html { min-height: 0; }
   .usage-summary-grid { gap: 7px; }
+  .usage-history-toolbar { grid-template-columns: 1fr auto; }
+  .usage-history-controls { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; overflow-x: auto; }
+  .usage-history-range { grid-column: 2; grid-row: 1; }
   .usage-period-grid { gap: 7px; }
   .usage-period-grid article { min-height: 76px; padding: 10px; }
   .usage-period-grid strong { font-size: 19px; }
@@ -1315,8 +1406,15 @@ html[data-native-app="true"] .android-download-button { display: none !important
   .summary-icon { display: none; }
   .usage-view .view-head { align-items: flex-start; }
   .usage-view .view-head p { max-width: 220px; }
+  .usage-history-mode { display: grid; width: 100%; }
+  .usage-history-toolbar { grid-template-columns: 1fr; }
+  .usage-history-range { grid-column: 1; grid-row: 2; justify-self: stretch; text-align: center; }
+  .usage-history-controls { display: grid; grid-column: 1; grid-row: 3; grid-template-columns: 1fr 1fr; overflow: visible; }
+  .usage-history-controls button,
+  .usage-history-controls select { width: 100%; min-width: 0; }
+  .usage-history-controls #usageCurrentPeriod { grid-column: 1 / -1; }
   .usage-summary-grid { grid-template-columns: 1fr 1fr; }
-  .usage-period-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .usage-period-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-period-grid article { min-height: 70px; padding: 9px; }
   .usage-period-grid strong { font-size: 16px; }
   .usage-period-grid small { font-size: 7px; }

@@ -4,7 +4,7 @@ A feature that aggregates per-session/per-project token usage into `usage.db`. T
 
 Separately from token totals, the Electron app shows per-period limits of Codex/Claude accounts on the bottom status bar. Token usage is cumulative per-session/project statistics; account limits are the latest usage-rate snapshots reported by the account. Codex limits come from session transcripts; Claude limits come from the OAuth usage endpoint.
 
-The authenticated Remote PWA and loopback Dashboard expose token totals, calendar-period aggregates, a 30-day trend, and normalized account-limit snapshots through the shared **Usage** tab. The token section shows **today / this week / this month** cards, a zero-filled daily bar chart for the most recent 30 calendar days, and cumulative input/output/cache/reasoning totals. Weeks begin on Monday and every boundary follows the desktop PC's local timezone. The account section converts stored `usedPercent` into an emphasized remaining percentage (`100 - usedPercent`) and shows each rolling window's reset time. `GET /api/usage?refresh=1` requests a live limit refresh, with server-side throttling at one refresh per 30 seconds; no OAuth token, session name, prompt, transcript path, or source-file path is sent to the browser.
+The authenticated Remote PWA and loopback Dashboard expose token totals, selectable calendar history, and normalized account-limit snapshots through the shared **Usage** tab. Users can switch between **week / month / year**, choose a past ISO week, month, or year, and move to the previous, next, or current period. Weekly and monthly views return zero-filled daily buckets; yearly views return twelve monthly buckets. The screen also shows the selected-period total, comparison with the immediately preceding period, average, peak bucket, token breakdown, and quick period navigation. Weeks begin on Monday and every boundary follows the desktop PC's local timezone. The available year list begins at the oldest local `usage_events` record. The account section converts stored `usedPercent` into an emphasized remaining percentage (`100 - usedPercent`) and shows each rolling window's reset time. `GET /api/usage?refresh=1` requests a live limit refresh, with server-side throttling at one refresh per 30 seconds; no OAuth token, session name, prompt, transcript path, or source-file path is sent to the browser.
 
 ## Data Sources
 
@@ -73,7 +73,7 @@ The Dashboard server uses default port `127.0.0.1:4421` and is managed in Settin
 
 | path | query | returns |
 |---|---|---|
-| `GET /api/usage` | `refresh=1?` | Electron shared PWA payload: cumulative `tokens`, `periods.day/week/month`, 30 daily `timeline` buckets, and account `limits` |
+| `GET /api/usage` | `refresh=1?`, `period=week\|month\|year`, `year`, `month?`, `week?` | Electron shared PWA payload: cumulative `tokens`, current `periods`, legacy 30-day `timeline`, selected `history`, and account `limits` |
 | `GET /api/usage/summary` | `range`, `projectId?` | totals cards (input/output/cache/reasoning/total/events) |
 | `GET /api/usage/projects` | `range` | per-project totals + session counts (includes zero-usage projects) |
 | `GET /api/usage/sessions` | `range`, `projectId?` | per-session totals (tool/model included) |
@@ -85,7 +85,7 @@ The Dashboard server uses default port `127.0.0.1:4421` and is managed in Settin
 
 ### Screens
 
-The Electron loopback Dashboard and authenticated Remote server use the same responsive Usage screen. It provides today/this-week/this-month summary cards, a recent 30-day daily chart, cumulative token breakdown, and account-limit cards. Missing dates are returned as zero-valued buckets so the graph does not visually compress inactive periods.
+The Electron loopback Dashboard and authenticated Remote server use the same responsive Usage screen. It provides week/month/year selectors, previous/current/next navigation, quick week/month selection, selected-period comparison cards, a responsive daily or monthly chart, selected-period token breakdown, and account-limit cards. Missing days or months are returned as zero-valued buckets so the graph does not visually compress inactive periods. All history is read from the PC-local `usage.db`; Remote only receives the authenticated response for the selected period and does not persist a second cloud copy.
 
 The legacy Tauri Dashboard Usage screen provides range buttons (today/7 days/30 days/all), Reindex, summary cards, and project/session/recent events/timeline tables through the `/api/usage/*` endpoints.
 

@@ -32,11 +32,13 @@ describe("Electron dashboard server", () => {
     const mobileApkPath = path.join(root, "MultiAgent-Mobile.apk");
     fs.writeFileSync(mobileApkPath, "0123456789");
     const usageRefreshes = [];
+    const usageSelections = [];
     const service = new RemoteDashboardService({
       baseDir: root,
       mobileApkPath,
-      usageProvider: async (refresh) => {
+      usageProvider: async (refresh, historySelection) => {
         usageRefreshes.push(refresh);
+        usageSelections.push(historySelection);
         return {
           updatedAt: 1_785_484_800_000,
           limits: [{
@@ -113,7 +115,7 @@ describe("Electron dashboard server", () => {
       fetch(`${status.url}/manifest.webmanifest`),
       fetch(`${status.url}/sw.js`),
       fetch(`${status.url}/api/state`),
-      fetch(`${status.url}/api/usage?refresh=1`),
+      fetch(`${status.url}/api/usage?refresh=1&period=year&year=2025`),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, { method: "HEAD" }),
       fetch(`${status.url}/downloads/MultiAgent-Mobile.apk`, {
@@ -147,6 +149,7 @@ describe("Electron dashboard server", () => {
       }),
     });
     const throttledUsage = await fetch(`${status.url}/api/usage?refresh=1`);
+    const invalidUsage = await fetch(`${status.url}/api/usage?period=quarter&year=2025`);
     const pageBody = await page.text();
     const appScriptBody = await appScript.text();
     const touchScriptBody = await touchScript.text();
@@ -180,9 +183,11 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('id="documentList" role="tree"');
     expect(pageBody).toContain('id="usageView"');
     expect(pageBody).toContain('id="usageTotalTokens"');
-    expect(pageBody).toContain('id="usageDailyTokens"');
-    expect(pageBody).toContain('id="usageWeeklyTokens"');
-    expect(pageBody).toContain('id="usageMonthlyTokens"');
+    expect(pageBody).toContain('id="usageHistoryMode"');
+    expect(pageBody).toContain('id="usageYearSelect"');
+    expect(pageBody).toContain('id="usageMonthSelect"');
+    expect(pageBody).toContain('id="usageWeekSelect"');
+    expect(pageBody).toContain('data-usage-period="year"');
     expect(pageBody).toContain('id="usageChart"');
     expect(pageBody).toContain('id="mobileSessionsButton"');
     expect(pageBody).toContain('data-filter="active"');
@@ -290,7 +295,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v55');
+    expect(workerBody).toContain('multiagent-remote-v56');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(stateBody.pwa).toBe(true);
@@ -323,7 +328,9 @@ describe("Electron dashboard server", () => {
     });
     expect(usageBody.timeline).toHaveLength(2);
     expect(usageRefreshes).toEqual([true, false]);
+    expect(usageSelections).toEqual([{ mode: "year", year: 2025 }, null]);
     expect(throttledUsage.status).toBe(200);
+    expect(invalidUsage.status).toBe(400);
     expect(apkDownload.status).toBe(200);
     expect(apkDownload.headers.get("content-type")).toBe("application/vnd.android.package-archive");
     expect(apkDownload.headers.get("content-disposition")).toContain("MultiAgent-Mobile.apk");

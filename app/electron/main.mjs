@@ -494,12 +494,13 @@ function writeMiraControlAgentInput({
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
 
-async function browserUsageSummary(refresh = false) {
+async function browserUsageSummary(refresh = false, historySelection = null) {
   const rateLimits = await usageIndex.getRateLimits(refresh);
   return {
     ...rateLimits,
     tokens: usageIndex.dashboardSummary(),
     ...usageIndex.usageOverview(),
+    history: usageIndex.usageHistory(historySelection),
   };
 }
 
