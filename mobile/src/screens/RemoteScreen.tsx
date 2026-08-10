@@ -17,6 +17,7 @@ import {
 } from "react-native-webview";
 import {
   isAllowedInAppNavigation,
+  mobileAuthCompleteUrl,
   remoteAppUrl,
 } from "../lib/remoteUrl";
 import {
@@ -34,14 +35,18 @@ import type { RemoteProfile } from "../lib/profiles";
 
 type Props = {
   profile: RemoteProfile;
+  mobileAuthTarget: { profileId: string; ticket: string; nonce: number } | null;
   notificationTarget: { profileId: string | null; agentId: string; url: string; nonce: number } | null;
+  onMobileAuthConsumed: () => void;
   onNotificationConsumed: () => void;
   onManageProfiles: () => void;
 };
 
 export function RemoteScreen({
   profile,
+  mobileAuthTarget,
   notificationTarget,
+  onMobileAuthConsumed,
   onNotificationConsumed,
   onManageProfiles,
 }: Props) {
@@ -56,6 +61,9 @@ export function RemoteScreen({
   const [loadError, setLoadError] = useState("");
   const [toolbarCollapsed, setToolbarCollapsed] = useState(true);
   const appUrl = useMemo(() => remoteAppUrl(baseUrl), [baseUrl]);
+  const [navigationUrl, setNavigationUrl] = useState(() => mobileAuthTarget
+    ? mobileAuthCompleteUrl(baseUrl, mobileAuthTarget.ticket)
+    : appUrl);
   const hostname = useMemo(() => new URL(baseUrl).host, [baseUrl]);
   const remoteOrigin = useMemo(() => new URL(baseUrl).origin, [baseUrl]);
   const nativeSafeAreaScript = useMemo(() => `
@@ -68,11 +76,12 @@ export function RemoteScreen({
   const nativeBootstrap = useMemo(() => `
     if (location.origin === ${JSON.stringify(remoteOrigin)}) {
       window.__MULTIAGENT_NATIVE_APP__ = true;
+      window.__MULTIAGENT_PROFILE_ID__ = ${JSON.stringify(profile.id)};
       document.documentElement.dataset.nativeApp = "true";
       ${nativeSafeAreaScript}
     }
     true;
-  `, [nativeSafeAreaScript, remoteOrigin]);
+  `, [nativeSafeAreaScript, profile.id, remoteOrigin]);
 
   const isRemotePage = (url: string) => {
     return isTrustedNativeBridgeUrl(baseUrl, url);
@@ -123,6 +132,12 @@ export function RemoteScreen({
   useEffect(() => {
     if (pageLoaded.current) webView.current?.injectJavaScript(nativeSafeAreaScript);
   }, [nativeSafeAreaScript]);
+
+  useEffect(() => {
+    if (!mobileAuthTarget || mobileAuthTarget.profileId !== profile.id) return;
+    setNavigationUrl(mobileAuthCompleteUrl(baseUrl, mobileAuthTarget.ticket));
+    onMobileAuthConsumed();
+  }, [mobileAuthTarget?.nonce, profile.id]);
 
   useEffect(() => {
     if (!notificationTarget || notificationTarget.profileId !== profile.id) return;
@@ -229,7 +244,7 @@ export function RemoteScreen({
       <View style={styles.webContainer}>
         <WebView
           ref={webView}
-          source={{ uri: appUrl }}
+          source={{ uri: navigationUrl }}
           originWhitelist={["https://*", "http://*"]}
           injectedJavaScriptBeforeContentLoaded={nativeBootstrap}
           javaScriptEnabled
@@ -242,7 +257,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.3.1"
+          applicationNameForUserAgent="MultiAgentMobile/0.3.2"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}

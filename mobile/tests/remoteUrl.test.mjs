@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isAllowedInAppNavigation,
+  mobileAuthCompleteUrl,
   normalizeRemoteUrl,
   remoteAppUrl,
 } from "../src/lib/remoteUrl.ts";
@@ -37,15 +38,22 @@ test("builds the native app URL without changing the Remote origin", () => {
   );
 });
 
-test("keeps Remote and GitHub auth in-app but rejects unrelated origins", () => {
+test("keeps only the configured Remote origin in-app", () => {
   const base = "https://agent.example.com/";
   assert.equal(isAllowedInAppNavigation(base, `${base}api/state`), true);
   assert.equal(
     isAllowedInAppNavigation(base, "https://github.com/login/device"),
-    true,
+    false,
   );
   assert.equal(
     isAllowedInAppNavigation(base, "https://docs.example.com/guide"),
     false,
+  );
+});
+
+test("builds a same-origin mobile auth ticket exchange URL", () => {
+  assert.equal(
+    mobileAuthCompleteUrl("https://agent.example.com/", "ticket_123"),
+    "https://agent.example.com/auth/mobile/complete?ticket=ticket_123",
   );
 });

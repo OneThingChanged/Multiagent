@@ -13,7 +13,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionScreen } from "./src/screens/ConnectionScreen";
 import { RemoteScreen } from "./src/screens/RemoteScreen";
 import { normalizeRemoteUrl } from "./src/lib/remoteUrl";
-import { normalizeNotificationOpenUrl } from "./src/lib/notificationBridge";
+import {
+  normalizeMobileAuthOpenUrl,
+  normalizeNotificationOpenUrl,
+} from "./src/lib/notificationBridge";
 import { stopForegroundMonitor } from "./src/lib/foregroundMonitor";
 import {
   createRemoteProfile,
@@ -29,6 +32,10 @@ type NotificationTarget = NonNullable<ReturnType<typeof normalizeNotificationOpe
   nonce: number;
 };
 
+type MobileAuthTarget = NonNullable<ReturnType<typeof normalizeMobileAuthOpenUrl>> & {
+  nonce: number;
+};
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
@@ -37,6 +44,7 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [notificationTarget, setNotificationTarget] = useState<NotificationTarget | null>(null);
+  const [mobileAuthTarget, setMobileAuthTarget] = useState<MobileAuthTarget | null>(null);
   const [pendingLinkVersion, setPendingLinkVersion] = useState(0);
   const pendingLink = useRef<string | null>(null);
 
@@ -78,8 +86,19 @@ export default function App() {
 
   useEffect(() => {
     if (booting || !pendingLink.current) return;
-    const target = normalizeNotificationOpenUrl(pendingLink.current);
+    const rawLink = pendingLink.current;
     pendingLink.current = null;
+    const mobileAuth = normalizeMobileAuthOpenUrl(rawLink);
+    if (mobileAuth) {
+      const profile = profiles.find((item) => item.id === mobileAuth.profileId);
+      if (!profile) return;
+      setSelectedProfileId(profile.id);
+      setConnectedProfileId(profile.id);
+      setMobileAuthTarget({ ...mobileAuth, nonce: Date.now() });
+      void persistProfiles(profiles, profile.id);
+      return;
+    }
+    const target = normalizeNotificationOpenUrl(rawLink);
     if (!target) return;
     const profile = target.profileId
       ? profiles.find((item) => item.id === target.profileId)
@@ -161,7 +180,9 @@ export default function App() {
         <RemoteScreen
           key={connectedProfile.id}
           profile={connectedProfile}
+          mobileAuthTarget={mobileAuthTarget?.profileId === connectedProfile.id ? mobileAuthTarget : null}
           notificationTarget={notificationTarget?.profileId === connectedProfile.id ? notificationTarget : null}
+          onMobileAuthConsumed={() => setMobileAuthTarget(null)}
           onNotificationConsumed={() => setNotificationTarget(null)}
           onManageProfiles={() => setConnectedProfileId(null)}
         />

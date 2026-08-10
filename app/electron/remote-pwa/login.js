@@ -67,8 +67,20 @@ async function startDeviceLogin() {
 }
 
 startButton.addEventListener("click", () => {
-  if (mode.web) location.href = "/auth/github";
-  else void startDeviceLogin();
+  if (!mode.web) {
+    void startDeviceLogin();
+    return;
+  }
+  const target = new URL("/auth/github", location.origin);
+  const profileId = String(window.__MULTIAGENT_PROFILE_ID__ || "").trim();
+  if (
+    window.__MULTIAGENT_NATIVE_APP__ === true &&
+    /^[A-Za-z0-9._:-]{1,128}$/.test(profileId)
+  ) {
+    target.searchParams.set("source", "mobile-app");
+    target.searchParams.set("profile", profileId);
+  }
+  location.href = `${target.pathname}${target.search}`;
 });
 
 copyCode.addEventListener("click", async () => {

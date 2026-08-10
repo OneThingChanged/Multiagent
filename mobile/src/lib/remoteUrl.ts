@@ -54,13 +54,14 @@ export function isAllowedInAppNavigation(baseUrl: string, targetUrl: string) {
   try {
     const base = new URL(baseUrl);
     const target = new URL(targetUrl);
-    if (target.origin === base.origin) return true;
-    return (
-      target.protocol === "https:" &&
-      (target.hostname === "github.com" ||
-        target.hostname.endsWith(".github.com"))
-    );
+    return target.origin === base.origin;
   } catch {
     return false;
   }
+}
+
+export function mobileAuthCompleteUrl(baseUrl: string, ticket: string) {
+  const url = new URL("/auth/mobile/complete", baseUrl);
+  url.searchParams.set("ticket", ticket);
+  return url.toString();
 }

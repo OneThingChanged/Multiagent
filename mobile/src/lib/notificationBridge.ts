@@ -56,3 +56,19 @@ export function normalizeNotificationOpenUrl(value: string | null | undefined) {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(agentId)) return null;
   return { profileId, agentId, url: `/?agent=${encodeURIComponent(agentId)}` };
 }
+
+export function normalizeMobileAuthOpenUrl(value: string | null | undefined) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "multiagent:" || url.hostname !== "auth" || url.pathname !== "/complete") {
+      return null;
+    }
+    const profileId = String(url.searchParams.get("profile") || "").trim();
+    const ticket = String(url.searchParams.get("ticket") || "").trim();
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(profileId)) return null;
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(ticket)) return null;
+    return { profileId, ticket };
+  } catch {
+    return null;
+  }
+}

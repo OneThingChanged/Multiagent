@@ -1074,6 +1074,83 @@ describe("Electron dashboard server", () => {
     ]);
   });
 
+  it("returns mobile web OAuth through a single-use app ticket", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-mobile-oauth-"));
+    roots.push(root);
+    const requests = [];
+    const fetchImpl = async (url) => {
+      requests.push(String(url));
+      if (String(url).endsWith("/login/oauth/access_token")) {
+        return new Response(JSON.stringify({ access_token: "token-123" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (String(url).endsWith("/user")) {
+        return new Response(JSON.stringify({ login: "owner-user" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const service = new RemoteDashboardService({
+      baseDir: root,
+      stateProvider: () => ({}),
+      writePty: () => false,
+      fetchImpl,
+    });
+    services.push(service);
+    service.config = {
+      ...service.config,
+      client_id: "client-123",
+      client_secret: ["fixture", "value"].join("-"),
+      owner: "owner-user",
+      public_hostname: "agent.example.com",
+      server_port: 0,
+    };
+    const status = await service.start();
+
+    const start = await fetch(
+      `${status.url}/auth/github?source=mobile-app&profile=pc-work`,
+      { redirect: "manual" },
+    );
+    const githubUrl = new URL(start.headers.get("location"));
+    const callback = await fetch(
+      `${status.url}/auth/callback?code=code-123&state=${githubUrl.searchParams.get("state")}`,
+      { redirect: "manual" },
+    );
+    const appUrl = new URL(callback.headers.get("location"));
+    const ticket = appUrl.searchParams.get("ticket");
+    const complete = await fetch(
+      `${status.url}/auth/mobile/complete?ticket=${encodeURIComponent(ticket)}`,
+      { redirect: "manual", headers: { "x-forwarded-proto": "https" } },
+    );
+    const replay = await fetch(
+      `${status.url}/auth/mobile/complete?ticket=${encodeURIComponent(ticket)}`,
+      { redirect: "manual" },
+    );
+
+    expect(start.status).toBe(302);
+    expect(githubUrl.origin).toBe("https://github.com");
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("set-cookie")).toBeNull();
+    expect(appUrl.protocol).toBe("multiagent:");
+    expect(appUrl.hostname).toBe("auth");
+    expect(appUrl.pathname).toBe("/complete");
+    expect(appUrl.searchParams.get("profile")).toBe("pc-work");
+    expect(ticket).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(complete.status).toBe(302);
+    expect(complete.headers.get("location")).toBe("/");
+    expect(complete.headers.get("set-cookie")).toContain("multiagent_remote=");
+    expect(complete.headers.get("set-cookie")).toContain("Secure");
+    expect(replay.status).toBe(400);
+    expect(requests).toEqual([
+      "https://github.com/login/oauth/access_token",
+      "https://api.github.com/user",
+    ]);
+  });
+
   it("waits for a quick tunnel URL before reporting the tunnel ready", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-tunnel-"));
     roots.push(root);

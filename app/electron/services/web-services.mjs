@@ -70,6 +70,9 @@ const REMOTE_PREVIEW_ASSET_EXTENSIONS = new Map([
 ]);
 const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
+const REMOTE_PROFILE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const MOBILE_AUTH_TICKET_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const MOBILE_AUTH_TICKET_TTL_MS = 2 * 60_000;
 const REMOTE_ATTACHMENT_TYPES = new Map([
   ["image/png", { extension: ".png", signature: (buffer) => buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")) }],
   ["image/jpeg", { extension: ".jpg", signature: (buffer) => buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff }],
@@ -893,6 +896,7 @@ export class RemoteDashboardService {
     this.agents = [];
     this.view = {};
     this.states = new Map();
+    this.mobileAuthTickets = new Map();
     this.secret = crypto.randomBytes(32);
     this.config = { client_id: "", owner: "", tunnel_token: "", public_hostname: "", server_port: 18800, client_secret: "" };
     this.access = { pending: [], approved: [] };
@@ -1056,13 +1060,55 @@ export class RemoteDashboardService {
   }
 
   async handleOAuth(request, response, url) {
+    if (request.method === "GET" && url.pathname === "/auth/mobile/complete") {
+      const ticket = String(url.searchParams.get("ticket") || "").trim();
+      const entry = MOBILE_AUTH_TICKET_PATTERN.test(ticket)
+        ? this.mobileAuthTickets.get(ticket)
+        : null;
+      if (ticket) this.mobileAuthTickets.delete(ticket);
+      if (!entry || entry.expiresAt < Date.now()) {
+        response.writeHead(400, {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        }).end("mobile auth ticket invalid or expired");
+        return true;
+      }
+      response.writeHead(302, {
+        location: "/",
+        "set-cookie": this.cookieFor(entry.login, request),
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      }).end();
+      return true;
+    }
     if (url.pathname === "/auth/github") {
       if (!this.config.client_id || !this.config.client_secret) {
         response.writeHead(503, { "content-type": "text/plain; charset=utf-8" }).end("Settings에서 GitHub OAuth 설정이 필요합니다.");
         return true;
       }
+      const mobileProfileId = url.searchParams.get("source") === "mobile-app"
+        ? String(url.searchParams.get("profile") || "").trim()
+        : "";
+      if (url.searchParams.get("source") === "mobile-app" && !REMOTE_PROFILE_ID_PATTERN.test(mobileProfileId)) {
+        response.writeHead(400, {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        }).end("valid mobile profile required");
+        return true;
+      }
+      const now = Date.now();
+      for (const [key, value] of this.states) {
+        const expiresAt = typeof value === "number" ? value : value?.expiresAt;
+        if (!expiresAt || expiresAt < now) this.states.delete(key);
+      }
+      for (const [key, value] of this.mobileAuthTickets) {
+        if (!value?.expiresAt || value.expiresAt < now) this.mobileAuthTickets.delete(key);
+      }
       const state = crypto.randomBytes(18).toString("hex");
-      this.states.set(state, Date.now() + 10 * 60_000);
+      this.states.set(state, {
+        expiresAt: now + 10 * 60_000,
+        mobileProfileId: mobileProfileId || null,
+      });
       const redirect = new URL("https://github.com/login/oauth/authorize");
       redirect.searchParams.set("client_id", this.config.client_id);
       redirect.searchParams.set("state", state);
@@ -1080,8 +1126,9 @@ export class RemoteDashboardService {
     }
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    const expires = state ? this.states.get(state) : null;
-    if (!code || !state || !expires || expires < Date.now()) {
+    const stateEntry = state ? this.states.get(state) : null;
+    const expiresAt = typeof stateEntry === "number" ? stateEntry : stateEntry?.expiresAt;
+    if (!code || !state || !expiresAt || expiresAt < Date.now()) {
       response.writeHead(400).end("invalid oauth state");
       return true;
     }
@@ -1096,6 +1143,23 @@ export class RemoteDashboardService {
     if (!token) { response.writeHead(401).end("github login failed"); return true; }
     const login = await this.githubLoginFromToken(token).catch(() => "");
     if (!login) { response.writeHead(401).end("github user failed"); return true; }
+    const mobileProfileId = typeof stateEntry === "object" ? stateEntry?.mobileProfileId : null;
+    if (mobileProfileId) {
+      const ticket = crypto.randomBytes(32).toString("base64url");
+      this.mobileAuthTickets.set(ticket, {
+        login,
+        expiresAt: Date.now() + MOBILE_AUTH_TICKET_TTL_MS,
+      });
+      const deepLink = new URL("multiagent://auth/complete");
+      deepLink.searchParams.set("profile", mobileProfileId);
+      deepLink.searchParams.set("ticket", ticket);
+      response.writeHead(302, {
+        location: deepLink.href,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      }).end();
+      return true;
+    }
     response.writeHead(302, {
       location: "/",
       "set-cookie": this.cookieFor(login, request),

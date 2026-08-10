@@ -88,6 +88,7 @@ Desktop/tablet Screen selection changes only inside the Remote browser and does 
 | `POST /auth/poll` | Device Flow token/user check |
 | `GET /auth/github` | start GitHub OAuth redirect for fixed domains |
 | `GET /auth/github/callback` | OAuth callback and session cookie issue |
+| `GET /auth/mobile/complete` | exchange a short-lived, single-use Android OAuth return ticket for the signed WebView session cookie |
 | `POST /auth/logout` | expire the session cookie |
 
 State syncs every 1.6 seconds, dropping to 5 seconds for a hidden PWA. Terminal output in Remote payloads is limited to the latest 24,000 chars per session.
@@ -105,6 +106,14 @@ Setting Client ID + Client Secret + Public hostname uses the normal web redirect
 ```text
 https://<public-hostname>/auth/github/callback
 ```
+
+The Android APK opens GitHub web OAuth in the system browser. After the callback, the
+Remote server returns to the registered `multiagent://auth/complete` app link with a
+random two-minute, single-use ticket and the validated local profile id. The APK accepts
+the link only for an already registered profile, then exchanges the ticket at that
+profile's same-origin `/auth/mobile/complete` endpoint. The GitHub access token and the
+Remote session cookie never appear in the app link; the browser does not receive the
+Remote session cookie, and a replayed or expired ticket is rejected.
 
 After login, you must still pass these approval rules.
 

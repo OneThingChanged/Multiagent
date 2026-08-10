@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   isTrustedNativeBridgeUrl,
   nativeBridgeEventScript,
+  normalizeMobileAuthOpenUrl,
   normalizeNotificationOpenUrl,
   parseNativeBridgeRequest,
 } from "../src/lib/notificationBridge.ts";
@@ -49,4 +50,15 @@ test("derives a same-origin route from a validated agent id", () => {
   assert.equal(normalizeNotificationOpenUrl("https://evil.test/?agent=agent-1"), null);
   assert.equal(normalizeNotificationOpenUrl("multiagent://open?agent=%3Cscript%3E"), null);
   assert.equal(normalizeNotificationOpenUrl("multiagent://open?profile=%3Cscript%3E&agent=agent-1"), null);
+});
+
+test("accepts only validated one-time mobile auth deep links", () => {
+  const ticket = "A".repeat(43);
+  assert.deepEqual(
+    normalizeMobileAuthOpenUrl(`multiagent://auth/complete?profile=pc-work&ticket=${ticket}`),
+    { profileId: "pc-work", ticket },
+  );
+  assert.equal(normalizeMobileAuthOpenUrl(`https://evil.test/?profile=pc-work&ticket=${ticket}`), null);
+  assert.equal(normalizeMobileAuthOpenUrl("multiagent://auth/complete?profile=pc-work&ticket=short"), null);
+  assert.equal(normalizeMobileAuthOpenUrl(`multiagent://auth/complete?profile=%3Cscript%3E&ticket=${ticket}`), null);
 });
