@@ -159,10 +159,12 @@ Company Electron uses the `com.jintae.multiagent.company.electron` identifier an
 `%LOCALAPPDATA%\com.jintae.multiagent.company` shared snapshot, and blocks Remote/Tunnel
 commands in main as well.
 
-The Electron Windows local launcher invokes npm global CLIs as `codex.cmd`/`claude.cmd`.
-So even when PowerShell ExecutionPolicy blocks `codex.ps1`, sessions can start without
-changing any policy. If you hit the same error when running directly in PowerShell, use
-`codex.cmd` or `claude.cmd` as well.
+The Electron local launcher keeps the configured portable command names (`codex`,
+`claude`, `qwen`, `cline`) unchanged. It no longer forces npm's Windows `.cmd` shim into
+the visible PTY command, resume command, or compatibility arguments. This allows the
+active shell and PATH to resolve native executables or user-provided launchers normally.
+Windows SSH hosts retain the separate **Use .cmd shims for npm CLIs** compatibility
+option because restricted remote PowerShell policies can still block npm `.ps1` shims.
 
 Changing terminal compatibility code does not alter an already-running PTY. Fully exit
 the tray process and start a new session before comparing behavior or colors.

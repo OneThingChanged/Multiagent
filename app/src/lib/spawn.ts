@@ -56,24 +56,14 @@ export function resolveRemoteToolCommand(
   return command;
 }
 
-function currentPlatform(): string {
-  if (typeof navigator === "undefined") return "";
-  return `${navigator.userAgent} ${navigator.platform}`;
-}
-
 export function resolveLocalToolCommand(
-  aiToolId: string,
-  command: string,
-  platform = currentPlatform()
+  _aiToolId: string,
+  command: string
 ): string {
-  if (!/(?:win32|windows|win64)/i.test(platform)) return command;
-
-  // npm installs both .ps1 and .cmd launchers on Windows. PowerShell resolves
-  // the blocked .ps1 first on restricted PCs, while the .cmd shim is safe.
-  if (aiToolId === "codex" && command === "codex") return "codex.cmd";
-  if (aiToolId === "claude" && command === "claude") return "claude.cmd";
-  if (aiToolId === "qwen" && command === "qwen") return "qwen.cmd";
-  if (aiToolId === "cline" && command === "cline") return "cline.cmd";
+  // Keep the configured command intact. Forcing npm's Windows .cmd shim here
+  // leaks a platform-specific wrapper into resume/compatibility arguments and
+  // breaks native or user-provided CLI resolution in otherwise valid shells.
+  // Windows SSH hosts retain their explicit, per-host .cmd compatibility flag.
   return command;
 }
 

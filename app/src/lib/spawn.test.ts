@@ -15,19 +15,16 @@ beforeEach(() => {
 });
 
 describe("resolveLocalToolCommand", () => {
-  it("uses npm .cmd shims for built-in agents on local Windows", () => {
-    expect(resolveLocalToolCommand("codex", "codex", "win32")).toBe(
-      "codex.cmd"
-    );
-    expect(resolveLocalToolCommand("claude", "claude", "Windows 11")).toBe(
-      "claude.cmd"
-    );
+  it("keeps built-in agent commands portable on local Windows", () => {
+    expect(resolveLocalToolCommand("codex", "codex")).toBe("codex");
+    expect(resolveLocalToolCommand("claude", "claude")).toBe("claude");
+    expect(resolveLocalToolCommand("qwen", "qwen")).toBe("qwen");
+    expect(resolveLocalToolCommand("cline", "cline")).toBe("cline");
   });
 
-  it("keeps POSIX and custom commands unchanged", () => {
-    expect(resolveLocalToolCommand("codex", "codex", "linux")).toBe("codex");
+  it("keeps custom commands unchanged", () => {
     expect(
-      resolveLocalToolCommand("codex", "C:\\Tools\\codex.exe", "win32")
+      resolveLocalToolCommand("codex", "C:\\Tools\\codex.exe")
     ).toBe("C:\\Tools\\codex.exe");
   });
 });
@@ -118,7 +115,7 @@ describe("buildSpawnArgs resume recovery", () => {
       preferredSessionId: null,
     });
     expect(result.initCommand).toBe(
-      "codex.cmd resume session-from-hook-index --no-alt-screen"
+      "codex resume session-from-hook-index --no-alt-screen"
     );
     expect(setAgentSessionId).toHaveBeenCalledWith(
       "agent-a",
@@ -137,7 +134,7 @@ describe("buildSpawnArgs resume recovery", () => {
     );
 
     expect(result.initCommand).toBe(
-      "codex.cmd resume stored-session --no-alt-screen"
+      "codex resume stored-session --no-alt-screen"
     );
     expect(setAgentSessionId).not.toHaveBeenCalled();
   });
@@ -152,7 +149,7 @@ describe("buildSpawnArgs resume recovery", () => {
     );
 
     expect(result.initCommand).toBe(
-      "codex.cmd resume pinned-session --no-alt-screen"
+      "codex resume pinned-session --no-alt-screen"
     );
   });
 });
