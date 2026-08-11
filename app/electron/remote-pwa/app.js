@@ -2181,7 +2181,6 @@ function replaceSelectOptions(select, values, selectedValue, label) {
 function renderUsageHistory() {
   const history = usageSummary?.history;
   if (!history?.selection) return;
-  usageSelection = { ...usageSelection, ...history.selection };
   const copy = usageHistoryCopy(usageSelection.mode);
   const totals = history.totals || {};
   const previousTotals = history.previous?.totals || {};
@@ -2387,6 +2386,10 @@ function renderUsage() {
 
 async function loadUsage(refresh = false) {
   const requestSerial = ++usageRequestSerial;
+  // Keep the user's requested period stable while the previous history is
+  // still rendered. renderUsage() must never be allowed to turn this request
+  // back into the period from the last response.
+  const requestedSelection = { ...usageSelection };
   usageLoadAttempted = true;
   usageLoading = true;
   usageRefreshing = refresh;
@@ -2394,11 +2397,11 @@ async function loadUsage(refresh = false) {
   renderUsage();
   try {
     const query = new URLSearchParams({
-      period: usageSelection.mode,
-      year: String(usageSelection.year),
+      period: requestedSelection.mode,
+      year: String(requestedSelection.year),
     });
-    if (usageSelection.mode === "month") query.set("month", String(usageSelection.month));
-    if (usageSelection.mode === "week" && usageSelection.week != null) query.set("week", String(usageSelection.week));
+    if (requestedSelection.mode === "month") query.set("month", String(requestedSelection.month));
+    if (requestedSelection.mode === "week" && requestedSelection.week != null) query.set("week", String(requestedSelection.week));
     if (refresh) query.set("refresh", "1");
     const response = await fetch(`/api/usage?${query}`, {
       cache: "no-store",

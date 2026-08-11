@@ -211,6 +211,13 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function renderUsage()");
     expect(appScriptBody).toContain("function renderUsageChart()");
     expect(appScriptBody).toContain("function formatTokenCount(value)");
+    const usageHistoryRenderer = appScriptBody.slice(
+      appScriptBody.indexOf("function renderUsageHistory()"),
+      appScriptBody.indexOf("function renderUsage()"),
+    );
+    expect(usageHistoryRenderer).not.toContain("usageSelection =");
+    expect(appScriptBody).toContain("const requestedSelection = { ...usageSelection };");
+    expect(appScriptBody).toContain("period: requestedSelection.mode");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
     expect(appScriptBody).toContain("function requestSessionActivation(agentId");
