@@ -123,6 +123,10 @@ import {
   deliverTerminalData,
 } from "./lib/terminalDelivery";
 import {
+  scheduleStartupReadyFallback,
+  type InitializingRuntimeStatus,
+} from "./lib/startupReadiness";
+import {
   buildDesktopPetUpdate,
   completionForAgent,
   loadDesktopPetEnabled,
@@ -505,8 +509,6 @@ type ReopenPending = {
   count: number;
 };
 
-const RECOVERY_READY_TIMEOUT_MS = 20_000;
-
 function computeInitialReopen(
   boot: Bootstrap,
   viewKey: string,
@@ -553,18 +555,18 @@ function App() {
   const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
     computeInitialReopen(boot, workspace.viewKey, workspace.restore)
   );
-  const recoveryTimersRef = useRef<Map<string, number>>(new Map());
-  const clearAgentRecoveryTimer = useCallback((agentId: string) => {
-    const timer = recoveryTimersRef.current.get(agentId);
+  const startupReadyTimersRef = useRef<Map<string, number>>(new Map());
+  const clearAgentStartupReadyTimer = useCallback((agentId: string) => {
+    const timer = startupReadyTimersRef.current.get(agentId);
     if (timer !== undefined) window.clearTimeout(timer);
-    recoveryTimersRef.current.delete(agentId);
+    startupReadyTimersRef.current.delete(agentId);
   }, []);
 
   useEffect(() => () => {
-    for (const timer of recoveryTimersRef.current.values()) {
+    for (const timer of startupReadyTimersRef.current.values()) {
       window.clearTimeout(timer);
     }
-    recoveryTimersRef.current.clear();
+    startupReadyTimersRef.current.clear();
   }, []);
 
   const [projects, setProjects] = useState<Project[]>(boot.projects);
@@ -1634,7 +1636,7 @@ function App() {
     listen<{ id: string }>("pty:exit", (e) => {
       if (cancelled) return;
       const id = e.payload.id;
-      clearAgentRecoveryTimer(id);
+      clearAgentStartupReadyTimer(id);
       const exitingAgent = agentsRef.current.find((agent) => agent.id === id);
       if (exitingAgent && isAgentActivelyWorking(exitingAgent)) {
         const sessionKey =
@@ -1692,7 +1694,7 @@ function App() {
         if (cancelled) return;
         const payload = e.payload;
         const { id, event } = payload;
-        clearAgentRecoveryTimer(id);
+        clearAgentStartupReadyTimer(id);
         const currentAgent = agentsRef.current.find((agent) => agent.id === id);
         const nextAgent = currentAgent
           ? applyAgentHookEvent(currentAgent, payload)
@@ -1870,7 +1872,7 @@ function App() {
     };
   }, [
     beginAgentWork,
-    clearAgentRecoveryTimer,
+    clearAgentStartupReadyTimer,
     isCoordinatorWindow,
     pushAttention,
     pushToast,
@@ -3076,20 +3078,25 @@ function App() {
         }
       }
       entry.spawned = true;
-      clearAgentRecoveryTimer(agentId);
-      setAgentStatus(agentId, options.recovering ? "recovering" : "starting");
-      if (options.recovering) {
-        const timer = window.setTimeout(() => {
-          recoveryTimersRef.current.delete(agentId);
-          const current = agentsRef.current.find((candidate) => candidate.id === agentId);
-          if (current?.runtimeStatus !== "recovering") return;
+      clearAgentStartupReadyTimer(agentId);
+      const initializingStatus: InitializingRuntimeStatus = options.recovering
+        ? "recovering"
+        : "starting";
+      setAgentStatus(agentId, initializingStatus);
+      const timer = scheduleStartupReadyFallback({
+        expectedStatus: initializingStatus,
+        getRuntimeStatus: () =>
+          agentsRef.current.find((candidate) => candidate.id === agentId)
+            ?.runtimeStatus,
+        onReady: () => {
+          startupReadyTimersRef.current.delete(agentId);
           console.warn(
-            `[recovery] SessionStart hook timeout; allowing input for ${agentId}`
+            `[startup] SessionStart hook timeout; allowing input for ${agentId}`
           );
           setAgentStatus(agentId, "running");
-        }, RECOVERY_READY_TIMEOUT_MS);
-        recoveryTimersRef.current.set(agentId, timer);
-      }
+        },
+      });
+      startupReadyTimersRef.current.set(agentId, timer);
       try {
         entry.spawnPromise = (async () => {
           const group = groupsRef.current.find((g) =>
@@ -3118,12 +3125,12 @@ function App() {
           entry.restoreScrollbackOnAttach = !result.reattached;
           if (result.cancelled) {
             entry.spawned = false;
-            clearAgentRecoveryTimer(agentId);
+            clearAgentStartupReadyTimer(agentId);
             setAgentStatus(agentId, "idle");
           }
         }
       } catch (err) {
-        clearAgentRecoveryTimer(agentId);
+        clearAgentStartupReadyTimer(agentId);
         entry.spawnPromise = null;
         entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
         setAgentStatus(agentId, "exited");
@@ -3134,7 +3141,7 @@ function App() {
       handleOpenImagePath,
       handleOpenFolderPath,
       handleOpenTerminalPath,
-      clearAgentRecoveryTimer,
+      clearAgentStartupReadyTimer,
       setAgentStatus,
       setAgentSessionId,
     ]
