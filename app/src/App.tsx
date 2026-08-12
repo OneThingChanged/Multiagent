@@ -19,6 +19,7 @@ import {
   LS_AGENTS,
   LS_PROJECT_FOLDERS,
   LS_PROJECTS,
+  AI_TOOLS,
   toolForId,
   toolSupportsChat,
 } from "./types";
@@ -1080,6 +1081,14 @@ function App() {
         folder: a.folder,
         status: a.status,
         aiToolId: a.aiToolId,
+        dangerous: a.dangerous,
+      })),
+      availableTools: AI_TOOLS.filter(
+        (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
+      ).map((tool) => ({
+        id: tool.id,
+        label: tool.label,
+        supportsDangerous: Boolean(tool.dangerousFlag),
       })),
       groups: groups.flatMap((group) => {
         // Remote clients only understand agent ids — hide doc tabs.
@@ -1102,6 +1111,7 @@ function App() {
     isCoordinatorWindow,
     remoteEnabled,
     runtimeFlags,
+    disabledTools,
   ]);
 
   useEffect(() => {
@@ -2545,12 +2555,15 @@ function App() {
   );
 
   const createAgent = useCallback(
-    (payload: NewAgentPayload) => {
+    (
+      payload: NewAgentPayload,
+      options: { projectId?: string; agentId?: string } = {}
+    ) => {
       const project = projectsRef.current.find(
-        (candidate) => candidate.id === activeProjectIdRef.current
+        (candidate) => candidate.id === (options.projectId ?? activeProjectIdRef.current)
       );
       if (!project) return;
-      const id = crypto.randomUUID();
+      const id = options.agentId ?? crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
       const addAgent = () => {
         setAgents((prev) => [
@@ -3144,6 +3157,58 @@ function App() {
       unlisten();
     };
   }, [remoteEnabled, spawnAgentInBackground]);
+
+  // Remote session management is handled only by the coordinator renderer so
+  // multiple workspace windows cannot create or rename the same session twice.
+  useEffect(() => {
+    if (!remoteEnabled || !isCoordinatorWindow) return;
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    const track = (unlisten: () => void) => {
+      if (cancelled) unlisten();
+      else unlisteners.push(unlisten);
+    };
+
+    listen<{
+      id: string;
+      projectId: string;
+      name: string;
+      aiToolId: string;
+      dangerous: boolean;
+    }>("remote:create-session", (event) => {
+      if (cancelled) return;
+      const payload = event.payload;
+      const projectExists = projectsRef.current.some(
+        (project) => project.id === payload.projectId
+      );
+      const toolAllowed = AI_TOOLS.some(
+        (tool) => tool.id === payload.aiToolId
+          && (tool.id === "none" || !disabledTools.includes(tool.id))
+      );
+      if (!payload.id || !projectExists || !toolAllowed || !payload.name.trim()) return;
+      createAgent(
+        {
+          name: payload.name.trim(),
+          aiToolId: payload.aiToolId,
+          dangerous: Boolean(payload.dangerous),
+        },
+        { projectId: payload.projectId, agentId: payload.id }
+      );
+    }).then(track);
+
+    listen<{ id: string; name: string }>("remote:rename-session", (event) => {
+      if (cancelled) return;
+      const id = event.payload?.id;
+      const name = event.payload?.name?.trim();
+      if (!id || !name || !agentsRef.current.some((agent) => agent.id === id)) return;
+      renameAgent(id, name);
+    }).then(track);
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [createAgent, disabledTools, isCoordinatorWindow, remoteEnabled, renameAgent]);
 
   // Startup reopen prompt answers.
   const confirmReopen = useCallback(() => {

@@ -24,6 +24,7 @@ const ui = {
   screenCount: $("#screenCount"),
   screenList: $("#screenList"),
   visibleSessionCount: $("#visibleSessionCount"),
+  newSessionButton: $("#newSessionButton"),
   filters: $("#filters"),
   sessionList: $("#sessionList"),
   emptyState: $("#emptyState"),
@@ -62,9 +63,22 @@ const ui = {
   filePreviewClose: $("#filePreviewClose"),
   filePreviewMessage: $("#filePreviewMessage"),
   filePreviewMarkdown: $("#filePreviewMarkdown"),
-  filePreviewHtml: $("#filePreviewHtml"),
   filePreviewImageWrap: $("#filePreviewImageWrap"),
   filePreviewImage: $("#filePreviewImage"),
+  sessionEditorOverlay: $("#sessionEditorOverlay"),
+  sessionEditorForm: $("#sessionEditorForm"),
+  sessionEditorTitle: $("#sessionEditorTitle"),
+  sessionEditorClose: $("#sessionEditorClose"),
+  sessionEditorProjectField: $("#sessionEditorProjectField"),
+  sessionEditorProject: $("#sessionEditorProject"),
+  sessionEditorName: $("#sessionEditorName"),
+  sessionEditorToolField: $("#sessionEditorToolField"),
+  sessionEditorTool: $("#sessionEditorTool"),
+  sessionEditorDangerousField: $("#sessionEditorDangerousField"),
+  sessionEditorDangerous: $("#sessionEditorDangerous"),
+  sessionEditorMessage: $("#sessionEditorMessage"),
+  sessionEditorCancel: $("#sessionEditorCancel"),
+  sessionEditorSubmit: $("#sessionEditorSubmit"),
   usageView: $("#usageView"),
   refreshUsageButton: $("#refreshUsageButton"),
   usageTokenEvents: $("#usageTokenEvents"),
@@ -112,6 +126,7 @@ const ui = {
   detailStatus: $("#detailStatus"),
   detailName: $("#detailName"),
   detailMeta: $("#detailMeta"),
+  renameSessionButton: $("#renameSessionButton"),
   sessionNavButton: $("#sessionNavButton"),
   backToScreenButton: $("#backToScreenButton"),
   questionPanel: $("#questionPanel"),
@@ -206,6 +221,9 @@ let filePreviewRequest = 0;
 let filePreviewObjectUrl = "";
 let filePreviewPreviousFocus = null;
 let filePreviewContext = null;
+let sessionEditorMode = null;
+let sessionEditorAgentId = null;
+let sessionEditorPreviousFocus = null;
 let usageSummary = null;
 let usageLoading = false;
 let usageRefreshing = false;
@@ -1683,8 +1701,6 @@ function resetFilePreviewContent() {
   ui.filePreviewImage.alt = "";
   ui.filePreviewMarkdown.replaceChildren();
   ui.filePreviewMarkdown.hidden = true;
-  ui.filePreviewHtml.srcdoc = "";
-  ui.filePreviewHtml.hidden = true;
   ui.filePreviewImageWrap.hidden = true;
   ui.filePreviewMessage.hidden = false;
 }
@@ -1700,9 +1716,47 @@ function closeFilePreview() {
   previousFocus?.focus?.();
 }
 
-async function openChatFilePreview(agentId, projectId, rawPath, kind) {
+async function openChatHtmlDocument(agentId, projectId, rawPath) {
   const path = cleanChatFilePath(rawPath);
-  if (!projectId || !path || !["markdown", "html", "image"].includes(kind)) return;
+  if (!projectId || !path) return;
+  try {
+    const query = remoteFileQuery(projectId, path, agentId);
+    const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) throw new Error(await apiError(response));
+    const result = await response.json();
+    if (result.kind !== "html") throw new Error("HTML 문서가 아닙니다.");
+    const resolvedProjectId = text(result.project?.id) || projectId;
+    const resolvedPath = text(result.path);
+    if (!resolvedPath || !localDocumentProjects().some((project) => project.id === resolvedProjectId)) {
+      throw new Error("Documents에서 열 수 있는 프로젝트를 찾지 못했습니다.");
+    }
+
+    if (!ui.filePreviewOverlay.hidden) closeFilePreview();
+    selectDocuments(resolvedProjectId);
+    await loadDocumentList(resolvedProjectId);
+    selectedDocumentPath = resolvedPath;
+    expandDocumentParents(resolvedProjectId, resolvedPath);
+    documentContent = null;
+    documentContentKey = "";
+    documentContentError = "";
+    documentSidebarOpen = !isMobile();
+    documentListRenderKey = "";
+    renderDocuments();
+    updateUrl();
+    if (isMobile()) setDocumentSidebarOpen(false);
+    void loadDocument(resolvedProjectId, resolvedPath);
+  } catch (error) {
+    showToast(`HTML 문서를 열지 못했습니다: ${error.message || error}`);
+  }
+}
+
+async function openChatFilePreview(agentId, projectId, rawPath, kind) {
+  if (kind === "html") {
+    await openChatHtmlDocument(agentId, projectId, rawPath);
+    return;
+  }
+  const path = cleanChatFilePath(rawPath);
+  if (!projectId || !path || !["markdown", "image"].includes(kind)) return;
   const requestId = ++filePreviewRequest;
   if (ui.filePreviewOverlay.hidden) filePreviewPreviousFocus = document.activeElement;
   resetFilePreviewContent();
@@ -1710,13 +1764,13 @@ async function openChatFilePreview(agentId, projectId, rawPath, kind) {
   document.documentElement.classList.add("file-preview-open");
   ui.filePreviewTitle.textContent = path.split(/[\\/]/).pop() || path;
   ui.filePreviewPath.textContent = path;
-  ui.filePreviewKind.textContent = kind === "markdown" ? "MARKDOWN" : kind === "html" ? "HTML · SANDBOX" : "IMAGE";
+  ui.filePreviewKind.textContent = kind === "markdown" ? "MARKDOWN" : "IMAGE";
   ui.filePreviewMessage.textContent = "파일을 불러오는 중…";
   ui.filePreviewClose.focus();
 
   try {
     const query = remoteFileQuery(projectId, path, agentId);
-    if (kind === "markdown" || kind === "html") {
+    if (kind === "markdown") {
       const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
       if (!response.ok) throw new Error(await apiError(response));
       const result = await response.json();
@@ -1734,13 +1788,6 @@ async function openChatFilePreview(agentId, projectId, rawPath, kind) {
         kind: result.kind || kind,
       };
       filePreviewContext = context;
-      if (kind === "html") {
-        ui.filePreviewHtml.srcdoc = await inlineRemoteHtmlAssets(result.content || "", context);
-        if (requestId !== filePreviewRequest) return;
-        ui.filePreviewMessage.hidden = true;
-        ui.filePreviewHtml.hidden = false;
-        return;
-      }
       ui.filePreviewMarkdown.innerHTML = documentMarkdownToHtml(result.content || "");
       ui.filePreviewMessage.hidden = true;
       ui.filePreviewMarkdown.hidden = false;
@@ -2513,6 +2560,193 @@ function selectScreen(id) {
   renderNavigation();
   renderSelection();
   closeSidebar();
+}
+
+function availableSessionTools() {
+  const known = new Map([
+    ["claude", { id: "claude", label: "Claude Code", supportsDangerous: true }],
+    ["codex", { id: "codex", label: "Codex", supportsDangerous: true }],
+    ["qwen", { id: "qwen", label: "Qwen", supportsDangerous: true }],
+    ["cline", { id: "cline", label: "Cline", supportsDangerous: false }],
+    ["none", { id: "none", label: "Shell only", supportsDangerous: false }],
+  ]);
+  const configured = remoteState.view?.availableTools;
+  if (!Array.isArray(configured)) return [...known.values()];
+  return configured.flatMap((candidate) => {
+    const tool = known.get(text(candidate?.id));
+    if (!tool) return [];
+    return [{
+      ...tool,
+      label: text(candidate?.label) || tool.label,
+      supportsDangerous: tool.supportsDangerous && Boolean(candidate?.supportsDangerous),
+    }];
+  });
+}
+
+function nextRemoteSessionName(projectId) {
+  const count = allAgents().filter((agent) => agent.projectId === projectId).length;
+  return `Session ${count + 1}`;
+}
+
+function syncSessionEditorDangerous() {
+  const tool = availableSessionTools().find((candidate) => candidate.id === ui.sessionEditorTool.value);
+  const supported = Boolean(tool?.supportsDangerous);
+  ui.sessionEditorDangerousField.hidden = !supported;
+  if (!supported) ui.sessionEditorDangerous.checked = false;
+}
+
+function setSessionEditorBusy(busy) {
+  for (const control of ui.sessionEditorForm.elements) control.disabled = busy;
+  ui.sessionEditorSubmit.textContent = busy
+    ? "처리 중…"
+    : sessionEditorMode === "rename" ? "저장" : "생성";
+}
+
+function closeSessionEditor() {
+  if (ui.sessionEditorOverlay.hidden) return;
+  ui.sessionEditorOverlay.hidden = true;
+  sessionEditorMode = null;
+  sessionEditorAgentId = null;
+  ui.sessionEditorMessage.hidden = true;
+  setSessionEditorBusy(false);
+  const previousFocus = sessionEditorPreviousFocus;
+  sessionEditorPreviousFocus = null;
+  previousFocus?.focus?.();
+}
+
+function openCreateSessionEditor() {
+  const projects = Array.isArray(remoteState.view?.projects)
+    ? remoteState.view.projects.filter((project) => text(project?.id))
+    : [];
+  const tools = availableSessionTools();
+  if (projects.length === 0) {
+    showToast("세션을 생성할 프로젝트가 없습니다.");
+    return;
+  }
+  if (tools.length === 0) {
+    showToast("설정에서 사용할 AI 도구를 먼저 활성화해 주세요.");
+    return;
+  }
+  sessionEditorPreviousFocus = document.activeElement;
+  sessionEditorMode = "create";
+  sessionEditorAgentId = null;
+  ui.sessionEditorTitle.textContent = "새 세션";
+  ui.sessionEditorProjectField.hidden = false;
+  ui.sessionEditorToolField.hidden = false;
+  ui.sessionEditorSubmit.textContent = "생성";
+  ui.sessionEditorMessage.hidden = true;
+
+  const selectedProjectId = selectedAgent()?.projectId
+    || text(remoteState.view?.activeProjectId)
+    || projects[0].id;
+  ui.sessionEditorProject.replaceChildren(...projects.map((project) => {
+    const option = make("option", "", text(project.name) || project.id);
+    option.value = project.id;
+    return option;
+  }));
+  ui.sessionEditorProject.value = projects.some((project) => project.id === selectedProjectId)
+    ? selectedProjectId
+    : projects[0].id;
+  ui.sessionEditorTool.replaceChildren(...tools.map((tool) => {
+    const option = make("option", "", tool.label);
+    option.value = tool.id;
+    return option;
+  }));
+  ui.sessionEditorTool.value = tools[0].id;
+  ui.sessionEditorName.value = nextRemoteSessionName(ui.sessionEditorProject.value);
+  ui.sessionEditorDangerous.checked = false;
+  syncSessionEditorDangerous();
+  ui.sessionEditorOverlay.hidden = false;
+  ui.sessionEditorName.focus();
+  ui.sessionEditorName.select();
+}
+
+function openRenameSessionEditor() {
+  const agent = selectedAgent();
+  if (!agent) return;
+  sessionEditorPreviousFocus = document.activeElement;
+  sessionEditorMode = "rename";
+  sessionEditorAgentId = agent.id;
+  ui.sessionEditorTitle.textContent = "세션 이름 변경";
+  ui.sessionEditorProjectField.hidden = true;
+  ui.sessionEditorToolField.hidden = true;
+  ui.sessionEditorDangerousField.hidden = true;
+  ui.sessionEditorSubmit.textContent = "저장";
+  ui.sessionEditorMessage.hidden = true;
+  ui.sessionEditorName.value = text(agent.name || agent.id);
+  ui.sessionEditorOverlay.hidden = false;
+  ui.sessionEditorName.focus();
+  ui.sessionEditorName.select();
+}
+
+async function waitForCreatedSession(id) {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 120 : 300));
+    await fetchState({ quiet: true });
+    if (agentMap().has(id)) {
+      selectSession(id);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function submitSessionEditor() {
+  if (!sessionEditorMode) return;
+  const name = ui.sessionEditorName.value.trim();
+  if (!name) {
+    ui.sessionEditorMessage.textContent = "세션 이름을 입력해 주세요.";
+    ui.sessionEditorMessage.hidden = false;
+    ui.sessionEditorName.focus();
+    return;
+  }
+  setSessionEditorBusy(true);
+  ui.sessionEditorMessage.hidden = true;
+  try {
+    const creating = sessionEditorMode === "create";
+    const body = creating
+      ? {
+          projectId: ui.sessionEditorProject.value,
+          name,
+          aiToolId: ui.sessionEditorTool.value,
+          dangerous: ui.sessionEditorDangerous.checked,
+        }
+      : { id: sessionEditorAgentId, name };
+    const response = await fetch(
+      creating ? "/api/session/create" : "/api/session/rename",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) throw new Error(await apiError(response));
+    const result = await response.json();
+    if (!creating) {
+      remoteState.agents = remoteState.agents.map((agent) => (
+        agent.id === body.id ? { ...agent, name } : agent
+      ));
+      remoteState.view.agents = remoteState.view.agents.map((agent) => (
+        agent.id === body.id ? { ...agent, name } : agent
+      ));
+      renderNavigation();
+      renderSelection();
+    }
+    closeSessionEditor();
+    showToast(creating ? "새 세션을 생성하고 있습니다." : "세션 이름을 변경했습니다.");
+    if (creating && result.id) {
+      if (!(await waitForCreatedSession(result.id))) {
+        showToast("세션 생성 요청은 전달됐지만 아직 목록에 나타나지 않았습니다.");
+      }
+    } else {
+      setTimeout(() => { void fetchState({ quiet: true }); }, 250);
+    }
+  } catch (error) {
+    setSessionEditorBusy(false);
+    ui.sessionEditorMessage.textContent = error.message || String(error);
+    ui.sessionEditorMessage.hidden = false;
+  }
 }
 
 function selectSession(id, fromScreenId = null) {
@@ -4271,8 +4505,29 @@ ui.filePreviewClose.addEventListener("click", closeFilePreview);
 ui.filePreviewOverlay.addEventListener("click", (event) => {
   if (event.target === ui.filePreviewOverlay) closeFilePreview();
 });
+ui.newSessionButton.addEventListener("click", openCreateSessionEditor);
+ui.renameSessionButton.addEventListener("click", openRenameSessionEditor);
+ui.sessionEditorProject.addEventListener("change", () => {
+  ui.sessionEditorName.value = nextRemoteSessionName(ui.sessionEditorProject.value);
+});
+ui.sessionEditorTool.addEventListener("change", syncSessionEditorDangerous);
+ui.sessionEditorForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitSessionEditor();
+});
+ui.sessionEditorClose.addEventListener("click", closeSessionEditor);
+ui.sessionEditorCancel.addEventListener("click", closeSessionEditor);
+ui.sessionEditorOverlay.addEventListener("click", (event) => {
+  if (event.target === ui.sessionEditorOverlay) closeSessionEditor();
+});
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (!ui.sessionEditorOverlay.hidden) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeSessionEditor();
+    return;
+  }
   if (selection.type === "documents" && documentSidebarOpen && isMobile()) {
     event.preventDefault();
     setDocumentSidebarOpen(false);

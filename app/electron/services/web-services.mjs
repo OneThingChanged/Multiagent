@@ -70,6 +70,13 @@ const REMOTE_PREVIEW_ASSET_EXTENSIONS = new Map([
 ]);
 const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
+const REMOTE_SESSION_TOOLS = new Map([
+  ["claude", { id: "claude", label: "Claude Code", supportsDangerous: true }],
+  ["codex", { id: "codex", label: "Codex", supportsDangerous: true }],
+  ["qwen", { id: "qwen", label: "Qwen", supportsDangerous: true }],
+  ["cline", { id: "cline", label: "Cline", supportsDangerous: false }],
+  ["none", { id: "none", label: "Shell only", supportsDangerous: false }],
+]);
 const REMOTE_PROFILE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MOBILE_AUTH_TICKET_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const MOBILE_AUTH_TICKET_TTL_MS = 2 * 60_000;
@@ -548,6 +555,72 @@ async function readJson(request, maxBytes = 64 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+function remoteSessionCatalog(snapshot) {
+  const view = snapshot?.view && typeof snapshot.view === "object" ? snapshot.view : snapshot;
+  const projects = Array.isArray(view?.projects) ? view.projects : [];
+  const configuredTools = Array.isArray(view?.availableTools) ? view.availableTools : null;
+  const tools = configuredTools == null
+    ? [...REMOTE_SESSION_TOOLS.values()]
+    : configuredTools.flatMap((candidate) => {
+        const known = REMOTE_SESSION_TOOLS.get(String(candidate?.id || "").trim());
+        if (!known) return [];
+        return [{
+          ...known,
+          label: String(candidate?.label || known.label).trim().slice(0, 40) || known.label,
+          supportsDangerous: known.supportsDangerous && Boolean(candidate?.supportsDangerous),
+        }];
+      });
+  const agents = [
+    ...(Array.isArray(view?.agents) ? view.agents : []),
+    ...(Array.isArray(snapshot?.agents) ? snapshot.agents : []),
+  ];
+  return { projects, tools, agents };
+}
+
+function remoteSessionName(value) {
+  const name = String(value || "").trim();
+  if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+    const error = new Error("session name must be 1-80 characters on one line");
+    error.statusCode = 400;
+    throw error;
+  }
+  return name;
+}
+
+function remoteCreateSessionPayload(snapshot, body) {
+  const catalog = remoteSessionCatalog(snapshot);
+  const projectId = String(body?.projectId || "").trim();
+  const aiToolId = String(body?.aiToolId || "").trim();
+  if (!catalog.projects.some((project) => String(project?.id || "") === projectId)) {
+    const error = new Error("project not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  const tool = catalog.tools.find((candidate) => candidate.id === aiToolId);
+  if (!tool) {
+    const error = new Error("AI tool is not available");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    projectId,
+    name: remoteSessionName(body?.name),
+    aiToolId,
+    dangerous: tool.supportsDangerous && body?.dangerous === true,
+  };
+}
+
+function remoteRenameSessionPayload(snapshot, body) {
+  const id = String(body?.id || "").trim();
+  const catalog = remoteSessionCatalog(snapshot);
+  if (!id || !catalog.agents.some((agent) => String(agent?.id || "") === id)) {
+    const error = new Error("session not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  return { id, name: remoteSessionName(body?.name) };
+}
+
 async function saveRemoteAttachment(request, baseDir) {
   let body;
   try {
@@ -774,6 +847,40 @@ export class LocalDashboardService {
             sendJson(response, 200, { ok: true, status: "idle" });
             return;
           }
+          if (request.method === "POST" && url.pathname === "/api/session/create") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+              sendJson(response, 415, { error: "application/json required" });
+              return;
+            }
+            try {
+              const payload = remoteCreateSessionPayload(this.snapshot(), await readJson(request));
+              const result = p.createSession?.(payload);
+              if (!result) { sendJson(response, 501, { error: "session creation unavailable" }); return; }
+              sendJson(response, 202, { ok: true, ...result });
+            } catch (error) {
+              sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
+            }
+            return;
+          }
+          if (request.method === "POST" && url.pathname === "/api/session/rename") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+              sendJson(response, 415, { error: "application/json required" });
+              return;
+            }
+            try {
+              const payload = remoteRenameSessionPayload(this.snapshot(), await readJson(request));
+              if (p.renameSession?.(payload) === false) {
+                sendJson(response, 409, { error: "session rename unavailable" });
+                return;
+              }
+              sendJson(response, 202, { ok: true, id: payload.id, name: payload.name });
+            } catch (error) {
+              sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
+            }
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/api/chat") {
             const id = String(url.searchParams.get("id") || "").trim();
             try {
@@ -872,7 +979,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, createSession, renameSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -886,6 +993,8 @@ export class RemoteDashboardService {
     this.chatProvider = chatProvider ?? (() => null);
     this.restartSession = restartSession ?? (() => false);
     this.cancelSession = cancelSession ?? (() => false);
+    this.createSession = createSession ?? (() => null);
+    this.renameSession = renameSession ?? (() => false);
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [], tokens: {} }));
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
@@ -1490,6 +1599,52 @@ export class RemoteDashboardService {
             return;
           }
           sendJson(response, 200, { ok: true, status: "idle" });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/session/create") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          try {
+            const payload = remoteCreateSessionPayload(
+              { agents: this.agents, view: this.view },
+              await readJson(request),
+            );
+            const result = this.createSession(payload);
+            if (!result) { sendJson(response, 501, { error: "session creation unavailable" }); return; }
+            sendJson(response, 202, { ok: true, ...result });
+          } catch (error) {
+            sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
+          }
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/session/rename") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          try {
+            const payload = remoteRenameSessionPayload(
+              { agents: this.agents, view: this.view },
+              await readJson(request),
+            );
+            if (this.renameSession(payload) === false) {
+              sendJson(response, 409, { error: "session rename unavailable" });
+              return;
+            }
+            sendJson(response, 202, { ok: true, id: payload.id, name: payload.name });
+          } catch (error) {
+            sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
+          }
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/chat") {

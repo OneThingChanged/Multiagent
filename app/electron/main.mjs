@@ -531,6 +531,15 @@ const sessionProviders = {
     sendEventToAll("remote:restart-session", { id: asString(id) });
     return ptys.has(asString(id));
   },
+  createSession: (payload) => {
+    const id = randomUUID();
+    sendEventToAll("remote:create-session", { id, ...payload });
+    return { id };
+  },
+  renameSession: (payload) => {
+    sendEventToAll("remote:rename-session", payload);
+    return true;
+  },
   cancelSession: (id) => {
     const agentId = asString(id).trim();
     const entry = ptys.get(agentId);

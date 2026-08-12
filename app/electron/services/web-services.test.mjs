@@ -173,10 +173,13 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('aria-label="이미지 첨부, 붙여넣기 또는 드래그 앤 드롭"');
     expect(pageBody).toContain('id="filePreviewOverlay"');
     expect(pageBody).toContain('id="filePreviewMarkdown"');
-    expect(pageBody).toContain('id="filePreviewHtml"');
+    expect(pageBody).not.toContain('id="filePreviewHtml"');
     expect(pageBody).toContain('id="filePreviewImage"');
     expect(pageBody).not.toContain('id="composerKeys"');
     expect(pageBody).toContain('id="sessionNavButton"');
+    expect(pageBody).toContain('id="newSessionButton"');
+    expect(pageBody).toContain('id="renameSessionButton"');
+    expect(pageBody).toContain('id="sessionEditorOverlay"');
     expect(pageBody).toContain('id="androidDownloadButton"');
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
@@ -223,6 +226,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function requestSessionActivation(agentId");
     expect(appScriptBody).toContain("async function cancelSession(agentId)");
     expect(appScriptBody).toContain('fetch("/api/session/cancel"');
+    expect(appScriptBody).toContain('"/api/session/create"');
+    expect(appScriptBody).toContain('"/api/session/rename"');
+    expect(appScriptBody).toContain("function openCreateSessionEditor()");
+    expect(appScriptBody).toContain("function openRenameSessionEditor()");
     expect(appScriptBody).toContain("function waitForSessionReady(agentId)");
     expect(appScriptBody).toContain("SESSION_ACTIVATION_TIMEOUT_MS = 30_000");
     expect(appScriptBody).toContain('activeFilter === "active"');
@@ -239,6 +246,9 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain('addEventListener("drop", handleComposerImageDrop)');
     expect(appScriptBody).toContain('addAttachments(files, { source: "drop" })');
     expect(appScriptBody).toContain("function openChatFilePreview(agentId, projectId, rawPath, kind)");
+    expect(appScriptBody).toContain("async function openChatHtmlDocument(agentId, projectId, rawPath)");
+    expect(appScriptBody).toContain('if (kind === "html")');
+    expect(appScriptBody).toContain("selectDocuments(resolvedProjectId)");
     expect(appScriptBody).toContain('if (/\\.(?:html|htm)$/i.test(path)) return "html";');
     expect(appScriptBody).toContain("function inlineRemoteHtmlAssets(html, context)");
     expect(appScriptBody).toContain('fetch(`/api/files/asset?${query}`');
@@ -289,9 +299,11 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".composer-attachment");
     expect(stylesBody).toContain(".composer.drag-active::after");
     expect(stylesBody).toContain(".file-preview-overlay");
-    expect(stylesBody).toContain(".file-preview-html");
+    expect(stylesBody).not.toContain(".file-preview-html");
     expect(stylesBody).toContain(".chat-file-link");
     expect(stylesBody).toContain(".session-head-actions");
+    expect(stylesBody).toContain(".session-editor-overlay");
+    expect(stylesBody).toContain(".nav-add-button");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
     expect(stylesBody).toContain("--visual-viewport-height: 100dvh");
@@ -536,6 +548,8 @@ describe("Electron dashboard server", () => {
     const writes = [];
     const activations = [];
     const cancellations = [];
+    const creations = [];
+    const renames = [];
     const service = new RemoteDashboardService({
       baseDir: root,
       stateProvider: () => ({}),
@@ -551,9 +565,27 @@ describe("Electron dashboard server", () => {
         cancellations.push(id);
         return id === "agent-1";
       },
+      createSession(payload) {
+        creations.push(payload);
+        return { id: "agent-created" };
+      },
+      renameSession(payload) {
+        renames.push(payload);
+        return true;
+      },
     });
     services.push(service);
     service.config.server_port = 0;
+    service.syncAgents([{ id: "agent-1", name: "Old name", project: "ProjectA" }]);
+    service.syncView({
+      projects: [{ id: "project-a", name: "ProjectA" }],
+      agents: [{ id: "agent-1", projectId: "project-a" }],
+      availableTools: [
+        { id: "codex", label: "Codex", supportsDangerous: true },
+        { id: "none", label: "Shell only", supportsDangerous: false },
+      ],
+      groups: [],
+    });
     const status = await service.start();
 
     const accepted = await fetch(`${status.url}/api/input`, {
@@ -590,6 +622,39 @@ describe("Electron dashboard server", () => {
       },
       body: JSON.stringify({ id: "agent-1" }),
     });
+    const created = await fetch(`${status.url}/api/session/create`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({
+        projectId: "project-a",
+        name: "Remote Codex",
+        aiToolId: "codex",
+        dangerous: true,
+      }),
+    });
+    const unavailableTool = await fetch(`${status.url}/api/session/create`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({
+        projectId: "project-a",
+        name: "Blocked Claude",
+        aiToolId: "claude",
+      }),
+    });
+    const renamed = await fetch(`${status.url}/api/session/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-1", name: "New name" }),
+    });
+    const blockedRename = await fetch(`${status.url}/api/session/rename`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.invalid",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({ id: "agent-1", name: "Hacked" }),
+    });
 
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-1", data: "계속 진행해줘\r" }]);
@@ -601,6 +666,18 @@ describe("Electron dashboard server", () => {
     expect(inactiveCancel.status).toBe(409);
     expect(blockedCancel.status).toBe(403);
     expect(cancellations).toEqual(["agent-1", "agent-offline"]);
+    expect(created.status).toBe(202);
+    await expect(created.json()).resolves.toEqual({ ok: true, id: "agent-created" });
+    expect(creations).toEqual([{
+      projectId: "project-a",
+      name: "Remote Codex",
+      aiToolId: "codex",
+      dangerous: true,
+    }]);
+    expect(unavailableTool.status).toBe(400);
+    expect(renamed.status).toBe(202);
+    expect(renames).toEqual([{ id: "agent-1", name: "New name" }]);
+    expect(blockedRename.status).toBe(403);
   });
 
   it("authenticates browser and foreground-service monitoring and forwards hook events", async () => {

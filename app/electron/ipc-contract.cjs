@@ -123,6 +123,8 @@ const DELIVERED_EVENTS = Object.freeze([
   "desktop-pet:close-requested",
   "remote:access-request",
   "remote:restart-session",
+  "remote:create-session",
+  "remote:rename-session",
   "chat:changed",
   "app:close-requested",
   "app:close-cancelled",

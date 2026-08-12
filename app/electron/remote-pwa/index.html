@@ -95,7 +95,13 @@
         </section>
 
         <section class="nav-section sessions-section">
-          <div class="nav-heading"><span>SESSIONS</span><b id="visibleSessionCount">0</b></div>
+          <div class="nav-heading">
+            <span>SESSIONS</span>
+            <span class="nav-heading-actions">
+              <b id="visibleSessionCount">0</b>
+              <button class="nav-add-button" id="newSessionButton" type="button" title="새 세션" aria-label="새 세션">＋</button>
+            </span>
+          </div>
           <div class="filter-row" id="filters" aria-label="세션 필터">
             <button class="active" type="button" data-filter="all">전체</button>
             <button type="button" data-filter="active">활성</button>
@@ -322,6 +328,7 @@
               <p id="detailMeta"></p>
             </div>
             <div class="session-head-actions">
+              <button class="small-button session-rename-button" id="renameSessionButton" type="button">이름 변경</button>
               <div class="session-mode" id="sessionMode" role="tablist">
                 <button class="on" data-mode="chat" type="button">💬 채팅</button>
                 <button data-mode="term" type="button">⌗ 터미널</button>
@@ -384,12 +391,44 @@
         <div class="file-preview-body">
           <div class="file-preview-message" id="filePreviewMessage">파일을 불러오는 중…</div>
           <article class="document-markdown file-preview-markdown" id="filePreviewMarkdown" hidden></article>
-          <iframe class="file-preview-html" id="filePreviewHtml" sandbox title="HTML 파일 미리보기" hidden></iframe>
           <div class="file-preview-image-wrap" id="filePreviewImageWrap" hidden>
             <img id="filePreviewImage" alt="">
           </div>
         </div>
       </section>
+    </div>
+
+    <div class="session-editor-overlay" id="sessionEditorOverlay" role="dialog" aria-modal="true" aria-labelledby="sessionEditorTitle" hidden>
+      <form class="session-editor-dialog" id="sessionEditorForm">
+        <header>
+          <div>
+            <span class="panel-kicker">SESSION</span>
+            <h2 id="sessionEditorTitle">새 세션</h2>
+          </div>
+          <button class="icon-button" id="sessionEditorClose" type="button" aria-label="닫기">×</button>
+        </header>
+        <label class="session-editor-field" id="sessionEditorProjectField">
+          <span>프로젝트</span>
+          <select id="sessionEditorProject"></select>
+        </label>
+        <label class="session-editor-field">
+          <span>세션 이름</span>
+          <input id="sessionEditorName" type="text" maxlength="80" autocomplete="off" required>
+        </label>
+        <label class="session-editor-field" id="sessionEditorToolField">
+          <span>AI 도구</span>
+          <select id="sessionEditorTool"></select>
+        </label>
+        <label class="session-editor-check" id="sessionEditorDangerousField">
+          <input id="sessionEditorDangerous" type="checkbox">
+          <span><strong>Dangerous mode</strong><small>권한 확인을 생략하고 실행합니다.</small></span>
+        </label>
+        <p class="session-editor-message" id="sessionEditorMessage" hidden></p>
+        <footer>
+          <button class="small-button" id="sessionEditorCancel" type="button">취소</button>
+          <button class="send-button" id="sessionEditorSubmit" type="submit">생성</button>
+        </footer>
+      </form>
     </div>
 
     <nav class="mobile-nav" aria-label="모바일 메뉴">
