@@ -34,4 +34,13 @@ describe("Remote mobile document layout", () => {
     expect(script).toContain('selectedDocumentPath = isMobile() ? null : (documents[0]?.path || null);');
     expect(script).toContain('ui.documentSidebarBackdrop.addEventListener("click", () => setDocumentSidebarOpen(false));');
   });
+
+  it("opens HTML documents through an isolated expiring server preview", () => {
+    expect(html).toContain('id="documentHtmlLaunch"');
+    expect(html).toContain('id="documentOpenHtmlButton"');
+    expect(html).not.toContain('id="documentHtml"');
+    expect(script).toContain("async function openRemoteHtmlPreview(projectId, relativePath, agentId");
+    expect(script).toContain('anchor.href = `/api/docs/preview?${query}`');
+    expect(script).not.toContain("srcdoc");
+  });
 });

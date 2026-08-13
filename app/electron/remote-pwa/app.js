@@ -55,7 +55,8 @@ const ui = {
   documentKind: $("#documentKind"),
   documentMessage: $("#documentMessage"),
   documentMarkdown: $("#documentMarkdown"),
-  documentHtml: $("#documentHtml"),
+  documentHtmlLaunch: $("#documentHtmlLaunch"),
+  documentOpenHtmlButton: $("#documentOpenHtmlButton"),
   filePreviewOverlay: $("#filePreviewOverlay"),
   filePreviewTitle: $("#filePreviewTitle"),
   filePreviewPath: $("#filePreviewPath"),
@@ -1473,18 +1474,21 @@ async function loadDocument(projectId, relativePath, { force = false } = {}) {
   documentContentError = "";
   if (force || documentContent?.path !== relativePath) documentContent = null;
   renderDocumentPreview();
+  if (/\.html?$/i.test(relativePath)) {
+    documentContent = {
+      kind: "html",
+      name: relativePath.split("/").pop() || relativePath,
+      path: relativePath,
+    };
+    documentContentLoading = false;
+    renderDocumentPreview();
+    return;
+  }
   try {
     const query = new URLSearchParams({ projectId, path: relativePath });
     const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
     if (!response.ok) throw new Error(await apiError(response));
     const result = await response.json();
-    if (result.kind === "html") {
-      result.renderedContent = await inlineRemoteHtmlAssets(result.content || "", {
-        agentId: "",
-        projectId,
-        path: result.path || relativePath,
-      });
-    }
     if (documentContentKey !== key) return;
     documentContent = result;
   } catch (error) {
@@ -1505,7 +1509,7 @@ function renderDocumentPreview() {
     ? documentKey(selection.id, relativePath)
     : "";
   ui.documentMarkdown.hidden = true;
-  ui.documentHtml.hidden = true;
+  ui.documentHtmlLaunch.hidden = true;
   ui.documentKind.hidden = true;
 
   if (!relativePath) {
@@ -1536,14 +1540,10 @@ function renderDocumentPreview() {
   ui.documentMessage.hidden = true;
   ui.documentKind.hidden = false;
   ui.documentKind.textContent = documentContent.kind === "html" ? "HTML · SANDBOX" : "MARKDOWN";
-  const renderKey = `${key}\u0000${documentContent.modifiedAt || ""}\u0000${documentContent.size || 0}`;
   if (documentContent.kind === "html") {
-    ui.documentHtml.hidden = false;
-    if (ui.documentHtml.dataset.renderKey !== renderKey) {
-      ui.documentHtml.dataset.renderKey = renderKey;
-      ui.documentHtml.srcdoc = documentContent.renderedContent || documentContent.content || "";
-    }
+    ui.documentHtmlLaunch.hidden = false;
   } else {
+    const renderKey = `${key}\u0000${documentContent.modifiedAt || ""}\u0000${documentContent.size || 0}`;
     ui.documentMarkdown.hidden = false;
     if (ui.documentMarkdown.dataset.renderKey !== renderKey) {
       ui.documentMarkdown.dataset.renderKey = renderKey;
@@ -1584,112 +1584,34 @@ function remoteFileQuery(projectId, relativePath, agentId = "") {
   return new URLSearchParams(values);
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("파일 변환 실패"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function fetchRemotePreviewAsset(context, containerPath, ref) {
-  if (!isLocalPreviewAssetRef(ref)) return null;
-  const resolvedPath = resolveRelativePreviewPath(containerPath, ref);
-  if (!resolvedPath) return null;
-  const query = remoteFileQuery(context.projectId, resolvedPath, context.agentId);
-  const response = await fetch(`/api/files/asset?${query}`, {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) return null;
-  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
-  if (contentType.startsWith("text/css")) {
-    return { kind: "css", text: await response.text(), path: resolvedPath };
-  }
-  if (contentType.startsWith("image/")) {
-    return { kind: "data", dataUrl: await blobToDataUrl(await response.blob()), path: resolvedPath };
-  }
-  return null;
-}
-
-function cssAssetUrlPattern() {
-  return /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s][^)]*?))\s*\)/gi;
-}
-
-async function inlineRemoteCssAssets(css, containerPath, context) {
-  const refs = [];
-  for (const match of String(css || "").matchAll(cssAssetUrlPattern())) {
-    const ref = String(match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (ref && isLocalPreviewAssetRef(ref) && !refs.includes(ref)) refs.push(ref);
-  }
-  const mapped = new Map();
-  await Promise.all(refs.map(async (ref) => {
-    const result = await fetchRemotePreviewAsset(context, containerPath, ref).catch(() => null);
-    mapped.set(ref, result?.kind === "data" ? result.dataUrl : null);
-  }));
-  return String(css || "").replace(cssAssetUrlPattern(), (full, doubleQuoted, singleQuoted, unquoted) => {
-    const ref = String(doubleQuoted ?? singleQuoted ?? unquoted ?? "").trim();
-    const dataUrl = mapped.get(ref);
-    return dataUrl ? `url("${dataUrl.replaceAll('"', "%22")}")` : full;
-  });
-}
-
-async function inlineRemoteHtmlAssets(html, context) {
-  const documentNode = new DOMParser().parseFromString(String(html || ""), "text/html");
-  documentNode.querySelectorAll("base, meta[http-equiv='refresh' i]").forEach((element) => element.remove());
-  const jobs = [];
-  const setDataAsset = (element, attribute, containerPath) => {
-    const ref = element.getAttribute(attribute);
-    if (!ref || !isLocalPreviewAssetRef(ref)) return;
-    jobs.push((async () => {
-      const result = await fetchRemotePreviewAsset(context, containerPath, ref).catch(() => null);
-      if (result?.kind === "data") element.setAttribute(attribute, result.dataUrl);
-    })());
-  };
-  documentNode.querySelectorAll("img[src], source[src], video[src], video[poster]").forEach((element) => {
-    setDataAsset(element, "src", context.path);
-    setDataAsset(element, "poster", context.path);
-  });
-  documentNode.querySelectorAll("img[srcset], source[srcset]").forEach((element) => {
-    const srcset = element.getAttribute("srcset") || "";
-    jobs.push((async () => {
-      const parts = srcset.split(",").map((raw) => {
-        const value = raw.trim();
-        const splitAt = value.search(/\s/);
-        return splitAt < 0
-          ? { url: value, descriptor: "" }
-          : { url: value.slice(0, splitAt), descriptor: value.slice(splitAt).trim() };
-      }).filter((part) => part.url);
-      const rewritten = await Promise.all(parts.map(async (part) => {
-        const result = await fetchRemotePreviewAsset(context, context.path, part.url).catch(() => null);
-        return `${result?.kind === "data" ? result.dataUrl : part.url}${part.descriptor ? ` ${part.descriptor}` : ""}`;
+async function openRemoteHtmlPreview(projectId, relativePath, agentId = "") {
+  if (!projectId || !relativePath) return;
+  const query = remoteFileQuery(projectId, relativePath, agentId);
+  if (window.__MULTIAGENT_NATIVE_EXTERNAL_PREVIEW__ && window.ReactNativeWebView?.postMessage) {
+    query.set("format", "json");
+    try {
+      const response = await fetch(`/api/docs/preview?${query}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error(await apiError(response));
+      const result = await response.json();
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "multiagent:open-external-preview",
+        url: new URL(result.url, window.location.origin).href,
       }));
-      element.setAttribute("srcset", rewritten.join(", "));
-    })());
-  });
-  documentNode.querySelectorAll("[style]").forEach((element) => {
-    const css = element.getAttribute("style") || "";
-    if (/url\(/i.test(css)) jobs.push(inlineRemoteCssAssets(css, context.path, context).then((value) => element.setAttribute("style", value)));
-  });
-  documentNode.querySelectorAll("style").forEach((element) => {
-    const css = element.textContent || "";
-    if (/url\(/i.test(css)) jobs.push(inlineRemoteCssAssets(css, context.path, context).then((value) => { element.textContent = value; }));
-  });
-  for (const link of documentNode.querySelectorAll('link[rel~="stylesheet"][href]')) {
-    const href = link.getAttribute("href") || "";
-    if (!isLocalPreviewAssetRef(href)) continue;
-    jobs.push((async () => {
-      const result = await fetchRemotePreviewAsset(context, context.path, href).catch(() => null);
-      if (result?.kind !== "css") return;
-      const style = documentNode.createElement("style");
-      style.textContent = await inlineRemoteCssAssets(result.text, result.path, context);
-      link.replaceWith(style);
-    })());
+    } catch (error) {
+      showToast(`HTML을 열지 못했습니다: ${error.message || error}`);
+    }
+    return;
   }
-  await Promise.all(jobs);
-  const doctype = documentNode.doctype ? "<!DOCTYPE html>\n" : "";
-  return `${doctype}${documentNode.documentElement.outerHTML}`;
+  const anchor = document.createElement("a");
+  anchor.href = `/api/docs/preview?${query}`;
+  anchor.target = window.__MULTIAGENT_NATIVE_APP__ ? "_self" : "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function resetFilePreviewContent() {
@@ -4419,6 +4341,10 @@ ui.refreshDocumentsButton.addEventListener("click", async () => {
   } finally {
     ui.refreshDocumentsButton.disabled = false;
   }
+});
+ui.documentOpenHtmlButton.addEventListener("click", () => {
+  if (selection.type !== "documents" || !selectedDocumentPath) return;
+  void openRemoteHtmlPreview(selection.id, selectedDocumentPath);
 });
 ui.documentMarkdown.addEventListener("click", (event) => {
   const link = event.target.closest("[data-document-link]");

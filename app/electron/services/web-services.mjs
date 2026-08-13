@@ -54,6 +54,9 @@ const REMOTE_DOCUMENT_SKIPPED_DIRS = new Set([
 const MAX_REMOTE_DOCUMENT_FILES = 500;
 const MAX_REMOTE_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const MAX_REMOTE_IMAGE_BYTES = 25 * 1024 * 1024;
+const REMOTE_HTML_PREVIEW_TTL_MS = 15 * 60_000;
+const MAX_REMOTE_HTML_PREVIEWS = 128;
+const REMOTE_HTML_PREVIEW_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const REMOTE_IMAGE_EXTENSIONS = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -68,6 +71,43 @@ const REMOTE_PREVIEW_ASSET_EXTENSIONS = new Map([
   ...REMOTE_IMAGE_EXTENSIONS,
   [".css", "text/css; charset=utf-8"],
 ]);
+const REMOTE_HTML_PREVIEW_EXTENSIONS = new Map([
+  ...REMOTE_IMAGE_EXTENSIONS,
+  [".html", "text/html; charset=utf-8"],
+  [".htm", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".mjs", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".map", "application/json; charset=utf-8"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".csv", "text/csv; charset=utf-8"],
+  [".xml", "application/xml; charset=utf-8"],
+  [".wasm", "application/wasm"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
+  [".ttf", "font/ttf"],
+  [".otf", "font/otf"],
+  [".mp3", "audio/mpeg"],
+  [".wav", "audio/wav"],
+  [".mp4", "video/mp4"],
+  [".webm", "video/webm"],
+]);
+const REMOTE_HTML_PREVIEW_CSP = [
+  "default-src 'self' data: blob:",
+  "base-uri 'self'",
+  "connect-src 'self'",
+  "font-src 'self' data:",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "object-src 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "worker-src 'self' blob:",
+  "sandbox allow-scripts allow-downloads",
+].join("; ");
 const MAX_REMOTE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_ATTACHMENT_REQUEST_BYTES = 12 * 1024 * 1024;
 const REMOTE_SESSION_TOOLS = new Map([
@@ -539,6 +579,117 @@ async function sendRemotePreviewAsset(response, snapshot, projectId, requestedPa
   await pipeline(fs.createReadStream(resolved), response);
 }
 
+function pruneRemoteHtmlPreviews(previews, now = Date.now()) {
+  for (const [token, entry] of previews) {
+    if (!entry || entry.expiresAt <= now) previews.delete(token);
+  }
+}
+
+async function issueRemoteHtmlPreview(previews, snapshot, projectId, requestedPath, agentId = null) {
+  const { root, resolved, stats } = await resolveRemoteProjectFile(
+    snapshot,
+    projectId,
+    requestedPath,
+    agentId,
+  );
+  if (![".html", ".htm"].includes(path.extname(resolved).toLowerCase())) {
+    throw new RemoteDocumentError(415, "HTML 파일만 새 창에서 열 수 있습니다.");
+  }
+  if (stats.size > MAX_REMOTE_DOCUMENT_BYTES) {
+    throw new RemoteDocumentError(413, "2MB보다 큰 HTML 문서는 Remote에서 열 수 없습니다.");
+  }
+  pruneRemoteHtmlPreviews(previews);
+  while (previews.size >= MAX_REMOTE_HTML_PREVIEWS) {
+    previews.delete(previews.keys().next().value);
+  }
+  const token = crypto.randomBytes(32).toString("base64url");
+  const relativePath = path.relative(root, resolved).split(path.sep).join("/");
+  previews.set(token, {
+    root,
+    expiresAt: Date.now() + REMOTE_HTML_PREVIEW_TTL_MS,
+  });
+  const encodedPath = relativePath.split("/").map(encodeURIComponent).join("/");
+  return `/preview/${token}/${encodedPath}`;
+}
+
+function parseRemoteHtmlPreviewPath(pathname) {
+  const match = /^\/preview\/([^/]+)\/(.+)$/.exec(pathname);
+  if (!match || !REMOTE_HTML_PREVIEW_TOKEN_PATTERN.test(match[1])) return null;
+  try {
+    return {
+      token: match[1],
+      relativePath: match[2].split("/").map(decodeURIComponent).join("/"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function sendRemoteHtmlPreview(request, response, previews, pathname) {
+  const parsed = parseRemoteHtmlPreviewPath(pathname);
+  if (!parsed) return false;
+  pruneRemoteHtmlPreviews(previews);
+  const entry = previews.get(parsed.token);
+  if (!entry) {
+    response.writeHead(404, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const normalizedPath = parsed.relativePath.replaceAll("\\", "/");
+  if (!normalizedPath || normalizedPath.includes("\0")) {
+    response.writeHead(400, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const candidate = path.resolve(entry.root, ...normalizedPath.split("/"));
+  if (!isInsideDocumentRoot(entry.root, candidate)) {
+    response.writeHead(403, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  let resolved;
+  try {
+    resolved = fs.realpathSync(candidate);
+  } catch {
+    response.writeHead(404, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  if (!isInsideDocumentRoot(entry.root, resolved)) {
+    response.writeHead(403, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const stats = await fsPromises.stat(resolved);
+  if (!stats.isFile()) {
+    response.writeHead(404, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const extension = path.extname(resolved).toLowerCase();
+  const contentType = REMOTE_HTML_PREVIEW_EXTENSIONS.get(extension);
+  if (!contentType) {
+    response.writeHead(415, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const limit = [".html", ".htm", ".css", ".js", ".mjs", ".json", ".map", ".txt", ".csv", ".xml"]
+    .includes(extension) ? MAX_REMOTE_DOCUMENT_BYTES : MAX_REMOTE_IMAGE_BYTES;
+  if (stats.size > limit) {
+    response.writeHead(413, { "cache-control": "no-store" }).end();
+    return true;
+  }
+  const html = extension === ".html" || extension === ".htm";
+  response.writeHead(200, {
+    "content-type": contentType,
+    "content-length": stats.size,
+    "access-control-allow-origin": "null",
+    "cache-control": "no-store",
+    "content-security-policy": html ? REMOTE_HTML_PREVIEW_CSP : "default-src 'none'; sandbox",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "cross-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  });
+  if (request.method === "HEAD") response.end();
+  else await pipeline(fs.createReadStream(resolved), response);
+  return true;
+}
+
 function sendRemoteDocumentError(response, error) {
   const status = Number.isInteger(error?.status) ? error.status : 500;
   sendJson(response, status, { error: error?.message || "문서를 불러오지 못했습니다." });
@@ -705,6 +856,7 @@ export class LocalDashboardService {
     this.state = {};
     this.server = null;
     this.port = null;
+    this.htmlPreviews = new Map();
     this.usageRefreshAt = 0;
     this.config = { enabled: false, serverPort: defaultPort };
     this.loadConfig();
@@ -772,6 +924,9 @@ export class LocalDashboardService {
     this.server = http.createServer(async (request, response) => {
       try {
         const url = new URL(request.url || "/", "http://127.0.0.1");
+        if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/preview/")) {
+          if (await sendRemoteHtmlPreview(request, response, this.htmlPreviews, url.pathname)) return;
+        }
         if (request.method === "GET" && url.pathname === "/api/state") {
           sendJson(response, 200, this.snapshot());
           return;
@@ -915,6 +1070,27 @@ export class LocalDashboardService {
             }
             return;
           }
+          if (request.method === "GET" && url.pathname === "/api/docs/preview") {
+            try {
+              const location = await issueRemoteHtmlPreview(
+                this.htmlPreviews,
+                this.snapshot(),
+                url.searchParams.get("projectId"),
+                url.searchParams.get("path"),
+                url.searchParams.get("agentId"),
+              );
+              if (url.searchParams.get("format") === "json") {
+                sendJson(response, 200, { url: location, expiresInSeconds: REMOTE_HTML_PREVIEW_TTL_MS / 1000 }, {
+                  "cache-control": "no-store",
+                });
+              } else {
+                response.writeHead(302, { location, "cache-control": "no-store" }).end();
+              }
+            } catch (error) {
+              sendRemoteDocumentError(response, error);
+            }
+            return;
+          }
           if (request.method === "GET" && url.pathname === "/api/files/image") {
             try {
               await sendRemoteImage(
@@ -970,6 +1146,7 @@ export class LocalDashboardService {
     const server = this.server;
     this.server = null;
     this.port = null;
+    this.htmlPreviews.clear();
     if (server) {
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -1006,6 +1183,7 @@ export class RemoteDashboardService {
     this.view = {};
     this.states = new Map();
     this.mobileAuthTickets = new Map();
+    this.htmlPreviews = new Map();
     this.secret = crypto.randomBytes(32);
     this.config = { client_id: "", owner: "", tunnel_token: "", public_hostname: "", server_port: 18800, client_secret: "" };
     this.access = { pending: [], approved: [] };
@@ -1356,6 +1534,9 @@ export class RemoteDashboardService {
     this.server = http.createServer(async (request, response) => {
       try {
         const url = new URL(request.url || "/", "http://127.0.0.1");
+        if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/preview/")) {
+          if (await sendRemoteHtmlPreview(request, response, this.htmlPreviews, url.pathname)) return;
+        }
         if (await this.handleOAuth(request, response, url)) return;
         if (await this.handleDeviceAuth(request, response, url)) return;
         if (request.method === "POST" && url.pathname === "/auth/logout") {
@@ -1681,6 +1862,27 @@ export class RemoteDashboardService {
           }
           return;
         }
+        if (request.method === "GET" && url.pathname === "/api/docs/preview") {
+          try {
+            const location = await issueRemoteHtmlPreview(
+              this.htmlPreviews,
+              { agents: this.agents, view: this.view },
+              url.searchParams.get("projectId"),
+              url.searchParams.get("path"),
+              url.searchParams.get("agentId"),
+            );
+            if (url.searchParams.get("format") === "json") {
+              sendJson(response, 200, { url: location, expiresInSeconds: REMOTE_HTML_PREVIEW_TTL_MS / 1000 }, {
+                "cache-control": "no-store",
+              });
+            } else {
+              response.writeHead(302, { location, "cache-control": "no-store" }).end();
+            }
+          } catch (error) {
+            sendRemoteDocumentError(response, error);
+          }
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/files/image") {
           try {
             await sendRemoteImage(
@@ -1725,6 +1927,7 @@ export class RemoteDashboardService {
 
   async stop() {
     const server = this.server; this.server = null; this.port = null;
+    this.htmlPreviews.clear();
     this.deviceMonitorService.close();
     if (server) {
       // Long-lived SSE terminal streams keep connections open; force them shut

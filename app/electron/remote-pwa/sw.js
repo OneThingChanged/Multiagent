@@ -1,4 +1,4 @@
-const CACHE_NAME = "multiagent-remote-v56";
+const CACHE_NAME = "multiagent-remote-v57";
 const STATIC_ASSETS = [
   "/",
   "/pwa/styles.css",
@@ -32,7 +32,8 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/auth/") ||
-    url.pathname.startsWith("/downloads/")
+    url.pathname.startsWith("/downloads/") ||
+    url.pathname.startsWith("/preview/")
   ) return;
 
   if (request.mode === "navigate") {

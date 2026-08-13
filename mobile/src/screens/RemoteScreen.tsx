@@ -76,6 +76,7 @@ export function RemoteScreen({
   const nativeBootstrap = useMemo(() => `
     if (location.origin === ${JSON.stringify(remoteOrigin)}) {
       window.__MULTIAGENT_NATIVE_APP__ = true;
+      window.__MULTIAGENT_NATIVE_EXTERNAL_PREVIEW__ = true;
       window.__MULTIAGENT_PROFILE_ID__ = ${JSON.stringify(profile.id)};
       document.documentElement.dataset.nativeApp = "true";
       ${nativeSafeAreaScript}
@@ -153,6 +154,18 @@ export function RemoteScreen({
     if (request.type === "multiagent:start-native-monitor") {
       void startForegroundMonitor(profile.id, profile.name, remoteOrigin, request.token, request.cursor)
         .then((state) => deliverMonitorState(state, true));
+      return;
+    }
+    if (request.type === "multiagent:open-external-preview") {
+      try {
+        const target = new URL(request.url);
+        if (
+          isTrustedNativeBridgeUrl(baseUrl, target.href) &&
+          /^\/preview\/[A-Za-z0-9_-]{43}\//.test(target.pathname)
+        ) {
+          void Linking.openURL(target.href).catch(() => {});
+        }
+      } catch {}
       return;
     }
     void stopForegroundMonitor(profile.id, remoteOrigin, request.revoke)

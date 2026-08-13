@@ -15,7 +15,7 @@ test("allows the native token bridge only on the configured Remote origin", () =
   assert.equal(isTrustedNativeBridgeUrl(base, "https://agent.example.com.evil.test/"), false);
 });
 
-test("accepts only validated foreground-monitor requests", () => {
+test("accepts only validated native bridge requests", () => {
   const token = `ma1_${"A".repeat(43)}`;
   assert.deepEqual(
     parseNativeBridgeRequest(JSON.stringify({ type: "multiagent:start-native-monitor", token, cursor: 42 })),
@@ -25,7 +25,12 @@ test("accepts only validated foreground-monitor requests", () => {
     parseNativeBridgeRequest('{"type":"multiagent:stop-native-monitor"}'),
     { type: "multiagent:stop-native-monitor", revoke: true },
   );
+  assert.deepEqual(
+    parseNativeBridgeRequest('{"type":"multiagent:open-external-preview","url":"https://agent.example.com/preview/token/report.html"}'),
+    { type: "multiagent:open-external-preview", url: "https://agent.example.com/preview/token/report.html" },
+  );
   assert.equal(parseNativeBridgeRequest('{"type":"multiagent:start-native-monitor","token":"bad"}'), null);
+  assert.equal(parseNativeBridgeRequest('{"type":"multiagent:open-external-preview","url":42}'), null);
   assert.equal(parseNativeBridgeRequest('{"type":"open-external-url"}'), null);
   assert.equal(parseNativeBridgeRequest("not json"), null);
 });

@@ -184,6 +184,9 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain("SCREENS");
     expect(pageBody).toContain('id="documentsView"');
     expect(pageBody).toContain('id="documentList" role="tree"');
+    expect(pageBody).toContain('id="documentHtmlLaunch"');
+    expect(pageBody).toContain('id="documentOpenHtmlButton"');
+    expect(pageBody).not.toContain('id="documentHtml"');
     expect(pageBody).toContain('id="usageView"');
     expect(pageBody).toContain('id="usageTotalTokens"');
     expect(pageBody).toContain('id="usageHistoryMode"');
@@ -250,8 +253,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain('if (kind === "html")');
     expect(appScriptBody).toContain("selectDocuments(resolvedProjectId)");
     expect(appScriptBody).toContain('if (/\\.(?:html|htm)$/i.test(path)) return "html";');
-    expect(appScriptBody).toContain("function inlineRemoteHtmlAssets(html, context)");
-    expect(appScriptBody).toContain('fetch(`/api/files/asset?${query}`');
+    expect(appScriptBody).toContain("async function openRemoteHtmlPreview(projectId, relativePath, agentId");
+    expect(appScriptBody).toContain("window.__MULTIAGENT_NATIVE_EXTERNAL_PREVIEW__");
+    expect(appScriptBody).toContain('anchor.href = `/api/docs/preview?${query}`');
+    expect(appScriptBody).not.toContain("function inlineRemoteHtmlAssets(html, context)");
     expect(appScriptBody).toContain('fetch(`/api/files/image?${query}`');
     expect(appScriptBody).toContain('closest(".chat-file-link")');
     expect(appScriptBody).toContain("CHAT_FILE_PATH_RE");
@@ -314,9 +319,10 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v56');
+    expect(workerBody).toContain('multiagent-remote-v57');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
+    expect(workerBody).toContain('url.pathname.startsWith("/preview/")');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.mobileApp).toEqual({
       available: true,
@@ -388,9 +394,10 @@ describe("Electron dashboard server", () => {
     fs.mkdirSync(path.join(projectRoot, ".build-tools", "android-sdk"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, ".codex"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
-    fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), "<h1>Preview</h1><script>throw new Error('blocked')</script>");
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), '<link rel="stylesheet" href="preview.css"><h1>Preview</h1><script src="preview.js"></script>');
     fs.writeFileSync(path.join(otherProjectRoot, "other.html"), "<h1>Other project</h1>");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.css"), "body { background: url(preview.png); }");
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.js"), "document.body.dataset.preview = 'ready';");
     const imageBytes = Buffer.from("89504e470d0a1a0a00000000", "hex");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.png"), imageBytes);
     fs.writeFileSync(path.join(projectRoot, "docs", "large.png"), "");
@@ -498,6 +505,26 @@ describe("Electron dashboard server", () => {
       `${status.url}/api/docs/read?${new URLSearchParams({ projectId: "local", path: "docs/large.md" })}`,
     );
     const ssh = await fetch(`${status.url}/api/docs?projectId=ssh`);
+    const previewIssueUrl = `${status.url}/api/docs/preview?${new URLSearchParams({
+      projectId: "local",
+      path: "docs/preview.html",
+    })}`;
+    const previewIssue = await fetch(previewIssueUrl, { redirect: "manual" });
+    const nativePreviewIssue = await fetch(`${previewIssueUrl}&format=json`);
+    const nativePreview = await nativePreviewIssue.json();
+    const previewLocation = previewIssue.headers.get("location");
+    const previewUrl = new URL(previewLocation, status.url);
+    const previewHtml = await fetch(previewUrl, {
+      headers: { "cf-connecting-ip": "203.0.113.10" },
+    });
+    const previewCss = await fetch(new URL("preview.css", previewUrl));
+    const previewScript = await fetch(new URL("preview.js", previewUrl));
+    const previewImage = await fetch(new URL("preview.png", previewUrl));
+    const previewUnsupported = await fetch(new URL("README.md", previewUrl));
+    const unauthorizedPreviewIssue = await fetch(previewIssueUrl, {
+      redirect: "manual",
+      headers: { "cf-connecting-ip": "203.0.113.10" },
+    });
 
     expect(listResponse.status).toBe(200);
     expect(list.documents.map((document) => document.path)).toEqual([
@@ -510,7 +537,7 @@ describe("Electron dashboard server", () => {
     expect(list.documents.some((document) => document.path.includes(".codex"))).toBe(false);
     expect(markdown).toMatchObject({ kind: "markdown", path: "docs/README.md", content: "# Remote 문서\n" });
     expect(html.kind).toBe("html");
-    expect(html.content).toContain("<script>");
+    expect(html.content).toContain("<script");
     expect(absoluteMarkdown.status).toBe(200);
     if (slashDriveMarkdown) expect(slashDriveMarkdown.status).toBe(200);
     expect(otherProjectHtml).toMatchObject({
@@ -540,6 +567,30 @@ describe("Electron dashboard server", () => {
     expect(unsupported.status).toBe(415);
     expect(oversized.status).toBe(413);
     expect(ssh.status).toBe(409);
+    expect(previewIssue.status).toBe(302);
+    expect(nativePreviewIssue.status).toBe(200);
+    expect(nativePreview).toMatchObject({ expiresInSeconds: 900 });
+    expect(nativePreview.url).toMatch(/^\/preview\/[A-Za-z0-9_-]{43}\/docs\/preview\.html$/);
+    expect(previewLocation).toMatch(/^\/preview\/[A-Za-z0-9_-]{43}\/docs\/preview\.html$/);
+    expect(previewHtml.status).toBe(200);
+    expect(previewHtml.headers.get("content-type")).toContain("text/html");
+    expect(previewHtml.headers.get("content-security-policy")).toContain("sandbox allow-scripts allow-downloads");
+    expect(previewHtml.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+    expect(previewHtml.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(previewHtml.headers.get("access-control-allow-origin")).toBe("null");
+    expect(await previewHtml.text()).toContain('href="preview.css"');
+    expect(previewCss.status).toBe(200);
+    expect(await previewCss.text()).toContain("url(preview.png)");
+    expect(previewScript.status).toBe(200);
+    expect(previewScript.headers.get("content-type")).toContain("text/javascript");
+    expect(previewImage.status).toBe(200);
+    expect(previewUnsupported.status).toBe(415);
+    expect(unauthorizedPreviewIssue.status).toBe(401);
+
+    const previewToken = previewLocation.split("/")[2];
+    service.htmlPreviews.get(previewToken).expiresAt = 0;
+    const expiredPreview = await fetch(previewUrl);
+    expect(expiredPreview.status).toBe(404);
   });
 
   it("accepts same-origin JSON input and blocks cross-origin commands", async () => {
@@ -910,6 +961,7 @@ describe("Electron dashboard server", () => {
     roots.push(root);
     fs.mkdirSync(path.join(root, "docs"));
     fs.writeFileSync(path.join(root, "docs", "local.md"), "# Local dashboard");
+    fs.writeFileSync(path.join(root, "docs", "local.html"), '<h1>Local HTML</h1><img src="local.png">');
     fs.writeFileSync(path.join(root, "docs", "local.png"), Buffer.from("89504e470d0a1a0a", "hex"));
     const writes = [];
     const cancellations = [];
@@ -967,6 +1019,14 @@ describe("Electron dashboard server", () => {
     );
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/png");
+    const previewIssue = await fetch(
+      `${status.url}/api/docs/preview?${new URLSearchParams({ projectId: "local-project", path: "docs/local.html" })}`,
+      { redirect: "manual" },
+    );
+    const preview = await fetch(new URL(previewIssue.headers.get("location"), status.url));
+    expect(previewIssue.status).toBe(302);
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toContain("Local HTML");
     const input = await fetch(`${status.url}/api/input`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: status.url },
