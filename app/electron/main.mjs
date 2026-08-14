@@ -495,9 +495,18 @@ function writeMiraControlAgentInput({
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
 
 async function browserUsageSummary(refresh = false, historySelection = null) {
-  const rateLimits = await usageIndex.getRateLimits(refresh);
+  // Local totals should not wait for a live account request. Claude's usage
+  // endpoint can take up to ten seconds, so refresh limits in the background
+  // and let the browser poll the cached snapshot until it settles.
+  if (refresh) {
+    void usageIndex.refreshRateLimits().catch((error) => {
+      console.warn("[electron] usage limit refresh failed", error?.message || error);
+    });
+  }
+  const rateLimits = usageIndex.rateLimitSummary();
   return {
     ...rateLimits,
+    refreshPending: Boolean(usageIndex.rateLimitRefresh),
     tokens: usageIndex.dashboardSummary(),
     ...usageIndex.usageOverview(),
     history: usageIndex.usageHistory(historySelection),

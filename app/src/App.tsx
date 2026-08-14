@@ -2651,6 +2651,21 @@ function App() {
     []
   );
 
+  const openNewSessionModal = useCallback(
+    (projectId?: string) => {
+      // Context-menu backdrops cover the entire window. Dismiss every
+      // transient menu first so a stale transparent backdrop cannot intercept
+      // the new-session form after a session was deleted.
+      setContextMenu(null);
+      setProjectContextMenu(null);
+      setProjectFolderContextMenu(null);
+      setTabContextMenu(null);
+      if (projectId) selectProject(projectId);
+      setShowModal(true);
+    },
+    [selectProject]
+  );
+
   const renameProject = useCallback((id: string, name: string) => {
     setProjects((prev) =>
       prev.map((p) => (p.id === id ? { ...p, name } : p))
@@ -3278,7 +3293,7 @@ function App() {
         setSearchOpen(true);
         break;
       case "new-session":
-        if (activeProjectIdRef.current) setShowModal(true);
+        if (activeProjectIdRef.current) openNewSessionModal();
         else setShowProjectModal(true);
         break;
       case "new-project":
@@ -3314,7 +3329,7 @@ function App() {
         setSettingsOpen(true);
         break;
     }
-  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, reopenClosedTab, toggleAlwaysOnTop]);
+  }, [closeTab, desktopPetEnabled, handleDesktopPetEnabledChange, openNewAppWindow, openNewSessionModal, reopenClosedTab, toggleAlwaysOnTop]);
 
   useEffect(() => {
     executeCommandRef.current = executeCommand;
@@ -3526,10 +3541,7 @@ function App() {
         onNewProjectFolder={(machineKey) =>
           setProjectFolderEditor({ mode: "create", machineKey })
         }
-        onNewSessionForProject={(projectId) => {
-          selectProject(projectId);
-          setShowModal(true);
-        }}
+        onNewSessionForProject={openNewSessionModal}
         onDeactivate={deactivateAgent}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}

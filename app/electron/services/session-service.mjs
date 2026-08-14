@@ -92,7 +92,8 @@ export class SessionService {
     this.storageDir = storageDir;
     this.indexPath = path.join(storageDir, "electron-session-index.json");
     this.notes = new Map();
-    this.scanCache = { at: 0, entries: [] };
+    this.scanCache = new Map();
+    this.metadataCache = new Map();
     this.loadNotes();
   }
 
@@ -124,7 +125,7 @@ export class SessionService {
       updatedAt: Date.now(),
     });
     await this.persistNotes().catch(() => {});
-    this.scanCache.at = 0;
+    this.scanCache.clear();
   }
 
   transcriptRoots(aiToolId) {
@@ -135,15 +136,31 @@ export class SessionService {
 
   async scan(aiToolId, force = false) {
     const cacheKey = `${aiToolId}:${this.transcriptRoots(aiToolId).join("|")}`;
-    if (!force && this.scanCache.key === cacheKey && Date.now() - this.scanCache.at < 15_000) {
-      return this.scanCache.entries;
+    const cachedScan = this.scanCache.get(cacheKey);
+    if (!force && cachedScan && Date.now() - cachedScan.at < 15_000) {
+      return cachedScan.entries;
     }
     const files = [];
     for (const root of this.transcriptRoots(aiToolId)) await walkJsonl(root, files);
     files.sort((a, b) => b.mtimeMs - a.mtimeMs);
     const entries = [];
-    for (const file of files) entries.push({ ...(await readMetadata(file, aiToolId)), ...file });
-    this.scanCache = { key: cacheKey, at: Date.now(), entries };
+    for (const file of files) {
+      const cachedMetadata = this.metadataCache.get(file.path);
+      const metadata = cachedMetadata
+        && cachedMetadata.mtimeMs === file.mtimeMs
+        && cachedMetadata.size === file.size
+        ? cachedMetadata.value
+        : await readMetadata(file, aiToolId);
+      if (!cachedMetadata || metadata !== cachedMetadata.value) {
+        this.metadataCache.set(file.path, {
+          mtimeMs: file.mtimeMs,
+          size: file.size,
+          value: metadata,
+        });
+      }
+      entries.push({ ...metadata, ...file });
+    }
+    this.scanCache.set(cacheKey, { at: Date.now(), entries });
     return entries;
   }
 

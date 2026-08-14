@@ -241,6 +241,8 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain('inactive && sessionViewMode !== "chat"');
     expect(appScriptBody).toContain("dataset.sessionMode = sessionViewMode");
     expect(appScriptBody).toContain('fetch("/api/attachment"');
+    expect(appScriptBody).toContain("refreshPending");
+    expect(appScriptBody).toContain("usageRefreshPollTimer");
     expect(appScriptBody).toContain("function clipboardImageFiles(event)");
     expect(appScriptBody).toContain("function handleComposerImagePaste(event)");
     expect(appScriptBody).toContain('addEventListener("paste", handleComposerImagePaste)');

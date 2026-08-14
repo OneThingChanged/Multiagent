@@ -5118,7 +5118,8 @@ body.files-resizing .files-resizer::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* Keep dialogs above transparent context-menu click blockers (150/151). */
+  z-index: 1000;
 }
 
 .modal {
@@ -5303,7 +5304,7 @@ body.files-resizing .files-resizer::after {
 
 /* SSH setup guide modal — sits above the Settings modal. */
 .ssh-guide-backdrop {
-  z-index: 120;
+  z-index: 1020;
 }
 .ssh-guide-modal {
   width: 560px;

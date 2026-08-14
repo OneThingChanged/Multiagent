@@ -11,7 +11,7 @@ describe("Electron usage index", () => {
   it("incrementally indexes Codex token events without duplicates", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-")); roots.push(root);
     const transcript = path.join(root, "session.jsonl");
-    const record = { timestamp: "2026-07-15T00:00:00Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2, total_tokens: 13 }, total_token_usage: { total_tokens: 13 } }, rate_limits: { limit_id: "codex", limit_name: null, primary: { used_percent: 25, window_minutes: 10_080, resets_at: 1_784_928_404 }, secondary: null, credits: { has_credits: false, unlimited: false, balance: "0" }, plan_type: "pro" } } };
+    const record = { timestamp: new Date().toISOString(), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2, total_tokens: 13 }, total_token_usage: { total_tokens: 13 } }, rate_limits: { limit_id: "codex", limit_name: null, primary: { used_percent: 25, window_minutes: 10_080, resets_at: 1_784_928_404 }, secondary: null, credits: { has_credits: false, unlimited: false, balance: "0" }, plan_type: "pro" } } };
     fs.writeFileSync(transcript, `${JSON.stringify(record)}\n`);
     const sessionService = { scan: async () => [{ path: transcript, sessionId: "s1", cwd: root }] };
     const service = new UsageService(path.join(root, "usage.db"), sessionService);
@@ -26,6 +26,37 @@ describe("Electron usage index", () => {
         primary: { usedPercent: 25, windowMinutes: 10_080, resetsAt: 1_784_928_404 },
       }],
     });
+    service.close();
+  });
+
+  it("persists daily aggregates and rolls up only newly inserted events", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-rollup-")); roots.push(root);
+    const databasePath = path.join(root, "usage.db");
+    let service = new UsageService(databasePath, { scan: async () => [] });
+    let insert = service.db().prepare(`INSERT INTO usage_events (
+      source_key, ts, tool, input_tokens, output_tokens, total_tokens, raw_kind
+    ) VALUES (?, ?, 'codex', ?, ?, ?, 'test')`);
+    const ts = Math.floor(new Date(2026, 7, 8, 12, 0, 0).getTime() / 1000);
+    insert.run("first", ts, 80, 20, 100);
+
+    expect(service.dashboardSummary()).toMatchObject({ events: 1, totalTokens: 100 });
+    const firstMarker = Number(service.db().prepare(
+      "SELECT value FROM usage_meta WHERE key='daily_rollup_event_id'"
+    ).get().value);
+    service.close();
+
+    service = new UsageService(databasePath, { scan: async () => [] });
+    insert = service.db().prepare(`INSERT INTO usage_events (
+      source_key, ts, tool, input_tokens, output_tokens, total_tokens, raw_kind
+    ) VALUES (?, ?, 'codex', ?, ?, ?, 'test')`);
+    insert.run("second", ts + 60, 150, 50, 200);
+
+    expect(service.dashboardSummary()).toMatchObject({ events: 2, totalTokens: 300 });
+    expect(Number(service.db().prepare(
+      "SELECT value FROM usage_meta WHERE key='daily_rollup_event_id'"
+    ).get().value)).toBeGreaterThan(firstMarker);
+    expect(service.db().prepare("SELECT events, total_tokens totalTokens FROM usage_daily").get())
+      .toMatchObject({ events: 2, totalTokens: 300 });
     service.close();
   });
 

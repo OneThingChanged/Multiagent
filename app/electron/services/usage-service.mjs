@@ -134,6 +134,7 @@ export class UsageService {
     this.catalog = { projects: [], agents: [] };
     this.database = null;
     this.rateLimitRefresh = null;
+    this.dailyRollupSync = false;
     // Claude has no rate-limit snapshot inside its transcript (unlike Codex's
     // token_count.rate_limits), so account limits are read live from the OAuth
     // usage endpoint using the local Claude Code credentials.
@@ -175,8 +176,70 @@ export class UsageService {
       );
       CREATE INDEX IF NOT EXISTS idx_usage_rate_limits_updated_at
         ON usage_rate_limits(updated_at);
+      CREATE TABLE IF NOT EXISTS usage_daily (
+        day TEXT PRIMARY KEY,
+        events INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS usage_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
     return this.database;
+  }
+
+  ensureDailyRollup() {
+    if (this.dailyRollupSync) return;
+    this.dailyRollupSync = true;
+    const db = this.db();
+    try {
+      const marker = db.prepare("SELECT value FROM usage_meta WHERE key='daily_rollup_event_id'").get();
+      const maximum = Number(db.prepare("SELECT COALESCE(MAX(id),0) id FROM usage_events").get()?.id) || 0;
+      let previous = Number(marker?.value);
+      if (!Number.isFinite(previous) || previous < 0 || previous > maximum) {
+        previous = 0;
+        db.exec("DELETE FROM usage_daily");
+      }
+      if (previous < maximum) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(`INSERT INTO usage_daily (
+            day,events,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,
+            reasoning_output_tokens,total_tokens
+          ) SELECT
+            strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime'), COUNT(*),
+            COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+            COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+            COALESCE(SUM(reasoning_output_tokens),0), COALESCE(SUM(total_tokens),0)
+          FROM usage_events WHERE id > ? GROUP BY 1
+          ON CONFLICT(day) DO UPDATE SET
+            events=events+excluded.events,
+            input_tokens=input_tokens+excluded.input_tokens,
+            output_tokens=output_tokens+excluded.output_tokens,
+            cache_read_tokens=cache_read_tokens+excluded.cache_read_tokens,
+            cache_write_tokens=cache_write_tokens+excluded.cache_write_tokens,
+            reasoning_output_tokens=reasoning_output_tokens+excluded.reasoning_output_tokens,
+            total_tokens=total_tokens+excluded.total_tokens`).run(previous);
+          db.prepare(`INSERT INTO usage_meta(key,value) VALUES('daily_rollup_event_id',?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(String(maximum));
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      } else if (!marker) {
+        db.prepare("INSERT OR REPLACE INTO usage_meta(key,value) VALUES('daily_rollup_event_id',?)")
+          .run(String(maximum));
+      }
+    } finally {
+      this.dailyRollupSync = false;
+    }
   }
 
   syncCatalog(projects, agents) {
@@ -628,40 +691,42 @@ export class UsageService {
   }
 
   tokenTotals(startAt = null, endAt = null) {
+    this.ensureDailyRollup();
     const clauses = [];
     const params = [];
     if (startAt != null && Number.isFinite(Number(startAt))) {
-      clauses.push("ts >= ?");
-      params.push(Math.floor(Number(startAt) / 1000));
+      clauses.push("day >= ?");
+      params.push(localDateKey(new Date(Number(startAt))));
     }
     if (endAt != null && Number.isFinite(Number(endAt))) {
-      clauses.push("ts < ?");
-      params.push(Math.floor(Number(endAt) / 1000));
+      clauses.push("day < ?");
+      params.push(localDateKey(new Date(Number(endAt))));
     }
     const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
-    const totals = this.db().prepare(`SELECT COUNT(*) events, COALESCE(SUM(input_tokens),0) inputTokens,
+    const totals = this.db().prepare(`SELECT COALESCE(SUM(events),0) events, COALESCE(SUM(input_tokens),0) inputTokens,
       COALESCE(SUM(output_tokens),0) outputTokens, COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
       COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
       COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
-      COALESCE(SUM(total_tokens),0) totalTokens FROM usage_events${where}`).get(...params);
+      COALESCE(SUM(total_tokens),0) totalTokens FROM usage_daily${where}`).get(...params);
     return normalizedTokenTotals(totals);
   }
 
   tokenBuckets(startAt, endAt, bucket = "day") {
-    const format = bucket === "month" ? "%Y-%m" : "%Y-%m-%d";
+    this.ensureDailyRollup();
+    const bucketExpression = bucket === "month" ? "substr(day,1,7)" : "day";
     const rows = this.db().prepare(`SELECT
-      strftime('${format}', ts, 'unixepoch', 'localtime') bucketKey,
-      COUNT(*) events,
+      ${bucketExpression} bucketKey,
+      COALESCE(SUM(events),0) events,
       COALESCE(SUM(input_tokens),0) inputTokens,
       COALESCE(SUM(output_tokens),0) outputTokens,
       COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
       COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
       COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
       COALESCE(SUM(total_tokens),0) totalTokens
-      FROM usage_events WHERE ts >= ? AND ts < ?
+      FROM usage_daily WHERE day >= ? AND day < ?
       GROUP BY bucketKey ORDER BY bucketKey`).all(
-      Math.floor(Number(startAt) / 1000),
-      Math.floor(Number(endAt) / 1000),
+      localDateKey(new Date(Number(startAt))),
+      localDateKey(new Date(Number(endAt))),
     );
     return new Map(rows.map((row) => [String(row.bucketKey), normalizedTokenTotals(row)]));
   }
@@ -761,8 +826,11 @@ export class UsageService {
       }
     }
 
-    const earliest = number(this.db().prepare("SELECT MIN(ts) earliest FROM usage_events").get()?.earliest);
-    const earliestYear = earliest > 0 ? new Date(earliest * 1000).getFullYear() : currentYear;
+    this.ensureDailyRollup();
+    const earliestDay = this.db().prepare("SELECT MIN(day) earliest FROM usage_daily").get()?.earliest;
+    const earliestYear = typeof earliestDay === "string"
+      ? Number(earliestDay.slice(0, 4)) || currentYear
+      : currentYear;
     const latestSelectionYear = selected.mode === "week" ? currentIsoWeek.year : currentYear;
     const endDisplay = new Date(selectedRange.end);
     endDisplay.setDate(endDisplay.getDate() - 1);
@@ -804,19 +872,14 @@ export class UsageService {
     const timelineStart = new Date(dayStart);
     timelineStart.setDate(timelineStart.getDate() - 29);
 
-    const rows = this.db().prepare(`SELECT
-      strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') date,
-      COUNT(*) events,
-      COALESCE(SUM(input_tokens),0) inputTokens,
-      COALESCE(SUM(output_tokens),0) outputTokens,
-      COALESCE(SUM(cache_read_tokens),0) cacheReadTokens,
-      COALESCE(SUM(cache_write_tokens),0) cacheWriteTokens,
-      COALESCE(SUM(reasoning_output_tokens),0) reasoningOutputTokens,
-      COALESCE(SUM(total_tokens),0) totalTokens
-      FROM usage_events WHERE ts >= ? AND ts < ?
-      GROUP BY date ORDER BY date`).all(
-      Math.floor(timelineStart.getTime() / 1000),
-      Math.floor(tomorrow.getTime() / 1000),
+    this.ensureDailyRollup();
+    const rows = this.db().prepare(`SELECT day date, events,
+      input_tokens inputTokens, output_tokens outputTokens,
+      cache_read_tokens cacheReadTokens, cache_write_tokens cacheWriteTokens,
+      reasoning_output_tokens reasoningOutputTokens, total_tokens totalTokens
+      FROM usage_daily WHERE day >= ? AND day < ? ORDER BY day`).all(
+      localDateKey(timelineStart),
+      localDateKey(tomorrow),
     );
     const totalsByDate = new Map(rows.map((row) => [String(row.date), normalizedTokenTotals(row)]));
     const timeline = [];

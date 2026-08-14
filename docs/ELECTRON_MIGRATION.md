@@ -150,11 +150,21 @@ Node 24's built-in SQLite reuses the existing `usage.db` schema as-is. Claude
 Hook `done` auto-ingests that transcript; Reindex in Settings re-indexes all known
 transcripts.
 
+Calendar totals are persisted in `usage_daily`. Its cursor in
+`usage_meta.daily_rollup_event_id` means an upgrade performs one backfill from existing
+events, then later requests fold in only new event IDs. Week/month/year navigation and
+the 30-day graph therefore query daily rows rather than regrouping the complete raw event
+table. Codex and Claude transcript discovery also keep independent scan caches and reuse
+unchanged file metadata.
+
 The latest snapshot of Codex `token_count.rate_limits` is stored per limit ID in
 `usage_rate_limits`. The Electron renderer always shows usage rate and time-to-reset on
 the bottom status bar, opening a detailed popover with multiple limit windows on click.
 First lookup and manual refresh only scan the last 1MiB of the newest transcript, so
 large session logs are never re-read in full.
+Remote `refresh=1` starts live account-limit lookup without blocking the local token
+payload. The client renders cached limits immediately and polls while `refreshPending`
+is true, which keeps a slow Claude OAuth response from delaying the Usage screen.
 
 ### updater and installer
 

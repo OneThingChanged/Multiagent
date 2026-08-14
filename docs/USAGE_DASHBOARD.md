@@ -4,7 +4,7 @@ A feature that aggregates per-session/per-project token usage into `usage.db`. T
 
 Separately from token totals, the Electron app shows per-period limits of Codex/Claude accounts on the bottom status bar. Token usage is cumulative per-session/project statistics; account limits are the latest usage-rate snapshots reported by the account. Codex limits come from session transcripts; Claude limits come from the OAuth usage endpoint.
 
-The authenticated Remote PWA and loopback Dashboard expose token totals, selectable calendar history, and normalized account-limit snapshots through the shared **Usage** tab. Users can switch between **week / month / year**, choose a past ISO week, month, or year, and move to the previous, next, or current period. Weekly and monthly views return zero-filled daily buckets; yearly views return twelve monthly buckets. The screen also shows the selected-period total, comparison with the immediately preceding period, average, peak bucket, token breakdown, and quick period navigation. Weeks begin on Monday and every boundary follows the desktop PC's local timezone. The available year list begins at the oldest local `usage_events` record. The account section converts stored `usedPercent` into an emphasized remaining percentage (`100 - usedPercent`) and shows each rolling window's reset time. `GET /api/usage?refresh=1` requests a live limit refresh, with server-side throttling at one refresh per 30 seconds; no OAuth token, session name, prompt, transcript path, or source-file path is sent to the browser.
+The authenticated Remote PWA and loopback Dashboard expose token totals, selectable calendar history, and normalized account-limit snapshots through the shared **Usage** tab. Users can switch between **week / month / year**, choose a past ISO week, month, or year, and move to the previous, next, or current period. Weekly and monthly views return zero-filled daily buckets; yearly views return twelve monthly buckets. The screen also shows the selected-period total, comparison with the immediately preceding period, average, peak bucket, token breakdown, and quick period navigation. Weeks begin on Monday and every boundary follows the desktop PC's local timezone. The available year list begins at the oldest local daily aggregate. The account section converts stored `usedPercent` into an emphasized remaining percentage (`100 - usedPercent`) and shows each rolling window's reset time. `GET /api/usage?refresh=1` starts a live limit refresh in the background, with server-side throttling at one refresh per 30 seconds; the response immediately returns cached limits plus local token totals and sets `refreshPending` while the provider lookup is running. The PWA polls the cached response briefly until that refresh settles. No OAuth token, session name, prompt, transcript path, or source-file path is sent to the browser.
 
 ## Data Sources
 
@@ -46,6 +46,7 @@ Extends the hook flow for automatic ingestion.
 3. `done` → `usage.ingest_agent(agent_id, transcript_path)` → parse on a background thread
 4. `ingest_file`: incrementally parses only after the **last offset** recorded in `usage_sources` (resets offset to 0 on file truncate/ownership mismatch)
 5. Idempotent load via `INSERT ... ON CONFLICT(source_key)`
+6. Before a Usage query, only `usage_events.id` values newer than `usage_meta.daily_rollup_event_id` are folded into `usage_daily`; previously aggregated history is reused without rescanning or regrouping raw events
 
 Manual reindex: the dashboard **Reindex** button or `usage_ingest_now` → `ingest_known_now()` scans all claude/codex sessions in the catalog.
 
@@ -60,10 +61,16 @@ Manual reindex: the dashboard **Reindex** button or `usage_ingest_now` → `inge
 **usage_sources** — per-file incremental progress:
 `source_path(PK), tool, session_id, last_offset, last_size, updated_at`
 
-**usage_rate_limits** — latest snapshots of account limits observed by Electron:
-`limit_id(PK), tool, used_percent, window_minutes, resets_at, updated_at, raw_json`
+**usage_daily** — persistent desktop-local daily rollup used by current totals, week/month/year history, charts, and comparisons:
+`day(PK), events, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_output_tokens, total_tokens`
 
-> Loaded statistics remain in usage.db even if source transcripts are deleted/rotated.
+**usage_meta** — internal incremental-rollup cursor:
+`key(PK), value`; `daily_rollup_event_id` stores the newest raw event ID already included in `usage_daily`
+
+**usage_rate_limits** — latest snapshots of account limits observed by Electron:
+`limit_id(PK), limit_name, plan_type, primary_used_percent, primary_window_minutes, primary_resets_at, secondary_used_percent, secondary_window_minutes, secondary_resets_at, has_credits, unlimited, credit_balance, source_path, updated_at`
+
+> Loaded statistics and their daily rollups remain in `usage.db` even if source transcripts are deleted or rotated. The first Usage lookup after upgrading performs one local backfill from existing `usage_events`; later lookups aggregate only newly inserted rows.
 
 ## Dashboard Integration
 
@@ -85,7 +92,7 @@ The Dashboard server uses default port `127.0.0.1:4421` and is managed in Settin
 
 ### Screens
 
-The Electron loopback Dashboard and authenticated Remote server use the same responsive Usage screen. It provides week/month/year selectors, previous/current/next navigation, quick week/month selection, selected-period comparison cards, a responsive daily or monthly chart, selected-period token breakdown, and account-limit cards. Missing days or months are returned as zero-valued buckets so the graph does not visually compress inactive periods. The client snapshots the pending calendar selection before starting a request; rendering the previous response is side-effect free and cannot reset a newly selected week, month, or year. The server-normalized selection is applied only after the matching response arrives. All history is read from the PC-local `usage.db`; Remote only receives the authenticated response for the selected period and does not persist a second cloud copy.
+The Electron loopback Dashboard and authenticated Remote server use the same responsive Usage screen. It provides week/month/year selectors, previous/current/next navigation, quick week/month selection, selected-period comparison cards, a responsive daily or monthly chart, selected-period token breakdown, and account-limit cards. Missing days or months are returned as zero-valued buckets so the graph does not visually compress inactive periods. The client snapshots the pending calendar selection before starting a request; rendering the previous response is side-effect free and cannot reset a newly selected week, month, or year. The server-normalized selection is applied only after the matching response arrives. Calendar totals and charts query the small `usage_daily` rollup instead of grouping the full `usage_events` table on every request. All history is read from the PC-local `usage.db`; Remote only receives the authenticated response for the selected period and does not persist a second cloud copy.
 
 The legacy Tauri Dashboard Usage screen provides range buttons (today/7 days/30 days/all), Reindex, summary cards, and project/session/recent events/timeline tables through the `/api/usage/*` endpoints.
 

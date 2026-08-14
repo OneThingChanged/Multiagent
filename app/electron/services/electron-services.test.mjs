@@ -339,6 +339,27 @@ describe("Electron hook runtime", () => {
 });
 
 describe("Electron session resolution", () => {
+  it("keeps independent short-lived scan caches for Codex and Claude", async () => {
+    const baseDir = temporaryDirectory();
+    const codexRoot = path.join(baseDir, "codex");
+    const claudeRoot = path.join(baseDir, "claude");
+    await fsPromises.mkdir(codexRoot, { recursive: true });
+    await fsPromises.mkdir(claudeRoot, { recursive: true });
+    const codexFile = path.join(codexRoot, "11111111-1111-4111-8111-111111111111.jsonl");
+    const claudeFile = path.join(claudeRoot, "22222222-2222-4222-8222-222222222222.jsonl");
+    await fsPromises.writeFile(codexFile, "{}\n");
+    await fsPromises.writeFile(claudeFile, "{}\n");
+    const service = new SessionService(path.join(baseDir, "state"));
+    service.transcriptRoots = (tool) => [tool === "codex" ? codexRoot : claudeRoot];
+
+    await expect(service.scan("codex")).resolves.toHaveLength(1);
+    await expect(service.scan("claude")).resolves.toHaveLength(1);
+    await fsPromises.unlink(codexFile);
+
+    // Scanning Claude must not evict Codex's still-valid cache entry.
+    await expect(service.scan("codex")).resolves.toHaveLength(1);
+  });
+
   it("verifies a preferred transcript and falls back to the latest folder session", async () => {
     const baseDir = temporaryDirectory();
     const transcripts = path.join(baseDir, "transcripts");

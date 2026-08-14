@@ -240,6 +240,7 @@ let usageSelection = {
 };
 let usageRequestSerial = 0;
 let usageQuickRenderKey = "";
+let usageRefreshPollTimer = 0;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -2385,6 +2386,7 @@ async function loadUsage(refresh = false) {
     if (requestSerial !== usageRequestSerial) return;
     usageSummary = {
       updatedAt: Number(result?.updatedAt) || 0,
+      refreshPending: result?.refreshPending === true,
       limits: Array.isArray(result?.limits) ? result.limits : [],
       tokens: result?.tokens && typeof result.tokens === "object" ? result.tokens : {},
       periods: result?.periods && typeof result.periods === "object" ? result.periods : {},
@@ -2395,6 +2397,12 @@ async function loadUsage(refresh = false) {
       usageSelection = { ...usageSelection, ...usageSummary.history.selection };
     }
     usageLoadedAt = Date.now();
+    window.clearTimeout(usageRefreshPollTimer);
+    if (usageSummary.refreshPending) {
+      usageRefreshPollTimer = window.setTimeout(() => {
+        if (selection.type === "usage" && !usageLoading) void loadUsage(false);
+      }, 1_000);
+    }
   } catch (error) {
     if (requestSerial !== usageRequestSerial) return;
     usageError = error instanceof Error ? error.message : String(error);
