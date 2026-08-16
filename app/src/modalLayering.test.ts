@@ -21,4 +21,15 @@ describe("desktop overlay layering", () => {
       zIndexFor(css, ".modal-backdrop")
     );
   });
+
+  it("does not leave full-window menu backdrops after catalog removal", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("const dismissTransientMenus = useCallback");
+    expect(source).toContain("{visibleContextMenu && (");
+    expect(source).toContain("{visibleProjectContextMenu && (");
+    expect(source).toContain("{visibleProjectFolderContextMenu && (");
+    expect(source).toContain("{visibleTabContextMenu && (");
+    expect(source).toContain("onClose={dismissTransientMenus}");
+  });
 });

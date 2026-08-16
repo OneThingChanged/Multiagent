@@ -2630,25 +2630,43 @@ function App() {
 
   // ---- Context menu
 
+  const dismissTransientMenus = useCallback(() => {
+    setContextMenu(null);
+    setProjectContextMenu(null);
+    setProjectFolderContextMenu(null);
+    setTabContextMenu(null);
+  }, []);
+
   const onSidebarContextMenu = useCallback(
     (agentId: string, x: number, y: number) => {
+      dismissTransientMenus();
       setContextMenu({ agentId, x, y });
     },
-    []
+    [dismissTransientMenus]
   );
 
   const onSidebarProjectContextMenu = useCallback(
     (projectId: string, x: number, y: number) => {
+      dismissTransientMenus();
       setProjectContextMenu({ projectId, x, y });
     },
-    []
+    [dismissTransientMenus]
   );
 
   const onSidebarProjectFolderContextMenu = useCallback(
     (projectFolderId: string, x: number, y: number) => {
+      dismissTransientMenus();
       setProjectFolderContextMenu({ projectFolderId, x, y });
     },
-    []
+    [dismissTransientMenus]
+  );
+
+  const onPaneTabContextMenu = useCallback(
+    (path: Path, agentId: string, x: number, y: number) => {
+      dismissTransientMenus();
+      setTabContextMenu({ path, agentId, x, y });
+    },
+    [dismissTransientMenus]
   );
 
   const openNewSessionModal = useCallback(
@@ -2656,14 +2674,11 @@ function App() {
       // Context-menu backdrops cover the entire window. Dismiss every
       // transient menu first so a stale transparent backdrop cannot intercept
       // the new-session form after a session was deleted.
-      setContextMenu(null);
-      setProjectContextMenu(null);
-      setProjectFolderContextMenu(null);
-      setTabContextMenu(null);
+      dismissTransientMenus();
       if (projectId) selectProject(projectId);
       setShowModal(true);
     },
-    [selectProject]
+    [dismissTransientMenus, selectProject]
   );
 
   const renameProject = useCallback((id: string, name: string) => {
@@ -2803,7 +2818,7 @@ function App() {
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
-      setContextMenu(null);
+      dismissTransientMenus();
       if (action === "open") requestSelectAgent(id);
       else if (action === "open-new-window") openNewAppWindow(id);
       else if (action === "tab") openAsTab(id);
@@ -2831,6 +2846,7 @@ function App() {
       pinContextGroupSessions,
       clearContextGroupSessionPins,
       deactivateAgent,
+      dismissTransientMenus,
       removeAgent,
       relinkSession,
     ]
@@ -3474,9 +3490,35 @@ function App() {
         : null,
     [agents, renameSessionId]
   );
+  // Never render a full-window menu backdrop after its catalog/layout target
+  // has disappeared. This is a render-time guard, so it does not depend on an
+  // effect running after a delete/deactivate state transition.
+  const visibleContextMenu =
+    contextMenu && agents.some((agent) => agent.id === contextMenu.agentId)
+      ? contextMenu
+      : null;
+  const visibleProjectContextMenu =
+    projectContextMenu &&
+    projects.some((project) => project.id === projectContextMenu.projectId)
+      ? projectContextMenu
+      : null;
+  const visibleProjectFolderContextMenu =
+    projectFolderContextMenu &&
+    projectFolders.some(
+      (folder) => folder.id === projectFolderContextMenu.projectFolderId
+    )
+      ? projectFolderContextMenu
+      : null;
+  const visibleTabContextMenu =
+    tabContextMenu &&
+    groups.some((group) =>
+      collectAgentIds(group.layout).has(tabContextMenu.agentId)
+    )
+      ? tabContextMenu
+      : null;
   const tabContextDocument = useMemo(() => {
-    if (!tabContextMenu) return null;
-    const ref = parseDocTabId(tabContextMenu.agentId);
+    if (!visibleTabContextMenu) return null;
+    const ref = parseDocTabId(visibleTabContextMenu.agentId);
     if (!ref) return null;
     const project = projects.find(
       (candidate) => candidate.id === ref.projectId
@@ -3488,7 +3530,7 @@ function App() {
         : joinFsPath(project.folder, ref.relativePath),
       projectName: project.name,
     };
-  }, [projects, tabContextMenu]);
+  }, [projects, visibleTabContextMenu]);
 
   // ---- Render
 
@@ -3573,9 +3615,7 @@ function App() {
         onDropTargetChange={setDropTarget}
         onDrop={performDrop}
         onDropToEmpty={requestSelectAgent}
-        onTabContextMenu={(path, agentId, x, y) =>
-          setTabContextMenu({ path, agentId, x, y })
-        }
+        onTabContextMenu={onPaneTabContextMenu}
         chatModeAgents={chatModeAgents}
         onToggleChat={toggleChatMode}
         onOpenMarkdownPath={handleOpenMarkdownPath}
@@ -3807,79 +3847,84 @@ function App() {
           }}
         />
       )}
-      {contextMenu && (
+      {visibleContextMenu && (
         <ContextMenu
-          state={contextMenu}
+          state={visibleContextMenu}
           hasActive={!!activeGroupLayout && !!activePath}
           canPlaceInActive={canPlaceContextAgentInActiveGroup}
           isSessionLocked={!!contextGroup?.sessionLocked}
           canPinSession={canPinContextGroupSession}
           canDeactivate={(() => {
             const agent = agents.find(
-              (candidate) => candidate.id === contextMenu.agentId
+              (candidate) => candidate.id === visibleContextMenu.agentId
             );
             return agent ? isAgentRuntimeActive(agent) : false;
           })()}
-          onClose={() => setContextMenu(null)}
+          onClose={dismissTransientMenus}
           onAction={onContextAction}
         />
       )}
-      {projectContextMenu && (
+      {visibleProjectContextMenu && (
         <ProjectContextMenu
-          state={projectContextMenu}
-          onClose={() => setProjectContextMenu(null)}
+          state={visibleProjectContextMenu}
+          onClose={dismissTransientMenus}
           onAction={(action) => {
+            const projectId = visibleProjectContextMenu.projectId;
+            dismissTransientMenus();
             if (action === "rename") {
-              setRenameProjectId(projectContextMenu.projectId);
+              setRenameProjectId(projectId);
             } else if (action === "delete") {
-              removeProject(projectContextMenu.projectId);
+              void removeProject(projectId);
             } else if (action === "properties") {
-              setPropertiesProjectId(projectContextMenu.projectId);
+              setPropertiesProjectId(projectId);
             }
-            setProjectContextMenu(null);
           }}
         />
       )}
-      {projectFolderContextMenu && (
+      {visibleProjectFolderContextMenu && (
         <ProjectFolderContextMenu
-          state={projectFolderContextMenu}
-          onClose={() => setProjectFolderContextMenu(null)}
+          state={visibleProjectFolderContextMenu}
+          onClose={dismissTransientMenus}
           onAction={(action) => {
+            const projectFolderId =
+              visibleProjectFolderContextMenu.projectFolderId;
+            dismissTransientMenus();
             if (action === "rename") {
               setProjectFolderEditor({
                 mode: "rename",
-                projectFolderId: projectFolderContextMenu.projectFolderId,
+                projectFolderId,
               });
             } else {
-              removeProjectFolder(projectFolderContextMenu.projectFolderId);
+              removeProjectFolder(projectFolderId);
             }
-            setProjectFolderContextMenu(null);
           }}
         />
       )}
-      {tabContextMenu && (
+      {visibleTabContextMenu && (
         <TabContextMenu
-          state={tabContextMenu}
+          state={visibleTabContextMenu}
           pinned={
-            !!agents.find((a) => a.id === tabContextMenu.agentId)?.pinned
+            !!agents.find((a) => a.id === visibleTabContextMenu.agentId)?.pinned
           }
           tabColor={
-            agents.find((a) => a.id === tabContextMenu.agentId)?.tabColor ?? null
+            agents.find((a) => a.id === visibleTabContextMenu.agentId)?.tabColor ?? null
           }
           canReopen={recentlyClosedTabsRef.current.length > 0}
-          onDismiss={() => setTabContextMenu(null)}
+          onDismiss={dismissTransientMenus}
           onSplit={(direction) =>
-            splitWith(tabContextMenu.agentId, direction)
+            splitWith(visibleTabContextMenu.agentId, direction)
           }
           onTogglePin={() => {
-            const current = agents.find((a) => a.id === tabContextMenu.agentId);
-            setAgentPinned(tabContextMenu.agentId, !current?.pinned);
+            const current = agents.find(
+              (a) => a.id === visibleTabContextMenu.agentId
+            );
+            setAgentPinned(visibleTabContextMenu.agentId, !current?.pinned);
           }}
           onReopen={reopenClosedTab}
-          chatMode={chatModeAgents.has(tabContextMenu.agentId)}
-          onToggleChat={() => toggleChatMode(tabContextMenu.agentId)}
+          chatMode={chatModeAgents.has(visibleTabContextMenu.agentId)}
+          onToggleChat={() => toggleChatMode(visibleTabContextMenu.agentId)}
           canChat={toolSupportsChat(
-            agents.find((a) => a.id === tabContextMenu.agentId)?.aiToolId
+            agents.find((a) => a.id === visibleTabContextMenu.agentId)?.aiToolId
           )}
           canRevealInExplorer={!!tabContextDocument}
           onRevealInExplorer={() => {
@@ -3888,24 +3933,30 @@ function App() {
               path: tabContextDocument.path,
             }).catch((error) => {
               pushToast(
-                tabContextMenu.agentId,
+                visibleTabContextMenu.agentId,
                 tabContextDocument.projectName,
                 `탐색기에서 파일을 표시할 수 없습니다: ${String(error)}`
               );
             });
           }}
           onCloseTab={() =>
-            closeTab(tabContextMenu.path, tabContextMenu.agentId)
+            closeTab(visibleTabContextMenu.path, visibleTabContextMenu.agentId)
           }
           onCloseOthers={() =>
-            closeOtherTabs(tabContextMenu.path, tabContextMenu.agentId)
+            closeOtherTabs(
+              visibleTabContextMenu.path,
+              visibleTabContextMenu.agentId
+            )
           }
           onCloseRight={() =>
-            closeTabsToRight(tabContextMenu.path, tabContextMenu.agentId)
+            closeTabsToRight(
+              visibleTabContextMenu.path,
+              visibleTabContextMenu.agentId
+            )
           }
-          onRename={() => setRenameSessionId(tabContextMenu.agentId)}
+          onRename={() => setRenameSessionId(visibleTabContextMenu.agentId)}
           onSetColor={(color) =>
-            setAgentTabColor(tabContextMenu.agentId, color)
+            setAgentTabColor(visibleTabContextMenu.agentId, color)
           }
         />
       )}
