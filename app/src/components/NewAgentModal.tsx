@@ -3,6 +3,8 @@ import { AI_TOOLS, toolForId } from "../types";
 import type { NewAgentPayload, Project } from "../types";
 import { folderTail } from "../lib/path";
 import { defaultAiToolId } from "../lib/projectCreation";
+import { SessionWorkerFields } from "./SessionWorkerFields";
+import type { SessionWorkerSettings } from "../types";
 
 export function NewAgentModal({
   project,
@@ -26,6 +28,9 @@ export function NewAgentModal({
     defaultAiToolId(disabledTools)
   );
   const [dangerous, setDangerous] = useState(false);
+  const [workerSettings, setWorkerSettings] = useState<
+    SessionWorkerSettings | undefined
+  >();
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!selectedTool.dangerousFlag;
 
@@ -37,6 +42,7 @@ export function NewAgentModal({
       name: name.trim(),
       aiToolId,
       dangerous: dangerous && supportsDangerous,
+      workerSettings: aiToolId === "codex" ? workerSettings : undefined,
     });
   };
 
@@ -99,6 +105,14 @@ export function NewAgentModal({
               </span>
             </span>
           </label>
+        )}
+
+        {aiToolId === "codex" && (
+          <SessionWorkerFields
+            settings={workerSettings}
+            disabledTools={disabledTools}
+            onChange={setWorkerSettings}
+          />
         )}
 
         <div className="modal-actions">

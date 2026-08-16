@@ -197,7 +197,7 @@ When starting a PowerShell-family shell, the `-NoLogo` argument is added.
 ```ts
 projects: Project[]                // project meta + optional UI-only projectFolderId
 projectFolders: ProjectFolder[]    // one-level collections scoped to local or one SSH machine
-agents: Agent[]                    // session meta (id, projectId, name, folder, aiToolId, dangerous, status, createdAt, lastSessionId?)
+agents: Agent[]                    // session meta (id, projectId, name, folder, aiToolId, dangerous, workerSettings?, status, createdAt, lastSessionId?)
 groups: Group[]                    // each group = layout tree + optional reference projectId + session pins
 activeProjectId: string | null     // the project the sidebar/Docs currently follow
 activeGroupId: string | null       // the group currently shown
@@ -222,11 +222,20 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 ```
 
 - Each leaf is one pane. The tabs array = tab order of that pane, activeIndex = currently visible tab
-- agents have tab customization fields `pinned`/`tabColor`, set from the tab context menu and persisted to localStorage. Pinned tabs are excluded from "close others/close to the right". The Codex-only `useAltScreen` is also toggled in session properties (decides whether `--no-alt-screen` is omitted the next time the session is activated)
+- agents have tab customization fields `pinned`/`tabColor`, set from the tab context menu and persisted to localStorage. Pinned tabs are excluded from "close others/close to the right". The Codex-only `useAltScreen` and per-session `workerSettings` are also edited in session properties; both are launch-time options and take effect the next time the session is activated
 - tabs entries are usually agent IDs, but **document tabs** are expressed as `doc:<projectId>:<relativePath>` prefix strings (`src/lib/docTabs.ts`). layout/groupOps operations treat strings as opaque so they just work, and `validateLayout` keeps doc ids as valid tabs so they restore after restart. Closing a document tab uses `closeDocTab` (no solo-group rearrangement), and they are removed via `stripDocTabs` before remote/monitor sync
 - Split operations add a new leaf to the current Screen. If the parent split has the same direction it is added as a sibling; otherwise the target leaf is wrapped in a new split, nesting it
 - So one Screen supports 3+ panes like `A+B+C` and nested left-right/top-bottom layouts
 - `sizes` child ratios sum to 1
+
+### Per-session Content Workers
+
+- A Codex session can independently select a worker for **documentation/Markdown** and **HTML/presentation** work. `undefined` means disabled, so previously stored sessions remain backward-compatible
+- Worker choices follow Settings → Agents: `Codex · Luna Max` is hidden when Codex is disabled, `Claude · Opus` is hidden when Claude is disabled, and the section is hidden when neither provider is enabled
+- Luna uses Codex's native multi-agent support. `src/lib/sessionWorkers.ts` appends invocation-scoped `-c` overrides for the Luna model, max reasoning, two named roles, concurrency, and delegation guidance. It does not mutate the user's global `~/.codex/config.toml` or the project's `.codex/config.toml`
+- Opus is not a Codex model. The per-session guidance tells the bounded worker role to invoke the installed Claude Code CLI with Opus/max, safe mode, a restricted tool list, no session persistence, and prompt input over stdin. Claude Code must be installed and authenticated; if it is unavailable, the primary Codex session continues safely and reports the failure
+- The primary Codex agent owns file allocation, integration, and verification. Workers must not edit the same file concurrently
+- Changing a running session does not hot-patch its CLI process. Deactivate and reopen it; the stored `lastSessionId` is reused, so the existing conversation resumes with the new worker configuration
 
 ### Group Model Invariants
 

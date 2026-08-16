@@ -2,6 +2,7 @@ import { invoke } from "../platform/runtime";
 import { toolForId } from "../types";
 import type { Agent, SshHost } from "../types";
 import { findSshHost } from "./sshHosts";
+import { addSessionWorkerArgs } from "./sessionWorkers";
 
 export type SpawnArgs = {
   initCommand: string | null;
@@ -152,6 +153,11 @@ export async function buildSpawnArgs(
       agent.aiToolId,
       cmd,
       agent.useAltScreen === true
+    );
+    cmd = addSessionWorkerArgs(
+      agent.aiToolId,
+      cmd,
+      agent.workerSettings
     );
     if (agent.dangerous && tool.dangerousFlag) {
       cmd = `${cmd} ${tool.dangerousFlag}`;

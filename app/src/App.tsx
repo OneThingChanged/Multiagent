@@ -73,6 +73,7 @@ import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound, loadNotificationSound, shouldSilenceOsNotification } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
+import { normalizeSessionWorkerSettings } from "./lib/sessionWorkers";
 import {
   AGENT_ACTIVITY_STALE_AFTER_MS,
   applyAgentHookEvent,
@@ -271,6 +272,7 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     aiToolId: agent.aiToolId,
     dangerous: agent.dangerous,
     useAltScreen: agent.useAltScreen || undefined,
+    workerSettings: normalizeSessionWorkerSettings(agent.workerSettings),
     pinned: agent.pinned || undefined,
     tabColor: agent.tabColor || undefined,
     createdAt: agent.createdAt,
@@ -395,6 +397,7 @@ function agentFromStored(
     aiLabel: toolForId(aiToolId).label,
     dangerous: !!stored.dangerous,
     useAltScreen: stored.useAltScreen || undefined,
+    workerSettings: normalizeSessionWorkerSettings(stored.workerSettings),
     pinned: stored.pinned || undefined,
     tabColor: stored.tabColor || undefined,
     createdAt: stored.createdAt || existing?.createdAt || Date.now(),
@@ -2578,6 +2581,10 @@ function App() {
             aiToolId: tool.id,
             aiLabel: tool.label,
             dangerous: payload.dangerous && !!tool.dangerousFlag,
+            workerSettings:
+              tool.id === "codex"
+                ? normalizeSessionWorkerSettings(payload.workerSettings)
+                : undefined,
             status: "starting",
             runtimeStatus: "starting",
             createdAt: Date.now(),
@@ -3806,6 +3813,7 @@ function App() {
                   prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
                 )
               }
+              disabledTools={disabledTools}
               onClose={() => setPropertiesAgentId(null)}
             />
           );

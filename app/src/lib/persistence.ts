@@ -30,6 +30,7 @@ import {
   pruneAgent,
   validateLayout,
 } from "./layout";
+import { normalizeSessionWorkerSettings } from "./sessionWorkers";
 
 function projectNameFromFolder(folder: string) {
   const normalized = folder.replace(/\\/g, "/").replace(/\/$/, "");
@@ -155,6 +156,7 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
         aiLabel: toolForId(c.aiToolId).label,
         dangerous: !!c.dangerous,
         useAltScreen: c.useAltScreen || undefined,
+        workerSettings: normalizeSessionWorkerSettings(c.workerSettings),
         pinned: c.pinned || undefined,
         tabColor: c.tabColor || undefined,
         createdAt: c.createdAt,

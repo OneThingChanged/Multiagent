@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { Agent, Project } from "../types";
 import { toolForId } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
+import { SessionWorkerFields } from "./SessionWorkerFields";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -28,14 +29,18 @@ export function SessionPropertiesModal({
   agent,
   project,
   onUpdateAgent,
+  disabledTools = [],
   onClose,
 }: {
   agent: Agent;
   project: Project | null;
   onUpdateAgent: (
     id: string,
-    patch: Partial<Pick<Agent, "dangerous" | "useAltScreen">>
+    patch: Partial<
+      Pick<Agent, "dangerous" | "useAltScreen" | "workerSettings">
+    >
   ) => void;
+  disabledTools?: string[];
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -101,6 +106,7 @@ export function SessionPropertiesModal({
 
   const supportsDangerous = !!tool.dangerousFlag;
   const supportsAltScreen = agent.aiToolId === "codex";
+  const supportsWorkers = agent.aiToolId === "codex";
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -131,7 +137,7 @@ export function SessionPropertiesModal({
             </div>
           ))}
         </div>
-        {(supportsDangerous || supportsAltScreen) && (
+        {(supportsDangerous || supportsAltScreen || supportsWorkers) && (
           <div className="session-props-toggles">
             {supportsDangerous && (
               <label className="session-props-toggle">
@@ -174,6 +180,16 @@ export function SessionPropertiesModal({
                   </span>
                 </span>
               </label>
+            )}
+            {supportsWorkers && (
+              <SessionWorkerFields
+                settings={agent.workerSettings}
+                disabledTools={disabledTools}
+                onChange={(workerSettings) =>
+                  onUpdateAgent(agent.id, { workerSettings })
+                }
+                className="session-worker-fields session-worker-fields-props"
+              />
             )}
             <div className="session-props-toggle-note">
               변경은 세션을 비활성화한 뒤 다시 열면 적용됩니다

@@ -152,4 +152,29 @@ describe("buildSpawnArgs resume recovery", () => {
       "codex resume pinned-session --no-alt-screen"
     );
   });
+
+  it("applies worker settings when an existing Codex session is resumed", async () => {
+    invokeMock.mockResolvedValueOnce("existing-session");
+
+    const result = await buildSpawnArgs(
+      {
+        ...agent,
+        lastSessionId: "existing-session",
+        workerSettings: {
+          documents: "codex-luna-max",
+          html: "claude-opus",
+        },
+      },
+      null,
+      vi.fn()
+    );
+
+    expect(result.initCommand).toContain(
+      "codex resume existing-session --no-alt-screen"
+    );
+    expect(result.initCommand).toContain(
+      "agents.default_subagent_model=\"gpt-5.6-luna\""
+    );
+    expect(result.initCommand).toContain("claude -p --model opus");
+  });
 });

@@ -3,7 +3,7 @@
 ## Known Limitations
 
 ### Persistence Limits
-- Project **settings** (name·folder) and session **settings** (alias·project·AI tool·dangerous·lastSessionId), **layout** (group/split/tab order·active), **view**, **app theme**, **Docs width**, and **terminal font size** are stored in localStorage
+- Project **settings** (name·folder) and session **settings** (alias·project·AI tool·dangerous·document/HTML workers·lastSessionId), **layout** (group/split/tab order·active), **view**, **app theme**, **Docs width**, and **terminal font size** are stored in localStorage
 - Group session pins (`sessionPins`, `sessionLocked`) are also stored with the group data in localStorage
 - However, **the OS processes of terminal sessions cannot be restored**: when the app closes, the PowerShell+Claude/Codex processes die
 - **Codex conversations can resume**: a graceful full exit/relaunch/update preserves the SessionStart ID and reopens with `codex resume <id>` on the next run. Electron's X button only hides to the tray, keeping the PTY alive
@@ -14,6 +14,11 @@
   the app exits, so this is not a permanent full-output transcript feature. The canonical
   Codex/Claude conversation originals are the provider resume data.
 - Electron journals the current live PTY IDs in `electron-reopen-state.json`, so forced/OS termination can still offer the last known sessions. It does not preserve the killed OS processes themselves; each conversation is recreated through the provider resume command
+
+### Per-session Content Workers
+- Document/HTML worker settings are launch-time Codex configuration. Existing sessions do not need to be recreated, but an already-running session must be deactivated and reopened before a change applies; it resumes the same stored conversation ID
+- Worker choices are filtered by the enabled providers in Settings → Agents. Enabling `Claude · Opus` does not install or log in to Claude Code: the local Claude CLI must also be installed and authenticated when that worker actually runs
+- Opus work is delegated through a separate Claude Code process and therefore uses the Claude account independently from the primary Codex session. If Claude is unavailable or logged out, the primary session is instructed to report it and continue without unsafe permission escalation
 
 ### Scrollback on Window Resize
 - Windows ConPTY uses xterm's conservative resize compatibility without assuming a hardcoded OS build, so existing lines are not reflowed when cols change. Output that Codex/Claude **baked in with wrapping based on the previous width** also does not re-wrap; only new output uses the new width

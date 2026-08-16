@@ -2250,6 +2250,8 @@ body,
 
 .session-props-modal {
   width: 420px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 .session-props-table {
   display: flex;
@@ -2299,6 +2301,48 @@ body,
 .session-props-toggle-note {
   font-size: 10px;
   color: var(--app-soft-text);
+}
+
+.session-worker-fields {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-panel-soft);
+}
+
+.session-worker-fields-props {
+  margin: 2px 0;
+  padding: 10px 0 2px;
+  border-width: 1px 0 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.session-worker-heading {
+  color: var(--app-heading);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.session-worker-description,
+.session-worker-hint {
+  color: var(--app-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.session-worker-description {
+  margin: 3px 0 10px;
+}
+
+.session-worker-field {
+  gap: 4px;
+  margin-bottom: 9px;
+}
+
+.session-worker-field:last-child {
+  margin-bottom: 0;
 }
 .session-props-row {
   display: flex;

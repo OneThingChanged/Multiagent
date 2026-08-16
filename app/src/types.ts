@@ -47,6 +47,13 @@ export type AgentStatus =
   | "waiting"
   | "blocked";
 
+export type SessionWorkerPreset = "codex-luna-max" | "claude-opus";
+
+export type SessionWorkerSettings = {
+  documents?: SessionWorkerPreset;
+  html?: SessionWorkerPreset;
+};
+
 export type AiTool = {
   id: string;
   label: string;
@@ -149,6 +156,9 @@ export type Agent = {
   // Codex only: skip the forced --no-alt-screen so the TUI runs on the
   // alternate screen (its own internal scrolling). Applies from next spawn.
   useAltScreen?: boolean;
+  // Codex only: delegate bounded documentation/HTML work to per-session
+  // workers. The effective CLI configuration is applied on the next spawn.
+  workerSettings?: SessionWorkerSettings;
   // Tab customization (right-click tab menu).
   pinned?: boolean;
   tabColor?: string;
@@ -170,6 +180,7 @@ export type StoredAgent = {
   aiToolId: string;
   dangerous?: boolean;
   useAltScreen?: boolean;
+  workerSettings?: SessionWorkerSettings;
   pinned?: boolean;
   tabColor?: string;
   createdAt: number;
@@ -227,6 +238,7 @@ export type NewAgentPayload = {
   name: string;
   aiToolId: string;
   dangerous: boolean;
+  workerSettings?: SessionWorkerSettings;
 };
 
 export type NewProjectPayload = {
