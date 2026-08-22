@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DesktopPetPage } from "./components/DesktopPetPage";
 import {
+  DocumentBrowserPage,
+  isDocumentBrowserPage,
+} from "./components/DocumentBrowserPage";
+import {
   syncReopenStateBeforeRender,
   syncSharedStorageBeforeRender,
 } from "./platform/storageMigration";
@@ -11,9 +15,10 @@ const desktopPet =
   (window as Window & { __MULTIAGENT_DESKTOP_PET__?: boolean })
     .__MULTIAGENT_DESKTOP_PET__ === true ||
   new URLSearchParams(window.location.search).has("desktopPet");
+const documentBrowser = !desktopPet && isDocumentBrowserPage();
 
 async function render() {
-  if (!desktopPet) {
+  if (!desktopPet && !documentBrowser) {
     await Promise.all([
       syncSharedStorageBeforeRender(),
       syncReopenStateBeforeRender(),
@@ -21,7 +26,7 @@ async function render() {
   }
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      {desktopPet ? <DesktopPetPage /> : <App />}
+      {desktopPet ? <DesktopPetPage /> : documentBrowser ? <DocumentBrowserPage /> : <App />}
     </React.StrictMode>,
   );
 }

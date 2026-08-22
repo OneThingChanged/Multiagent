@@ -3069,6 +3069,13 @@ body.files-resizing .files-resizer::after {
 .docs-tool-btn:hover:not(:disabled) {
   background: var(--docs-button-hover);
 }
+.docs-tool-btn-primary {
+  border-color: var(--docs-accent, #58a6ff);
+  background: rgba(31, 111, 235, 0.22);
+}
+.docs-tool-btn-primary:hover:not(:disabled) {
+  background: rgba(31, 111, 235, 0.38);
+}
 .docs-tool-btn:disabled {
   color: var(--docs-muted);
   cursor: not-allowed;
@@ -4246,6 +4253,237 @@ body.files-resizing .files-resizer::after {
   width: 100%;
   border: none;
   background: #fff;
+}
+
+.doc-html-launch {
+  width: min(560px, calc(100% - 48px));
+  margin: auto;
+  padding: 28px 30px;
+  border: 1px solid var(--docs-border);
+  border-radius: 12px;
+  background: var(--docs-bg-strong);
+  text-align: center;
+}
+
+.doc-html-launch-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  height: 28px;
+  margin-bottom: 14px;
+  padding: 0 9px;
+  border: 1px solid #d29922;
+  border-radius: 6px;
+  color: #f2cc60;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.doc-html-launch-title {
+  color: var(--docs-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.doc-html-launch-copy {
+  margin: 10px auto 18px;
+  color: var(--docs-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Electron's isolated HTML WebContentsView is attached to the current
+   workspace window and positioned over this host. Keeping the host in the
+   document tab makes the browser feel like a normal Codex-style pane instead
+   of opening a second native window. */
+.embedded-document-browser {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+.embedded-document-browser-toolbar {
+  flex: 0 0 48px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.embedded-document-browser-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #0d1117;
+  border-top: 1px solid #30363d;
+}
+
+.document-browser-annotation-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid #303d4d;
+  background: #101923;
+  color: #8b949e;
+  font: 11px Consolas, "Courier New", monospace;
+}
+
+.document-browser-annotation-bar details {
+  min-width: 0;
+  flex: 1;
+}
+
+.document-browser-annotation-bar summary {
+  cursor: pointer;
+  color: #58a6ff;
+}
+
+.document-browser-annotation-bar pre {
+  margin: 6px 0 0;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Legacy standalone browser shell styles retained for the packaged migration
+   path. The normal Electron HTML viewer now uses the embedded toolbar above
+   and positions its untrusted WebContentsView over the host element. */
+.document-browser-page {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d1117;
+  color: #c9d1d9;
+}
+
+.document-browser-toolbar {
+  height: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #30363d;
+  background: #111820;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.document-browser-nav,
+.document-browser-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.document-browser-btn {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #303d4d;
+  border-radius: 6px;
+  background: #192331;
+  color: #c9d1d9;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.document-browser-btn:hover:not(:disabled) {
+  background: #263548;
+  border-color: #58a6ff;
+}
+
+.document-browser-btn.is-active {
+  border-color: #58a6ff;
+  background: rgba(31, 111, 235, 0.34);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.16);
+}
+
+.document-browser-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.document-browser-location {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.document-browser-address-form {
+  align-items: center;
+}
+
+.document-browser-address {
+  min-width: 80px;
+  flex: 1;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #303d4d;
+  border-radius: 6px;
+  outline: none;
+  background: #0d1117;
+  color: #c9d1d9;
+  font: 11px Consolas, "Courier New", monospace;
+}
+
+.document-browser-address:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.18);
+}
+
+.document-browser-title {
+  flex-shrink: 0;
+  color: #eef3f8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.document-browser-path {
+  min-width: 0;
+  color: #8b949e;
+  font: 11px Consolas, "Courier New", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-browser-close {
+  color: #ffb4ab;
+}
+
+.document-browser-status-inline {
+  flex-shrink: 0;
+  color: #8b949e;
+  font-size: 10px;
+}
+
+.document-browser-error {
+  max-width: 32vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffb4ab;
 }
 
 .doc-image-wrap {

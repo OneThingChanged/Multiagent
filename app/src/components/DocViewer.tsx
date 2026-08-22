@@ -7,10 +7,9 @@ import type { Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
 import type { TextFileResult, DocAssetResult } from "../platform/ipcContract";
 import { docKindForPath, parseDocTabId, type DocKind } from "../lib/docTabs";
-import {
-  htmlNeedsAssetInlining,
-  inlineHtmlAssets,
-} from "../lib/htmlAssets";
+import { isElectronRuntime } from "../platform/electronBridge";
+import { htmlNeedsAssetInlining, inlineHtmlAssets } from "../lib/htmlAssets";
+import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
 
 function joinFolderPath(folder: string, relativePath: string) {
   return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
@@ -38,21 +37,16 @@ function fencedSource(content: string, language: string) {
   return `${fence}${language}\n${content}\n${fence}`;
 }
 
-// Injected into HTML doc tabs so http(s) links respond: Ctrl/Cmd+click (or
-// middle-click) opens the OS browser via window.open → the main process's
-// window-open handler (shell.openExternal); plain clicks are swallowed so a
-// stray click can't navigate the sandboxed frame. The document's OWN scripts
-// stay blocked — the app CSP only whitelists this exact text by hash
-// (index.html script-src 'sha256-…'). If you change ANY character here,
-// recompute the hash: node -e "console.log(require('crypto').createHash(
-// 'sha256').update(SCRIPT,'utf8').digest('base64'))"
+// Tauri keeps the legacy in-pane fallback. Electron opens HTML in the
+// isolated Document Browser instead, so this script is never injected into
+// the trusted Electron renderer.
 const DOC_LINK_SCRIPT =
   'document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();if(e.ctrlKey||e.metaKey)window.open(h,"_blank","noopener")}else if(!/^#/.test(a.getAttribute("href")||""))e.preventDefault()},!0);document.addEventListener("auxclick",function(e){if(1!==e.button)return;var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();window.open(h,"_blank","noopener")}},!0);';
 
 type DocViewerState =
   | { phase: "loading" }
   | { phase: "markdown"; content: string }
-  | { phase: "html"; content: string }
+  | { phase: "html"; content: string | null }
   | { phase: "image"; dataUrl: string }
   | { phase: "text"; content: string; language: string }
   | { phase: "binary"; reason: "binary" | "too_large"; size?: number }
@@ -62,16 +56,23 @@ export function DocViewer({
   docId,
   project,
   theme,
+  agentId,
 }: {
   docId: string;
   project: Project | null;
   theme: AppThemeId;
+  agentId?: string | null;
 }) {
   const ref = parseDocTabId(docId);
   const folder = project?.folder ?? "";
   const relativePath = ref?.relativePath ?? "";
   const [state, setState] = useState<DocViewerState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+  const [embeddedBrowser, setEmbeddedBrowser] = useState<{
+    browserId: string;
+    docId: string;
+  } | null>(null);
+  const electronRuntime = isElectronRuntime();
 
   useEffect(() => {
     if (!relativePath) {
@@ -87,10 +88,29 @@ export function DocViewer({
     }
 
     let cancelled = false;
+    setEmbeddedBrowser(null);
     setState({ phase: "loading" });
     const kind: DocKind = docKindForPath(relativePath);
 
     const load = async () => {
+      // Do not copy arbitrary project HTML into the trusted application
+      // renderer. The Electron Document Browser validates and streams it
+      // through the isolated preview origin before it is shown.
+      if (kind === "html" && electronRuntime) {
+        try {
+          const result = await invoke<{ browserId: string }>("document_browser_open", {
+            folder,
+            relativePath,
+            ...(agentId ? { agentId } : {}),
+          });
+          if (cancelled) return;
+          setEmbeddedBrowser({ browserId: result.browserId, docId });
+          setState({ phase: "html", content: null });
+        } catch (error) {
+          if (!cancelled) setState({ phase: "error", message: String(error) });
+        }
+        return;
+      }
       if (kind === "markdown" || kind === "html") {
         const content = await invoke<string>("read_markdown_file", {
           folder,
@@ -101,23 +121,25 @@ export function DocViewer({
           setState({ phase: "markdown", content });
           return;
         }
-        // HTML renders in a srcDoc iframe (about:srcdoc), so relative images,
-        // css url()s and linked stylesheets can't resolve on their own. Inline
-        // local assets (scoped to the project root) so they display.
-        let html = content;
-        if (htmlNeedsAssetInlining(content)) {
-          html = await inlineHtmlAssets(content, {
-            htmlRelative: relativePath,
-            readAsset: (containerRelative, ref) =>
-              invoke<DocAssetResult>("read_doc_asset", {
-                folder,
-                containerRelative,
-                ref,
-              }).catch(() => null),
-          });
+        if (kind === "html" && !electronRuntime) {
+          let html = content;
+          if (htmlNeedsAssetInlining(content)) {
+            html = await inlineHtmlAssets(content, {
+              htmlRelative: relativePath,
+              readAsset: (containerRelative, ref) =>
+                invoke<DocAssetResult>("read_doc_asset", {
+                  folder,
+                  containerRelative,
+                  ref,
+                }).catch(() => null),
+            });
+          }
+          if (cancelled) return;
+          setState({ phase: "html", content: html });
+          return;
         }
         if (cancelled) return;
-        setState({ phase: "html", content: html });
+        setState({ phase: "html", content: null });
         return;
       }
       if (kind === "image") {
@@ -154,7 +176,7 @@ export function DocViewer({
     return () => {
       cancelled = true;
     };
-  }, [docId, folder, relativePath, reloadKey]);
+  }, [docId, folder, relativePath, reloadKey, electronRuntime, agentId]);
 
   const fullPath = folder && relativePath
     ? joinFolderPath(folder, relativePath)
@@ -166,39 +188,57 @@ export function DocViewer({
   const revealLocal = () => {
     if (fullPath) invoke("reveal_local_path", { path: fullPath }).catch(() => {});
   };
+  const openBrowser = async () => {
+    if (!electronRuntime || !folder || !relativePath) return;
+    try {
+      const result = await invoke<{ browserId: string }>("document_browser_open", {
+        folder,
+        relativePath,
+        ...(agentId ? { agentId } : {}),
+      });
+      setEmbeddedBrowser({ browserId: result.browserId, docId });
+    } catch (error) {
+      setState({ phase: "error", message: String(error) });
+    }
+  };
+  const browserOpenForThisDocument = embeddedBrowser?.docId === docId;
+  const usesEmbeddedHtmlBrowser =
+    electronRuntime && docKindForPath(relativePath) === "html";
 
   return (
     <div className={`doc-view docs-theme-${theme}`}>
-      <div className="doc-view-header">
-        <div className="doc-view-path" title={relativePath}>
-          {displayPath(relativePath)}
+      {!usesEmbeddedHtmlBrowser && (
+        <div className="doc-view-header">
+          <div className="doc-view-path" title={relativePath}>
+            {displayPath(relativePath)}
+          </div>
+          <div className="doc-view-actions">
+            <button
+              className="docs-tool-btn"
+              onClick={() => setReloadKey((v) => v + 1)}
+              title="다시 읽기"
+            >
+              Refresh
+            </button>
+            <button
+              className="docs-tool-btn"
+              onClick={openLocal}
+              disabled={!fullPath}
+              title="OS 기본 앱으로 열기"
+            >
+              Open
+            </button>
+            <button
+              className="docs-tool-btn"
+              onClick={revealLocal}
+              disabled={!fullPath}
+              title="탐색기에서 보기"
+            >
+              Reveal
+            </button>
+          </div>
         </div>
-        <div className="doc-view-actions">
-          <button
-            className="docs-tool-btn"
-            onClick={() => setReloadKey((v) => v + 1)}
-            title="다시 읽기"
-          >
-            Refresh
-          </button>
-          <button
-            className="docs-tool-btn"
-            onClick={openLocal}
-            disabled={!fullPath}
-            title="OS 기본 앱으로 열기"
-          >
-            Open
-          </button>
-          <button
-            className="docs-tool-btn"
-            onClick={revealLocal}
-            disabled={!fullPath}
-            title="탐색기에서 보기"
-          >
-            Reveal
-          </button>
-        </div>
-      </div>
+      )}
       <div className="doc-view-body">
         {state.phase === "loading" && (
           <div className="docs-empty">Loading...</div>
@@ -213,11 +253,32 @@ export function DocViewer({
             </ReactMarkdown>
           </div>
         )}
-        {state.phase === "html" && (
+        {state.phase === "html" && electronRuntime && browserOpenForThisDocument && embeddedBrowser && (
+          <EmbeddedDocumentBrowser
+            browserId={embeddedBrowser.browserId}
+            documentPath={relativePath}
+          />
+        )}
+        {state.phase === "html" && electronRuntime && !browserOpenForThisDocument && (
+          <div className="doc-html-launch">
+            <div className="doc-html-launch-icon">HTML</div>
+            <div className="doc-html-launch-title">전용 브라우저에서 문서 열기</div>
+            <div className="doc-html-launch-copy">
+              상대경로 CSS, JavaScript, 이미지, 폰트와 미디어를 원본 경로 그대로 불러옵니다.
+              프로젝트 폴더 밖의 파일과 Electron 권한은 차단됩니다.
+            </div>
+            <div className="doc-fallback-actions">
+              <button className="docs-tool-btn docs-tool-btn-primary" onClick={openBrowser}>
+                전용 브라우저로 열기
+              </button>
+            </div>
+          </div>
+        )}
+        {state.phase === "html" && !electronRuntime && (
           <iframe
             className="doc-html-frame"
             sandbox="allow-scripts allow-popups"
-            srcDoc={`${state.content}\n<script>${DOC_LINK_SCRIPT}</script>`}
+            srcDoc={`${state.content ?? ""}\n<script>${DOC_LINK_SCRIPT}</script>`}
             title={`${relativePath} — 링크는 Ctrl+클릭으로 브라우저에서 열립니다`}
           />
         )}

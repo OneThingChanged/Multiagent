@@ -19,6 +19,7 @@ top of ConPTY; Claude and plain Shell output pass through unchanged.
 - **[MIRACONTROL.md](MIRACONTROL.md)** — authenticated local session status, activation, and guarded input API for MiraControl/StreamDeck
 - **[REMOTE.md](REMOTE.md)** — remote access (axum server, Cloudflare Tunnel, GitHub auth, account approval, web client)
 - **[USAGE_DASHBOARD.md](USAGE_DASHBOARD.md)** — token usage collection, SQLite, dashboard, and the Electron account rate-limit status bar
+- **[BROWSER_MCP.md](BROWSER_MCP.md)** — embedded browser tabs, agent MCP controls, element selection/clipboard/session delivery, and security boundaries
 
 ### Build, Release & Issues
 - **[BUILD.md](BUILD.md)** — dev/debug/release builds, troubleshooting

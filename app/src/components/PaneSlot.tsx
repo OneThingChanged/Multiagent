@@ -97,6 +97,8 @@ export type RenderCtx = {
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   chatModeAgents: Set<string>;
   onToggleChat: (agentId: string) => void;
+  getDocumentOwner: (docId: string) => string | null;
+  fallbackDocumentAgentId: string | null;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -130,6 +132,14 @@ export function PaneSlot({
   const activeGitHistoryId =
     activeTabId && isGitHistoryTabId(activeTabId) ? activeTabId : null;
   const activeAgentId = activeDocId || activeGitHistoryId ? null : activeTabId;
+  // A document tab can coexist with one or more session tabs in the same
+  // leaf. Use the first real session as the browser/MCP owner so an HTML tab
+  // opened from a terminal remains associated with that agent.
+  const documentBrowserAgentId = activeDocId
+    ? ctx.getDocumentOwner(activeDocId) ??
+      leaf.tabs.find((tabId) => !isDocTabId(tabId) && !isGitHistoryTabId(tabId)) ??
+      ctx.fallbackDocumentAgentId
+    : null;
   const activeAgent = activeAgentId
     ? ctx.agents.find((a) => a.id === activeAgentId) ?? null
     : null;
@@ -967,6 +977,7 @@ export function PaneSlot({
       {activeDocId && (
         <DocViewer
           docId={activeDocId}
+          agentId={documentBrowserAgentId}
           project={
             ctx.projects.find(
               (p) => p.id === parseDocTabId(activeDocId)?.projectId

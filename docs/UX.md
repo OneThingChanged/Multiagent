@@ -169,15 +169,17 @@ Orca style: the right sidebar shows **only the file tree**, and clicking a file 
 - Docs can be opened even with no session screen — a new single-document screen is auto-created
 - Rendering by file kind:
   - `.md`/`.markdown` — GFM + code highlight render
-  - `.html`/`.htm` — **sandbox iframe** render (the document's own scripts are blocked). http(s) links inside the document open in the OS default browser on **Ctrl+click (or wheel click)** (plain click ignored, `#anchor` navigates within the document)
+- `.html`/`.htm` — Electron opens a **dedicated isolated Document Browser embedded in the active document pane** with project-relative CSS/JavaScript/images/fonts/media, back/forward/reload, an editable HTTP(S) address bar, and an OS-default-browser action. Normal `http(s)` links continue navigating inside this pane; the view uses the shared app-local persistent profile plus a narrow sandboxed annotation preload with no Node APIs, file-system escape, or device permissions. Tauri keeps the legacy sandbox iframe fallback
+  - `영역 선택` — DevTools-style hover outlines the pointed element; clicking captures sanitized JSON/HTML and a PNG, then copies the full annotation prompt to the clipboard
+  - `선택 후 전송` — performs the same explicit selection and submits the prompt to the document tab's associated session. If Codex is already working, the prompt can remain in the composer/queue; avoid duplicate clicks. A multi-line Codex draft is cleared with repeated `Ctrl+U` (`Esc` interrupts the active turn)
   - images (png/jpg/gif/webp/svg/…) — image viewer
   - other text files — read-only syntax-highlighted source (2MB limit)
   - binary/oversized — "Open with OS" / "Reveal in Explorer" buttons
-- Tab header: relative path + `Refresh` (re-read) / `Open` (default program) / `Reveal` (Explorer location)
+- Tab header: relative path + `Refresh` (re-read) / HTML `Browser` (reopen isolated preview if closed) / `Open` (default program) / `Reveal` (Explorer location). HTML documents open the isolated preview automatically
 - Document tabs support **drag split/move**, `Ctrl+1~9` switching, and `Ctrl+W` close, same as terminal tabs. Unlike sessions, closing leaves no trace (not a Ctrl+Shift+T restore target)
 - Document tabs are also restored after a restart. If the file was deleted, an error panel (Retry/Reveal) shows
 - Document tabs are not exposed on Remote (Remote PWA) or the Dashboard (only terminal sessions sync)
-- Document paths in terminal output (`docs/README.md`, `Docs/Foo.md:42`, etc.) are clickable. `.md`/`.html` inside the project open as document tabs; **absolute paths outside the project folder** open the OS default app as before. **Ctrl+click** opens even in-project files with the OS default app (browser for html) instead of in-app
+- Document paths in terminal output (`docs/README.md`, `Docs/Foo.md:42`, etc.) are clickable. `.md`/`.html` inside the project open as document tabs; opening an HTML document's `Browser` action mounts the isolated browser view inside that pane. **Absolute paths outside the project folder** open the OS default app as before. **Ctrl+click** opens even in-project files with the OS default app (browser for html) instead of in-app
 - Document search results in QuickOpen (`Ctrl+K`) also open as document tabs
 
 ## Settings

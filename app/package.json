@@ -3,7 +3,7 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.6.10",
+  "version": "0.6.11",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -78,7 +78,8 @@
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "electron/services/browser-mcp-server.mjs"
     ],
     "files": [
       "dist/**",

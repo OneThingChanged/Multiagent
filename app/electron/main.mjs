@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  WebContentsView,
   clipboard,
   dialog,
   ipcMain,
@@ -28,6 +29,7 @@ import { CloseCoordinator } from "./services/close-coordinator.mjs";
 import { HookService } from "./services/hook-service.mjs";
 import {
   buildMiraControlSnapshot,
+  mergeMiraControlAgents,
   prepareMiraControlInput,
 } from "./services/miracontrol-integration.mjs";
 import { ReopenJournal } from "./services/reopen-journal.mjs";
@@ -60,6 +62,14 @@ import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
 import { cleanupLegacyElectronShortcuts } from "./services/windows-shortcut-cleanup.mjs";
 import { discoverGitSubmodules } from "./services/git-submodules.mjs";
+import { DocumentPreviewService } from "./services/document-preview-service.mjs";
+import {
+  buildBrowserAnnotation,
+  normalizeBrowserCaptureRect,
+  sanitizeBrowserUrl,
+  sanitizeBrowserSnapshot,
+  sanitizeElementDescriptor,
+} from "./services/browser-context.mjs";
 import { isGitRepository, runGit } from "./services/git-command.mjs";
 import {
   buildWindowSessionUsage,
@@ -69,6 +79,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.cjs");
+const browserAnnotationPreloadPath = path.join(__dirname, "browser-annotation-preload.cjs");
 const packageVariant = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"))
@@ -175,6 +186,13 @@ let closeSmokeStartedAt = null;
 let workspaceSmokeStarted = false;
 /** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
 const workspaceWindows = new Map();
+/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean}>} */
+const documentBrowserWindows = new Map();
+const documentBrowserByShellWebContents = new Map();
+/** @type {Map<string, string>} agentId → browser/tab id */
+const documentBrowserByAgent = new Map();
+/** @type {Map<number, Promise<unknown>>} serialize native document view opens per workspace */
+const documentBrowserOpenPromises = new Map();
 /** @type {number | null} Renderer elected for singleton background UI sync. */
 let coordinatorWebContentsId = null;
 let lastWorkspaceWindowId = "primary";
@@ -212,6 +230,7 @@ const terminalSessions = new TerminalSessionService({
 });
 /** @type {Map<string, string>} */
 const sshPasswords = new Map();
+const documentPreviewService = new DocumentPreviewService();
 const remotePorts = new Set();
 let desktopPetUpdate = {
   status: "idle",
@@ -297,6 +316,9 @@ const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
   runtimeVariant.localDataDirectory
 );
+const browserMcpScriptPath = app.isPackaged
+  ? path.join(process.resourcesPath, "app.asar.unpacked", "electron", "services", "browser-mcp-server.mjs")
+  : path.join(appRoot, "electron", "services", "browser-mcp-server.mjs");
 
 function publishAgentHookEvent(eventName, payload) {
   if (eventName === "agent:hook-event" && payload?.id) {
@@ -358,6 +380,8 @@ const hookService = new HookService({
   integrationProvider: () => miraControlSnapshot(),
   activateAgent: (agentId) => activateMiraControlAgent(agentId),
   writeAgentInput: (request) => writeMiraControlAgentInput(request),
+  browserProvider: (request) => handleBrowserIntegration(request),
+  mcpScriptPath: browserMcpScriptPath,
   sendEvent: publishAgentHookEvent,
   sessionService,
 });
@@ -400,9 +424,19 @@ function liveOutputForAgents(agents, maxOutput = 80_000) {
 
 function miraControlCatalog() {
   const state = monitorService?.state || {};
+  const runtimeAgents = [...ptys.values()].map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    aiToolId: entry.aiToolId,
+    folder: entry.cwd,
+    lastSessionId:
+      agentSessionIds.get(entry.id) || monitorHooks.get(entry.id)?.session_id || null,
+  }));
   return {
     projects: Array.isArray(state.projects) ? state.projects : [],
-    agents: Array.isArray(state.agents) ? state.agents : [],
+    // PTY startup and renderer state persistence are asynchronous. A live
+    // terminal must remain addressable during that short catalog-sync window.
+    agents: mergeMiraControlAgents(state.agents, runtimeAgents),
   };
 }
 
@@ -829,6 +863,15 @@ function openExternalIfAllowed(rawUrl) {
   }
 }
 
+function isHttpUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function installNavigationPolicy(win) {
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalIfAllowed(url);
@@ -915,6 +958,650 @@ async function loadRenderer(win, query = {}) {
     return;
   }
   await win.loadFile(path.join(appRoot, "dist", "index.html"), { query });
+}
+
+function documentBrowserRecordForSender(senderId, browserId = null) {
+  if (browserId) {
+    const record = documentBrowserWindows.get(browserId);
+    return record && record.shellWebContentsId === senderId ? record : null;
+  }
+  const mappedId = documentBrowserByShellWebContents.get(senderId);
+  return mappedId ? documentBrowserWindows.get(mappedId) ?? null : null;
+}
+
+function positionDocumentBrowserView(record, bounds = record?.bounds) {
+  if (!record || record.win.isDestroyed() || record.view.webContents.isDestroyed()) return;
+  if (!bounds) return;
+  record.bounds = bounds;
+  record.view.setBounds(bounds);
+  if (typeof record.view.setVisible === "function") record.view.setVisible(true);
+}
+
+function documentBrowserSnapshot(record, extra = {}) {
+  if (!record || record.view.webContents.isDestroyed()) return null;
+  const url = record.view.webContents.getURL() || record.previewUrl;
+  const preview = documentPreviewService.isPreviewUrl(url, record.token);
+  return {
+    browserId: record.id,
+    tabId: record.id,
+    agentId: record.agentId,
+    profileId: "multiagent-browser",
+    title:
+      record.view.webContents.getTitle() ||
+      (preview ? record.relativePath.split("/").pop() || record.relativePath : url),
+    relativePath: preview ? record.relativePath : url,
+    url,
+    canGoBack: record.view.webContents.canGoBack(),
+    canGoForward: record.view.webContents.canGoForward(),
+    loading: record.view.webContents.isLoading(),
+    hoveredElement: record.hoveredElement,
+    selectedElement: record.selectedElement,
+    annotation: record.lastAnnotation,
+    annotationDelivery: record.lastAnnotationDelivery,
+    hasAnnotation: Boolean(record.lastAnnotation),
+    inspectionMode: record.inspectionMode,
+    inspectionSendToSession: record.inspectionSendToSession,
+    ...extra,
+  };
+}
+
+function publishDocumentBrowser(record, extra = {}) {
+  const snapshot = documentBrowserSnapshot(record, extra);
+  if (snapshot) sendEvent(record.win, "document-browser:update", snapshot);
+}
+
+function browserRecordForAgent(agentId, browserId = "") {
+  const id = String(browserId || "").trim();
+  if (id) {
+    const record = documentBrowserWindows.get(id);
+    if (record && (!agentId || record.agentId === agentId)) return record;
+    return null;
+  }
+  const mappedId = documentBrowserByAgent.get(String(agentId || "").trim());
+  return mappedId ? documentBrowserWindows.get(mappedId) ?? null : null;
+}
+
+function browserParentWindowForAgent(agentId) {
+  const ownerId = detachedAgents.get(String(agentId || ""));
+  if (typeof ownerId === "number") {
+    const owned = BrowserWindow.getAllWindows().find(
+      (win) => !win.isDestroyed() && win.webContents.id === ownerId
+    );
+    if (owned) return owned;
+  }
+  const remembered = [...workspaceWindows.values()].find((win) => {
+    const runtime = runtimeByWebContents.get(win.webContents.id);
+    return runtime?.workspace_window_id === lastWorkspaceWindowId && !win.isDestroyed();
+  });
+  return remembered ?? [...workspaceWindows.values()].find((win) => !win.isDestroyed()) ?? null;
+}
+
+function activateDocumentBrowser(record) {
+  if (!record || record.win.isDestroyed()) return;
+  for (const candidate of documentBrowserWindows.values()) {
+    if (candidate.win !== record.win || candidate === record) continue;
+    if (typeof candidate.view.setVisible === "function") candidate.view.setVisible(false);
+  }
+  if (typeof record.view.setVisible === "function") record.view.setVisible(true);
+  documentBrowserByShellWebContents.set(record.shellWebContentsId, record.id);
+}
+
+async function executeBrowserSnapshot(record) {
+  if (!record || record.view.webContents.isDestroyed()) throw new Error("브라우저 탭을 찾을 수 없습니다.");
+  const raw = await record.view.webContents.executeJavaScript(`(() => {
+    const selectorFor = (element) => {
+      if (!(element instanceof Element)) return "";
+      if (element.id && /^[A-Za-z][\\w-]{0,120}$/.test(element.id)) return "#" + CSS.escape(element.id);
+      const parts = [];
+      let current = element;
+      for (let depth = 0; current && current.nodeType === Node.ELEMENT_NODE && depth < 5; depth += 1) {
+        let part = current.tagName.toLowerCase();
+        const classes = [...current.classList]
+          .filter((name) => /^[A-Za-z_][\\w-]{0,80}$/.test(name))
+          .slice(0, 2);
+        if (classes.length) part += "." + classes.map((name) => CSS.escape(name)).join(".");
+        const parent = current.parentElement;
+        if (parent) {
+          const sameTag = [...parent.children].filter((child) => child.tagName === current.tagName);
+          if (sameTag.length > 1) part += ":nth-of-type(" + (sameTag.indexOf(current) + 1) + ")";
+        }
+        parts.unshift(part);
+        current = parent;
+      }
+      return parts.join(" > ");
+    };
+    const text = (document.body?.innerText || document.documentElement?.innerText || "").slice(0, 24000);
+    const links = [...document.querySelectorAll("a[href]")].slice(0, 100).map((node) => ({
+      text: (node.innerText || node.textContent || "").trim().slice(0, 300),
+      href: node.href || "",
+    }));
+    const controls = [...document.querySelectorAll("button, input, textarea, select, [role=button], [contenteditable=true]")].slice(0, 100).map((node) => ({
+      tag: node.tagName || "",
+      type: node.getAttribute("type") || "",
+      text: (node.innerText || node.getAttribute("placeholder") || node.getAttribute("aria-label") || "").trim().slice(0, 300),
+      ariaLabel: node.getAttribute("aria-label") || "",
+      selector: selectorFor(node),
+      disabled: Boolean(node.disabled),
+    }));
+    return { url: location.href, title: document.title, text, links, controls };
+  })()`, true);
+  return sanitizeBrowserSnapshot(raw);
+}
+
+async function saveBrowserScreenshot(record, rect = null, viewport = null) {
+  const options = rect
+    ? normalizeBrowserCaptureRect(rect, viewport || record.bounds || {}) || undefined
+    : undefined;
+  const image = await record.view.webContents.capturePage(options);
+  const data = image.toPNG();
+  if (!data?.length) return null;
+  const directory = path.join(app.getPath("userData"), "browser-annotations");
+  await fsPromises.mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, `${Date.now()}-${record.id}.png`);
+  await fsPromises.writeFile(filePath, data);
+  return filePath;
+}
+
+async function captureBrowserAnnotation(record) {
+  if (!record || record.view.webContents.isDestroyed()) throw new Error("브라우저 탭을 찾을 수 없습니다.");
+  const element = sanitizeElementDescriptor(record.selectedElement || record.hoveredElement);
+  if (!element) throw new Error("먼저 브라우저에서 주석을 달 영역을 선택해 주세요.");
+  const selector = JSON.stringify(element.selector || "");
+  const rect = JSON.stringify(element.rect || {});
+  const raw = await record.view.webContents.executeJavaScript(`(() => {
+    const selector = ${selector};
+    const rect = ${rect};
+    let node = null;
+    try { if (selector) node = document.querySelector(selector); } catch {}
+    if (!node && Number.isFinite(rect.x) && Number.isFinite(rect.y)) {
+      const pointX = rect.x + Math.max(1, rect.width || 0) / 2;
+      const pointY = rect.y + Math.max(1, rect.height || 0) / 2;
+      node = document.elementFromPoint(pointX, pointY);
+    }
+    if (!node) return null;
+    return { html: node.outerHTML || "", text: (node.innerText || node.textContent || "").slice(0, 2000) };
+  })()`, true);
+  const screenshotPath = await saveBrowserScreenshot(record, element.rect, element.viewport).catch(() => null);
+  const annotation = buildBrowserAnnotation({
+    browserId: record.id,
+    agentId: record.agentId,
+    url: record.view.webContents.getURL(),
+    title: record.view.webContents.getTitle(),
+    element: { ...element, text: raw?.text || element.text },
+    html: raw?.html || "",
+    screenshotPath,
+  });
+  record.lastAnnotation = annotation;
+  publishDocumentBrowser(record, { annotation });
+  return annotation;
+}
+
+function deliverBrowserAnnotation(record, annotation) {
+  if (!record.agentId) {
+    return {
+      ok: false,
+      target: "session",
+      httpStatus: 409,
+      error: "이 브라우저 탭에 연결된 세션이 없습니다.",
+    };
+  }
+  const agent = miraControlAgent(record.agentId);
+  return {
+    target: "session",
+    ...writeMiraControlAgentInput({
+      agentId: record.agentId,
+      text: browserAnnotationPrompt(annotation),
+      submit: true,
+      expectedSessionId: agent ? miraControlProviderSessionId(agent) || "" : "",
+    }),
+  };
+}
+
+function copyBrowserAnnotation(annotation) {
+  try {
+    clipboard.writeText(browserAnnotationPrompt(annotation));
+    return { ok: true, target: "clipboard" };
+  } catch (error) {
+    return {
+      ok: false,
+      target: "clipboard",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function setDocumentBrowserInspection(record, enabled, sendToSession = false) {
+  if (!record || record.view.webContents.isDestroyed()) return null;
+  record.inspectionMode = Boolean(enabled);
+  record.inspectionSendToSession = record.inspectionMode && Boolean(sendToSession);
+  if (record.inspectionMode) {
+    record.hoveredElement = null;
+    record.selectedElement = null;
+    record.lastAnnotationDelivery = null;
+  }
+  record.view.webContents.send("multiagent:browser-inspect-mode", {
+    enabled: record.inspectionMode,
+  });
+  publishDocumentBrowser(record);
+  return documentBrowserSnapshot(record);
+}
+
+async function completeDocumentBrowserInspection(record, sendToSession) {
+  try {
+    const annotation = await captureBrowserAnnotation(record);
+    const delivery = sendToSession
+      ? deliverBrowserAnnotation(record, annotation)
+      : copyBrowserAnnotation(annotation);
+    record.lastAnnotationDelivery = delivery;
+    publishDocumentBrowser(record, { annotation, annotationDelivery: delivery });
+  } catch (error) {
+    publishDocumentBrowser(record, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function browserAnnotationPrompt(annotation) {
+  const element = JSON.stringify(annotation?.element || {}, null, 2);
+  const html = String(annotation?.html || "").slice(0, 4_000);
+  const screenshot = annotation?.screenshotPath ? `\nScreenshot: ${annotation.screenshotPath}` : "";
+  const prompt = [
+    "[Browser annotation]",
+    `URL: ${annotation?.url || ""}`,
+    `Title: ${annotation?.title || ""}`,
+    `Element JSON:\n${element}`,
+    `HTML:\n${html}`,
+    screenshot,
+    "이 영역을 현재 작업 맥락으로 사용해 주세요.",
+  ].join("\n");
+  // MiraControl input is capped at 8 KiB. Trim by UTF-8 bytes (not JS code
+  // units) so Korean labels and HTML cannot make an otherwise valid capture
+  // fail at the final terminal-write step.
+  const maxBytes = 7_500;
+  if (Buffer.byteLength(prompt, "utf8") <= maxBytes) return prompt;
+  let end = Math.min(prompt.length, maxBytes);
+  while (end > 0 && Buffer.byteLength(prompt.slice(0, end), "utf8") > maxBytes) {
+    end -= Math.max(1, Math.ceil((Buffer.byteLength(prompt.slice(0, end), "utf8") - maxBytes) / 3));
+  }
+  return `${prompt.slice(0, end)}\n[truncated]`;
+}
+
+function installDocumentBrowserViewPolicy(record) {
+  const contents = record.view.webContents;
+  contents.setWindowOpenHandler(({ url }) => {
+    // Keep preview links and normal web links in this same isolated view. A
+    // popup never creates a second native window; it is promoted to a normal
+    // navigation so the document pane behaves like a small browser tab.
+    if (
+      documentPreviewService.isPreviewUrl(url, record.token) ||
+      isHttpUrl(url)
+    ) {
+      void contents.loadURL(url).catch(() => {});
+    }
+    return { action: "deny" };
+  });
+  const guardNavigation = (event, url) => {
+    // Project-local capability URLs and external HTTP(S) pages are the only
+    // navigations allowed. file://, javascript:, devtools and custom schemes
+    // remain blocked because the view has no reason to access them.
+    if (documentPreviewService.isPreviewUrl(url, record.token) || isHttpUrl(url)) {
+      return;
+    }
+    event.preventDefault();
+  };
+  contents.on("will-navigate", guardNavigation);
+  contents.on("will-redirect", guardNavigation);
+  contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
+  contents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+    if (!isMainFrame || !record.inspectionMode) return;
+    record.inspectionMode = false;
+    record.inspectionSendToSession = false;
+    record.hoveredElement = null;
+    record.selectedElement = null;
+    publishDocumentBrowser(record);
+  });
+  contents.on("did-start-loading", () => publishDocumentBrowser(record, { loading: true }));
+  contents.on("did-stop-loading", () => publishDocumentBrowser(record, { loading: false }));
+  contents.on("did-navigate", () => publishDocumentBrowser(record));
+  contents.on("did-navigate-in-page", () => publishDocumentBrowser(record));
+  contents.on("ipc-message", (_event, channel, payload) => {
+    if (channel === "multiagent:browser-hover") {
+      if (!record.inspectionMode) return;
+      record.hoveredElement = sanitizeElementDescriptor(payload);
+      publishDocumentBrowser(record, { hoveredElement: record.hoveredElement });
+    } else if (channel === "multiagent:browser-select") {
+      if (!record.inspectionMode) return;
+      record.selectedElement = sanitizeElementDescriptor(payload);
+      const sendToSession = record.inspectionSendToSession;
+      record.inspectionMode = false;
+      record.inspectionSendToSession = false;
+      publishDocumentBrowser(record, {
+        hoveredElement: record.hoveredElement,
+        selectedElement: record.selectedElement,
+      });
+      void completeDocumentBrowserInspection(record, sendToSession);
+    } else if (channel === "multiagent:browser-inspect-cancelled") {
+      record.inspectionMode = false;
+      record.inspectionSendToSession = false;
+      publishDocumentBrowser(record);
+    }
+  });
+  contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // aborted by a later navigation
+    publishDocumentBrowser(record, {
+      loading: false,
+      error: `${errorDescription || "HTML을 불러오지 못했습니다."} (${errorCode})`,
+      url: validatedURL || record.previewUrl,
+    });
+  });
+  contents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const key = String(input.key || "").toLowerCase();
+    if (input.alt && key === "arrowleft" && contents.canGoBack()) {
+      event.preventDefault();
+      contents.goBack();
+    } else if (input.alt && key === "arrowright" && contents.canGoForward()) {
+      event.preventDefault();
+      contents.goForward();
+    } else if (input.control && key === "r") {
+      event.preventDefault();
+      contents.reload();
+    }
+  });
+}
+
+function cleanupDocumentBrowser(record) {
+  if (!record) return;
+  documentBrowserWindows.delete(record.id);
+  if (record.agentId && documentBrowserByAgent.get(record.agentId) === record.id) {
+    documentBrowserByAgent.delete(record.agentId);
+  }
+  if (documentBrowserByShellWebContents.get(record.shellWebContentsId) === record.id) {
+    documentBrowserByShellWebContents.delete(record.shellWebContentsId);
+  }
+  documentPreviewService.release(record.token);
+  try {
+    if (!record.win.isDestroyed()) record.win.contentView.removeChildView(record.view);
+  } catch {}
+  try {
+    if (!record.view.webContents.isDestroyed()) record.view.webContents.destroy();
+  } catch {}
+}
+
+async function refreshDocumentBrowserPreview(record) {
+  if (!record.folder || !record.relativePath) return;
+  if (documentPreviewService.isPreviewUrl(record.previewUrl, record.token)) return;
+  const previousToken = record.token;
+  const preview = await documentPreviewService.issue({
+    folder: record.folder,
+    relativePath: record.relativePath,
+  });
+  record.token = preview.token;
+  record.previewUrl = preview.url;
+  documentPreviewService.release(previousToken);
+  await record.view.webContents.loadURL(preview.url);
+  publishDocumentBrowser(record);
+}
+
+async function createDocumentBrowserWindowNow({
+  folder = "",
+  relativePath = "",
+  parentWindow,
+  agentId = null,
+  initialUrl = "",
+}) {
+  if (!parentWindow || parentWindow.isDestroyed()) {
+    throw new Error("브라우저를 연결할 작업창을 찾을 수 없습니다.");
+  }
+  // Keep the native views as browser tabs instead of destroying the previous
+  // one. Only the newly activated tab is visible; a renderer can reattach an
+  // older tab by sending its browserId and bounds again.
+  for (const candidate of documentBrowserWindows.values()) {
+    if (candidate.win === parentWindow && typeof candidate.view.setVisible === "function") {
+      candidate.view.setVisible(false);
+    }
+  }
+
+  const preview = folder && relativePath
+    ? await documentPreviewService.issue({ folder, relativePath })
+    : { token: "", url: "", relativePath: relativePath || "" };
+  const browserId = randomUUID();
+  const view = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      preload: browserAnnotationPreloadPath,
+      // One app-local profile is shared by all tabs but never shares Chrome's
+      // cookies. This lets an agent keep a login while switching tabs.
+      partition: "persist:multiagent-browser",
+    },
+  });
+  const record = {
+    id: browserId,
+    win: parentWindow,
+    view,
+    token: preview.token,
+    previewUrl: preview.url,
+    folder,
+    relativePath: preview.relativePath,
+    shellWebContentsId: parentWindow.webContents.id,
+    bounds: null,
+    agentId: agentId ? String(agentId) : null,
+    hoveredElement: null,
+    selectedElement: null,
+    lastAnnotation: null,
+    lastAnnotationDelivery: null,
+    inspectionMode: false,
+    inspectionSendToSession: false,
+    persistent: true,
+  };
+  documentBrowserWindows.set(browserId, record);
+  if (record.agentId) documentBrowserByAgent.set(record.agentId, browserId);
+  documentBrowserByShellWebContents.set(parentWindow.webContents.id, browserId);
+  parentWindow.contentView.addChildView(view);
+  if (typeof view.setVisible === "function") view.setVisible(false);
+  installDocumentBrowserViewPolicy(record);
+  try {
+    const target = preview.url || initialUrl || "about:blank";
+    if (target !== "about:blank") {
+      const parsed = new URL(target);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("HTTP 또는 HTTPS 주소만 열 수 있습니다.");
+      }
+    }
+    await view.webContents.loadURL(target);
+  } catch (error) {
+    cleanupDocumentBrowser(record);
+    throw error;
+  }
+  activateDocumentBrowser(record);
+  publishDocumentBrowser(record);
+  return { browserId };
+}
+
+async function createDocumentBrowserWindow(args) {
+  const windowId = args.parentWindow.webContents.id;
+  const previous = documentBrowserOpenPromises.get(windowId) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => {})
+    .then(() => createDocumentBrowserWindowNow(args));
+  documentBrowserOpenPromises.set(windowId, operation);
+  try {
+    return await operation;
+  } finally {
+    if (documentBrowserOpenPromises.get(windowId) === operation) {
+      documentBrowserOpenPromises.delete(windowId);
+    }
+  }
+}
+
+function browserIntegrationRecords(agentId = "") {
+  const normalized = String(agentId || "").trim();
+  return [...documentBrowserWindows.values()]
+    .filter((record) => !normalized || record.agentId === normalized)
+    .filter((record) => !record.view.webContents.isDestroyed())
+    .sort((left, right) => (right.id === documentBrowserByAgent.get(normalized) ? 1 : 0) - (left.id === documentBrowserByAgent.get(normalized) ? 1 : 0));
+}
+
+function browserIntegrationTabSnapshot(record) {
+  const snapshot = documentBrowserSnapshot(record, {
+    hoveredElement: record.hoveredElement,
+    selectedElement: record.selectedElement,
+    hasAnnotation: Boolean(record.lastAnnotation),
+  });
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    url: sanitizeBrowserUrl(snapshot.url),
+    relativePath: isHttpUrl(snapshot.relativePath)
+      ? sanitizeBrowserUrl(snapshot.relativePath)
+      : snapshot.relativePath,
+  };
+}
+
+async function browserRecordForIntegration(agentId, body = {}, { create = true } = {}) {
+  const requestedTab = typeof body.tabId === "string" ? body.tabId.trim() : "";
+  let record = browserRecordForAgent(agentId, requestedTab);
+  if (!record && !requestedTab) record = browserRecordForAgent(agentId);
+  if (record) {
+    activateDocumentBrowser(record);
+    return record;
+  }
+  if (!create) return null;
+  const parentWindow = browserParentWindowForAgent(agentId);
+  if (!parentWindow) throw new Error("브라우저를 연결할 작업창이 없습니다.");
+  const created = await createDocumentBrowserWindow({
+    parentWindow,
+    agentId,
+    initialUrl: "about:blank",
+  });
+  return documentBrowserWindows.get(created.browserId) ?? null;
+}
+
+async function browserClick(record, selector) {
+  const value = String(selector || "").trim();
+  if (!value || value.length > 512) throw new Error("CSS selector가 올바르지 않습니다.");
+  const safeSelector = JSON.stringify(value);
+  return record.view.webContents.executeJavaScript(`(() => {
+    let node;
+    try { node = document.querySelector(${safeSelector}); } catch { return { ok: false, error: "invalid selector" }; }
+    if (!node) return { ok: false, error: "element not found" };
+    const type = String(node.getAttribute("type") || "").toLowerCase();
+    const autocomplete = String(node.getAttribute("autocomplete") || "").toLowerCase();
+    if (type === "password" || autocomplete.includes("password")) return { ok: false, error: "password controls are blocked" };
+    if (type === "file") return { ok: false, error: "file chooser controls are blocked" };
+    if (node.disabled) return { ok: false, error: "element is disabled" };
+    node.click();
+    return { ok: true, tag: node.tagName || "" };
+  })()`, true);
+}
+
+async function browserType(record, selector, text) {
+  const value = String(selector || "").trim();
+  const input = String(text ?? "");
+  if (!value || value.length > 512) throw new Error("CSS selector가 올바르지 않습니다.");
+  if (!input || input.length > 8_000 || input.includes("\0")) throw new Error("입력 텍스트가 올바르지 않습니다.");
+  const safeSelector = JSON.stringify(value);
+  const safeInput = JSON.stringify(input);
+  return record.view.webContents.executeJavaScript(`(() => {
+    let node;
+    try { node = document.querySelector(${safeSelector}); } catch { return { ok: false, error: "invalid selector" }; }
+    if (!node) return { ok: false, error: "element not found" };
+    const type = String(node.getAttribute("type") || "").toLowerCase();
+    const autocomplete = String(node.getAttribute("autocomplete") || "").toLowerCase();
+    if (type === "password" || autocomplete.includes("password")) return { ok: false, error: "password controls are blocked" };
+    if (type === "file") return { ok: false, error: "file chooser controls are blocked" };
+    if (node.disabled) return { ok: false, error: "element is disabled" };
+    if (node instanceof HTMLElement && node.isContentEditable) {
+      node.focus();
+      node.textContent = ${safeInput};
+    } else if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
+      const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter) setter.call(node, ${safeInput}); else node.value = ${safeInput};
+    } else {
+      return { ok: false, error: "element is not a text control" };
+    }
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true };
+  })()`, true);
+}
+
+async function browserIntegrationStatus(agentId) {
+  const tabs = browserIntegrationRecords(agentId).map(browserIntegrationTabSnapshot);
+  return {
+    ok: true,
+    agentId,
+    profileId: "multiagent-browser",
+    activeTabId: documentBrowserByAgent.get(agentId) || null,
+    tabs,
+  };
+}
+
+async function handleBrowserIntegration({ agentId, action, body = {} }) {
+  const normalizedAgentId = String(agentId || "").trim();
+  if (!normalizedAgentId) return { ok: false, httpStatus: 400, error: "agent id is required" };
+  if (action === "status") return browserIntegrationStatus(normalizedAgentId);
+  if (action === "open") {
+    const target = new URL(String(body.url || "").trim());
+    if (!isHttpUrl(target.href)) return { ok: false, httpStatus: 400, error: "HTTP 또는 HTTPS 주소만 열 수 있습니다." };
+    const parentWindow = browserParentWindowForAgent(normalizedAgentId);
+    if (!parentWindow) return { ok: false, httpStatus: 503, error: "브라우저를 연결할 작업창이 없습니다." };
+    const created = await createDocumentBrowserWindow({
+      parentWindow,
+      agentId: normalizedAgentId,
+      initialUrl: target.href,
+    });
+    const record = documentBrowserWindows.get(created.browserId);
+    return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+  }
+
+  const record = await browserRecordForIntegration(normalizedAgentId, body);
+  if (!record) return { ok: false, httpStatus: 404, error: "브라우저 탭을 찾을 수 없습니다." };
+  switch (action) {
+    case "navigate": {
+      const target = new URL(String(body.url || "").trim());
+      if (!isHttpUrl(target.href)) return { ok: false, httpStatus: 400, error: "HTTP 또는 HTTPS 주소만 열 수 있습니다." };
+      await record.view.webContents.loadURL(target.href);
+      return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+    }
+    case "back":
+      if (record.view.webContents.canGoBack()) record.view.webContents.goBack();
+      return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+    case "forward":
+      if (record.view.webContents.canGoForward()) record.view.webContents.goForward();
+      return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+    case "reload":
+      await refreshDocumentBrowserPreview(record);
+      if (!record.view.webContents.isDestroyed()) record.view.webContents.reload();
+      return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+    case "snapshot":
+      return { ok: true, tab: browserIntegrationTabSnapshot(record), snapshot: await executeBrowserSnapshot(record) };
+    case "click": {
+      const result = await browserClick(record, body.selector);
+      if (result?.ok === false) return { ok: false, httpStatus: 409, error: result.error };
+      return { ok: true, result, tab: browserIntegrationTabSnapshot(record) };
+    }
+    case "type": {
+      const result = await browserType(record, body.selector, body.text);
+      if (result?.ok === false) return { ok: false, httpStatus: 409, error: result.error };
+      return { ok: true, result, tab: browserIntegrationTabSnapshot(record) };
+    }
+    case "screenshot": {
+      const screenshotPath = await saveBrowserScreenshot(record);
+      return { ok: true, tab: browserIntegrationTabSnapshot(record), screenshotPath };
+    }
+    case "annotate":
+      return { ok: true, annotation: await captureBrowserAnnotation(record), tab: browserIntegrationTabSnapshot(record) };
+    default:
+      return { ok: false, httpStatus: 404, error: `unsupported browser action: ${action}` };
+  }
 }
 
 const TITLEBAR_HEIGHT = 36;
@@ -1027,6 +1714,9 @@ function createAppWindow({
     rememberWorkspaceWindowId(workspaceWindowId);
   });
   win.webContents.on("destroyed", () => {
+    for (const record of [...documentBrowserWindows.values()]) {
+      if (record.win === win) cleanupDocumentBrowser(record);
+    }
     terminalSessions.detachView(webContentsId);
     workspaceWindows.delete(webContentsId);
     runtimeByWebContents.delete(webContentsId);
@@ -1483,6 +2173,7 @@ async function spawnPty(args, event) {
         MULTIAGENT_AGENT_ID: id,
         MULTIAGENT_PORT: String(hookService.port || ""),
         MULTIAGENT_TOKEN: hookService.token || "",
+        MULTIAGENT_MCP_SCRIPT: browserMcpScriptPath,
       },
       useConpty: true,
     });
@@ -3366,6 +4057,134 @@ async function invokeCommand(event, command, rawArgs) {
       return null;
     case "show_open_dialog":
       return showOpenDialog(event, args);
+    case "document_browser_open": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (!runtime?.workspace_window) {
+        throw new Error("작업창에서만 전용 HTML 브라우저를 열 수 있습니다.");
+      }
+      return createDocumentBrowserWindow({
+        folder: asString(args.folder),
+        relativePath: asString(args.relativePath),
+        agentId: asString(args.agentId).trim() || null,
+        parentWindow: eventSenderWindow(event),
+      });
+    }
+    case "document_browser_ready": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) {
+        throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      }
+      publishDocumentBrowser(record);
+      return documentBrowserSnapshot(record);
+    }
+    case "document_browser_bounds": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      positionDocumentBrowserView(record, {
+        x: asPositiveInt(args.x, 0),
+        y: asPositiveInt(args.y, 0),
+        width: asPositiveInt(args.width, 1),
+        height: asPositiveInt(args.height, 1),
+      });
+      return null;
+    }
+    case "document_browser_back": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      if (record.view.webContents.canGoBack()) record.view.webContents.goBack();
+      return null;
+    }
+    case "document_browser_forward": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      if (record.view.webContents.canGoForward()) record.view.webContents.goForward();
+      return null;
+    }
+    case "document_browser_reload": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      await refreshDocumentBrowserPreview(record);
+      if (!record.view.webContents.isDestroyed()) record.view.webContents.reload();
+      return null;
+    }
+    case "document_browser_navigate": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) {
+        throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      }
+      const target = new URL(asString(args.url).trim());
+      if (target.protocol !== "http:" && target.protocol !== "https:") {
+        throw new Error("HTTP 또는 HTTPS 주소만 열 수 있습니다.");
+      }
+      await record.view.webContents.loadURL(target.href);
+      return null;
+    }
+    case "document_browser_open_external": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      const currentUrl = record.view.webContents.getURL();
+      if (isHttpUrl(currentUrl) && !documentPreviewService.isPreviewUrl(currentUrl, record.token)) {
+        await shell.openExternal(currentUrl);
+      } else {
+        await openPath(resolveExistingPath(record.folder, record.relativePath));
+      }
+      return null;
+    }
+    case "document_browser_inspect": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      return setDocumentBrowserInspection(
+        record,
+        args.enabled === true,
+        args.sendToSession === true,
+      );
+    }
+    case "document_browser_attach_annotation": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      const annotation = await captureBrowserAnnotation(record);
+      const delivery = args.sendToSession === true
+        ? deliverBrowserAnnotation(record, annotation)
+        : copyBrowserAnnotation(annotation);
+      record.lastAnnotationDelivery = delivery;
+      return { ...annotation, delivery };
+    }
+    case "document_browser_close": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      cleanupDocumentBrowser(record);
+      return null;
+    }
     case "open_external_url":
       {
         const target = new URL(asString(args.url));
@@ -3725,6 +4544,7 @@ app.on("before-quit", (event) => {
   void hookService.stop();
   void monitorService.stop();
   void usageDashboard.stop();
+  void documentPreviewService.close();
   usageIndex.close();
   void remoteService.stop();
   void tunnelService.stop();

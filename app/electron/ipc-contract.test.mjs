@@ -48,6 +48,62 @@ describe("Electron IPC contract", () => {
     })).toThrow("agent id");
   });
 
+  it("validates embedded document browser bounds", () => {
+    expect(contract.assertInvokeRequest("document_browser_bounds", {
+      browserId: "browser",
+      x: 0,
+      y: 36,
+      width: 640,
+      height: 480,
+    })).toMatchObject({ width: 640, height: 480 });
+    expect(() => contract.assertInvokeRequest("document_browser_bounds", {
+      browserId: "browser",
+      x: -1,
+      y: 0,
+      width: 640,
+      height: 480,
+    })).toThrow("non-negative");
+    expect(() => contract.assertInvokeRequest("document_browser_bounds", {
+      browserId: "browser",
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 480,
+    })).toThrow("positive");
+  });
+
+  it("allows only HTTP(S) navigation in the embedded browser", () => {
+    expect(contract.assertInvokeRequest("document_browser_navigate", {
+      browserId: "browser",
+      url: "https://example.com/docs?q=multiagent",
+    })).toMatchObject({ url: "https://example.com/docs?q=multiagent" });
+    expect(() => contract.assertInvokeRequest("document_browser_navigate", {
+      browserId: "browser",
+      url: "file:///C:/secret.txt",
+    })).toThrow("http or https");
+    expect(() => contract.assertInvokeRequest("document_browser_navigate", {
+      browserId: "browser",
+      url: "not a url",
+    })).toThrow("valid HTTP(S)");
+  });
+
+  it("validates browser element inspection mode and delivery intent", () => {
+    expect(contract.assertInvokeRequest("document_browser_inspect", {
+      browserId: "browser",
+      enabled: true,
+      sendToSession: true,
+    })).toMatchObject({ enabled: true, sendToSession: true });
+    expect(() => contract.assertInvokeRequest("document_browser_inspect", {
+      browserId: "browser",
+      enabled: "yes",
+    })).toThrow("inspection flag");
+    expect(() => contract.assertInvokeRequest("document_browser_inspect", {
+      browserId: "browser",
+      enabled: true,
+      sendToSession: "yes",
+    })).toThrow("delivery flag");
+  });
+
   it("rejects commands and emitted events outside the contract", () => {
     expect(() => contract.assertInvokeRequest("shell_exec", {})).toThrow("Blocked");
     expect(() => contract.assertAllowed(

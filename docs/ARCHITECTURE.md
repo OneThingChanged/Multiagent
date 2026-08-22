@@ -30,6 +30,9 @@ K:\AI\MultiAgent\
 ├─ docs/                ← these documents
 └─ app/                 ← Electron production app + legacy Tauri transition sources
    ├─ electron/         ← Electron main/preload, IPC handlers, PTY/web services
+   │  ├─ services/browser-mcp-server.mjs ← stdio MCP bridge for the embedded browser
+   │  ├─ services/browser-context.mjs    ← snapshot/annotation redaction
+   │  └─ browser-annotation-preload.cjs  ← isolated hover/click descriptor relay
    ├─ src/              ← frontend (React + TS)
    │  ├─ App.tsx        ← top-level orchestration, IPC listeners, workspace composition
    │  ├─ types.ts       ← shared types + AI_TOOLS + LS keys
@@ -97,6 +100,8 @@ transition channel; the table below describes the shared behavior.
 | `read_markdown_file` | folder, relative_path | reads md/html. Absolute paths may leave the folder; over 2MB rejected |
 | `resolve_markdown_path` | folder, path | validates/normalizes clicked terminal paths (supports absolute paths outside the folder) |
 | `read_image_data_url` | path, folder? | image file as a data URL (for the image viewer, 25MB limit) |
+| `document_browser_open` / `document_browser_navigate` | folder, relative_path, optional agent_id / browser_id, URL | opens or navigates an isolated HTTP(S) browser tab; tabs share the app-local browser profile and expose a stable tab/browser ID |
+| `document_browser_attach_annotation` | browser_id, optional send_to_session | captures the explicitly selected element as sanitized JSON/HTML/PNG context; copies the prompt to the clipboard by default or sends it to the associated session when explicitly requested |
 | `play_system_sound` / `read_audio_file` | — / path | notification sound (system beep / custom file bytes) |
 | `set_desktop_pet_enabled` | enabled | show/hide the main-process Desktop Pet window pre-created in setup |
 | `update_desktop_pet` / `desktop_pet_snapshot` | update / — | caches pet state payload + delivers window events / initial state query |
@@ -123,6 +128,18 @@ The Electron main process and system tray are the persistent application shell. 
 - Tray Exit/update/relaunch broadcasts `app:close-requested` to every workspace and waits for every renderer's `confirm_close` before final process shutdown (5-second fallback remains)
 
 **IPC contract:** `runtime_flags` returns `workspace_window`, `workspace_window_id`, and `coordinator`; window/session commands remain `open_new_app_window`, `get_detached_agents`, `get_agent_window_usage`, and `claim_agent_for_window`. Ownership events remain `session-detached` / `sessions-reattached`.
+
+### Embedded browser and agent bridge
+
+The Electron main process owns a single persistent application browser profile and
+keeps multiple native `WebContentsView` tabs in a `browserId → tab` map. A tab may
+be associated with an `agentId`; the association is used by the local
+`multiagent-browser` stdio MCP server. The server calls authenticated
+`/integration/v1/browser/:agentId/:action` routes and returns sanitized page
+snapshots, screenshots, navigation results, and explicit element annotations to
+Codex/Claude. It never exposes arbitrary JavaScript or the browser profile to
+the web renderer. See [BROWSER_MCP.md](BROWSER_MCP.md) for the tool list,
+annotation flow, and security boundaries.
 
 
 ### State (`AppState`)
@@ -309,7 +326,7 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
 - **`set_titlebar_overlay`** (Electron only): applies the native window button overlay color (hex validated) to all app windows on theme change
 - **Ports IPC** (Electron only): `list_ports {projects}` — parses `netstat -ano` (not using `-p tcp`, which hides IPv6-only listeners) LISTENING entries + queries all `Win32_Process` (Name/CommandLine/ppid) for attribution: ① if the listener pid's ppid chain contains a session PTY root → `terminal_id` ② if the command line contains the project folder as a boundary token → `project_id` (deepest folder wins) ③ otherwise external. Wildcard binds normalize to `localhost`, `host:port:pid` dedup, 200 cap. `kill_port_process {pid, port}` — re-scans netstat right before kill to re-verify ownership + refuses own pid. POSIX uses `lsof -iTCP -sTCP:LISTEN` + `ps`
 - **Window creation**: `titleBarStyle:'hidden'` + `titleBarOverlay` (36px) + `Menu.setApplicationMenu(null)` — the custom top bar replaces the titlebar and min/max/close are OS overlay. DevTools (F12/Ctrl+Shift+I) and dev reload (Ctrl+Shift+R) are restored via `before-input-event` (Ctrl+R intentionally unbound — reserved for the terminal)
-- `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path` are still used for document tab md/html reading and QuickOpen doc search (also works on Tauri)
+- `list_markdown_files`/`read_markdown_file`/`resolve_markdown_path` are still used for document tab Markdown/HTML discovery and QuickOpen doc search (also works on Tauri). Electron-only `document_browser_open` creates the isolated HTML window; its shell uses the matching `document_browser_*` navigation commands
 - `resolve_markdown_path` handles `Docs/TODO.md`, relative paths, absolute paths, and `file.md:12` line suffixes, canonicalizes, then checks whether it is inside the root
 - The Tauri runtime has no `list_directory`/`read_text_file`, so the file tree and text view degrade to empty/error states there (Electron-first)
 
@@ -324,7 +341,8 @@ SplitNode = { type: 'split'; id; direction: 'h' | 'v'; children: LayoutNode[]; s
   - **View tabs**: topmost 🗀 Files / ⎇ Source Control switch. The ⎇ badge count reuses the event-refreshed Files view `git_status` result (`gitFiles.size`)
   - **SourceControlView**: loads `git_changes` on view entry and on the same event-driven refresh signals; its branch row also has a manual refresh button. Requests are single-flight/coalesced. Stage/unstage/commit are serialized with a busy guard, then immediately reload + refresh tree badges. Single click toggles selection, Shift+click selects a range, and double-click opens the configured external diff for source/config/text files (HTML and non-text assets keep the document viewer). A permanently reserved batch-toolbar slot prevents selection from moving rows between the two clicks
   - The file tree open button is a **floating button at the window's top-right** (`.files-open-btn`, rendered only when the panel is closed), not in the left sidebar
-- **`DocViewer.tsx`** — opens `doc:<projectId>:<relativePath>` tabs. md → `react-markdown`+`remark-gfm`+`rehype-highlight`, html → `<iframe sandbox srcdoc>` (no script/same-origin permissions), images → `read_image_data_url`, others → `read_text_file` result as a highlighted fenced code block. Read failures show a Retry/Reveal error panel
+- **`DocViewer.tsx`** — opens `doc:<projectId>:<relativePath>` tabs. md → `react-markdown`+`remark-gfm`+`rehype-highlight`, images → `read_image_data_url`, and other text files → `read_text_file` as a highlighted fenced code block. Electron HTML tabs request the isolated Document Browser through `document_browser_open`; the trusted React toolbar is rendered in the active document pane and the untrusted view is positioned over its browser host through `document_browser_bounds`. The old `srcdoc` path is not used there because it loses the document's relative asset base. Tauri keeps the sandboxed in-pane fallback. Read failures show a Retry/Reveal error panel
+- **Electron Document Browser** — `DocumentPreviewService` binds a loopback-only ephemeral HTTP server and issues a 15-minute, project-root-scoped capability URL. An untrusted `WebContentsView` is attached to the current workspace window and positioned over the renderer's browser host, while the trusted toolbar remains a normal React document-tab component. The view uses the shared app-local persistent profile and a narrow sandboxed annotation preload with no Node APIs, denies permissions, blocks `file://` and project-root escapes, keeps same-token preview navigation in the view, and allows normal external HTTP(S) links to continue in that same pane (including popup links promoted to the current view). The toolbar supports back/forward/reload, an editable HTTP(S) address bar, default-browser open, clipboard annotation capture, and explicit session delivery. `document_browser_navigate` is the typed IPC seam for the authenticated local browser/MCP controller; PTY agents do not receive renderer IPC access directly
 - **`PaneSlot.tsx`** — when the leaf's active tab is a doc id, the xterm host (`.pane-body`) is hidden with `display:none` and DocViewer renders. The xterm DOM and attach/detach lifecycle are kept intact so terminal↔document switching loses no output
 - `Open`/`Reveal` open with the default app / reveal in Explorer
 

@@ -24,6 +24,17 @@ const INVOKE_COMMANDS = Object.freeze([
   "open_folder_path",
   "reveal_local_path",
   "list_markdown_files",
+  "document_browser_open",
+  "document_browser_ready",
+  "document_browser_bounds",
+  "document_browser_back",
+  "document_browser_forward",
+  "document_browser_reload",
+  "document_browser_navigate",
+  "document_browser_open_external",
+  "document_browser_inspect",
+  "document_browser_attach_annotation",
+  "document_browser_close",
   "read_markdown_file",
   "resolve_markdown_path",
   "list_directory",
@@ -134,6 +145,7 @@ const DELIVERED_EVENTS = Object.freeze([
   "session-detached",
   "sessions-reattached",
   "workspace:coordinator-changed",
+  "document-browser:update",
 ]);
 
 const EMITTED_EVENTS = Object.freeze([
@@ -172,6 +184,27 @@ function assertPositiveInteger(value, name, maximum = 10000) {
   }
 }
 
+function assertNonNegativeInteger(value, name, maximum = 10000) {
+  if (!Number.isInteger(value) || value < 0 || value > maximum) {
+    throw new TypeError(`Electron ${name} must be a non-negative integer`);
+  }
+}
+
+function assertHttpUrl(value, name = "document browser URL") {
+  if (typeof value !== "string" || value.trim().length < 1 || value.length > 8192) {
+    throw new TypeError(`Electron ${name} must be a non-empty URL up to 8192 chars`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new TypeError(`Electron ${name} must be a valid HTTP(S) URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new TypeError(`Electron ${name} must use http or https`);
+  }
+}
+
 function assertInvokeRequest(command, rawArgs) {
   assertAllowed(invokeSet, command, "command");
   const args = assertObject(rawArgs);
@@ -198,6 +231,89 @@ function assertInvokeRequest(command, rawArgs) {
         args.agentId.length > 256
       ) {
         throw new TypeError("Electron window agent id must be a non-empty string");
+      }
+      break;
+    case "document_browser_open":
+      assertPathString(args.folder, "document browser folder");
+      assertPathString(args.relativePath, "document browser relative path");
+      if (args.agentId !== undefined && (
+        typeof args.agentId !== "string" ||
+        args.agentId.trim().length < 1 ||
+        args.agentId.length > 256
+      )) {
+        throw new TypeError("Electron document browser agent id must be a non-empty string");
+      }
+      break;
+    case "document_browser_bounds":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      assertNonNegativeInteger(args.x, "document browser x");
+      assertNonNegativeInteger(args.y, "document browser y");
+      assertPositiveInteger(args.width, "document browser width");
+      assertPositiveInteger(args.height, "document browser height");
+      break;
+    case "document_browser_ready":
+    case "document_browser_back":
+    case "document_browser_forward":
+    case "document_browser_reload":
+    case "document_browser_close":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      break;
+    case "document_browser_navigate":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      assertHttpUrl(args.url);
+      break;
+    case "document_browser_open_external":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      break;
+    case "document_browser_inspect":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      if (typeof args.enabled !== "boolean") {
+        throw new TypeError("Electron document browser inspection flag must be boolean");
+      }
+      if (args.sendToSession !== undefined && typeof args.sendToSession !== "boolean") {
+        throw new TypeError("Electron document browser inspection delivery flag must be boolean");
+      }
+      break;
+    case "document_browser_attach_annotation":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      if (args.sendToSession !== undefined && typeof args.sendToSession !== "boolean") {
+        throw new TypeError("Electron document browser annotation delivery flag must be boolean");
       }
       break;
     case "terminal_session_action":

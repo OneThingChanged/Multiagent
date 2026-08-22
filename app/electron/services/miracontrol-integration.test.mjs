@@ -3,10 +3,36 @@ import {
   buildMiraControlSnapshot,
   deriveMiraControlState,
   MIRACONTROL_HOOK_STALE_AFTER_MS,
+  mergeMiraControlAgents,
   prepareMiraControlInput,
 } from "./miracontrol-integration.mjs";
 
 describe("MiraControl integration state", () => {
+  it("keeps live PTYs addressable while the persisted catalog is still syncing", () => {
+    expect(mergeMiraControlAgents(
+      [{ id: "stored", name: "Stored", aiToolId: "codex", projectId: "project-1" }],
+      [
+        { id: "stored", name: "Live Stored", aiToolId: "codex", lastSessionId: "session-1" },
+        { id: "runtime", name: "Runtime", aiToolId: "claude", lastSessionId: "session-2" },
+        { id: "shell", name: "Shell", aiToolId: "shell" },
+      ],
+    )).toEqual([
+      {
+        id: "stored",
+        name: "Live Stored",
+        aiToolId: "codex",
+        projectId: "project-1",
+        lastSessionId: "session-1",
+      },
+      {
+        id: "runtime",
+        name: "Runtime",
+        aiToolId: "claude",
+        lastSessionId: "session-2",
+      },
+    ]);
+  });
+
   it("maps live hook states into the four-state StreamDeck contract", () => {
     const now = 1_800_000_000_000;
     expect(deriveMiraControlState({ active: false, status: "working" }, now))

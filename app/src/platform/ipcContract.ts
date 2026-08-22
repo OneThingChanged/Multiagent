@@ -7,6 +7,10 @@ export type RuntimeCommand =
   | "update_desktop_pet" | "desktop_pet_snapshot" | "reset_desktop_pet_position"
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
+  | "document_browser_open" | "document_browser_ready" | "document_browser_bounds"
+  | "document_browser_back" | "document_browser_forward"
+  | "document_browser_reload" | "document_browser_navigate" | "document_browser_open_external"
+  | "document_browser_inspect" | "document_browser_attach_annotation" | "document_browser_close"
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "list_git_submodules"
   | "read_text_file" | "read_chat_transcript" | "chat_blocks" | "search_files"
@@ -50,7 +54,7 @@ export type RuntimeEventName =
   | "app:close-requested" | "app:close-cancelled" | "agent:hook-event"
   | "native-notification:clicked" | "update:progress"
   | "session-detached" | "sessions-reattached"
-  | "workspace:coordinator-changed";
+  | "workspace:coordinator-changed" | "document-browser:update";
 
 export type RuntimeEmittedEventName =
   | "desktop-pet:activate"
@@ -112,6 +116,27 @@ export type DocAssetResult =
   | { kind: "data"; dataUrl: string; relativePath: string }
   | { kind: "text"; text: string; relativePath: string }
   | null;
+
+export type DocumentBrowserSnapshot = {
+  browserId: string;
+  tabId?: string;
+  agentId?: string | null;
+  profileId?: string;
+  title: string;
+  relativePath: string;
+  url: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  loading: boolean;
+  hoveredElement?: unknown;
+  selectedElement?: unknown;
+  annotation?: unknown;
+  annotationDelivery?: unknown;
+  hasAnnotation?: boolean;
+  inspectionMode?: boolean;
+  inspectionSendToSession?: boolean;
+  error?: string;
+};
 
 export type GitStatusLetter = "M" | "A" | "U" | "D" | "R";
 
@@ -228,6 +253,29 @@ export type GitChangesResult = {
 
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
+  document_browser_open: {
+    args: { folder: string; relativePath: string; agentId?: string };
+    result: { browserId: string };
+  };
+  document_browser_ready: {
+    args: { browserId: string };
+    result: DocumentBrowserSnapshot;
+  };
+  document_browser_bounds: {
+    args: { browserId: string; x: number; y: number; width: number; height: number };
+    result: null;
+  };
+  document_browser_back: { args: { browserId: string }; result: null };
+  document_browser_forward: { args: { browserId: string }; result: null };
+  document_browser_reload: { args: { browserId: string }; result: null };
+  document_browser_navigate: { args: { browserId: string; url: string }; result: null };
+  document_browser_open_external: { args: { browserId: string }; result: null };
+  document_browser_inspect: {
+    args: { browserId: string; enabled: boolean; sendToSession?: boolean };
+    result: DocumentBrowserSnapshot;
+  };
+  document_browser_attach_annotation: { args: { browserId: string; sendToSession?: boolean }; result: unknown };
+  document_browser_close: { args: { browserId: string }; result: null };
   list_directory: {
     args: { folder: string; relative: string };
     result: DirectoryEntry[];

@@ -27,6 +27,12 @@ const QWEN_EVENTS = [
 ];
 const CODEX_BEGIN = "# >>> multiagent electron hooks >>>";
 const CODEX_END = "# <<< multiagent electron hooks <<<";
+const CODEX_MCP_BEGIN = "# >>> multiagent browser mcp >>>";
+const CODEX_MCP_END = "# <<< multiagent browser mcp <<<";
+const BROWSER_MCP_NODE_ARGS = [
+  "-e",
+  "import(require('node:url').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))",
+];
 const MAX_INTEGRATION_BODY_BYTES = 16 * 1024;
 
 function sendJson(response, status, payload) {
@@ -77,6 +83,20 @@ function integrationAgentId(pathname, action) {
   try {
     const id = decodeURIComponent(match[1]).trim();
     return id && id.length <= 256 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function integrationBrowserRoute(pathname) {
+  const match = pathname.match(/^\/integration\/v1\/browser\/([^/]+)(?:\/([^/]+))?$/);
+  if (!match) return null;
+  try {
+    const agentId = decodeURIComponent(match[1]).trim();
+    const action = match[2] ? decodeURIComponent(match[2]).trim() : "status";
+    return agentId && agentId.length <= 256 && action.length <= 80
+      ? { agentId, action }
+      : null;
   } catch {
     return null;
   }
@@ -295,6 +315,32 @@ function mergeClaude(existing, helperPath) {
   return mergeJsonSettingsHooks(existing, helperPath, CLAUDE_EVENTS);
 }
 
+function mergeMcpJson(existing, command, scriptPath) {
+  if (!command || !scriptPath) return existing;
+  let settings;
+  try {
+    settings = existing.trim() ? JSON.parse(existing) : {};
+  } catch {
+    settings = {};
+  }
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
+  if (!settings.mcpServers || typeof settings.mcpServers !== "object" || Array.isArray(settings.mcpServers)) {
+    settings.mcpServers = {};
+  }
+  settings.mcpServers["multiagent-browser"] = {
+    type: "stdio",
+    command,
+    // Keep the machine-local install path out of project files. The Electron
+    // PTY supplies MULTIAGENT_MCP_SCRIPT to the child process at runtime.
+    args: [...BROWSER_MCP_NODE_ARGS],
+  };
+  return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
+function mergeClaudeMcp(existing, command, scriptPath) {
+  return mergeMcpJson(existing, command, scriptPath);
+}
+
 function mergeQwen(existing, helperPath) {
   return mergeJsonSettingsHooks(existing, helperPath, QWEN_EVENTS);
 }
@@ -314,8 +360,16 @@ function removeLegacyManagedCodexEntries(existing) {
     .trimEnd();
 }
 
-function mergeCodex(existing, helperPath) {
-  const cleaned = removeLegacyManagedCodexEntries(removeManagedCodexBlock(existing));
+function removeManagedCodexMcpBlock(existing) {
+  const start = existing.indexOf(CODEX_MCP_BEGIN);
+  const end = existing.indexOf(CODEX_MCP_END);
+  if (start < 0 || end < start) return existing;
+  return `${existing.slice(0, start)}${existing.slice(end + CODEX_MCP_END.length)}`.trimEnd();
+}
+
+function mergeCodex(existing, helperPath, mcpScriptPath = "") {
+  let cleaned = removeLegacyManagedCodexEntries(removeManagedCodexBlock(existing));
+  cleaned = removeManagedCodexMcpBlock(cleaned);
   const lines = [CODEX_BEGIN];
   for (const [eventName, event] of CODEX_EVENTS) {
     lines.push(
@@ -329,6 +383,17 @@ function mergeCodex(existing, helperPath) {
     );
   }
   lines.push(CODEX_END);
+  if (mcpScriptPath) {
+    lines.push(
+      "",
+      CODEX_MCP_BEGIN,
+      "[mcp_servers.multiagent_browser]",
+      'command = "node"',
+      `args = [${BROWSER_MCP_NODE_ARGS.map((arg) => JSON.stringify(arg)).join(", ")}]`,
+      "enabled = true",
+      CODEX_MCP_END,
+    );
+  }
   return `${cleaned.trimEnd()}${cleaned.trim() ? "\n\n" : ""}${lines.join("\n")}\n`;
 }
 
@@ -341,6 +406,8 @@ export class HookService {
     integrationProvider = null,
     activateAgent = null,
     writeAgentInput = null,
+    browserProvider = null,
+    mcpScriptPath = "",
   }) {
     this.baseDir = baseDir;
     this.helperPath = path.join(baseDir, "notify.ps1");
@@ -351,6 +418,8 @@ export class HookService {
     this.integrationProvider = integrationProvider;
     this.activateAgent = activateAgent;
     this.writeAgentInput = writeAgentInput;
+    this.browserProvider = browserProvider;
+    this.mcpScriptPath = mcpScriptPath;
     this.server = null;
     this.port = 0;
     this.token = "";
@@ -412,6 +481,35 @@ export class HookService {
         return;
       }
       sendJson(response, 200, snapshot);
+      return;
+    }
+
+    const browserRoute = integrationBrowserRoute(url.pathname);
+    if (browserRoute && (request.method === "GET" || request.method === "POST")) {
+      if (!this.browserProvider) {
+        sendJson(response, 501, { ok: false, error: "browser integration unavailable" });
+        return;
+      }
+      let body = {};
+      if (request.method === "POST") {
+        if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+          sendJson(response, 415, { ok: false, error: "application/json required" });
+          return;
+        }
+        try {
+          body = await readIntegrationJson(request);
+        } catch (error) {
+          sendJson(response, Number(error?.status) || 400, { ok: false, error: error.message });
+          return;
+        }
+      }
+      const result = await this.browserProvider({
+        agentId: browserRoute.agentId,
+        action: browserRoute.action,
+        body: body && typeof body === "object" ? body : {},
+      });
+      const status = Number(result?.httpStatus) || (result?.ok === false ? 409 : 200);
+      sendJson(response, status, actionPayload(result));
       return;
     }
 
@@ -590,12 +688,22 @@ export class HookService {
         const before = await fsPromises.readFile(target, "utf8").catch(() => "");
         const after = mergeClaude(before, this.helperPath);
         if (before !== after) await atomicWrite(target, after);
-        return before !== after;
+        let mcpChanged = false;
+        if (this.mcpScriptPath) {
+          const mcpTarget = path.join(root, ".mcp.json");
+          const mcpBefore = await fsPromises.readFile(mcpTarget, "utf8").catch(() => "");
+          const mcpAfter = mergeClaudeMcp(mcpBefore, "node", this.mcpScriptPath);
+          if (mcpBefore !== mcpAfter) {
+            await atomicWrite(mcpTarget, mcpAfter);
+            mcpChanged = true;
+          }
+        }
+        return before !== after || mcpChanged;
       }
       if (aiToolId === "codex") {
         const target = path.join(root, ".codex", "config.toml");
         const before = await fsPromises.readFile(target, "utf8").catch(() => "");
-        const after = mergeCodex(before, this.helperPath);
+        const after = mergeCodex(before, this.helperPath, this.mcpScriptPath);
         if (before !== after) await atomicWrite(target, after);
         return before !== after;
       }
@@ -716,6 +824,8 @@ export class HookService {
 
 export const hookInternals = {
   mergeClaude,
+  mergeClaudeMcp,
+  mergeMcpJson,
   mergeCodex,
   mergeQwen,
   removeManagedCodexBlock,

@@ -578,6 +578,14 @@ function App() {
   );
   const [agents, setAgents] = useState<Agent[]>(boot.agents);
   const [groups, setGroups] = useState<Group[]>(boot.groups);
+  // A document tab may be dragged into its own split, where its leaf no longer
+  // contains the terminal that opened it. Keep the source session association
+  // outside the layout so browser annotations still return to that session.
+  const documentOwnerByTabRef = useRef<Map<string, string>>(new Map());
+  const getDocumentOwner = useCallback(
+    (docId: string) => documentOwnerByTabRef.current.get(docId) ?? null,
+    []
+  );
   // Sessions detached to other windows — kept visible but unavailable here.
   const [detachedAgentIds, setDetachedAgentIds] = useState<Set<string>>(
     () => new Set()
@@ -2896,8 +2904,9 @@ function App() {
   // Re-clicking an already-open file focuses its existing tab: first in the
   // active Screen, otherwise openAsTab moves it here from any other group.
   const openDocTab = useCallback(
-    (projectId: string, relativePath: string) => {
+    (projectId: string, relativePath: string, ownerAgentId?: string | null) => {
       const docId = makeDocTabId(projectId, relativePath);
+      if (ownerAgentId) documentOwnerByTabRef.current.set(docId, ownerAgentId);
       applyGroupOp((s) => {
         const group = s.groups.find((g) => g.id === s.activeGroupId);
         // Already open in the active screen → just focus it.
@@ -2979,13 +2988,13 @@ function App() {
         if (isAbsoluteFsPath(relativePath)) {
           const inside = relativeIfInside(project.folder, relativePath);
           if (inside) {
-            openDocTab(project.id, inside);
+            openDocTab(project.id, inside, agentId);
           } else {
             await invoke("open_local_path", { path: relativePath });
           }
           return;
         }
-        openDocTab(project.id, relativePath);
+        openDocTab(project.id, relativePath, agentId);
       } catch {
         pushToast(agentId, agent.name, "문서 파일을 열 수 없습니다.");
       }
@@ -3043,7 +3052,7 @@ function App() {
         if (resolved.kind === "html") {
           const inside = relativeIfInside(project.folder, resolved.path);
           if (inside) {
-            openDocTab(project.id, inside);
+            openDocTab(project.id, inside, agentId);
           } else {
             await invoke("open_local_path", { path: resolved.path });
           }
@@ -3057,10 +3066,10 @@ function App() {
           });
           if (isAbsoluteFsPath(relativePath)) {
             const inside = relativeIfInside(project.folder, relativePath);
-            if (inside) openDocTab(project.id, inside);
+            if (inside) openDocTab(project.id, inside, agentId);
             else await invoke("open_local_path", { path: relativePath });
           } else {
-            openDocTab(project.id, relativePath);
+            openDocTab(project.id, relativePath, agentId);
           }
           return;
         }
@@ -3625,6 +3634,7 @@ function App() {
         onTabContextMenu={onPaneTabContextMenu}
         chatModeAgents={chatModeAgents}
         onToggleChat={toggleChatMode}
+        getDocumentOwner={getDocumentOwner}
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
         onOpenFolderPath={handleOpenFolderPath}

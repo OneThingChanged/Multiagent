@@ -55,6 +55,45 @@ describe("Electron hook configuration", () => {
     expect(first).toContain("[[hooks.PermissionRequest]]");
   });
 
+  it("registers the shared browser MCP without replacing user servers", () => {
+    const existing = JSON.stringify({
+      mcpServers: { custom: { type: "stdio", command: "custom-tool" } },
+    });
+    const first = hookInternals.mergeClaudeMcp(
+      existing,
+      "node",
+      "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs"
+    );
+    const second = hookInternals.mergeClaudeMcp(
+      first,
+      "node",
+      "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs"
+    );
+    const parsed = JSON.parse(first);
+    expect(parsed.mcpServers.custom.command).toBe("custom-tool");
+    expect(parsed.mcpServers["multiagent-browser"]).toMatchObject({
+      type: "stdio",
+      command: "node",
+      args: [
+        "-e",
+        "import(require('node:url').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))",
+      ],
+    });
+    expect(first).not.toContain("browser-mcp-server.mjs");
+    expect(second).toBe(first);
+    const codex = hookInternals.mergeCodex(
+      'model = "gpt"\n',
+      "C:\\helper\\notify.ps1",
+      "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs"
+    );
+    expect(codex).toContain("[mcp_servers.multiagent_browser]");
+    expect(codex).toContain(
+      'args = ["-e", "import(require(\'node:url\').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))"]',
+    );
+    expect(codex).not.toContain("browser-mcp-server.mjs");
+    expect(hookInternals.mergeCodex(codex, "C:\\helper\\notify.ps1", "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs")).toBe(codex);
+  });
+
   it("upgrades legacy Tauri Codex entries without removing user hooks", () => {
     const existing = `model = "gpt"
 
@@ -186,6 +225,7 @@ describe("Electron hook runtime", () => {
     const baseDir = temporaryDirectory();
     const activated = [];
     const inputs = [];
+    const browserCalls = [];
     const service = new HookService({
       baseDir,
       sendEvent: () => {},
@@ -210,6 +250,10 @@ describe("Electron hook runtime", () => {
           agentId: request.agentId,
           providerSessionId: request.expectedSessionId,
         };
+      },
+      browserProvider: async (request) => {
+        browserCalls.push(request);
+        return { ok: true, agentId: request.agentId, action: request.action, body: request.body };
       },
     });
     try {
@@ -260,14 +304,28 @@ describe("Electron hook runtime", () => {
           }),
         }
       );
+      const browser = await fetch(
+        `${baseUrl}/integration/v1/browser/agent-1/snapshot`,
+        {
+          method: "POST",
+          headers: { ...authorization, "content-type": "application/json" },
+          body: JSON.stringify({ tabId: "tab-1" }),
+        }
+      );
       expect(activate.status).toBe(202);
       expect(input.status).toBe(200);
+      expect(browser.status).toBe(200);
       expect(activated).toEqual(["agent-1"]);
       expect(inputs).toEqual([{
         agentId: "agent-1",
         text: "이 작업을 진행해 주세요",
         submit: true,
         expectedSessionId: "session-1",
+      }]);
+      expect(browserCalls).toEqual([{
+        agentId: "agent-1",
+        action: "snapshot",
+        body: { tabId: "tab-1" },
       }]);
     } finally {
       await service.stop();

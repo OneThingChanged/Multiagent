@@ -18,6 +18,40 @@ function lower(value) {
   return text(value).toLowerCase();
 }
 
+export function mergeMiraControlAgents(catalogAgents = [], runtimeAgents = []) {
+  const merged = [];
+  const indexById = new Map();
+
+  for (const candidate of Array.isArray(catalogAgents) ? catalogAgents : []) {
+    const id = text(candidate?.id);
+    if (!id || indexById.has(id)) continue;
+    indexById.set(id, merged.length);
+    merged.push(candidate);
+  }
+
+  for (const runtime of Array.isArray(runtimeAgents) ? runtimeAgents : []) {
+    const id = text(runtime?.id);
+    const tool = lower(runtime?.aiToolId || runtime?.tool);
+    if (!id || !SUPPORTED_TOOLS.has(tool)) continue;
+    const existingIndex = indexById.get(id);
+    if (existingIndex === undefined) {
+      indexById.set(id, merged.length);
+      merged.push({ ...runtime, id, aiToolId: tool });
+      continue;
+    }
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      name: text(runtime?.name) || existing?.name,
+      aiToolId: tool,
+      folder: text(runtime?.folder) || existing?.folder,
+      lastSessionId: text(runtime?.lastSessionId) || existing?.lastSessionId,
+    };
+  }
+
+  return merged;
+}
+
 export function deriveMiraControlState(
   { active, status, hook },
   now = Date.now()

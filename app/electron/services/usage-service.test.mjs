@@ -160,8 +160,9 @@ describe("Electron usage index", () => {
   it("refreshes a current limit from the tail of a recent transcript", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-tail-")); roots.push(root);
     const transcript = path.join(root, "session.jsonl");
-    const oldRecord = { timestamp: "2026-07-14T00:00:00Z", type: "event_msg", payload: { type: "message", text: "old" } };
-    const rateRecord = { timestamp: "2026-07-18T00:00:00Z", type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", primary: { used_percent: 42, window_minutes: 300, resets_at: 1_784_400_000 }, secondary: null, credits: { has_credits: false, unlimited: false } } } };
+    const now = Date.now();
+    const oldRecord = { timestamp: new Date(now - 60_000).toISOString(), type: "event_msg", payload: { type: "message", text: "old" } };
+    const rateRecord = { timestamp: new Date(now).toISOString(), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", primary: { used_percent: 42, window_minutes: 300, resets_at: 1_784_400_000 }, secondary: null, credits: { has_credits: false, unlimited: false } } } };
     fs.writeFileSync(transcript, `${JSON.stringify(oldRecord)}\n${JSON.stringify(rateRecord)}\n`);
     const sessionService = { scan: async () => [{ path: transcript, sessionId: "s1", mtimeMs: Date.now() }] };
     const service = new UsageService(path.join(root, "usage.db"), sessionService, {
@@ -179,8 +180,9 @@ describe("Electron usage index", () => {
 
   it("keeps the canonical Codex limit but drops per-model codex ceilings", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-codexmodel-")); roots.push(root);
-    const base = { timestamp: "2026-07-18T00:00:00Z", type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", primary: { used_percent: 6, window_minutes: 10_080, resets_at: 1 }, secondary: null, credits: {} } } };
-    const model = { timestamp: "2026-07-18T00:00:01Z", type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex_bengalfox", limit_name: "GPT-5.3-Codex-Spark", primary: { used_percent: 0, window_minutes: 10_080, resets_at: 1 }, secondary: null, credits: {} } } };
+    const now = Date.now();
+    const base = { timestamp: new Date(now).toISOString(), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", primary: { used_percent: 6, window_minutes: 10_080, resets_at: 1 }, secondary: null, credits: {} } } };
+    const model = { timestamp: new Date(now + 1_000).toISOString(), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex_bengalfox", limit_name: "GPT-5.3-Codex-Spark", primary: { used_percent: 0, window_minutes: 10_080, resets_at: 1 }, secondary: null, credits: {} } } };
     const transcript = path.join(root, "session.jsonl");
     fs.writeFileSync(transcript, `${JSON.stringify(base)}\n${JSON.stringify(model)}\n`);
     const service = new UsageService(path.join(root, "usage.db"), { scan: async () => [{ path: transcript, sessionId: "s1", mtimeMs: Date.now() }] }, {

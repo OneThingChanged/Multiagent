@@ -68,6 +68,20 @@ function isOverEmptyState(clientX: number, clientY: number) {
     ?.closest(".empty-state");
 }
 
+function firstSessionInLayout(node: LayoutNode | null, validAgentIds: Set<string>): string | null {
+  if (!node) return null;
+  if (node.type === "leaf") {
+    const active = node.tabs[node.activeIndex];
+    if (active && validAgentIds.has(active)) return active;
+    return node.tabs.find((tabId) => validAgentIds.has(tabId)) ?? null;
+  }
+  for (const child of node.children) {
+    const found = firstSessionInLayout(child, validAgentIds);
+    if (found) return found;
+  }
+  return null;
+}
+
 export function TerminalArea({
   agents,
   projects,
@@ -92,6 +106,7 @@ export function TerminalArea({
   onTabContextMenu,
   chatModeAgents,
   onToggleChat,
+  getDocumentOwner,
   onOpenMarkdownPath,
   onOpenImagePath,
   onOpenFolderPath,
@@ -120,6 +135,7 @@ export function TerminalArea({
   onTabContextMenu: (path: Path, agentId: string, x: number, y: number) => void;
   chatModeAgents: Set<string>;
   onToggleChat: (agentId: string) => void;
+  getDocumentOwner: (docId: string) => string | null;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -129,6 +145,10 @@ export function TerminalArea({
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;
 }) {
+  const fallbackDocumentAgentId = firstSessionInLayout(
+    layout,
+    new Set(agents.map((agent) => agent.id))
+  );
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
@@ -251,6 +271,8 @@ export function TerminalArea({
     onTabContextMenu,
     chatModeAgents,
     onToggleChat,
+    getDocumentOwner,
+    fallbackDocumentAgentId,
     onOpenMarkdownPath,
     onOpenImagePath,
     onOpenFolderPath,
