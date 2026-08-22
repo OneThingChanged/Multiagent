@@ -110,34 +110,34 @@ Tauri 산출물은 `app/src-tauri/target/release/bundle/`에 생성됩니다 (NS
 | **standard** | `com.jintae.multiagent` | ✅ 포함 |
 | **company** | `com.jintae.multiagent.company` | ❌ 제외 (UI와 백엔드 모두) |
 
-두 variant는 같은 코드·같은 버전을 쓰고, 식별자·업데이트 채널·원격 기능만 다릅니다. 서명 릴리즈와 업데이트 manifest 절차는 [docs/RELEASE.md](docs/RELEASE.md)를 참고하세요.
+두 variant는 같은 코드·같은 버전을 쓰고, 식별자·업데이트 채널·원격 기능만 다릅니다. 서명 릴리즈와 업데이트 manifest 절차는 [docs/release-playbook.md](docs/release-playbook.md)를 참고하세요.
 
 ## 프로젝트 구조
 
 ```text
 ├─ app/                    # 데스크톱 앱
-│  ├─ src/                 # React 19 + TypeScript 렌더러 (두 셸이 공유)
-│  ├─ src-tauri/           # Tauri 2 백엔드 (Rust): PTY, hook, 원격, 사용량
-│  ├─ electron/            # Electron 메인 프로세스 + 서비스 (node-pty)
+│  ├─ src/                 # React 19 + TypeScript 렌더러
+│  ├─ src-tauri/           # 레거시 Tauri 업데이터 전환 자산
+│  ├─ electron/            # 프로덕션 메인 프로세스 + 서비스 (node-pty)
 │  └─ scripts/             # 빌드 / 릴리즈 스크립트
-├─ docs/                   # 상세 프로젝트 문서
-├─ SETUP.md                # 포터블 셋업 가이드
+├─ docs/                   # OKF v0.2 프로젝트 지식
+├─ SETUP.md                # 설치 안내
 └─ LICENSE                 # MIT
 ```
 
 ## 문서
 
-자세한 문서는 [`docs/`](docs/README.md)에 있습니다.
+정식 OKF v0.2 지식 인덱스는 [`docs/index.md`](docs/index.md)입니다.
 
-- [OVERVIEW.md](docs/OVERVIEW.md) — 목적, 기술 스택, 전체 기능 카탈로그
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 프로세스 구조, Rust/React 모델, 레이아웃 트리, 영구화
-- [UX.md](docs/UX.md) — 조작법 전체: 사이드바, 드래그앤드롭, 단축키, 뷰어, 알림
-- [REMOTE.md](docs/REMOTE.md) — Remote PWA: 터널, GitHub 인증, 계정 승인
-- [RESUME.md](docs/RESUME.md) — 세션 resume 흐름과 한계
-- [MONITOR.md](docs/MONITOR.md) / [USAGE_DASHBOARD.md](docs/USAGE_DASHBOARD.md) — 로컬 대시보드 & 토큰 집계
-- [BUILD.md](docs/BUILD.md) / [RELEASE.md](docs/RELEASE.md) — 빌드, 서명, 게시, 자동 업데이트
-- [ELECTRON_MIGRATION.md](docs/ELECTRON_MIGRATION.md) — Electron 셸 구현과 검증
-- [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) — 알려진 제약과 남은 과제
+- [product-overview.md](docs/product-overview.md) — 제품 목표, 런타임 구성, 기능과 variant
+- [system-architecture.md](docs/system-architecture.md) — Electron 경계, 워크스페이스 모델, 레이아웃과 IPC
+- [workspace-interactions.md](docs/workspace-interactions.md) — 지속적인 워크스페이스 상호작용 규칙
+- [remote-service.md](docs/remote-service.md) — 인증된 Remote PWA와 Android 접근
+- [session-lifecycle-and-resume.md](docs/session-lifecycle-and-resume.md) — PTY 수명주기, 훅, 취소와 provider resume
+- [local-dashboard.md](docs/local-dashboard.md) / [usage-accounting.md](docs/usage-accounting.md) — 로컬 Dashboard와 사용량 집계
+- [development-and-build.md](docs/development-and-build.md) / [release-playbook.md](docs/release-playbook.md) — 개발, 패키징, 서명과 게시
+- [electron-migration-decision.md](docs/electron-migration-decision.md) — production runtime 결정 기록
+- [known-limitations.md](docs/known-limitations.md) — 확인된 제약과 재검토 조건
 
 ## 라이선스
 

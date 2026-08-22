@@ -1,0 +1,87 @@
+---
+type: Interface
+title: Embedded browser MCP
+description: "Session-associated browser tabs, fixed automation tools, element annotations, and security boundaries."
+tags:
+  - browser
+  - mcp
+  - security
+status: stable
+stale_after: 2026-10-31
+sources:
+  - id: browser-server
+    resource: ../app/electron/services/browser-mcp-server.mjs
+    title: "Managed browser MCP server"
+  - id: browser-context
+    resource: ../app/electron/services/browser-context.mjs
+    title: "Snapshot and annotation sanitization"
+  - id: browser-ui
+    resource: ../app/src/components/EmbeddedDocumentBrowser.tsx
+    title: "Embedded browser toolbar and selection UI"
+  - id: annotation-preload
+    resource: ../app/electron/browser-annotation-preload.cjs
+    title: "Isolated annotation preload"
+  - id: preview-service
+    resource: ../app/electron/services/document-preview-service.mjs
+    title: "Project-scoped HTML preview service"
+  - id: electron-main
+    resource: ../app/electron/main.mjs
+    title: "Native browser ownership and integration routes"
+---
+
+# Embedded browser MCP
+
+MultiAgent owns one application-local browser profile with multiple native
+browser tabs. Each tab has a stable browser ID and may be associated with an
+agent. Cookies are shared between MultiAgent tabs but remain separate from
+Chrome and Edge profiles.[^electron-main]
+
+## Managed MCP connection
+
+The `multiagent-browser` MCP process uses newline-delimited JSON-RPC over stdio.
+The PTY environment supplies its loopback integration port, bearer token,
+associated agent ID, and script path. The MCP process opens no independent
+network listener.[^browser-server]
+
+The fixed tools are:
+
+* `browser_tabs`, `browser_open`, and `browser_navigate`;
+* `browser_snapshot` and `browser_screenshot`;
+* `browser_click` and `browser_type`;
+* `browser_back`, `browser_forward`, and `browser_reload`;
+* `browser_attach_annotation`.[^browser-server]
+
+Arbitrary page JavaScript is intentionally not exposed as a tool.
+
+## Element selection and session delivery
+
+Selection mode highlights the DOM element under the pointer. A click captures a
+bounded descriptor containing tag/role/text, selector, attributes, rectangle,
+viewport, sanitized HTML, and a PNG crop.[^annotation-preload][^browser-context]
+
+`영역 선택` copies the resulting prompt to the clipboard. `선택 후 전송`
+submits the same context to the associated active session. Hover alone only
+previews the target; it does not capture or send data.[^browser-ui]
+
+## Isolation and sanitization
+
+Local HTML opens through a random project-scoped preview capability. Tokens
+expire after 15 minutes and permit only approved GET/HEAD assets under the
+canonical project root. Traversal, symlink escape, sensitive/build/cache paths,
+unsupported types, and oversized HTML are rejected.[^preview-service]
+
+The browser view does not receive the workspace preload. Snapshots and
+annotations cap text, links, controls, attributes, selectors, and HTML; cookies,
+authorization material, active scripts, event handlers, and password values are
+excluded. MCP typing and clicking reject password controls.[^browser-context]
+
+Integration calls require the per-process bearer token and associated agent ID
+and reject browser-origin requests. A running CLI must restart after managed MCP
+configuration changes because MCP clients load configuration at startup.
+
+[^browser-server]: Managed browser MCP server
+[^browser-context]: Snapshot and annotation sanitization
+[^browser-ui]: Embedded browser toolbar and selection UI
+[^annotation-preload]: Isolated annotation preload
+[^preview-service]: Project-scoped HTML preview service
+[^electron-main]: Native browser ownership and integration routes

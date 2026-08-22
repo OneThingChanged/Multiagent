@@ -114,34 +114,34 @@ source-tree or debug APK. Company packaging remains APK-free.
 | **standard** | `com.jintae.multiagent` | ✅ included |
 | **company** | `com.jintae.multiagent.company` | ❌ removed (UI and backend) |
 
-Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Signed-release and update-manifest procedures are documented in [docs/RELEASE.md](docs/RELEASE.md).
+Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Signed-release and update-manifest procedures are documented in [docs/release-playbook.md](docs/release-playbook.md).
 
 ## Project Structure
 
 ```text
 ├─ app/                    # Desktop app
-│  ├─ src/                 # React 19 + TypeScript renderer (shared by both shells)
-│  ├─ src-tauri/           # Tauri 2 backend (Rust): PTY, hooks, remote, usage
-│  ├─ electron/            # Electron main process + services (node-pty)
+│  ├─ src/                 # React 19 + TypeScript renderer
+│  ├─ src-tauri/           # Legacy Tauri updater-transition assets
+│  ├─ electron/            # Production main process + services (node-pty)
 │  └─ scripts/             # Build / release scripts
-├─ docs/                   # In-depth project docs (Korean)
-├─ SETUP.md                # Portable setup guide
+├─ docs/                   # OKF v0.2 project knowledge
+├─ SETUP.md                # Setup guide
 └─ LICENSE                 # MIT
 ```
 
 ## Documentation
 
-Detailed docs live in [`docs/`](docs/README.md):
+The canonical OKF v0.2 knowledge index is [`docs/index.md`](docs/index.md):
 
-- [OVERVIEW.md](docs/OVERVIEW.md) — goals, tech stack, full feature catalog
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — processes, Rust/React models, layout tree, persistence
-- [UX.md](docs/UX.md) — every interaction: sidebar, drag-and-drop, shortcuts, viewers, notifications
-- [REMOTE.md](docs/REMOTE.md) — Remote PWA: tunnel, GitHub auth, account approval
-- [RESUME.md](docs/RESUME.md) — session resume flow and its limits
-- [MONITOR.md](docs/MONITOR.md) / [USAGE_DASHBOARD.md](docs/USAGE_DASHBOARD.md) — local dashboard & token accounting
-- [BUILD.md](docs/BUILD.md) / [RELEASE.md](docs/RELEASE.md) — build, sign, publish, auto-update
-- [ELECTRON_MIGRATION.md](docs/ELECTRON_MIGRATION.md) — Electron shell implementation & verification
-- [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) — known limitations & future work
+- [product-overview.md](docs/product-overview.md) — product goals, runtime shape, capabilities, and variants
+- [system-architecture.md](docs/system-architecture.md) — Electron boundaries, workspace model, layout, and IPC
+- [workspace-interactions.md](docs/workspace-interactions.md) — durable workspace interaction rules
+- [remote-service.md](docs/remote-service.md) — authenticated Remote PWA and Android access
+- [session-lifecycle-and-resume.md](docs/session-lifecycle-and-resume.md) — PTY lifecycle, hooks, cancellation, and provider resume
+- [local-dashboard.md](docs/local-dashboard.md) / [usage-accounting.md](docs/usage-accounting.md) — local Dashboard and usage accounting
+- [development-and-build.md](docs/development-and-build.md) / [release-playbook.md](docs/release-playbook.md) — development, packaging, signing, and publication
+- [electron-migration-decision.md](docs/electron-migration-decision.md) — production-runtime decision record
+- [known-limitations.md](docs/known-limitations.md) — confirmed constraints and review triggers
 
 ## License
 
