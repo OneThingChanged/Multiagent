@@ -10,6 +10,8 @@ const CLAUDE_USAGE_MIN_INTERVAL_MS = 60_000;
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
 const FIVE_HOUR_MINUTES = 300;
 const SEVEN_DAY_MINUTES = 10_080;
+const USAGE_EVENT_PARSER_VERSION = 2;
+const USAGE_EVENT_PARSER_VERSION_KEY = "usage_event_parser_version";
 
 function number(value) {
   const parsed = Number(value);
@@ -24,6 +26,12 @@ function optionalNumber(value) {
 function timestamp(value) {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : Math.floor(Date.now() / 1000);
+}
+
+function codexCumulativeFromSourceKey(sourceKey) {
+  const value = String(sourceKey || "").split(":").at(-1);
+  const cumulative = Number(value);
+  return Number.isSafeInteger(cumulative) && cumulative > 0 ? cumulative : null;
 }
 
 function sameFolder(left, right) {
@@ -191,7 +199,102 @@ export class UsageService {
         value TEXT NOT NULL
       );
     `);
+    this.ensureUsageSourceStateColumns(this.database);
+    this.migrateUsageEventParser(this.database);
     return this.database;
+  }
+
+  ensureUsageSourceStateColumns(database) {
+    const columns = new Set(database.prepare("PRAGMA table_info(usage_sources)").all()
+      .map((column) => String(column.name)));
+    if (!columns.has("last_cumulative")) {
+      database.exec("ALTER TABLE usage_sources ADD COLUMN last_cumulative INTEGER");
+    }
+    if (!columns.has("cumulative_segment")) {
+      database.exec("ALTER TABLE usage_sources ADD COLUMN cumulative_segment INTEGER NOT NULL DEFAULT 0");
+    }
+  }
+
+  migrateUsageEventParser(database) {
+    const versionRow = database.prepare("SELECT value FROM usage_meta WHERE key=?")
+      .get(USAGE_EVENT_PARSER_VERSION_KEY);
+    const currentVersion = number(versionRow?.value);
+    if (currentVersion >= USAGE_EVENT_PARSER_VERSION) return;
+
+    const rows = database.prepare(`SELECT id,source_path sourcePath,source_key sourceKey,source_offset sourceOffset
+      FROM usage_events WHERE tool='codex' ORDER BY source_path,source_offset,id`).all();
+    const remove = database.prepare("DELETE FROM usage_events WHERE id=?");
+    const updateSource = database.prepare(`UPDATE usage_sources
+      SET last_cumulative=?, cumulative_segment=? WHERE source_path=?`);
+    const sourceStates = new Map();
+    let sourcePath = null;
+    let previousCumulative = null;
+    let cumulativeSegment = 0;
+    let removed = 0;
+
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of rows) {
+        const nextSourcePath = typeof row.sourcePath === "string" ? row.sourcePath : null;
+        if (nextSourcePath !== sourcePath) {
+          if (sourcePath) {
+            sourceStates.set(sourcePath, {
+              lastCumulative: previousCumulative,
+              cumulativeSegment,
+            });
+          }
+          sourcePath = nextSourcePath;
+          previousCumulative = null;
+          cumulativeSegment = 0;
+        }
+        const cumulative = codexCumulativeFromSourceKey(row.sourceKey);
+        if (cumulative == null) continue;
+        if (sourcePath && previousCumulative === cumulative) {
+          remove.run(row.id);
+          removed += 1;
+          continue;
+        }
+        if (previousCumulative != null && cumulative < previousCumulative) {
+          cumulativeSegment += 1;
+        }
+        previousCumulative = cumulative;
+      }
+      if (sourcePath) {
+        sourceStates.set(sourcePath, {
+          lastCumulative: previousCumulative,
+          cumulativeSegment,
+        });
+      }
+
+      // Codex reports cached_input_tokens as a subset of input_tokens and
+      // reasoning_output_tokens as a subset of output_tokens. Older versions
+      // added both subsets to total_tokens a second time. Convert the stored
+      // columns to mutually exclusive categories while preserving the
+      // provider-reported input + output total.
+      database.exec(`UPDATE usage_events SET
+        total_tokens=MAX(input_tokens,0)+MAX(output_tokens,0),
+        input_tokens=MAX(input_tokens-MIN(MAX(cache_read_tokens,0),MAX(input_tokens,0)),0),
+        output_tokens=MAX(output_tokens-MIN(MAX(reasoning_output_tokens,0),MAX(output_tokens,0)),0),
+        cache_read_tokens=MIN(MAX(cache_read_tokens,0),MAX(input_tokens,0)),
+        reasoning_output_tokens=MIN(MAX(reasoning_output_tokens,0),MAX(output_tokens,0)),
+        raw_kind='codex_token_count_v2'
+        WHERE tool='codex' AND raw_kind!='codex_token_count_v2'`);
+      for (const [pathKey, state] of sourceStates) {
+        updateSource.run(state.lastCumulative, state.cumulativeSegment, pathKey);
+      }
+      database.exec("DELETE FROM usage_daily");
+      database.prepare("DELETE FROM usage_meta WHERE key=?").run("daily_rollup_event_id");
+      database.prepare(`INSERT INTO usage_meta(key,value) VALUES(?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+        .run(USAGE_EVENT_PARSER_VERSION_KEY, String(USAGE_EVENT_PARSER_VERSION));
+      database.exec("COMMIT");
+      if (rows.length > 0) {
+        console.info(`[electron] corrected ${rows.length - removed} Codex usage events; removed ${removed} repeats`);
+      }
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   ensureDailyRollup() {
@@ -291,27 +394,45 @@ export class UsageService {
     if (item?.type !== "event_msg" || payload?.type !== "token_count") return null;
     const usage = payload.info?.last_token_usage;
     if (!usage) return null;
-    const input = number(usage.input_tokens);
-    const output = number(usage.output_tokens);
-    const cacheRead = number(usage.cached_input_tokens);
-    const reasoning = number(usage.reasoning_output_tokens);
+    const rawInput = Math.max(0, number(usage.input_tokens));
+    const rawOutput = Math.max(0, number(usage.output_tokens));
+    const cacheRead = Math.min(rawInput, Math.max(0, number(usage.cached_input_tokens)));
+    const reasoning = Math.min(rawOutput, Math.max(0, number(usage.reasoning_output_tokens)));
+    const input = rawInput - cacheRead;
+    const output = rawOutput - reasoning;
     const reported = number(usage.total_tokens);
-    const total = reported > 0 ? reported + cacheRead + reasoning : input + output + cacheRead + reasoning;
+    const total = reported > 0 ? reported : rawInput + rawOutput;
     if (total <= 0) return null;
     const ts = timestamp(item.timestamp);
-    const cumulative = number(payload.info?.total_token_usage?.total_tokens) || sourceOffset;
+    const cumulative = number(payload.info?.total_token_usage?.total_tokens);
+    let sourceKey;
+    if (cumulative > 0) {
+      if (context.codexLastCumulative === cumulative) return null;
+      if (context.codexLastCumulative != null && cumulative < context.codexLastCumulative) {
+        context.codexCumulativeSegment += 1;
+      }
+      context.codexLastCumulative = cumulative;
+      sourceKey = `codex:${context.sessionId || "unknown"}:${context.codexCumulativeSegment}:${cumulative}`;
+    } else {
+      sourceKey = `codex:${context.sessionId || "unknown"}:${ts}:${sourceOffset}`;
+    }
     return {
-      sourceKey: `codex:${context.sessionId || "unknown"}:${ts}:${cumulative}`,
+      sourceKey,
       ts, sessionId: context.sessionId, model: context.model, cwd: context.cwd,
       input, output, cacheRead, cacheWrite: 0, reasoning, total,
-      rawKind: "codex_token_count",
+      rawKind: "codex_token_count_v2",
     };
   }
 
   updateContext(item, context) {
     if (context.tool !== "codex") return;
     if (item?.type === "session_meta") {
-      context.sessionId = item.payload?.id || context.sessionId;
+      const nextSessionId = item.payload?.id || context.sessionId;
+      if (nextSessionId && context.sessionId && nextSessionId !== context.sessionId) {
+        context.codexCumulativeSegment += 1;
+        context.codexLastCumulative = null;
+      }
+      context.sessionId = nextSessionId;
       context.cwd = item.payload?.cwd || context.cwd;
       context.model = item.payload?.model || context.model;
     } else if (item?.type === "turn_context") {
@@ -397,9 +518,19 @@ export class UsageService {
   ingestFile(entry, tool) {
     const db = this.db();
     const stat = fs.statSync(entry.path);
-    const source = db.prepare("SELECT last_offset FROM usage_sources WHERE source_path=?").get(entry.path);
-    let start = Number(source?.last_offset) || 0;
-    if (start > stat.size) start = 0;
+    const source = db.prepare(`SELECT session_id sessionId,last_offset lastOffset,
+      last_cumulative lastCumulative,cumulative_segment cumulativeSegment
+      FROM usage_sources WHERE source_path=?`).get(entry.path);
+    let start = Number(source?.lastOffset) || 0;
+    let codexLastCumulative = source?.lastCumulative == null
+      ? null
+      : number(source.lastCumulative);
+    let codexCumulativeSegment = Math.max(0, number(source?.cumulativeSegment));
+    if (start > stat.size) {
+      start = 0;
+      codexLastCumulative = null;
+      codexCumulativeSegment += 1;
+    }
     if (start === stat.size) return 0;
     const fd = fs.openSync(entry.path, "r");
     const buffer = Buffer.alloc(stat.size - start);
@@ -408,7 +539,18 @@ export class UsageService {
     const lastNewline = buffer.lastIndexOf(0x0a);
     if (lastNewline < 0) return 0;
     const readable = buffer.subarray(0, lastNewline + 1);
-    const context = { tool, sessionId: entry.sessionId, cwd: entry.cwd, model: null };
+    if (source?.sessionId && entry.sessionId && source.sessionId !== entry.sessionId) {
+      codexLastCumulative = null;
+      codexCumulativeSegment += 1;
+    }
+    const context = {
+      tool,
+      sessionId: entry.sessionId || source?.sessionId,
+      cwd: entry.cwd,
+      model: null,
+      codexLastCumulative,
+      codexCumulativeSegment,
+    };
     const { agent, project } = this.ownerFor(entry, tool);
     const insert = db.prepare(`INSERT OR IGNORE INTO usage_events (
       source_key,ts,project_id,project_name,agent_id,agent_name,session_id,tool,model,cwd,
@@ -438,11 +580,14 @@ export class UsageService {
       );
       inserted += Number(result.changes);
     }
-    db.prepare(`INSERT INTO usage_sources(source_path,tool,session_id,last_offset,last_size,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET tool=excluded.tool,
+    db.prepare(`INSERT INTO usage_sources(source_path,tool,session_id,last_offset,last_size,updated_at,
+      last_cumulative,cumulative_segment)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET tool=excluded.tool,
       session_id=excluded.session_id,last_offset=excluded.last_offset,last_size=excluded.last_size,
-      updated_at=excluded.updated_at`).run(
-        entry.path, tool, context.sessionId ?? null, start + readable.length, stat.size, Date.now()
+      updated_at=excluded.updated_at,last_cumulative=excluded.last_cumulative,
+      cumulative_segment=excluded.cumulative_segment`).run(
+        entry.path, tool, context.sessionId ?? null, start + readable.length, stat.size, Date.now(),
+        context.codexLastCumulative, context.codexCumulativeSegment
       );
     return inserted;
   }

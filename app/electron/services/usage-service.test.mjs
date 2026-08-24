@@ -11,14 +11,21 @@ describe("Electron usage index", () => {
   it("incrementally indexes Codex token events without duplicates", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-")); roots.push(root);
     const transcript = path.join(root, "session.jsonl");
-    const record = { timestamp: new Date().toISOString(), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2, total_tokens: 13 }, total_token_usage: { total_tokens: 13 } }, rate_limits: { limit_id: "codex", limit_name: null, primary: { used_percent: 25, window_minutes: 10_080, resets_at: 1_784_928_404 }, secondary: null, credits: { has_credits: false, unlimited: false, balance: "0" }, plan_type: "pro" } } };
+    const record = { timestamp: new Date().toISOString(), type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2, reasoning_output_tokens: 1, total_tokens: 13 }, total_token_usage: { total_tokens: 13 } }, rate_limits: { limit_id: "codex", limit_name: null, primary: { used_percent: 25, window_minutes: 10_080, resets_at: 1_784_928_404 }, secondary: null, credits: { has_credits: false, unlimited: false, balance: "0" }, plan_type: "pro" } } };
     fs.writeFileSync(transcript, `${JSON.stringify(record)}\n`);
     const sessionService = { scan: async () => [{ path: transcript, sessionId: "s1", cwd: root }] };
     const service = new UsageService(path.join(root, "usage.db"), sessionService);
     service.syncCatalog([{ id: "p", name: "P", folder: root }], [{ id: "a", projectId: "p", name: "A", folder: root, aiToolId: "codex", lastSessionId: "s1" }]);
     expect((await service.ingestAll()).events).toBe(1);
     expect((await service.ingestAll()).events).toBe(0);
-    expect(service.dashboardSummary()).toMatchObject({ events: 1, totalTokens: 15 });
+    expect(service.dashboardSummary()).toMatchObject({
+      events: 1,
+      inputTokens: 8,
+      outputTokens: 2,
+      cacheReadTokens: 2,
+      reasoningOutputTokens: 1,
+      totalTokens: 13,
+    });
     expect(service.rateLimitSummary()).toMatchObject({
       limits: [{
         limitId: "codex",
@@ -26,6 +33,92 @@ describe("Electron usage index", () => {
         primary: { usedPercent: 25, windowMinutes: 10_080, resetsAt: 1_784_928_404 },
       }],
     });
+    service.close();
+  });
+
+  it("skips repeated Codex cumulative snapshots across incremental reads and preserves resets", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-repeat-")); roots.push(root);
+    const transcript = path.join(root, "session.jsonl");
+    let sequence = 0;
+    const record = (total, cumulative) => ({
+      timestamp: new Date(Date.now() + sequence++ * 1_000).toISOString(),
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: total - 1,
+            output_tokens: 1,
+            cached_input_tokens: Math.min(2, total - 1),
+            total_tokens: total,
+          },
+          total_token_usage: { total_tokens: cumulative },
+        },
+      },
+    });
+    fs.writeFileSync(transcript, `${JSON.stringify(record(13, 13))}\n`);
+    const service = new UsageService(path.join(root, "usage.db"), {
+      scan: async () => [{ path: transcript, sessionId: "s1", cwd: root }],
+    });
+
+    expect((await service.ingestAll()).events).toBe(1);
+    fs.appendFileSync(transcript, `${JSON.stringify(record(13, 13))}\n`);
+    expect((await service.ingestAll()).events).toBe(0);
+    fs.appendFileSync(transcript, `${JSON.stringify(record(7, 20))}\n`);
+    expect((await service.ingestAll()).events).toBe(1);
+    fs.appendFileSync(transcript, `${JSON.stringify(record(5, 5))}\n`);
+    expect((await service.ingestAll()).events).toBe(1);
+    fs.appendFileSync(transcript, `${JSON.stringify(record(5, 5))}\n`);
+    expect((await service.ingestAll()).events).toBe(0);
+
+    expect(service.dashboardSummary()).toMatchObject({ events: 3, totalTokens: 25 });
+    expect(service.db().prepare(`SELECT last_cumulative lastCumulative,
+      cumulative_segment cumulativeSegment FROM usage_sources`).get()).toMatchObject({
+        lastCumulative: 5,
+        cumulativeSegment: 1,
+      });
+    service.close();
+  });
+
+  it("corrects legacy Codex totals, removes repeated snapshots, and rebuilds daily rollups", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-usage-migrate-")); roots.push(root);
+    const databasePath = path.join(root, "usage.db");
+    const transcript = path.join(root, "session.jsonl");
+    let service = new UsageService(databasePath, { scan: async () => [] });
+    const database = service.db();
+    const insert = database.prepare(`INSERT INTO usage_events (
+      source_key,ts,session_id,tool,source_path,source_offset,input_tokens,output_tokens,
+      cache_read_tokens,reasoning_output_tokens,total_tokens,raw_kind
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const ts = Math.floor(Date.now() / 1000);
+    insert.run("codex:s1:1000:13", ts, "s1", "codex", transcript, 10, 10, 3, 2, 1, 16, "codex_token_count");
+    insert.run("codex:s1:1001:13", ts + 1, "s1", "codex", transcript, 20, 10, 3, 2, 1, 16, "codex_token_count");
+    database.prepare(`INSERT INTO usage_sources (
+      source_path,tool,session_id,last_offset,last_size,updated_at
+    ) VALUES (?,?,?,?,?,?)`).run(transcript, "codex", "s1", 20, 20, Date.now());
+    database.prepare("INSERT OR REPLACE INTO usage_daily(day,events,total_tokens) VALUES(?,?,?)")
+      .run("2020-01-01", 99, 9999);
+    database.prepare("INSERT OR REPLACE INTO usage_meta(key,value) VALUES(?,?)")
+      .run("usage_event_parser_version", "1");
+    service.close();
+
+    service = new UsageService(databasePath, { scan: async () => [] });
+    expect(service.dashboardSummary()).toMatchObject({
+      events: 1,
+      inputTokens: 8,
+      outputTokens: 2,
+      cacheReadTokens: 2,
+      reasoningOutputTokens: 1,
+      totalTokens: 13,
+    });
+    expect(service.db().prepare("SELECT COUNT(*) count FROM usage_daily").get().count).toBe(1);
+    expect(service.db().prepare("SELECT value FROM usage_meta WHERE key=?")
+      .get("usage_event_parser_version").value).toBe("2");
+    expect(service.db().prepare(`SELECT last_cumulative lastCumulative,
+      cumulative_segment cumulativeSegment FROM usage_sources`).get()).toMatchObject({
+        lastCumulative: 13,
+        cumulativeSegment: 0,
+      });
     service.close();
   });
 
