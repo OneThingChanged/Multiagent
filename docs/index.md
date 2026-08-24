@@ -21,7 +21,7 @@ configuration that supports it.
 * [MiraControl integration](miracontrol-integration.md) - Authenticated session state, activation, and guarded input API.
 * [Remote service](remote-service.md) - External Remote/PWA/Android access and its authentication boundary.
 * [Usage accounting](usage-accounting.md) - Local token indexing, historical aggregation, and account limits.
-* [Embedded browser MCP](embedded-browser-mcp.md) - Agent-controlled browser tabs, annotations, and isolation rules.
+* [Embedded browser MCP](embedded-browser-mcp.md) - Always-on shared browser tabs, managed MCP startup, annotations, and isolation rules.
 
 ## Delivery and maintenance
 

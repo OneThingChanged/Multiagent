@@ -47,8 +47,9 @@ an allowlisted preload bridge for privileged requests.[^electron-main][^renderer
 
 The production desktop entry point is Electron. `node-pty` provides terminal
 processes, xterm renders them, and Electron Builder produces Windows NSIS
-installers. Closing all workspace windows can leave the tray-owned application
-running; a coordinated full exit tears down PTYs and services.[^desktop-manifest][^electron-main]
+installers. Closing all workspace windows can leave the tray-owned application,
+shared browser profile, and browser MCP broker running invisibly; a coordinated
+full exit tears down PTYs and services.[^desktop-manifest][^electron-main]
 
 The Android package is a separate client for the authenticated Remote service.
 It stores multiple server profiles and displays the Remote UI through a
@@ -61,7 +62,7 @@ constrained WebView; it does not embed the desktop runtime.[^mobile-manifest]
 * transcript-backed chat for Codex and Claude;
 * project file tree, Git/submodule status, Markdown/image viewing, and isolated
   HTML preview;
-* browser tabs controlled through a fixed MCP tool surface;
+* always-on shared browser tabs controlled through a fixed MCP tool surface;
 * local token accounting plus provider account-limit snapshots;
 * loopback Dashboard, authenticated Remote access, and MiraControl integration;
 * signed Standard and Company installers plus a separately signed Android APK.

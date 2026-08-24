@@ -90,6 +90,9 @@ describe("Electron hook configuration", () => {
     expect(codex).toContain(
       'args = ["-e", "import(require(\'node:url\').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))"]',
     );
+    expect(codex).toContain(
+      'env_vars = ["MULTIAGENT_AGENT_ID", "MULTIAGENT_PORT", "MULTIAGENT_TOKEN", "MULTIAGENT_MCP_SCRIPT"]',
+    );
     expect(codex).not.toContain("browser-mcp-server.mjs");
     expect(hookInternals.mergeCodex(codex, "C:\\helper\\notify.ps1", "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs")).toBe(codex);
   });
@@ -129,6 +132,61 @@ command = "old-helper working"
       ? path.join(root, ".claude", "settings.local.json")
       : path.join(root, ".codex", "config.toml");
     expect(fs.readFileSync(target, "utf8")).toContain("multiagent");
+  });
+});
+
+describe("browser MCP stdio bridge", () => {
+  it("completes initialize using the same environment-based launcher as Codex", async () => {
+    const scriptPath = path.resolve("electron", "services", "browser-mcp-server.mjs");
+    const child = spawn(process.execPath, [
+      "-e",
+      "import(require('node:url').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))",
+    ], {
+      cwd: path.resolve("."),
+      env: {
+        ...process.env,
+        MULTIAGENT_AGENT_ID: "agent-handshake",
+        MULTIAGENT_PORT: "1",
+        MULTIAGENT_TOKEN: "test-token",
+        MULTIAGENT_MCP_SCRIPT: scriptPath,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    try {
+      const response = await new Promise((resolve, reject) => {
+        let stdout = "";
+        let stderr = "";
+        const timeout = setTimeout(() => reject(new Error(`MCP initialize timeout: ${stderr}`)), 5_000);
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk) => { stderr += chunk; });
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+          const newline = stdout.indexOf("\n");
+          if (newline < 0) return;
+          clearTimeout(timeout);
+          try { resolve(JSON.parse(stdout.slice(0, newline))); } catch (error) { reject(error); }
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (!stdout.trim()) reject(new Error(`MCP exited before initialize (${code}): ${stderr}`));
+        });
+        child.stdin.write(`${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+        })}\n`);
+      });
+      expect(response).toMatchObject({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { serverInfo: { name: "multiagent-browser" } },
+      });
+    } finally {
+      child.stdin.end();
+      child.kill();
+    }
   });
 });
 

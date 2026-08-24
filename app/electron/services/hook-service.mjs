@@ -33,6 +33,12 @@ const BROWSER_MCP_NODE_ARGS = [
   "-e",
   "import(require('node:url').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))",
 ];
+const BROWSER_MCP_ENV_VARS = [
+  "MULTIAGENT_AGENT_ID",
+  "MULTIAGENT_PORT",
+  "MULTIAGENT_TOKEN",
+  "MULTIAGENT_MCP_SCRIPT",
+];
 const MAX_INTEGRATION_BODY_BYTES = 16 * 1024;
 
 function sendJson(response, status, payload) {
@@ -390,6 +396,7 @@ function mergeCodex(existing, helperPath, mcpScriptPath = "") {
       "[mcp_servers.multiagent_browser]",
       'command = "node"',
       `args = [${BROWSER_MCP_NODE_ARGS.map((arg) => JSON.stringify(arg)).join(", ")}]`,
+      `env_vars = [${BROWSER_MCP_ENV_VARS.map((name) => JSON.stringify(name)).join(", ")}]`,
       "enabled = true",
       CODEX_MCP_END,
     );

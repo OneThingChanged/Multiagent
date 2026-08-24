@@ -1,7 +1,7 @@
 ---
 type: Interface
 title: Embedded browser MCP
-description: "Session-associated browser tabs, fixed automation tools, element annotations, and security boundaries."
+description: "Always-on shared browser tabs, managed MCP startup, fixed automation tools, element annotations, and security boundaries."
 tags:
   - browser
   - mcp
@@ -32,9 +32,12 @@ sources:
 # Embedded browser MCP
 
 MultiAgent owns one application-local browser profile with multiple native
-browser tabs. Each tab has a stable browser ID and may be associated with an
-agent. Cookies are shared between MultiAgent tabs but remain separate from
-Chrome and Edge profiles.[^electron-main]
+browser tabs. A hidden host and blank tab are created before restored agent
+sessions start, and the browser view disables background throttling. Closing
+all visible workspaces therefore leaves the browser profile and its hidden tab
+alive with the system-tray process. Each tab has a stable browser ID; agents
+share the tab list and select tabs by ID. Cookies are shared between MultiAgent
+tabs but remain separate from Chrome and Edge profiles.[^electron-main]
 
 ## Managed MCP connection
 
@@ -42,6 +45,14 @@ The `multiagent-browser` MCP process uses newline-delimited JSON-RPC over stdio.
 The PTY environment supplies its loopback integration port, bearer token,
 associated agent ID, and script path. The MCP process opens no independent
 network listener.[^browser-server]
+
+Codex project configuration explicitly whitelists `MULTIAGENT_AGENT_ID`,
+`MULTIAGENT_PORT`, `MULTIAGENT_TOKEN`, and `MULTIAGENT_MCP_SCRIPT` for the MCP
+stdio child. MultiAgent waits for both the hidden browser and authenticated
+loopback broker before it writes the managed configuration and launches a
+Codex, Claude, or Qwen PTY. The stdio MCP child itself is still created by the
+CLI at CLI startup; the browser and broker are the app-lifetime services that
+must already be ready.[^electron-main]
 
 The fixed tools are:
 

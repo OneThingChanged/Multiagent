@@ -81,9 +81,13 @@ Workspace models are versioned and normalized when loaded. Runtime PTY objects,
 native browser views, bearer tokens, and process-local service state are never
 serialized as workspace data.[^persistence]
 
-Workspace windows may close while the tray-owned process continues. A full exit
+Workspace windows may close while the tray-owned process continues. The main
+process parks persistent browser views on an invisible host so their shared
+profile, tabs, and authenticated loopback broker remain available to agent MCP
+clients. AI PTYs start only after that browser integration is ready. A full exit
 uses coordinated teardown and provider resume metadata; see [Session lifecycle
-and resume](session-lifecycle-and-resume.md).
+and resume](session-lifecycle-and-resume.md) and [Embedded browser
+MCP](embedded-browser-mcp.md).[^electron-main]
 
 ## Adding a privileged capability
 

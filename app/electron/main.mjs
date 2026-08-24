@@ -178,6 +178,9 @@ const preloadContractArguments = [
 let initialWindow = null;
 /** @type {BrowserWindow | null} */
 let petWindow = null;
+/** @type {BrowserWindow | null} Invisible owner for the always-on browser profile. */
+let browserHostWindow = null;
+let backgroundBrowserTabId = null;
 /** @type {import('electron').Tray | null} */
 let tray = null;
 let forceClosing = false;
@@ -193,6 +196,7 @@ const documentBrowserByShellWebContents = new Map();
 const documentBrowserByAgent = new Map();
 /** @type {Map<number, Promise<unknown>>} serialize native document view opens per workspace */
 const documentBrowserOpenPromises = new Map();
+let backgroundBrowserPromise = null;
 /** @type {number | null} Renderer elected for singleton background UI sync. */
 let coordinatorWebContentsId = null;
 let lastWorkspaceWindowId = "primary";
@@ -386,8 +390,47 @@ const hookService = new HookService({
   sessionService,
 });
 let hookReady = null;
+let browserReady = null;
 let hookMaintenanceTimer = null;
 let hookMaintenancePromise = null;
+
+async function ensureBrowserIntegrationReady() {
+  const backgroundRecord = backgroundBrowserTabId
+    ? documentBrowserWindows.get(backgroundBrowserTabId)
+    : null;
+  if (!backgroundRecord || backgroundRecord.view.webContents.isDestroyed()) {
+    browserReady = null;
+  }
+  if (!browserReady) {
+    const pendingBrowser = ensureBackgroundBrowser();
+    browserReady = pendingBrowser;
+    pendingBrowser.catch(() => {
+      if (browserReady === pendingBrowser) browserReady = null;
+    });
+  }
+  await browserReady;
+
+  if (!hookReady) {
+    const pendingHook = hookService.start();
+    hookReady = pendingHook;
+    pendingHook.catch(() => {
+      if (hookReady === pendingHook) hookReady = null;
+    });
+  }
+  await hookReady;
+  if (!(await hookService.health())) {
+    const pendingRefresh = hookService.refresh();
+    hookReady = pendingRefresh;
+    await pendingRefresh;
+  }
+  if (!hookService.port || !hookService.token) {
+    throw new Error("브라우저 MCP 연동 서버가 준비되지 않았습니다.");
+  }
+  return {
+    browserTabId: backgroundBrowserTabId,
+    port: hookService.port,
+  };
+}
 
 function maintainActiveHooks() {
   if (hookMaintenancePromise) return hookMaintenancePromise;
@@ -960,6 +1003,67 @@ async function loadRenderer(win, query = {}) {
   await win.loadFile(path.join(appRoot, "dist", "index.html"), { query });
 }
 
+function ensureBrowserHostWindow() {
+  if (browserHostWindow && !browserHostWindow.isDestroyed()) return browserHostWindow;
+  const host = new BrowserWindow({
+    title: "MultiAgent Browser Host",
+    x: -32_000,
+    y: -32_000,
+    width: 1,
+    height: 1,
+    show: false,
+    focusable: false,
+    skipTaskbar: true,
+    frame: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      backgroundThrottling: false,
+    },
+  });
+  browserHostWindow = host;
+  host.on("closed", () => {
+    for (const record of [...documentBrowserWindows.values()]) {
+      if (record.win === host) cleanupDocumentBrowser(record);
+    }
+    if (browserHostWindow === host) browserHostWindow = null;
+    backgroundBrowserTabId = null;
+    backgroundBrowserPromise = null;
+    browserReady = null;
+  });
+  return host;
+}
+
+async function ensureBackgroundBrowser() {
+  const existing = backgroundBrowserTabId
+    ? documentBrowserWindows.get(backgroundBrowserTabId)
+    : null;
+  if (existing && !existing.view.webContents.isDestroyed()) return existing;
+  if (backgroundBrowserPromise) return backgroundBrowserPromise;
+  const operation = (async () => {
+    const host = ensureBrowserHostWindow();
+    const created = await createDocumentBrowserWindow({
+      parentWindow: host,
+      initialUrl: "about:blank",
+      background: true,
+    });
+    const record = documentBrowserWindows.get(created.browserId);
+    if (!record) throw new Error("백그라운드 브라우저를 초기화하지 못했습니다.");
+    backgroundBrowserTabId = record.id;
+    return record;
+  })();
+  backgroundBrowserPromise = operation;
+  try {
+    return await operation;
+  } catch (error) {
+    if (backgroundBrowserPromise === operation) backgroundBrowserPromise = null;
+    throw error;
+  }
+}
+
 function documentBrowserRecordForSender(senderId, browserId = null) {
   if (browserId) {
     const record = documentBrowserWindows.get(browserId);
@@ -1014,8 +1118,7 @@ function browserRecordForAgent(agentId, browserId = "") {
   const id = String(browserId || "").trim();
   if (id) {
     const record = documentBrowserWindows.get(id);
-    if (record && (!agentId || record.agentId === agentId)) return record;
-    return null;
+    return record && !record.view.webContents.isDestroyed() ? record : null;
   }
   const mappedId = documentBrowserByAgent.get(String(agentId || "").trim());
   return mappedId ? documentBrowserWindows.get(mappedId) ?? null : null;
@@ -1033,10 +1136,11 @@ function browserParentWindowForAgent(agentId) {
     const runtime = runtimeByWebContents.get(win.webContents.id);
     return runtime?.workspace_window_id === lastWorkspaceWindowId && !win.isDestroyed();
   });
-  return remembered ?? [...workspaceWindows.values()].find((win) => !win.isDestroyed()) ?? null;
+  return remembered ?? [...workspaceWindows.values()].find((win) => !win.isDestroyed()) ??
+    (browserHostWindow && !browserHostWindow.isDestroyed() ? browserHostWindow : null);
 }
 
-function activateDocumentBrowser(record) {
+function activateDocumentBrowser(record, agentId = "") {
   if (!record || record.win.isDestroyed()) return;
   for (const candidate of documentBrowserWindows.values()) {
     if (candidate.win !== record.win || candidate === record) continue;
@@ -1044,6 +1148,11 @@ function activateDocumentBrowser(record) {
   }
   if (typeof record.view.setVisible === "function") record.view.setVisible(true);
   documentBrowserByShellWebContents.set(record.shellWebContentsId, record.id);
+  const normalizedAgentId = String(agentId || "").trim();
+  if (normalizedAgentId) {
+    record.agentId = normalizedAgentId;
+    documentBrowserByAgent.set(normalizedAgentId, record.id);
+  }
 }
 
 async function executeBrowserSnapshot(record) {
@@ -1315,8 +1424,8 @@ function installDocumentBrowserViewPolicy(record) {
 function cleanupDocumentBrowser(record) {
   if (!record) return;
   documentBrowserWindows.delete(record.id);
-  if (record.agentId && documentBrowserByAgent.get(record.agentId) === record.id) {
-    documentBrowserByAgent.delete(record.agentId);
+  for (const [agentId, browserId] of documentBrowserByAgent) {
+    if (browserId === record.id) documentBrowserByAgent.delete(agentId);
   }
   if (documentBrowserByShellWebContents.get(record.shellWebContentsId) === record.id) {
     documentBrowserByShellWebContents.delete(record.shellWebContentsId);
@@ -1328,6 +1437,38 @@ function cleanupDocumentBrowser(record) {
   try {
     if (!record.view.webContents.isDestroyed()) record.view.webContents.destroy();
   } catch {}
+  if (backgroundBrowserTabId === record.id) {
+    backgroundBrowserTabId = null;
+    backgroundBrowserPromise = null;
+    browserReady = null;
+  }
+}
+
+function parkDocumentBrowser(record) {
+  if (!record || forceClosing || record.view.webContents.isDestroyed()) return false;
+  const host = ensureBrowserHostWindow();
+  if (record.win === host) {
+    if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+    return true;
+  }
+  const previousShellId = record.shellWebContentsId;
+  try {
+    if (!record.win.isDestroyed()) record.win.contentView.removeChildView(record.view);
+  } catch {}
+  try {
+    host.contentView.addChildView(record.view);
+  } catch {
+    return false;
+  }
+  if (documentBrowserByShellWebContents.get(previousShellId) === record.id) {
+    documentBrowserByShellWebContents.delete(previousShellId);
+  }
+  record.win = host;
+  record.shellWebContentsId = host.webContents.id;
+  record.bounds = null;
+  record.background = true;
+  if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+  return true;
 }
 
 async function refreshDocumentBrowserPreview(record) {
@@ -1351,6 +1492,7 @@ async function createDocumentBrowserWindowNow({
   parentWindow,
   agentId = null,
   initialUrl = "",
+  background = false,
 }) {
   if (!parentWindow || parentWindow.isDestroyed()) {
     throw new Error("브라우저를 연결할 작업창을 찾을 수 없습니다.");
@@ -1375,6 +1517,7 @@ async function createDocumentBrowserWindowNow({
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      backgroundThrottling: false,
       preload: browserAnnotationPreloadPath,
       // One app-local profile is shared by all tabs but never shares Chrome's
       // cookies. This lets an agent keep a login while switching tabs.
@@ -1399,10 +1542,11 @@ async function createDocumentBrowserWindowNow({
     inspectionMode: false,
     inspectionSendToSession: false,
     persistent: true,
+    background: Boolean(background),
   };
   documentBrowserWindows.set(browserId, record);
   if (record.agentId) documentBrowserByAgent.set(record.agentId, browserId);
-  documentBrowserByShellWebContents.set(parentWindow.webContents.id, browserId);
+  if (!record.background) documentBrowserByShellWebContents.set(parentWindow.webContents.id, browserId);
   parentWindow.contentView.addChildView(view);
   if (typeof view.setVisible === "function") view.setVisible(false);
   installDocumentBrowserViewPolicy(record);
@@ -1419,8 +1563,12 @@ async function createDocumentBrowserWindowNow({
     cleanupDocumentBrowser(record);
     throw error;
   }
-  activateDocumentBrowser(record);
-  publishDocumentBrowser(record);
+  if (record.background) {
+    if (typeof view.setVisible === "function") view.setVisible(false);
+  } else {
+    activateDocumentBrowser(record, record.agentId || "");
+    publishDocumentBrowser(record);
+  }
   return { browserId };
 }
 
@@ -1443,7 +1591,6 @@ async function createDocumentBrowserWindow(args) {
 function browserIntegrationRecords(agentId = "") {
   const normalized = String(agentId || "").trim();
   return [...documentBrowserWindows.values()]
-    .filter((record) => !normalized || record.agentId === normalized)
     .filter((record) => !record.view.webContents.isDestroyed())
     .sort((left, right) => (right.id === documentBrowserByAgent.get(normalized) ? 1 : 0) - (left.id === documentBrowserByAgent.get(normalized) ? 1 : 0));
 }
@@ -1468,8 +1615,9 @@ async function browserRecordForIntegration(agentId, body = {}, { create = true }
   const requestedTab = typeof body.tabId === "string" ? body.tabId.trim() : "";
   let record = browserRecordForAgent(agentId, requestedTab);
   if (!record && !requestedTab) record = browserRecordForAgent(agentId);
+  if (!record && !requestedTab) record = await ensureBackgroundBrowser();
   if (record) {
-    activateDocumentBrowser(record);
+    activateDocumentBrowser(record, agentId);
     return record;
   }
   if (!create) return null;
@@ -1551,7 +1699,7 @@ async function handleBrowserIntegration({ agentId, action, body = {} }) {
   if (action === "open") {
     const target = new URL(String(body.url || "").trim());
     if (!isHttpUrl(target.href)) return { ok: false, httpStatus: 400, error: "HTTP 또는 HTTPS 주소만 열 수 있습니다." };
-    const parentWindow = browserParentWindowForAgent(normalizedAgentId);
+    const parentWindow = browserParentWindowForAgent(normalizedAgentId) || ensureBrowserHostWindow();
     if (!parentWindow) return { ok: false, httpStatus: 503, error: "브라우저를 연결할 작업창이 없습니다." };
     const created = await createDocumentBrowserWindow({
       parentWindow,
@@ -1712,6 +1860,12 @@ function createAppWindow({
   });
   win.on("focus", () => {
     rememberWorkspaceWindowId(workspaceWindowId);
+  });
+  win.on("close", () => {
+    if (forceClosing) return;
+    for (const record of [...documentBrowserWindows.values()]) {
+      if (record.win === win && record.persistent) parkDocumentBrowser(record);
+    }
   });
   win.webContents.on("destroyed", () => {
     for (const record of [...documentBrowserWindows.values()]) {
@@ -2113,8 +2267,15 @@ async function spawnPty(args, event) {
   if (terminalSessions.has(id)) return { reattached: true };
   const spawnGeneration = terminalSessions.beginSpawn(id);
 
-  await hookReady?.catch(() => {});
   const aiToolId = asString(args.aiToolId).trim();
+  if (["codex", "claude", "qwen"].includes(aiToolId)) {
+    // A CLI reads MCP configuration only during its own startup. Do not spawn
+    // it until the hidden browser profile and authenticated loopback broker
+    // are both ready, otherwise the failed MCP stays failed for that session.
+    await ensureBrowserIntegrationReady();
+  } else {
+    await hookReady?.catch(() => {});
+  }
 
   const ssh = args.ssh ? asObject(args.ssh) : null;
   let executable;
@@ -2149,9 +2310,7 @@ async function spawnPty(args, event) {
       ? requestedCwd
       : os.homedir();
   if (!ssh && (aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen") && cwd) {
-    await hookService.setupProject(cwd, aiToolId).catch((error) => {
-      console.warn(`[electron] hook setup failed for ${id}:`, error);
-    });
+    await hookService.setupProject(cwd, aiToolId);
   }
   const ptyCols = asPositiveInt(args.cols, 120);
   const ptyRows = asPositiveInt(args.rows, 30);
@@ -4578,11 +4737,15 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
   if (!bridgeSmoke) {
     try { createTray(); } catch (error) { console.warn("[electron] tray init failed", error); }
   }
-  hookReady = hookService.start().catch((error) => {
-    console.error("[electron] hook service failed to start", error);
-    throw error;
-  });
-  await hookReady.catch(() => {});
+  // The browser is an app-lifetime background service. Its persistent Chromium
+  // profile and the authenticated MCP broker must exist before a restored CLI
+  // session is allowed to start.
+  try {
+    await ensureBrowserIntegrationReady();
+    console.log(`[electron] background browser ready tab=${backgroundBrowserTabId}`);
+  } catch (error) {
+    console.error("[electron] browser integration failed to start", error);
+  }
   hookMaintenanceTimer = setInterval(async () => {
     if (forceClosing) return;
     await maintainActiveHooks();
