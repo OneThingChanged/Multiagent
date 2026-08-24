@@ -594,6 +594,7 @@ async function browserUsageSummary(refresh = false, historySelection = null) {
 // send input, stream the live terminal, read the chat transcript, restart.
 const sessionProviders = {
   usageProvider: browserUsageSummary,
+  browserProvider: (request) => handleRemoteBrowser(request),
   writePty(id, data) {
     const agentId = asString(id).trim();
     const syncedAgent = (monitorService?.state?.agents || [])
@@ -1009,8 +1010,10 @@ function ensureBrowserHostWindow() {
     title: "MultiAgent Browser Host",
     x: -32_000,
     y: -32_000,
-    width: 1,
-    height: 1,
+    // Hidden does not mean zero-sized: Remote capture and background MCP tabs
+    // need a real layout viewport even while no workspace is showing them.
+    width: 1280,
+    height: 800,
     show: false,
     focusable: false,
     skipTaskbar: true,
@@ -1548,6 +1551,10 @@ async function createDocumentBrowserWindowNow({
   if (record.agentId) documentBrowserByAgent.set(record.agentId, browserId);
   if (!record.background) documentBrowserByShellWebContents.set(parentWindow.webContents.id, browserId);
   parentWindow.contentView.addChildView(view);
+  if (record.background) {
+    record.bounds = { x: 0, y: 0, width: 1280, height: 800 };
+    view.setBounds(record.bounds);
+  }
   if (typeof view.setVisible === "function") view.setVisible(false);
   installDocumentBrowserViewPolicy(record);
   try {
@@ -1750,6 +1757,191 @@ async function handleBrowserIntegration({ agentId, action, body = {} }) {
     default:
       return { ok: false, httpStatus: 404, error: `unsupported browser action: ${action}` };
   }
+}
+
+const REMOTE_BROWSER_KEYS = new Set([
+  "Enter",
+  "Backspace",
+  "Delete",
+  "Escape",
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Space",
+]);
+
+function remoteBrowserNumber(value, minimum, maximum, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? Math.min(maximum, Math.max(minimum, numeric))
+    : fallback;
+}
+
+function remoteBrowserTargetUrl(value) {
+  const input = String(value || "").trim();
+  if (!input || input.length > 4_096 || input.includes("\0")) {
+    throw new Error("브라우저 주소가 올바르지 않습니다.");
+  }
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `http://${input}`;
+  const target = new URL(candidate);
+  if (!isHttpUrl(target.href)) throw new Error("HTTP 또는 HTTPS 주소만 열 수 있습니다.");
+  return target.href;
+}
+
+async function captureRemoteBrowserFrame(record, body = {}) {
+  if (!record || record.view.webContents.isDestroyed()) {
+    return { ok: false, httpStatus: 404, error: "브라우저 탭을 찾을 수 없습니다." };
+  }
+  ensureRemoteBrowserViewport(record);
+  if (typeof record.view.setVisible === "function") record.view.setVisible(true);
+  const quality = Math.round(remoteBrowserNumber(body.quality, 40, 85, 62));
+  let image;
+  if (record.win === browserHostWindow) {
+    // WebContentsView.capturePage rejects a fully hidden host on Windows with
+    // "Current display surface not available". CDP captures Chromium's own
+    // compositor frame without displaying the host or writing it to disk.
+    const remoteDebugger = record.view.webContents.debugger;
+    let attachedHere = false;
+    try {
+      if (!remoteDebugger.isAttached()) {
+        remoteDebugger.attach("1.3");
+        attachedHere = true;
+      }
+      const captured = await remoteDebugger.sendCommand("Page.captureScreenshot", {
+        format: "jpeg",
+        quality,
+        fromSurface: true,
+        captureBeyondViewport: false,
+        optimizeForSpeed: true,
+      });
+      image = nativeImage.createFromBuffer(Buffer.from(captured.data || "", "base64"));
+    } finally {
+      if (attachedHere && remoteDebugger.isAttached()) remoteDebugger.detach();
+    }
+  } else {
+    image = await record.view.webContents.capturePage();
+  }
+  const source = image.getSize();
+  if (!source.width || !source.height) {
+    return { ok: false, httpStatus: 503, error: "브라우저 화면을 캡처하지 못했습니다." };
+  }
+  const maxWidth = remoteBrowserNumber(body.maxWidth, 320, 2_048, 1_280);
+  const maxHeight = remoteBrowserNumber(body.maxHeight, 320, 2_048, 1_280);
+  const scale = Math.min(1, maxWidth / source.width, maxHeight / source.height);
+  if (scale < 1) {
+    image = image.resize({
+      width: Math.max(1, Math.round(source.width * scale)),
+      height: Math.max(1, Math.round(source.height * scale)),
+      quality: "good",
+    });
+  }
+  const frame = image.getSize();
+  const data = image.toJPEG(quality);
+  if (!data?.length) {
+    return { ok: false, httpStatus: 503, error: "브라우저 화면을 인코딩하지 못했습니다." };
+  }
+  return {
+    ok: true,
+    contentType: "image/jpeg",
+    data,
+    width: frame.width,
+    height: frame.height,
+    sourceWidth: source.width,
+    sourceHeight: source.height,
+    tab: browserIntegrationTabSnapshot(record),
+  };
+}
+
+function ensureRemoteBrowserViewport(record) {
+  if (record?.bounds?.width >= 320 && record?.bounds?.height >= 320) return;
+  const bounds = { x: 0, y: 0, width: 1280, height: 800 };
+  record.bounds = bounds;
+  record.view.setBounds(bounds);
+}
+
+async function handleRemoteBrowser({ agentId, action, body = {} }) {
+  const normalizedAgentId = String(agentId || "").trim();
+  if (!normalizedAgentId) return { ok: false, httpStatus: 400, error: "agent id is required" };
+  if (action === "status") return browserIntegrationStatus(normalizedAgentId);
+  if (["open", "navigate"].includes(action)) {
+    try {
+      body = { ...body, url: remoteBrowserTargetUrl(body.url) };
+    } catch (error) {
+      return { ok: false, httpStatus: 400, error: error?.message || "invalid browser url" };
+    }
+    if (action === "navigate") {
+      return handleBrowserIntegration({ agentId: normalizedAgentId, action, body });
+    }
+    const created = await createDocumentBrowserWindow({
+      parentWindow: ensureBrowserHostWindow(),
+      agentId: normalizedAgentId,
+      initialUrl: body.url,
+      background: true,
+    });
+    const createdRecord = documentBrowserWindows.get(created.browserId);
+    if (!createdRecord) return { ok: false, httpStatus: 503, error: "브라우저 탭을 만들지 못했습니다." };
+    ensureRemoteBrowserViewport(createdRecord);
+    return { ok: true, tab: browserIntegrationTabSnapshot(createdRecord) };
+  }
+
+  const record = await browserRecordForIntegration(normalizedAgentId, body, { create: false });
+  if (!record) return { ok: false, httpStatus: 404, error: "브라우저 탭을 찾을 수 없습니다." };
+  ensureRemoteBrowserViewport(record);
+  if (action === "frame") return captureRemoteBrowserFrame(record, body);
+  if (action === "activate") {
+    activateDocumentBrowser(record, normalizedAgentId);
+    return { ok: true, tab: browserIntegrationTabSnapshot(record) };
+  }
+  if (["back", "forward", "reload"].includes(action)) {
+    return handleBrowserIntegration({ agentId: normalizedAgentId, action, body });
+  }
+
+  const webContents = record.view.webContents;
+  if (action === "pointer") {
+    // The client coordinates are expressed in the source viewport reported by
+    // the frame endpoint. Avoid another capture here: hidden background tabs
+    // do not expose an OS display surface on Windows, while their maintained
+    // WebContentsView bounds are the exact input coordinate space.
+    const size = record.bounds || { width: 1280, height: 800 };
+    const x = Math.round(remoteBrowserNumber(body.x, 0, Math.max(0, Number(size.width) - 1), 0));
+    const y = Math.round(remoteBrowserNumber(body.y, 0, Math.max(0, Number(size.height) - 1), 0));
+    webContents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+    webContents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    return { ok: true };
+  }
+  if (action === "wheel") {
+    const x = Math.round(remoteBrowserNumber(body.x, 0, 16_384, 0));
+    const y = Math.round(remoteBrowserNumber(body.y, 0, 16_384, 0));
+    const deltaX = Math.round(remoteBrowserNumber(body.deltaX, -2_000, 2_000, 0));
+    const deltaY = Math.round(remoteBrowserNumber(body.deltaY, -2_000, 2_000, 0));
+    if (!deltaX && !deltaY) return { ok: false, httpStatus: 400, error: "scroll delta is required" };
+    webContents.sendInputEvent({ type: "mouseWheel", x, y, deltaX, deltaY, canScroll: true });
+    return { ok: true };
+  }
+  if (action === "key") {
+    const keyCode = String(body.key || "").trim();
+    if (!REMOTE_BROWSER_KEYS.has(keyCode)) {
+      return { ok: false, httpStatus: 400, error: "unsupported browser key" };
+    }
+    webContents.sendInputEvent({ type: "keyDown", keyCode });
+    webContents.sendInputEvent({ type: "keyUp", keyCode });
+    return { ok: true };
+  }
+  if (action === "text") {
+    const text = String(body.text ?? "");
+    if (!text || text.length > 4_000 || text.includes("\0")) {
+      return { ok: false, httpStatus: 400, error: "invalid browser text" };
+    }
+    webContents.insertText(text);
+    return { ok: true };
+  }
+  return { ok: false, httpStatus: 404, error: `unsupported remote browser action: ${action}` };
 }
 
 const TITLEBAR_HEIGHT = 36;
@@ -4766,6 +4958,34 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
       const id = "electron-bridge-smoke";
       const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
       try {
+        // Production starts the shared browser broker before an AI CLI so its
+        // MCP handshake cannot race startup. Exercise the Remote frame bridge
+        // in that same order, independently of the PTY smoke below.
+        const browserStatus = await handleRemoteBrowser({
+          agentId: id,
+          action: "status",
+          body: {},
+        });
+        const browserTabId = browserStatus.tabs?.[0]?.tabId;
+        const browserFrame = browserTabId
+          ? await handleRemoteBrowser({
+              agentId: id,
+              action: "frame",
+              body: { tabId: browserTabId, quality: 45, maxWidth: 640, maxHeight: 480 },
+            })
+          : null;
+        if (
+          !browserStatus.ok ||
+          !browserTabId ||
+          !browserFrame?.ok ||
+          !Buffer.isBuffer(browserFrame.data) ||
+          browserFrame.data.length < 100 ||
+          browserFrame.sourceWidth < 320 ||
+          browserFrame.sourceHeight < 320
+        ) {
+          throw new Error("Remote browser frame validation failed");
+        }
+        console.log("[electron-smoke] MULTIAGENT_REMOTE_BROWSER_BRIDGE_OK");
         await initialWindow.webContents.executeJavaScript(`
           new Promise(async (resolve, reject) => {
             const id = ${JSON.stringify(id)};

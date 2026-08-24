@@ -33,6 +33,7 @@ describe("Electron dashboard server", () => {
     fs.writeFileSync(mobileApkPath, "0123456789");
     const usageRefreshes = [];
     const usageSelections = [];
+    const browserRequests = [];
     const service = new RemoteDashboardService({
       baseDir: root,
       mobileApkPath,
@@ -81,6 +82,36 @@ describe("Electron dashboard server", () => {
         }],
       }),
       writePty: () => true,
+      browserProvider: async (request) => {
+        browserRequests.push(request);
+        if (request.action === "status") {
+          return {
+            ok: true,
+            agentId: request.agentId,
+            activeTabId: "tab-1",
+            tabs: [{
+              tabId: "tab-1",
+              title: "Local app",
+              url: "http://127.0.0.1:3000/",
+              canGoBack: false,
+              canGoForward: true,
+              loading: false,
+            }],
+          };
+        }
+        if (request.action === "frame") {
+          return {
+            ok: true,
+            contentType: "image/jpeg",
+            data: Buffer.from("jpeg-frame"),
+            width: 640,
+            height: 360,
+            sourceWidth: 1280,
+            sourceHeight: 720,
+          };
+        }
+        return { ok: true };
+      },
     });
     services.push(service);
     service.config.server_port = 0;
@@ -137,6 +168,28 @@ describe("Electron dashboard server", () => {
       { headers: { "cf-connecting-ip": "203.0.113.10" } },
     );
     const externalUsage = await fetch(`${status.url}/api/usage`, {
+      headers: { "cf-connecting-ip": "203.0.113.10" },
+    });
+    const browserTabs = await fetch(`${status.url}/api/browser/tabs?agentId=agent-1`);
+    const browserTabsBody = await browserTabs.json();
+    const browserFrame = await fetch(`${status.url}/api/browser/frame?agentId=agent-1&tabId=tab-1&quality=55`);
+    const browserFrameBody = Buffer.from(await browserFrame.arrayBuffer()).toString();
+    const browserAction = await fetch(`${status.url}/api/browser/action`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "agent-1", tabId: "tab-1", action: "pointer", x: 12, y: 24 }),
+    });
+    const crossOriginBrowserAction = await fetch(`${status.url}/api/browser/action`, {
+      method: "POST",
+      headers: { origin: "https://evil.example", "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "agent-1", tabId: "tab-1", action: "reload" }),
+    });
+    const invalidBrowserAction = await fetch(`${status.url}/api/browser/action`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "agent-1", tabId: "tab-1", action: "cookies" }),
+    });
+    const externalBrowser = await fetch(`${status.url}/api/browser/tabs?agentId=agent-1`, {
       headers: { "cf-connecting-ip": "203.0.113.10" },
     });
     const pushKey = await fetch(`${status.url}/api/push/public-key`).then((response) => response.json());
@@ -199,6 +252,9 @@ describe("Electron dashboard server", () => {
     expect(pageBody).toContain('data-filter="active"');
     expect(pageBody).toContain('data-filter="recovering"');
     expect(pageBody).toContain('id="restartSessionButton" type="button">활성화</button>');
+    expect(pageBody).toContain('data-mode="browser"');
+    expect(pageBody).toContain('id="browserViewport"');
+    expect(pageBody).toContain('id="browserAddressInput"');
     expect(pageBody).not.toContain('id="mobileScreensButton"');
     expect(pageBody).not.toContain('id="mobileQuestionsButton"');
     expect(pageBody).toContain('id="overviewButton" type="button" hidden');
@@ -226,6 +282,10 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("period: requestedSelection.mode");
     expect(appScriptBody).toContain("ui.appShell.dataset.view = selection.type");
     expect(appScriptBody).toContain("function setSessionViewMode(mode)");
+    expect(appScriptBody).toContain("function loadRemoteBrowserFrame()");
+    expect(appScriptBody).toContain('fetch(`/api/browser/frame?${query}`');
+    expect(appScriptBody).toContain('fetch("/api/browser/action"');
+    expect(appScriptBody).toContain("function remoteBrowserPoint(clientX, clientY)");
     expect(appScriptBody).toContain("function requestSessionActivation(agentId");
     expect(appScriptBody).toContain("async function cancelSession(agentId)");
     expect(appScriptBody).toContain('fetch("/api/session/cancel"');
@@ -310,6 +370,8 @@ describe("Electron dashboard server", () => {
     expect(stylesBody).toContain(".chat-file-link");
     expect(stylesBody).toContain(".session-head-actions");
     expect(stylesBody).toContain(".session-editor-overlay");
+    expect(stylesBody).toContain(".browser-panel");
+    expect(stylesBody).toContain("touch-action: none");
     expect(stylesBody).toContain(".nav-add-button");
     expect(stylesBody).toContain('[data-session-mode="chat"] .question-panel');
     expect(stylesBody).toContain("touch-action: pinch-zoom");
@@ -321,7 +383,7 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v57');
+    expect(workerBody).toContain('multiagent-remote-v58');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(workerBody).toContain('url.pathname.startsWith("/preview/")');
@@ -374,6 +436,22 @@ describe("Electron dashboard server", () => {
     expect(externalLogin.status).toBe(200);
     expect(externalDownload.status).toBe(401);
     expect(externalUsage.status).toBe(401);
+    expect(browserTabs.status).toBe(200);
+    expect(browserTabsBody.activeTabId).toBe("tab-1");
+    expect(browserFrame.status).toBe(200);
+    expect(browserFrame.headers.get("content-type")).toBe("image/jpeg");
+    expect(browserFrame.headers.get("cache-control")).toContain("no-store");
+    expect(browserFrame.headers.get("x-browser-source-width")).toBe("1280");
+    expect(browserFrameBody).toBe("jpeg-frame");
+    expect(browserAction.status).toBe(200);
+    expect(crossOriginBrowserAction.status).toBe(403);
+    expect(invalidBrowserAction.status).toBe(400);
+    expect(externalBrowser.status).toBe(401);
+    expect(browserRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: "agent-1", action: "status" }),
+      expect.objectContaining({ agentId: "agent-1", action: "frame", body: expect.objectContaining({ tabId: "tab-1" }) }),
+      expect.objectContaining({ agentId: "agent-1", action: "pointer", body: expect.objectContaining({ x: 12, y: 24 }) }),
+    ]));
     expect(pushKey.supported).toBe(true);
     expect(pushKey.publicKey).toBeTruthy();
     expect(pushSubscription.status).toBe(201);
@@ -391,17 +469,43 @@ describe("Electron dashboard server", () => {
     const projectRoot = path.join(root, "project");
     const otherProjectRoot = path.join(root, "other-project");
     fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, "assets"), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, "automation"), { recursive: true });
     fs.mkdirSync(otherProjectRoot, { recursive: true });
     fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, ".build-tools", "android-sdk"), { recursive: true });
     fs.mkdirSync(path.join(projectRoot, ".codex"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "docs", "README.md"), "# Remote 문서\n");
-    fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), '<link rel="stylesheet" href="preview.css"><h1>Preview</h1><script src="preview.js"></script>');
+    fs.writeFileSync(path.join(projectRoot, "docs", "preview.html"), '<link rel="stylesheet" href="preview.css"><link rel="stylesheet" href="/assets/root.css"><h1>Preview</h1><script src="preview.js"></script>');
     fs.writeFileSync(path.join(otherProjectRoot, "other.html"), "<h1>Other project</h1>");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.css"), "body { background: url(preview.png); }");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.js"), "document.body.dataset.preview = 'ready';");
     const imageBytes = Buffer.from("89504e470d0a1a0a00000000", "hex");
     fs.writeFileSync(path.join(projectRoot, "docs", "preview.png"), imageBytes);
+    fs.writeFileSync(path.join(projectRoot, "assets", "root.css"), "body { color: cyan; }");
+    fs.writeFileSync(
+      path.join(projectRoot, "automation", "index.html"),
+      '<!doctype html><title>Automation Test Results</title><script src="/bower_components/dustjs-linkedin/dist/dust-full.min.js"></script><div id="output"></div><script>$.getJSON("index.json", function () {});</script>',
+    );
+    fs.writeFileSync(path.join(projectRoot, "automation", "index.json"), `\uFEFF${JSON.stringify({
+      title: "P54 Automation",
+      reportCreatedOn: "2026.08.24-02.14.18",
+      succeeded: 1,
+      succeededWithWarnings: 0,
+      failed: 0,
+      notRun: 0,
+      inProcess: 0,
+      totalDuration: 0.25,
+      devices: [{ platform: "WindowsEditor" }],
+      tests: [{
+        fullTestPath: "AX.PostProcess.CameraMotionBlur.Binding",
+        state: "Success",
+        duration: 0.012,
+        warnings: 0,
+        entries: [{ event: { type: "Warning", message: "<script>bad()</script>" } }],
+        artifacts: [],
+      }],
+    })}`);
     fs.writeFileSync(path.join(projectRoot, "docs", "large.png"), "");
     fs.truncateSync(path.join(projectRoot, "docs", "large.png"), 25 * 1024 * 1024 + 1);
     fs.writeFileSync(path.join(projectRoot, "notes.txt"), "not allowed");
@@ -516,13 +620,22 @@ describe("Electron dashboard server", () => {
     const nativePreview = await nativePreviewIssue.json();
     const previewLocation = previewIssue.headers.get("location");
     const previewUrl = new URL(previewLocation, status.url);
+    const previewToken = previewLocation.split("/")[2];
     const previewHtml = await fetch(previewUrl, {
       headers: { "cf-connecting-ip": "203.0.113.10" },
     });
+    const previewHtmlBody = await previewHtml.text();
     const previewCss = await fetch(new URL("preview.css", previewUrl));
     const previewScript = await fetch(new URL("preview.js", previewUrl));
     const previewImage = await fetch(new URL("preview.png", previewUrl));
+    const previewRootCss = await fetch(`${status.url}/preview/${previewToken}/assets/root.css`);
     const previewUnsupported = await fetch(new URL("README.md", previewUrl));
+    const automationIssue = await fetch(`${status.url}/api/docs/preview?${new URLSearchParams({
+      projectId: "local",
+      path: "automation/index.html",
+    })}`, { redirect: "manual" });
+    const automationPreview = await fetch(new URL(automationIssue.headers.get("location"), status.url));
+    const automationBody = await automationPreview.text();
     const unauthorizedPreviewIssue = await fetch(previewIssueUrl, {
       redirect: "manual",
       headers: { "cf-connecting-ip": "203.0.113.10" },
@@ -530,6 +643,7 @@ describe("Electron dashboard server", () => {
 
     expect(listResponse.status).toBe(200);
     expect(list.documents.map((document) => document.path)).toEqual([
+      "automation/index.html",
       "docs/large.md",
       "docs/preview.html",
       "docs/README.md",
@@ -580,16 +694,26 @@ describe("Electron dashboard server", () => {
     expect(previewHtml.headers.get("content-security-policy")).not.toContain("allow-same-origin");
     expect(previewHtml.headers.get("referrer-policy")).toBe("no-referrer");
     expect(previewHtml.headers.get("access-control-allow-origin")).toBe("null");
-    expect(await previewHtml.text()).toContain('href="preview.css"');
+    expect(previewHtmlBody).toContain('href="preview.css"');
+    expect(previewHtmlBody).toContain(`href="/preview/${previewToken}/assets/root.css"`);
     expect(previewCss.status).toBe(200);
     expect(await previewCss.text()).toContain("url(preview.png)");
     expect(previewScript.status).toBe(200);
     expect(previewScript.headers.get("content-type")).toContain("text/javascript");
     expect(previewImage.status).toBe(200);
+    expect(previewRootCss.status).toBe(200);
+    expect(await previewRootCss.text()).toContain("color: cyan");
     expect(previewUnsupported.status).toBe(415);
     expect(unauthorizedPreviewIssue.status).toBe(401);
+    expect(automationIssue.status).toBe(302);
+    expect(automationPreview.status).toBe(200);
+    expect(automationBody).toContain("P54 Automation");
+    expect(automationBody).toContain("AX.PostProcess.CameraMotionBlur.Binding");
+    expect(automationBody).toContain("테스트 이름 또는 상태 검색");
+    expect(automationBody).toContain("&lt;script&gt;bad()&lt;/script&gt;");
+    expect(automationBody).not.toContain("<script>bad()</script>");
+    expect(automationBody).not.toContain("bower_components");
 
-    const previewToken = previewLocation.split("/")[2];
     service.htmlPreviews.get(previewToken).expiresAt = 0;
     const expiredPreview = await fetch(previewUrl);
     expect(expiredPreview.status).toBe(404);

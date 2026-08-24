@@ -64,6 +64,20 @@ The fixed tools are:
 
 Arbitrary page JavaScript is intentionally not exposed as a tool.
 
+## Remote human control
+
+The authenticated Remote PWA can project these same tabs as memory-only JPEG
+frames. A phone does not navigate its own WebView: navigation and input are
+executed by the desktop browser, which also makes desktop-local HTTP services
+reachable through the approved Remote session. Remote taps, drag scrolling,
+wheel events, allowlisted keys, and explicit text are translated into native
+Electron input events using the frame's source dimensions.[^electron-main]
+
+This relay is deliberately narrower than MCP. It returns tab metadata and
+pixels, not DOM snapshots, cookies, storage, or profile files. Frames are never
+persisted, while annotation screenshots continue to use their separate local
+workflow.
+
 ## Element selection and session delivery
 
 Selection mode highlights the DOM element under the pointer. A click captures a

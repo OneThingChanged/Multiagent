@@ -335,6 +335,126 @@ function sendJson(response, status, value, headers = {}) {
   response.end(body);
 }
 
+const REMOTE_BROWSER_ACTIONS = new Set([
+  "open",
+  "navigate",
+  "activate",
+  "back",
+  "forward",
+  "reload",
+  "pointer",
+  "wheel",
+  "key",
+  "text",
+]);
+
+function remoteBrowserIdentifier(value, label) {
+  const id = String(value || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+    throw new RemoteDocumentError(400, `${label} is invalid`);
+  }
+  return id;
+}
+
+function sendRemoteBrowserFrame(response, result) {
+  if (!result?.ok || !Buffer.isBuffer(result.data)) {
+    sendJson(response, result?.httpStatus || 502, {
+      error: result?.error || "browser frame unavailable",
+    });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": result.contentType || "image/jpeg",
+    "content-length": result.data.length,
+    "cache-control": "private, no-store, no-cache, must-revalidate",
+    pragma: "no-cache",
+    "x-content-type-options": "nosniff",
+    "x-browser-frame-width": String(result.width || 0),
+    "x-browser-frame-height": String(result.height || 0),
+    "x-browser-source-width": String(result.sourceWidth || result.width || 0),
+    "x-browser-source-height": String(result.sourceHeight || result.height || 0),
+  });
+  response.end(result.data);
+}
+
+async function serveRemoteBrowserApi(request, response, url, {
+  browserProvider,
+  mutationAllowed,
+}) {
+  if (request.method === "GET" && url.pathname === "/api/browser/tabs") {
+    try {
+      const agentId = remoteBrowserIdentifier(url.searchParams.get("agentId"), "agent id");
+      const result = await browserProvider?.({ agentId, action: "status", body: {} });
+      sendJson(response, result?.ok === false ? result.httpStatus || 502 : 200, result ?? {
+        ok: false,
+        error: "browser integration unavailable",
+      });
+    } catch (error) {
+      sendJson(response, error?.status || 500, { error: error?.message || "browser status unavailable" });
+    }
+    return true;
+  }
+  if (request.method === "GET" && url.pathname === "/api/browser/frame") {
+    try {
+      const agentId = remoteBrowserIdentifier(url.searchParams.get("agentId"), "agent id");
+      const tabId = remoteBrowserIdentifier(url.searchParams.get("tabId"), "tab id");
+      const result = await browserProvider?.({
+        agentId,
+        action: "frame",
+        body: {
+          tabId,
+          quality: url.searchParams.get("quality"),
+          maxWidth: url.searchParams.get("maxWidth"),
+          maxHeight: url.searchParams.get("maxHeight"),
+        },
+      });
+      sendRemoteBrowserFrame(response, result ?? {
+        ok: false,
+        httpStatus: 501,
+        error: "browser integration unavailable",
+      });
+    } catch (error) {
+      sendJson(response, error?.status || 500, { error: error?.message || "browser frame unavailable" });
+    }
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/api/browser/action") {
+    if (!mutationAllowed()) {
+      sendJson(response, 403, { error: "cross-origin request blocked" });
+      return true;
+    }
+    if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+      sendJson(response, 415, { error: "application/json required" });
+      return true;
+    }
+    try {
+      const body = await readJson(request);
+      const agentId = remoteBrowserIdentifier(body.agentId, "agent id");
+      const action = String(body.action || "").trim().toLowerCase();
+      if (!REMOTE_BROWSER_ACTIONS.has(action)) {
+        throw new RemoteDocumentError(400, "browser action is invalid");
+      }
+      const payload = { ...body };
+      delete payload.agentId;
+      delete payload.action;
+      if (action !== "open" && payload.tabId) {
+        payload.tabId = remoteBrowserIdentifier(payload.tabId, "tab id");
+      }
+      const result = await browserProvider?.({ agentId, action, body: payload });
+      const { data: _privateFrame, ...safeResult } = result ?? {
+        ok: false,
+        httpStatus: 501,
+        error: "browser integration unavailable",
+      };
+      sendJson(response, safeResult.ok === false ? safeResult.httpStatus || 502 : 200, safeResult);
+    } catch (error) {
+      sendJson(response, error?.status || 500, { error: error?.message || "browser action failed" });
+    }
+    return true;
+  }
+  return false;
+}
+
 class RemoteDocumentError extends Error {
   constructor(status, message) {
     super(message);
@@ -585,6 +705,149 @@ function pruneRemoteHtmlPreviews(previews, now = Date.now()) {
   }
 }
 
+function escapeRemotePreviewHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function remotePreviewPath(token, root, candidate) {
+  let resolved;
+  try {
+    resolved = fs.realpathSync(candidate);
+  } catch {
+    return null;
+  }
+  if (!isInsideDocumentRoot(root, resolved)) return null;
+  const extension = path.extname(resolved).toLowerCase();
+  if (!REMOTE_HTML_PREVIEW_EXTENSIONS.has(extension)) return null;
+  const relativePath = path.relative(root, resolved).split(path.sep).join("/");
+  const encodedPath = relativePath.split("/").map(encodeURIComponent).join("/");
+  return `/preview/${token}/${encodedPath}`;
+}
+
+function unrealAutomationArtifactUrl(token, root, reportDirectory, rawPath) {
+  const value = String(rawPath ?? "").trim();
+  if (!value || value.includes("\0") || /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//")) {
+    return null;
+  }
+  const normalized = value.replaceAll("\\", "/");
+  const candidate = normalized.startsWith("/")
+    ? path.resolve(root, ...normalized.replace(/^\/+/, "").split("/"))
+    : path.resolve(reportDirectory, ...normalized.split("/"));
+  return remotePreviewPath(token, root, candidate);
+}
+
+function formatAutomationDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "0.000s";
+  if (seconds < 60) return `${seconds.toFixed(3)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${(seconds % 60).toFixed(1)}s`;
+}
+
+function renderUnrealAutomationArtifacts(test, token, root, reportDirectory) {
+  const artifacts = Array.isArray(test?.artifacts) ? test.artifacts : [];
+  const images = [];
+  for (const artifact of artifacts) {
+    const files = artifact?.files && typeof artifact.files === "object" ? artifact.files : {};
+    for (const [label, rawPath] of Object.entries(files)) {
+      const url = unrealAutomationArtifactUrl(token, root, reportDirectory, rawPath);
+      if (!url || !REMOTE_IMAGE_EXTENSIONS.has(path.extname(String(rawPath)).toLowerCase())) continue;
+      images.push(`<figure><img loading="lazy" src="${escapeRemotePreviewHtml(url)}" alt="${escapeRemotePreviewHtml(artifact?.name || label)}"><figcaption>${escapeRemotePreviewHtml(artifact?.name || label)}</figcaption></figure>`);
+    }
+  }
+  return images.length > 0 ? `<div class="artifacts">${images.join("")}</div>` : "";
+}
+
+function renderUnrealAutomationEntries(test) {
+  const entries = Array.isArray(test?.entries) ? test.entries : [];
+  if (entries.length === 0) return '<p class="empty">기록된 이벤트가 없습니다.</p>';
+  return `<div class="events">${entries.map((entry) => {
+    const event = entry?.event && typeof entry.event === "object" ? entry.event : entry;
+    const level = String(event?.type || "Info").toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 32);
+    const message = event?.message ?? entry?.message ?? "";
+    const location = entry?.filename
+      ? `${entry.filename}${entry.lineNumber ? `:${entry.lineNumber}` : ""}`
+      : "";
+    return `<div class="event event-${escapeRemotePreviewHtml(level)}">${location ? `<code>${escapeRemotePreviewHtml(location)}</code>` : ""}<span>${escapeRemotePreviewHtml(message)}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function renderUnrealAutomationReport(report, token, root, reportPath) {
+  const tests = Array.isArray(report?.tests) ? report.tests : [];
+  const succeeded = Number(report?.succeeded) || 0;
+  const warned = Number(report?.succeededWithWarnings) || 0;
+  const failed = Number(report?.failed) || 0;
+  const notRun = Number(report?.notRun) || 0;
+  const inProcess = Number(report?.inProcess) || 0;
+  const total = succeeded + warned + failed + notRun + inProcess;
+  const title = report?.title || "Automation Test Results";
+  const reportDirectory = path.dirname(reportPath);
+  const platforms = [...new Set((Array.isArray(report?.devices) ? report.devices : [])
+    .map((device) => String(device?.platform || "").trim()).filter(Boolean))];
+  const cards = tests.map((test, index) => {
+    const state = String(test?.state || "NotRun");
+    const stateClass = state.toLowerCase() === "success" && Number(test?.warnings) > 0
+      ? "warning"
+      : state.toLowerCase() === "failure" || state.toLowerCase() === "fail"
+        ? "failure"
+        : state.toLowerCase();
+    const normalizedState = stateClass.replace(/[^a-z0-9_-]/g, "-").slice(0, 32);
+    const testTitle = test?.fullTestPath || test?.testDisplayName || `Test ${index + 1}`;
+    const search = `${testTitle} ${state}`.toLowerCase();
+    return `<details class="test state-${escapeRemotePreviewHtml(normalizedState)}" data-search="${escapeRemotePreviewHtml(search)}">
+      <summary><span>${escapeRemotePreviewHtml(testTitle)}</span><span class="test-meta">${escapeRemotePreviewHtml(state)} · ${formatAutomationDuration(test?.duration)}</span></summary>
+      <div class="test-body">${renderUnrealAutomationEntries(test)}${renderUnrealAutomationArtifacts(test, token, root, reportDirectory)}</div>
+    </details>`;
+  }).join("");
+  return `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeRemotePreviewHtml(title)}</title><style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:#07111b;color:#dceaf4}*{box-sizing:border-box}body{margin:0;background:#07111b;color:#dceaf4}header{padding:28px clamp(18px,4vw,52px);background:linear-gradient(135deg,#0d2638,#0b1726);border-bottom:1px solid #24465a}h1{margin:0 0 8px;font-size:clamp(25px,4vw,42px)}.subtitle{color:#91adbe}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:22px}.metric{padding:14px 16px;border:1px solid #28475a;border-radius:12px;background:#0c1c29}.metric strong{display:block;font-size:24px;margin-bottom:3px}.metric span{font-size:12px;color:#91adbe}.success strong{color:#5ae6a1}.warning strong{color:#ffc766}.failure strong{color:#ff7f8b}.neutral strong{color:#83cdfc}main{padding:20px clamp(12px,3vw,44px) 48px;max-width:1600px;margin:auto}.toolbar{position:sticky;top:0;z-index:2;padding:10px 0;background:#07111bf2}.toolbar input{width:100%;padding:12px 14px;border:1px solid #2b4a5d;border-radius:10px;background:#0b1925;color:#e9f6ff;font:inherit}.test{margin:9px 0;border:1px solid #203b4c;border-left:4px solid #668194;border-radius:10px;background:#0a1824;overflow:hidden}.test.state-success{border-left-color:#35d893}.test.state-warning{border-left-color:#f6b94d}.test.state-failure,.test.state-fail{border-left-color:#ff6574}.test summary{cursor:pointer;padding:13px 15px;display:flex;gap:16px;justify-content:space-between;align-items:center}.test summary::marker{color:#73caff}.test-meta{flex:none;color:#88a4b5;font-size:12px}.test-body{padding:4px 16px 16px;border-top:1px solid #1c3443}.empty{color:#7894a5}.event{display:grid;gap:4px;padding:8px 0;border-bottom:1px solid #172e3c}.event code{color:#79d6ff;white-space:pre-wrap}.event-warning span{color:#ffd17c}.event-error span{color:#ff8994}.artifacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px}.artifacts figure{margin:0;padding:8px;border:1px solid #274354;border-radius:9px}.artifacts img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain;background:#02080d}.artifacts figcaption{padding:7px 2px 2px;color:#91adbe;font-size:12px}.hidden{display:none}@media(max-width:600px){header{padding:18px 14px}.summary{grid-template-columns:repeat(2,1fr)}main{padding:10px}.test summary{align-items:flex-start;flex-direction:column;gap:5px}}
+</style></head><body><header><h1>${escapeRemotePreviewHtml(title)}</h1><div class="subtitle">${escapeRemotePreviewHtml(platforms.join(" + ") || "Unreal Automation")} · ${escapeRemotePreviewHtml(report?.reportCreatedOn || "")} · ${formatAutomationDuration(report?.totalDuration)}</div><div class="summary"><div class="metric success"><strong>${succeeded}</strong><span>성공</span></div><div class="metric warning"><strong>${warned}</strong><span>경고 포함</span></div><div class="metric failure"><strong>${failed}</strong><span>실패</span></div><div class="metric neutral"><strong>${notRun + inProcess}</strong><span>미실행/진행 중</span></div><div class="metric neutral"><strong>${total}</strong><span>전체</span></div></div></header><main><div class="toolbar"><input id="filter" type="search" placeholder="테스트 이름 또는 상태 검색" autocomplete="off"></div><section id="tests">${cards || '<p class="empty">표시할 테스트가 없습니다.</p>'}</section></main><script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.trim().toLowerCase();document.querySelectorAll(".test").forEach(function(node){node.classList.toggle("hidden",q&&!node.dataset.search.includes(q));});});</script></body></html>`;
+}
+
+function rewriteRemotePreviewRootUrls(source, token) {
+  const prefix = `/preview/${token}/`;
+  let rewritten = String(source).replace(
+    /\b(src|href|poster|data|data-original|data-featherlight)\s*=\s*(["'])\/(?!\/)/gi,
+    (_match, attribute, quote) => `${attribute}=${quote}${prefix}`,
+  );
+  rewritten = rewritten.replace(
+    /url\(\s*(["']?)\/(?!\/)/gi,
+    (_match, quote) => `url(${quote}${prefix}`,
+  );
+  return rewritten;
+}
+
+async function prepareRemoteHtmlPreview(entry, token, resolved) {
+  const source = await fsPromises.readFile(resolved, "utf8");
+  const unrealReport = /<title>\s*Automation Test Results\s*<\/title>/i.test(source)
+    && /dustjs-linkedin|\$\.getJSON\(["']index\.json["']/i.test(source);
+  if (unrealReport) {
+    const jsonCandidate = path.join(path.dirname(resolved), "index.json");
+    try {
+      const jsonResolved = fs.realpathSync(jsonCandidate);
+      if (isInsideDocumentRoot(entry.root, jsonResolved)) {
+        const stats = await fsPromises.stat(jsonResolved);
+        if (stats.isFile() && stats.size <= MAX_REMOTE_DOCUMENT_BYTES) {
+          const jsonSource = (await fsPromises.readFile(jsonResolved, "utf8")).replace(/^\uFEFF/, "");
+          const report = JSON.parse(jsonSource);
+          return renderUnrealAutomationReport(report, token, entry.root, resolved);
+        }
+      }
+    } catch {
+      // Fall through to the normal isolated HTML preview when the companion
+      // report is absent or malformed.
+    }
+  }
+  return rewriteRemotePreviewRootUrls(source, token);
+}
+
 async function issueRemoteHtmlPreview(previews, snapshot, projectId, requestedPath, agentId = null) {
   const { root, resolved, stats } = await resolveRemoteProjectFile(
     snapshot,
@@ -673,9 +936,10 @@ async function sendRemoteHtmlPreview(request, response, previews, pathname) {
     return true;
   }
   const html = extension === ".html" || extension === ".htm";
+  const htmlBody = html ? Buffer.from(await prepareRemoteHtmlPreview(entry, parsed.token, resolved)) : null;
   response.writeHead(200, {
     "content-type": contentType,
-    "content-length": stats.size,
+    "content-length": htmlBody?.length ?? stats.size,
     "access-control-allow-origin": "null",
     "cache-control": "no-store",
     "content-security-policy": html ? REMOTE_HTML_PREVIEW_CSP : "default-src 'none'; sandbox",
@@ -686,6 +950,7 @@ async function sendRemoteHtmlPreview(request, response, previews, pathname) {
     "x-content-type-options": "nosniff",
   });
   if (request.method === "HEAD") response.end();
+  else if (htmlBody) response.end(htmlBody);
   else await pipeline(fs.createReadStream(resolved), response);
   return true;
 }
@@ -933,6 +1198,10 @@ export class LocalDashboardService {
         }
         if (p) {
           // Full Remote PWA on loopback (no login needed locally).
+          if (await serveRemoteBrowserApi(request, response, url, {
+            browserProvider: p.browserProvider,
+            mutationAllowed: () => this.isLocalOrigin(request),
+          })) return;
           if (request.method === "GET" && url.pathname === "/api/usage") {
             const historyRequest = remoteUsageHistorySelection(url);
             if (historyRequest.error) {
@@ -1156,7 +1425,7 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, createSession, renameSession, usageProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
+  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, createSession, renameSession, usageProvider, browserProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
@@ -1173,6 +1442,7 @@ export class RemoteDashboardService {
     this.createSession = createSession ?? (() => null);
     this.renameSession = renameSession ?? (() => false);
     this.usageProvider = usageProvider ?? (() => ({ updatedAt: 0, limits: [], tokens: {} }));
+    this.browserProvider = browserProvider ?? (() => null);
     this.usageRefreshAt = 0;
     this.mobileApkPath = mobileApkPath;
     this.pushService = pushService ?? new RemotePushService({ baseDir });
@@ -1599,6 +1869,10 @@ export class RemoteDashboardService {
           } else sendJson(response, 401, { error: "unauthorized", pending: Boolean(login) });
           return;
         }
+        if (await serveRemoteBrowserApi(request, response, url, {
+          browserProvider: this.browserProvider,
+          mutationAllowed: () => this.isSameOrigin(request),
+        })) return;
         if (
           ["GET", "HEAD"].includes(request.method) &&
           url.pathname === REMOTE_MOBILE_APK_URL

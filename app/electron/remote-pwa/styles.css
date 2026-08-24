@@ -834,6 +834,85 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .context-panel { padding: 13px; }
 .context-panel p { margin: 7px 0 0; color: #c3d2dc; font-size: 11px; line-height: 1.5; }
 .output-panel { overflow: hidden; }
+.browser-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #050d14;
+}
+.browser-panel[hidden] { display: none; }
+.browser-toolbar { display: flex; align-items: center; gap: 5px; padding: 6px; border-bottom: 1px solid var(--line); background: rgba(10, 23, 34, 0.94); }
+.browser-tool-button,
+.browser-key-button,
+.browser-go-button,
+.browser-text-send {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(15, 34, 49, 0.92);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+}
+.browser-tool-button { width: 36px; padding: 0; font-size: 17px; }
+.browser-tool-button:disabled { color: #526574; cursor: default; opacity: 0.6; }
+.browser-toolbar select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: #08131d;
+  font-size: 11px;
+}
+.browser-address-form,
+.browser-input-form { display: flex; align-items: center; gap: 6px; padding: 6px; border-bottom: 1px solid var(--line); background: rgba(8, 19, 29, 0.95); }
+.browser-input-form { border-top: 1px solid var(--line); border-bottom: 0; }
+.browser-address-form input,
+.browser-input-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  color: var(--text);
+  background: #030a10;
+  font: 12px/1.2 "Cascadia Mono", Consolas, monospace;
+}
+.browser-address-form input:focus,
+.browser-input-form input:focus { border-color: #3e7192; }
+.browser-go-button,
+.browser-text-send { border-color: rgba(80, 223, 208, 0.32); color: #06131a; background: var(--cyan); }
+.browser-viewport {
+  position: relative;
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 300px;
+  place-items: start center;
+  overflow: hidden;
+  outline: 0;
+  background: #02070b;
+  touch-action: none;
+  user-select: none;
+}
+.browser-viewport:focus-visible { box-shadow: inset 0 0 0 2px rgba(80, 223, 208, 0.38); }
+.browser-frame { display: block; width: 100%; height: 100%; object-fit: contain; object-position: top center; pointer-events: none; }
+.browser-frame[hidden] { display: none; }
+.browser-message { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: var(--muted); text-align: center; font-size: 12px; pointer-events: none; }
+.browser-message[hidden] { display: none; }
+.app-shell[data-view="session"][data-session-mode="browser"] .session-offline,
+.app-shell[data-view="session"][data-session-mode="browser"] .question-panel,
+.app-shell[data-view="session"][data-session-mode="browser"] .context-panel { display: none !important; }
 
 /* ---- Conversation (chat) view ---- */
 .session-mode { display: flex; gap: 3px; padding: 3px; background: #050d14; border: 1px solid var(--line); border-radius: 10px; }
@@ -1081,6 +1160,8 @@ html[data-native-app="true"] .android-download-button { display: none !important
     min-height: 0;
   }
   .app-shell[data-view="session"] .output-panel[hidden] { display: none; }
+  .app-shell[data-view="session"] .browser-panel { flex: 1 1 auto; min-height: 0; }
+  .app-shell[data-view="session"] .browser-panel[hidden] { display: none; }
   .app-shell[data-view="session"] .terminal-mount {
     flex: 1 1 auto;
     min-height: 0;
@@ -1349,6 +1430,22 @@ html[data-native-app="true"] .android-download-button { display: none !important
     min-height: 0;
   }
   .app-shell[data-view="session"] .output-panel[hidden] { display: none; }
+  .app-shell[data-view="session"] .browser-panel { flex: 1 1 auto; min-height: 0; border-radius: 9px; }
+  .app-shell[data-view="session"] .browser-panel[hidden] { display: none; }
+  .app-shell[data-view="session"][data-session-mode="browser"] .session-offline,
+  .app-shell[data-view="session"][data-session-mode="browser"] .question-panel,
+  .app-shell[data-view="session"][data-session-mode="browser"] .context-panel { display: none !important; }
+  .browser-toolbar { padding: 4px; gap: 3px; }
+  .browser-tool-button { width: 32px; min-height: 32px; }
+  .browser-toolbar select { height: 32px; font-size: 10px; }
+  .browser-address-form,
+  .browser-input-form { padding: 4px; gap: 4px; }
+  .browser-address-form input,
+  .browser-input-form input { height: 38px; font-size: 12px; }
+  .browser-go-button,
+  .browser-text-send,
+  .browser-key-button { min-height: 38px; padding: 0 9px; }
+  .browser-viewport { min-height: 0; }
   .app-shell[data-view="session"] .terminal-mount {
     flex: 1 1 auto;
     min-height: 0;

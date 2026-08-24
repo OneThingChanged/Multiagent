@@ -2,6 +2,8 @@
 
 ## 2026-08-24
 
+* **Remote shared browser**: Added an approved-session, same-origin-controlled browser relay with shared tab IDs, memory-only JPEG frames, scaled touch input, navigation, and explicit mobile text/key controls for desktop-local sites.
+* **Remote HTML compatibility**: Rebound root-relative assets to the preview capability and added a dependency-free `index.json` renderer for Unreal Automation reports that omit their Bower runtime.
 * **Browser startup ordering**: Recorded that the hidden shared browser profile and authenticated loopback broker start before restored AI sessions.
 * **Codex MCP environment**: Documented the explicit stdio environment-variable allowlist that prevents the managed browser MCP from exiting before `initialize`.
 

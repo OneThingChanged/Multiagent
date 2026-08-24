@@ -145,6 +145,19 @@ const ui = {
   terminalMount: $("#terminalMount"),
   terminalLive: $("#terminalLive"),
   copyOutputButton: $("#copyOutputButton"),
+  browserPanel: $("#browserPanel"),
+  browserBackButton: $("#browserBackButton"),
+  browserForwardButton: $("#browserForwardButton"),
+  browserReloadButton: $("#browserReloadButton"),
+  browserNewTabButton: $("#browserNewTabButton"),
+  browserTabSelect: $("#browserTabSelect"),
+  browserAddressForm: $("#browserAddressForm"),
+  browserAddressInput: $("#browserAddressInput"),
+  browserViewport: $("#browserViewport"),
+  browserFrame: $("#browserFrame"),
+  browserMessage: $("#browserMessage"),
+  browserInputForm: $("#browserInputForm"),
+  browserTextInput: $("#browserTextInput"),
   composerForm: $("#composerForm"),
   composerQueue: $("#composerQueue"),
   composerAc: $("#composerAc"),
@@ -212,6 +225,22 @@ const documentLists = new Map();
 const documentListLoads = new Map();
 const documentExpandedFolders = new Map();
 const attachmentDrafts = new Map();
+const remoteBrowser = {
+  agentId: "",
+  tabs: [],
+  activeTabId: "",
+  statusAt: 0,
+  statusLoading: false,
+  frameLoading: false,
+  frameTimer: null,
+  frameAbort: null,
+  frameObjectUrl: "",
+  frameWidth: 0,
+  frameHeight: 0,
+  sourceWidth: 0,
+  sourceHeight: 0,
+  pointer: null,
+};
 let documentContent = null;
 let documentContentKey = "";
 let documentContentLoading = false;
@@ -3520,10 +3549,275 @@ function syncTerminal() {
   }
 }
 
+// ---- Shared desktop browser relay ----
+// The desktop owns one persistent Electron browser profile. Remote only receives
+// short-lived JPEG frames plus a constrained set of human input events; cookies,
+// storage and DOM snapshots never cross this API boundary.
+function remoteBrowserTab() {
+  return remoteBrowser.tabs.find((tab) => tab.tabId === remoteBrowser.activeTabId) || null;
+}
+
+function setRemoteBrowserMessage(message) {
+  if (!ui.browserMessage) return;
+  ui.browserMessage.textContent = message || "";
+  ui.browserMessage.hidden = !message;
+}
+
+function renderRemoteBrowserChrome() {
+  const tab = remoteBrowserTab();
+  const key = remoteBrowser.tabs.map((item) => `${item.tabId}:${item.title}:${item.url}`).join("|");
+  if (ui.browserTabSelect && key !== remoteBrowser.tabsKey) {
+    remoteBrowser.tabsKey = key;
+    const fragment = document.createDocumentFragment();
+    for (const item of remoteBrowser.tabs) {
+      const option = document.createElement("option");
+      option.value = item.tabId;
+      option.textContent = item.title || item.url || "새 탭";
+      fragment.appendChild(option);
+    }
+    ui.browserTabSelect.replaceChildren(fragment);
+  }
+  if (ui.browserTabSelect) {
+    ui.browserTabSelect.disabled = remoteBrowser.tabs.length === 0;
+    ui.browserTabSelect.value = remoteBrowser.activeTabId;
+  }
+  if (ui.browserBackButton) ui.browserBackButton.disabled = !tab?.canGoBack;
+  if (ui.browserForwardButton) ui.browserForwardButton.disabled = !tab?.canGoForward;
+  if (ui.browserReloadButton) ui.browserReloadButton.disabled = !tab;
+  if (ui.browserAddressInput && document.activeElement !== ui.browserAddressInput) {
+    ui.browserAddressInput.value = tab?.url === "about:blank" ? "" : (tab?.url || "");
+  }
+  if (!tab) {
+    if (ui.browserFrame) ui.browserFrame.hidden = true;
+    setRemoteBrowserMessage("사용할 수 있는 내장 브라우저 탭이 없습니다.");
+  }
+}
+
+function resetRemoteBrowserFrame() {
+  clearTimeout(remoteBrowser.frameTimer);
+  remoteBrowser.frameTimer = null;
+  remoteBrowser.frameAbort?.abort();
+  remoteBrowser.frameAbort = null;
+  remoteBrowser.frameLoading = false;
+  remoteBrowser.pointer = null;
+  if (remoteBrowser.frameObjectUrl) URL.revokeObjectURL(remoteBrowser.frameObjectUrl);
+  remoteBrowser.frameObjectUrl = "";
+  remoteBrowser.frameWidth = 0;
+  remoteBrowser.frameHeight = 0;
+  remoteBrowser.sourceWidth = 0;
+  remoteBrowser.sourceHeight = 0;
+  if (ui.browserFrame) {
+    ui.browserFrame.removeAttribute("src");
+    ui.browserFrame.hidden = true;
+  }
+}
+
+function stopRemoteBrowser({ reset = false } = {}) {
+  clearTimeout(remoteBrowser.frameTimer);
+  remoteBrowser.frameTimer = null;
+  remoteBrowser.frameAbort?.abort();
+  remoteBrowser.frameAbort = null;
+  remoteBrowser.frameLoading = false;
+  remoteBrowser.pointer = null;
+  if (reset) {
+    resetRemoteBrowserFrame();
+    remoteBrowser.agentId = "";
+    remoteBrowser.tabs = [];
+    remoteBrowser.activeTabId = "";
+    remoteBrowser.tabsKey = "";
+    remoteBrowser.statusAt = 0;
+    renderRemoteBrowserChrome();
+  }
+}
+
+async function fetchRemoteBrowserTabs(agentId, { force = false } = {}) {
+  if (!agentId || remoteBrowser.statusLoading) return;
+  if (!force && Date.now() - remoteBrowser.statusAt < 1_800 && remoteBrowser.tabs.length) return;
+  remoteBrowser.statusLoading = true;
+  try {
+    const query = new URLSearchParams({ agentId });
+    const response = await fetch(`/api/browser/tabs?${query}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result?.ok === false) throw new Error(result?.error || `HTTP ${response.status}`);
+    if (remoteBrowser.agentId !== agentId) return;
+    remoteBrowser.tabs = Array.isArray(result.tabs) ? result.tabs : [];
+    remoteBrowser.activeTabId = remoteBrowser.tabs.some((tab) => tab.tabId === result.activeTabId)
+      ? result.activeTabId
+      : remoteBrowser.tabs[0]?.tabId || "";
+    remoteBrowser.statusAt = Date.now();
+    renderRemoteBrowserChrome();
+  } catch (error) {
+    if (remoteBrowser.agentId === agentId) {
+      setRemoteBrowserMessage(`브라우저 연결 실패: ${error.message || error}`);
+    }
+  } finally {
+    remoteBrowser.statusLoading = false;
+  }
+}
+
+function scheduleRemoteBrowserFrame(delay = 0) {
+  clearTimeout(remoteBrowser.frameTimer);
+  remoteBrowser.frameTimer = null;
+  if (
+    selection.type !== "session"
+    || sessionViewMode !== "browser"
+    || !remoteBrowser.agentId
+  ) return;
+  remoteBrowser.frameTimer = setTimeout(() => { void loadRemoteBrowserFrame(); }, delay);
+}
+
+async function loadRemoteBrowserFrame() {
+  if (remoteBrowser.frameLoading || selection.type !== "session" || sessionViewMode !== "browser") return;
+  const agentId = remoteBrowser.agentId;
+  if (document.hidden) {
+    scheduleRemoteBrowserFrame(1_500);
+    return;
+  }
+  if (Date.now() - remoteBrowser.statusAt >= 1_800 || !remoteBrowser.activeTabId) {
+    await fetchRemoteBrowserTabs(agentId, { force: true });
+  }
+  const tab = remoteBrowserTab();
+  if (!tab || remoteBrowser.agentId !== agentId) {
+    scheduleRemoteBrowserFrame(1_000);
+    return;
+  }
+  remoteBrowser.frameLoading = true;
+  const controller = new AbortController();
+  remoteBrowser.frameAbort = controller;
+  try {
+    const pixelRatio = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    const viewportWidth = ui.browserViewport?.clientWidth || window.innerWidth || 720;
+    const viewportHeight = ui.browserViewport?.clientHeight || window.innerHeight || 720;
+    const query = new URLSearchParams({
+      agentId,
+      tabId: tab.tabId,
+      quality: isMobile() ? "58" : "66",
+      maxWidth: String(Math.min(2_048, Math.max(720, Math.round(viewportWidth * pixelRatio)))),
+      maxHeight: String(Math.min(2_048, Math.max(720, Math.round(viewportHeight * pixelRatio)))),
+    });
+    const response = await fetch(`/api/browser/frame?${query}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(await apiError(response));
+    const blob = await response.blob();
+    if (remoteBrowser.agentId !== agentId || remoteBrowser.activeTabId !== tab.tabId) return;
+    const nextUrl = URL.createObjectURL(blob);
+    const previousUrl = remoteBrowser.frameObjectUrl;
+    remoteBrowser.frameObjectUrl = nextUrl;
+    remoteBrowser.frameWidth = Number(response.headers.get("x-browser-frame-width")) || 0;
+    remoteBrowser.frameHeight = Number(response.headers.get("x-browser-frame-height")) || 0;
+    remoteBrowser.sourceWidth = Number(response.headers.get("x-browser-source-width")) || remoteBrowser.frameWidth;
+    remoteBrowser.sourceHeight = Number(response.headers.get("x-browser-source-height")) || remoteBrowser.frameHeight;
+    ui.browserFrame.src = nextUrl;
+    ui.browserFrame.hidden = false;
+    setRemoteBrowserMessage("");
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      setRemoteBrowserMessage(`화면을 불러오지 못했습니다: ${error.message || error}`);
+    }
+  } finally {
+    if (remoteBrowser.frameAbort === controller) remoteBrowser.frameAbort = null;
+    remoteBrowser.frameLoading = false;
+    const currentTab = remoteBrowserTab();
+    scheduleRemoteBrowserFrame(currentTab?.loading ? 300 : 800);
+  }
+}
+
+async function remoteBrowserAction(action, payload = {}) {
+  const agentId = remoteBrowser.agentId || selectedAgent()?.id;
+  if (!agentId) return null;
+  try {
+    const response = await fetch("/api/browser/action", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agentId,
+        action,
+        ...(action === "open" ? {} : { tabId: remoteBrowser.activeTabId }),
+        ...payload,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result?.ok === false) throw new Error(result?.error || `HTTP ${response.status}`);
+    if (result.tab?.tabId) remoteBrowser.activeTabId = result.tab.tabId;
+    const changesChrome = ["open", "navigate", "activate", "back", "forward", "reload"].includes(action);
+    if (changesChrome || action === "pointer") remoteBrowser.statusAt = 0;
+    if (changesChrome) await fetchRemoteBrowserTabs(agentId, { force: true });
+    scheduleRemoteBrowserFrame(0);
+    return result;
+  } catch (error) {
+    showToast(`브라우저 조작 실패: ${error.message || error}`);
+    return null;
+  }
+}
+
+function normalizeRemoteBrowserAddress(value) {
+  const input = String(value || "").trim();
+  if (!input) return "https://www.google.com/";
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(input)) return input;
+  if (/\s/.test(input) || (!/[.:]/.test(input) && input.toLowerCase() !== "localhost")) {
+    return `https://www.google.com/search?q=${encodeURIComponent(input)}`;
+  }
+  return `http://${input}`;
+}
+
+function browserFrameMetrics() {
+  const rect = ui.browserViewport?.getBoundingClientRect();
+  const frameWidth = remoteBrowser.frameWidth;
+  const frameHeight = remoteBrowser.frameHeight;
+  if (!rect || !frameWidth || !frameHeight || !rect.width || !rect.height) return null;
+  const scale = Math.min(rect.width / frameWidth, rect.height / frameHeight);
+  const drawWidth = frameWidth * scale;
+  const drawHeight = frameHeight * scale;
+  return {
+    rect,
+    scale,
+    drawWidth,
+    drawHeight,
+    offsetX: (rect.width - drawWidth) / 2,
+    offsetY: 0,
+  };
+}
+
+function remoteBrowserPoint(clientX, clientY) {
+  const metrics = browserFrameMetrics();
+  if (!metrics) return null;
+  const localX = clientX - metrics.rect.left - metrics.offsetX;
+  const localY = clientY - metrics.rect.top - metrics.offsetY;
+  if (localX < 0 || localY < 0 || localX > metrics.drawWidth || localY > metrics.drawHeight) return null;
+  const frameX = localX / metrics.scale;
+  const frameY = localY / metrics.scale;
+  return {
+    x: Math.round(frameX * remoteBrowser.sourceWidth / remoteBrowser.frameWidth),
+    y: Math.round(frameY * remoteBrowser.sourceHeight / remoteBrowser.frameHeight),
+    metrics,
+  };
+}
+
+function startRemoteBrowser(agent) {
+  if (!agent) return;
+  if (remoteBrowser.agentId !== agent.id) {
+    stopRemoteBrowser({ reset: true });
+    remoteBrowser.agentId = agent.id;
+    setRemoteBrowserMessage("PC 내장 브라우저를 연결하는 중…");
+  }
+  void fetchRemoteBrowserTabs(agent.id).then(() => scheduleRemoteBrowserFrame(0));
+}
+
 // ---- Conversation (chat) view ----
 // Renders an agent's own transcript (via /api/chat) as a chat instead of the
 // width-constrained terminal. Default on; the session view toggles chat/term.
-let sessionViewMode = localStorage.getItem("multiagent.remote.sessionMode") === "term" ? "term" : "chat";
+const storedSessionViewMode = localStorage.getItem("multiagent.remote.sessionMode");
+let sessionViewMode = ["chat", "term", "browser"].includes(storedSessionViewMode)
+  ? storedSessionViewMode
+  : "chat";
 let chatRequestSeq = 0;
 
 function escapeHtml(text) {
@@ -3882,14 +4176,20 @@ async function fetchChat(agentId) {
 
 // Show chat or terminal for the session view; refresh the active one.
 function syncSessionView() {
-  if (selection.type !== "session") return;
+  if (selection.type !== "session") {
+    stopRemoteBrowser();
+    return;
+  }
   const agent = selectedAgent();
   syncQueueAgent(agent);
   renderComposerAttachments();
   const chat = sessionViewMode === "chat";
+  const browser = sessionViewMode === "browser";
   ui.appShell.dataset.sessionMode = sessionViewMode;
   if (ui.chatView) ui.chatView.hidden = !chat;
-  if (ui.outputPanel) ui.outputPanel.hidden = chat;
+  if (ui.outputPanel) ui.outputPanel.hidden = sessionViewMode !== "term";
+  if (ui.browserPanel) ui.browserPanel.hidden = !browser;
+  if (ui.composerForm) ui.composerForm.hidden = browser;
   if (ui.sessionMode) {
     for (const button of ui.sessionMode.children) {
       button.classList.toggle("on", button.dataset.mode === sessionViewMode);
@@ -3913,11 +4213,13 @@ function syncSessionView() {
       if (lastChatData) renderChat(lastChatData);
     }
   }
+  if (browser && agent) startRemoteBrowser(agent);
+  else stopRemoteBrowser();
 }
 let lastChatStatusSig = "";
 
 function setSessionViewMode(mode) {
-  sessionViewMode = mode === "term" ? "term" : "chat";
+  sessionViewMode = ["chat", "term", "browser"].includes(mode) ? mode : "chat";
   localStorage.setItem("multiagent.remote.sessionMode", sessionViewMode);
   lastChatFetch = { id: null, at: 0 };
   syncTerminal();
@@ -4511,6 +4813,91 @@ ui.sessionMode?.addEventListener("click", (event) => {
   if (!button) return;
   setSessionViewMode(button.dataset.mode);
 });
+ui.browserBackButton?.addEventListener("click", () => { void remoteBrowserAction("back"); });
+ui.browserForwardButton?.addEventListener("click", () => { void remoteBrowserAction("forward"); });
+ui.browserReloadButton?.addEventListener("click", () => { void remoteBrowserAction("reload"); });
+ui.browserNewTabButton?.addEventListener("click", () => {
+  const url = normalizeRemoteBrowserAddress(ui.browserAddressInput?.value);
+  void remoteBrowserAction("open", { url });
+});
+ui.browserTabSelect?.addEventListener("change", () => {
+  const tabId = ui.browserTabSelect.value;
+  if (!tabId) return;
+  remoteBrowser.activeTabId = tabId;
+  resetRemoteBrowserFrame();
+  void remoteBrowserAction("activate", { tabId });
+});
+ui.browserAddressForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const url = normalizeRemoteBrowserAddress(ui.browserAddressInput?.value);
+  void remoteBrowserAction(remoteBrowser.activeTabId ? "navigate" : "open", { url });
+  ui.browserAddressInput?.blur();
+});
+ui.browserInputForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const value = ui.browserTextInput?.value || "";
+  if (!value) return;
+  if (await remoteBrowserAction("text", { text: value })) ui.browserTextInput.value = "";
+});
+ui.browserInputForm?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-browser-key]");
+  if (button) void remoteBrowserAction("key", { key: button.dataset.browserKey });
+});
+ui.browserViewport?.addEventListener("pointerdown", (event) => {
+  if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+  const point = remoteBrowserPoint(event.clientX, event.clientY);
+  if (!point) return;
+  event.preventDefault();
+  ui.browserViewport.setPointerCapture?.(event.pointerId);
+  remoteBrowser.pointer = {
+    id: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    lastWheelAt: 0,
+    moved: false,
+  };
+});
+ui.browserViewport?.addEventListener("pointermove", (event) => {
+  const pointer = remoteBrowser.pointer;
+  if (!pointer || pointer.id !== event.pointerId) return;
+  event.preventDefault();
+  if (Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) >= 7) pointer.moved = true;
+  if (!pointer.moved || event.timeStamp - pointer.lastWheelAt < 65) return;
+  const point = remoteBrowserPoint(event.clientX, event.clientY);
+  if (!point) return;
+  const sourcePerClientX = remoteBrowser.sourceWidth / Math.max(1, point.metrics.drawWidth);
+  const sourcePerClientY = remoteBrowser.sourceHeight / Math.max(1, point.metrics.drawHeight);
+  const deltaX = Math.round((pointer.lastX - event.clientX) * sourcePerClientX * 1.25);
+  const deltaY = Math.round((pointer.lastY - event.clientY) * sourcePerClientY * 1.25);
+  pointer.lastX = event.clientX;
+  pointer.lastY = event.clientY;
+  pointer.lastWheelAt = event.timeStamp;
+  if (deltaX || deltaY) void remoteBrowserAction("wheel", { x: point.x, y: point.y, deltaX, deltaY });
+});
+function finishRemoteBrowserPointer(event, cancelled = false) {
+  const pointer = remoteBrowser.pointer;
+  if (!pointer || pointer.id !== event.pointerId) return;
+  remoteBrowser.pointer = null;
+  ui.browserViewport.releasePointerCapture?.(event.pointerId);
+  if (cancelled || pointer.moved) return;
+  const point = remoteBrowserPoint(event.clientX, event.clientY);
+  if (point) void remoteBrowserAction("pointer", { x: point.x, y: point.y });
+}
+ui.browserViewport?.addEventListener("pointerup", (event) => finishRemoteBrowserPointer(event));
+ui.browserViewport?.addEventListener("pointercancel", (event) => finishRemoteBrowserPointer(event, true));
+ui.browserViewport?.addEventListener("wheel", (event) => {
+  const point = remoteBrowserPoint(event.clientX, event.clientY);
+  if (!point) return;
+  event.preventDefault();
+  void remoteBrowserAction("wheel", {
+    x: point.x,
+    y: point.y,
+    deltaX: Math.round(event.deltaX),
+    deltaY: Math.round(event.deltaY),
+  });
+}, { passive: false });
 ui.composerForm.addEventListener("submit", (event) => { event.preventDefault(); void sendSelectedMessage(); });
 ui.attachmentButton.addEventListener("click", () => ui.attachmentInput.click());
 ui.attachmentInput.addEventListener("change", () => {
@@ -4630,7 +5017,12 @@ addEventListener("beforeinstallprompt", (event) => {
 addEventListener("appinstalled", () => { ui.installButton.hidden = true; showToast("MultiAgent Remote를 설치했습니다."); });
 addEventListener("online", () => { void fetchState(); });
 addEventListener("offline", () => { setConnection("offline", "오프라인"); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) void fetchState({ quiet: true }); });
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    void fetchState({ quiet: true });
+    if (selection.type === "session" && sessionViewMode === "browser") scheduleRemoteBrowserFrame(0);
+  }
+});
 navigator.serviceWorker?.addEventListener("message", (event) => {
   if (event.data?.type === "open-agent" && event.data.agentId) selectSession(event.data.agentId);
 });

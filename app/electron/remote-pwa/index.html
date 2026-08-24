@@ -340,6 +340,7 @@
               <div class="session-mode" id="sessionMode" role="tablist">
                 <button class="on" data-mode="chat" type="button">💬 채팅</button>
                 <button data-mode="term" type="button">⌗ 터미널</button>
+                <button data-mode="browser" type="button">🌐 브라우저</button>
               </div>
               <button class="small-button" id="backToScreenButton" type="button" hidden>Screen으로 돌아가기</button>
             </div>
@@ -368,6 +369,30 @@
               <div class="output-head"><strong>터미널</strong><span class="terminal-live" id="terminalLive" hidden>● LIVE</span><button class="small-button" id="copyOutputButton" type="button">복사</button></div>
               <div class="terminal-mount" id="terminalMount"></div>
               <pre id="outputText" tabindex="0">출력 대기 중…</pre>
+            </section>
+
+            <section class="browser-panel" id="browserPanel" hidden>
+              <div class="browser-toolbar">
+                <button class="browser-tool-button" id="browserBackButton" type="button" title="뒤로" aria-label="뒤로">←</button>
+                <button class="browser-tool-button" id="browserForwardButton" type="button" title="앞으로" aria-label="앞으로">→</button>
+                <button class="browser-tool-button" id="browserReloadButton" type="button" title="새로고침" aria-label="새로고침">↻</button>
+                <select id="browserTabSelect" aria-label="내장 브라우저 탭"></select>
+                <button class="browser-tool-button" id="browserNewTabButton" type="button" title="새 탭" aria-label="새 탭">＋</button>
+              </div>
+              <form class="browser-address-form" id="browserAddressForm">
+                <input id="browserAddressInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="http://localhost:3000 또는 웹 주소" aria-label="브라우저 주소">
+                <button class="browser-go-button" type="submit">이동</button>
+              </form>
+              <div class="browser-viewport" id="browserViewport" tabindex="0" aria-label="PC 내장 브라우저 원격 화면">
+                <img class="browser-frame" id="browserFrame" alt="PC 내장 브라우저 화면" draggable="false" hidden>
+                <div class="browser-message" id="browserMessage">브라우저를 연결하는 중…</div>
+              </div>
+              <form class="browser-input-form" id="browserInputForm">
+                <input id="browserTextInput" type="text" maxlength="4000" autocomplete="off" placeholder="선택한 웹 입력란에 보낼 텍스트" aria-label="브라우저 텍스트 입력">
+                <button class="browser-key-button" data-browser-key="Backspace" type="button" title="백스페이스">⌫</button>
+                <button class="browser-key-button" data-browser-key="Enter" type="button">Enter</button>
+                <button class="browser-text-send" type="submit">입력</button>
+              </form>
             </section>
 
             <form class="composer" id="composerForm">
