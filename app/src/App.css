@@ -4551,6 +4551,11 @@ body.files-resizing .files-resizer::after {
   background: rgba(234, 88, 12, 0.18);
   color: #fb923c;
 }
+.tab-doc-icon-browser {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.18);
+  color: #93c5fd;
+}
 
 .term-host {
   position: relative;
@@ -4809,6 +4814,30 @@ body.files-resizing .files-resizer::after {
 .tab-close:hover {
   background: var(--app-button-active);
   color: var(--app-danger);
+}
+
+.pane-browser-add {
+  flex: 0 0 28px;
+  align-self: stretch;
+  border: 0;
+  border-right: 1px solid var(--app-border);
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.pane-browser-add:hover {
+  background: var(--app-panel-hover);
+  color: var(--app-heading);
+}
+
+.pane-browser-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
 .pane-body {

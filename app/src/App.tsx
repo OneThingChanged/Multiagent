@@ -55,6 +55,7 @@ import {
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
 import {
+  makeBrowserTabId,
   isDocTabId,
   makeDocTabId,
   parseDocTabId,
@@ -2961,6 +2962,98 @@ function App() {
     [applyGroupOp]
   );
 
+  const showBrowserTab = useCallback(
+    (browserId: string, ownerAgentId: string | null, preferredPath?: Path) => {
+      const tabId = makeBrowserTabId(browserId);
+      if (ownerAgentId) {
+        documentOwnerByTabRef.current.set(tabId, ownerAgentId);
+      }
+      applyGroupOp((state) => {
+        // Preserve a browser tab that the user deliberately moved to another
+        // split; subsequent MCP actions should focus it, not move it back.
+        for (const group of state.groups) {
+          const existingPath = findLeafPath(group.layout, tabId);
+          if (!existingPath) continue;
+          return {
+            groups: updateGroup(
+              state.groups,
+              group.id,
+              setLeafActiveTab(group.layout, existingPath, tabId)
+            ),
+            activeGroupId: group.id,
+            activePath: existingPath,
+          };
+        }
+
+        let targetGroup = state.groups.find((group) => group.id === state.activeGroupId) ?? null;
+        let targetPath = preferredPath ?? state.activePath;
+        if (ownerAgentId) {
+          const ownerGroup = state.groups.find((group) =>
+            findLeafPath(group.layout, ownerAgentId) !== null
+          );
+          if (ownerGroup) {
+            targetGroup = ownerGroup;
+            targetPath = findLeafPath(ownerGroup.layout, ownerAgentId);
+          }
+        }
+        if (!targetGroup || !targetPath || !getAt(targetGroup.layout, targetPath)) {
+          return state;
+        }
+        const projectId = ownerAgentId
+          ? agentsRef.current.find((agent) => agent.id === ownerAgentId)?.projectId
+          : activeProjectIdRef.current ?? undefined;
+        return groupOps.openAsTab(
+          {
+            ...state,
+            activeGroupId: targetGroup.id,
+            activePath: targetPath,
+          },
+          tabId,
+          projectId
+        );
+      });
+    },
+    [applyGroupOp]
+  );
+
+  const openBrowserTab = useCallback(
+    async (path: Path, ownerAgentId: string | null) => {
+      if (!isElectronRuntime()) return;
+      try {
+        const result = await invoke<{ browserId: string }>("document_browser_open", {
+          folder: "",
+          relativePath: "",
+          initialUrl: "https://www.google.com/",
+          ...(ownerAgentId ? { agentId: ownerAgentId } : {}),
+        });
+        showBrowserTab(result.browserId, ownerAgentId, path);
+      } catch (error) {
+        pushToast("", "브라우저 열기 실패", String(error));
+      }
+    },
+    [pushToast, showBrowserTab]
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ browserId: string; agentId?: string | null }>(
+      "document-browser:show-tab",
+      (event) => {
+        const browserId = event.payload?.browserId?.trim();
+        if (!browserId) return;
+        showBrowserTab(browserId, event.payload.agentId?.trim() || null);
+      }
+    ).then((remove) => {
+      if (disposed) remove();
+      else unlisten = remove;
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [showBrowserTab]);
+
   const handleOpenMarkdownPath = useCallback(
     async (agentId: string, path: string, external = false) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
@@ -3635,6 +3728,7 @@ function App() {
         chatModeAgents={chatModeAgents}
         onToggleChat={toggleChatMode}
         getDocumentOwner={getDocumentOwner}
+        onOpenBrowser={openBrowserTab}
         onOpenMarkdownPath={handleOpenMarkdownPath}
         onOpenImagePath={handleOpenImagePath}
         onOpenFolderPath={handleOpenFolderPath}

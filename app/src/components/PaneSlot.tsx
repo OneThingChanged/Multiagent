@@ -29,7 +29,9 @@ import { activeAgentInLeaf, pathEq } from "../lib/layout";
 import {
   docFileExtension,
   docTabBasename,
+  isBrowserTabId,
   isDocTabId,
+  parseBrowserTabId,
   parseDocTabId,
 } from "../lib/docTabs";
 import {
@@ -38,6 +40,7 @@ import {
   gitHistoryTabTitle,
 } from "../lib/gitHistoryTabs";
 import { DocViewer } from "./DocViewer";
+import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
 import { GitHistoryView } from "./GitHistoryView";
 import { ChatView } from "./ChatView";
 import { TerminalContextMenu } from "./Menus";
@@ -99,6 +102,7 @@ export type RenderCtx = {
   onToggleChat: (agentId: string) => void;
   getDocumentOwner: (docId: string) => string | null;
   fallbackDocumentAgentId: string | null;
+  onOpenBrowser: (path: Path, ownerAgentId: string | null) => void;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -128,10 +132,24 @@ export function PaneSlot({
   } | null>(null);
   const active = pathEq(path, ctx.activePath);
   const activeTabId = activeAgentInLeaf(leaf);
-  const activeDocId = activeTabId && isDocTabId(activeTabId) ? activeTabId : null;
+  const activeBrowserTabId =
+    activeTabId && isBrowserTabId(activeTabId) ? activeTabId : null;
+  const activeDocId =
+    activeTabId && isDocTabId(activeTabId) && !activeBrowserTabId
+      ? activeTabId
+      : null;
   const activeGitHistoryId =
     activeTabId && isGitHistoryTabId(activeTabId) ? activeTabId : null;
-  const activeAgentId = activeDocId || activeGitHistoryId ? null : activeTabId;
+  const activeAgentId =
+    activeDocId || activeGitHistoryId || activeBrowserTabId
+      ? null
+      : activeTabId;
+  const paneSessionAgentId =
+    activeAgentId ??
+    leaf.tabs.find(
+      (tabId) => !isDocTabId(tabId) && !isGitHistoryTabId(tabId)
+    ) ??
+    ctx.fallbackDocumentAgentId;
   // A document tab can coexist with one or more session tabs in the same
   // leaf. Use the first real session as the browser/MCP owner so an HTML tab
   // opened from a terminal remains associated with that agent.
@@ -796,6 +814,46 @@ export function PaneSlot({
     >
       <div className="pane-tabs">
         {leaf.tabs.map((tabAgentId) => {
+          if (isBrowserTabId(tabAgentId)) {
+            const isActive = tabAgentId === activeTabId;
+            const isDragging = dragFrom === tabAgentId;
+            return (
+              <div
+                key={tabAgentId}
+                className={`pane-tab pane-tab-doc ${isActive ? "tab-active" : ""} ${isDragging ? "tab-dragging" : ""}`}
+                draggable={false}
+                onPointerDown={(e) => onTabPointerDown(e, tabAgentId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressNextTabClickRef.current) {
+                    suppressNextTabClickRef.current = false;
+                    e.preventDefault();
+                    return;
+                  }
+                  ctx.onSelectTab(path, tabAgentId);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
+                }}
+                title="Google · 내장 브라우저"
+              >
+                <span className="tab-doc-icon tab-doc-icon-browser">WEB</span>
+                <span className="tab-name">Google</span>
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.onCloseTab(path, tabAgentId);
+                  }}
+                  title="Close tab"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
           if (isDocTabId(tabAgentId)) {
             const isActive = tabAgentId === activeTabId;
             const isDragging = dragFrom === tabAgentId;
@@ -946,6 +1004,18 @@ export function PaneSlot({
             </div>
           );
         })}
+        <button
+          className="pane-browser-add"
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.setActivePath(path);
+            ctx.onOpenBrowser(path, paneSessionAgentId);
+          }}
+          title="Google을 새 내장 브라우저 탭으로 열기"
+          aria-label="브라우저 탭 열기"
+        >
+          +
+        </button>
         {activeAgentId && toolSupportsChat(activeAgent?.aiToolId) && (
           <button
             className={`pane-chat-toggle ${chatMode ? "on" : ""}`}
@@ -968,7 +1038,7 @@ export function PaneSlot({
         ref={bodyRef}
         className="pane-body"
         style={
-          activeDocId || activeGitHistoryId || (chatMode && activeAgentId)
+          activeDocId || activeGitHistoryId || activeBrowserTabId || (chatMode && activeAgentId)
             ? { display: "none" }
             : undefined
         }
@@ -996,6 +1066,24 @@ export function PaneSlot({
           }
         />
       )}
+      {leaf.tabs.filter(isBrowserTabId).map((browserTabId) => {
+        const browserId = parseBrowserTabId(browserTabId);
+        if (!browserId) return null;
+        const browserActive = browserTabId === activeBrowserTabId;
+        return (
+          <div
+            key={browserTabId}
+            className="pane-browser-view"
+            style={browserActive ? undefined : { display: "none" }}
+          >
+            <EmbeddedDocumentBrowser
+              browserId={browserId}
+              documentPath="https://www.google.com/"
+              active={browserActive}
+            />
+          </div>
+        );
+      })}
       {chatMode && activeAgentId && !activeDocId && toolSupportsChat(activeAgent?.aiToolId) && (
         <ChatView
           agentId={activeAgentId}

@@ -8,6 +8,7 @@ import { isGitHistoryTabId } from "./gitHistoryTabs";
 // so parsing splits at the first ":" after the prefix. The relative path may
 // itself contain ":" (e.g. absolute Windows fallback payloads) and stays intact.
 export const DOC_TAB_PREFIX = "doc:";
+const BROWSER_TAB_PROJECT_ID = "__browser__";
 
 export type DocTabRef = {
   projectId: string;
@@ -23,6 +24,25 @@ export function isDocTabId(id: string): boolean {
 export function makeDocTabId(projectId: string, relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
   return `${DOC_TAB_PREFIX}${projectId}:${normalized}`;
+}
+
+// Embedded browser tabs reuse the document-tab namespace so the existing
+// layout/group algebra treats them as local virtual tabs. The payload is the
+// native browser id created by Electron; it is intentionally ephemeral and is
+// discarded while restoring a workspace after an app restart.
+export function makeBrowserTabId(browserId: string): string {
+  return makeDocTabId(BROWSER_TAB_PROJECT_ID, browserId);
+}
+
+export function isBrowserTabId(id: string): boolean {
+  return parseDocTabId(id)?.projectId === BROWSER_TAB_PROJECT_ID;
+}
+
+export function parseBrowserTabId(id: string): string | null {
+  const ref = parseDocTabId(id);
+  return ref?.projectId === BROWSER_TAB_PROJECT_ID
+    ? ref.relativePath
+    : null;
 }
 
 export function parseDocTabId(id: string): DocTabRef | null {

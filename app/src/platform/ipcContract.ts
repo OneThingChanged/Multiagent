@@ -8,6 +8,7 @@ export type RuntimeCommand =
   | "show_open_dialog" | "open_external_url" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "document_browser_open" | "document_browser_ready" | "document_browser_bounds"
+  | "document_browser_visibility"
   | "document_browser_back" | "document_browser_forward"
   | "document_browser_reload" | "document_browser_navigate" | "document_browser_open_external"
   | "document_browser_inspect" | "document_browser_attach_annotation" | "document_browser_close"
@@ -54,7 +55,8 @@ export type RuntimeEventName =
   | "app:close-requested" | "app:close-cancelled" | "agent:hook-event"
   | "native-notification:clicked" | "update:progress"
   | "session-detached" | "sessions-reattached"
-  | "workspace:coordinator-changed" | "document-browser:update";
+  | "workspace:coordinator-changed" | "document-browser:update"
+  | "document-browser:show-tab";
 
 export type RuntimeEmittedEventName =
   | "desktop-pet:activate"
@@ -254,7 +256,7 @@ export type GitChangesResult = {
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
   document_browser_open: {
-    args: { folder: string; relativePath: string; agentId?: string };
+    args: { folder: string; relativePath: string; agentId?: string; initialUrl?: string };
     result: { browserId: string };
   };
   document_browser_ready: {
@@ -263,6 +265,10 @@ export type RuntimeCommandContract = {
   };
   document_browser_bounds: {
     args: { browserId: string; x: number; y: number; width: number; height: number };
+    result: null;
+  };
+  document_browser_visibility: {
+    args: { browserId: string; visible: boolean };
     result: null;
   };
   document_browser_back: { args: { browserId: string }; result: null };

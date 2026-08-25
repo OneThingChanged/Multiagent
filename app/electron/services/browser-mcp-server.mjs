@@ -16,8 +16,8 @@ const tools = [
   },
   {
     name: "browser_open",
-    description: "Open an HTTP(S) URL in the session's shared MultiAgent browser.",
-    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+    description: "Open a new visible tab in the session's shared MultiAgent browser. Defaults to Google when URL is omitted.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, additionalProperties: false },
   },
   {
     name: "browser_navigate",
@@ -181,4 +181,3 @@ process.stdin.on("data", (chunk) => {
   }
 });
 process.stdin.on("end", () => process.exit(0));
-

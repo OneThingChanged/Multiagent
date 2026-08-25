@@ -1474,6 +1474,58 @@ function parkDocumentBrowser(record) {
   return true;
 }
 
+function attachDocumentBrowserToWindow(record, targetWindow) {
+  if (!record || !targetWindow || targetWindow.isDestroyed()) return false;
+  if (record.win === targetWindow) {
+    if (record.background) {
+      record.bounds = null;
+      record.view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
+      if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+    }
+    record.background = false;
+    return true;
+  }
+  const previousWindow = record.win;
+  const previousShellId = record.shellWebContentsId;
+  try {
+    if (!previousWindow.isDestroyed()) previousWindow.contentView.removeChildView(record.view);
+    targetWindow.contentView.addChildView(record.view);
+  } catch {
+    try {
+      if (!previousWindow.isDestroyed()) previousWindow.contentView.addChildView(record.view);
+    } catch {}
+    return false;
+  }
+  if (documentBrowserByShellWebContents.get(previousShellId) === record.id) {
+    documentBrowserByShellWebContents.delete(previousShellId);
+  }
+  record.win = targetWindow;
+  record.shellWebContentsId = targetWindow.webContents.id;
+  record.bounds = null;
+  record.background = false;
+  record.view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
+  if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+  return true;
+}
+
+function showBrowserIntegrationTab(record, agentId) {
+  if (!record || record.view.webContents.isDestroyed()) return;
+  const targetWindow = browserParentWindowForAgent(agentId);
+  if (!targetWindow || !attachDocumentBrowserToWindow(record, targetWindow)) return;
+  const normalizedAgentId = String(agentId || "").trim();
+  if (normalizedAgentId) {
+    record.agentId = normalizedAgentId;
+    documentBrowserByAgent.set(normalizedAgentId, record.id);
+  }
+  const runtime = runtimeByWebContents.get(targetWindow.webContents.id);
+  if (!runtime?.workspace_window) return;
+  sendEvent(targetWindow, "document-browser:show-tab", {
+    browserId: record.id,
+    agentId: String(agentId || "").trim() || null,
+    url: sanitizeBrowserUrl(record.view.webContents.getURL() || record.previewUrl),
+  });
+}
+
 async function refreshDocumentBrowserPreview(record) {
   if (!record.folder || !record.relativePath) return;
   if (documentPreviewService.isPreviewUrl(record.previewUrl, record.token)) return;
@@ -1624,7 +1676,11 @@ async function browserRecordForIntegration(agentId, body = {}, { create = true }
   if (!record && !requestedTab) record = browserRecordForAgent(agentId);
   if (!record && !requestedTab) record = await ensureBackgroundBrowser();
   if (record) {
-    activateDocumentBrowser(record, agentId);
+    const normalizedAgentId = String(agentId || "").trim();
+    if (normalizedAgentId) {
+      record.agentId = normalizedAgentId;
+      documentBrowserByAgent.set(normalizedAgentId, record.id);
+    }
     return record;
   }
   if (!create) return null;
@@ -1699,12 +1755,12 @@ async function browserIntegrationStatus(agentId) {
   };
 }
 
-async function handleBrowserIntegration({ agentId, action, body = {} }) {
+async function handleBrowserIntegration({ agentId, action, body = {}, reveal = true }) {
   const normalizedAgentId = String(agentId || "").trim();
   if (!normalizedAgentId) return { ok: false, httpStatus: 400, error: "agent id is required" };
   if (action === "status") return browserIntegrationStatus(normalizedAgentId);
   if (action === "open") {
-    const target = new URL(String(body.url || "").trim());
+    const target = new URL(String(body.url || "https://www.google.com/").trim());
     if (!isHttpUrl(target.href)) return { ok: false, httpStatus: 400, error: "HTTP 또는 HTTPS 주소만 열 수 있습니다." };
     const parentWindow = browserParentWindowForAgent(normalizedAgentId) || ensureBrowserHostWindow();
     if (!parentWindow) return { ok: false, httpStatus: 503, error: "브라우저를 연결할 작업창이 없습니다." };
@@ -1712,13 +1768,16 @@ async function handleBrowserIntegration({ agentId, action, body = {} }) {
       parentWindow,
       agentId: normalizedAgentId,
       initialUrl: target.href,
+      background: true,
     });
     const record = documentBrowserWindows.get(created.browserId);
+    if (reveal) showBrowserIntegrationTab(record, normalizedAgentId);
     return { ok: true, tab: browserIntegrationTabSnapshot(record) };
   }
 
   const record = await browserRecordForIntegration(normalizedAgentId, body);
   if (!record) return { ok: false, httpStatus: 404, error: "브라우저 탭을 찾을 수 없습니다." };
+  if (reveal) showBrowserIntegrationTab(record, normalizedAgentId);
   switch (action) {
     case "navigate": {
       const target = new URL(String(body.url || "").trim());
@@ -1876,7 +1935,7 @@ async function handleRemoteBrowser({ agentId, action, body = {} }) {
       return { ok: false, httpStatus: 400, error: error?.message || "invalid browser url" };
     }
     if (action === "navigate") {
-      return handleBrowserIntegration({ agentId: normalizedAgentId, action, body });
+      return handleBrowserIntegration({ agentId: normalizedAgentId, action, body, reveal: false });
     }
     const created = await createDocumentBrowserWindow({
       parentWindow: ensureBrowserHostWindow(),
@@ -1899,7 +1958,7 @@ async function handleRemoteBrowser({ agentId, action, body = {} }) {
     return { ok: true, tab: browserIntegrationTabSnapshot(record) };
   }
   if (["back", "forward", "reload"].includes(action)) {
-    return handleBrowserIntegration({ agentId: normalizedAgentId, action, body });
+    return handleBrowserIntegration({ agentId: normalizedAgentId, action, body, reveal: false });
   }
 
   const webContents = record.view.webContents;
@@ -4417,6 +4476,7 @@ async function invokeCommand(event, command, rawArgs) {
         folder: asString(args.folder),
         relativePath: asString(args.relativePath),
         agentId: asString(args.agentId).trim() || null,
+        initialUrl: asString(args.initialUrl).trim(),
         parentWindow: eventSenderWindow(event),
       });
     }
@@ -4443,6 +4503,20 @@ async function invokeCommand(event, command, rawArgs) {
         width: asPositiveInt(args.width, 1),
         height: asPositiveInt(args.height, 1),
       });
+      return null;
+    }
+    case "document_browser_visibility": {
+      const record = documentBrowserRecordForSender(
+        event.sender.id,
+        asString(args.browserId),
+      );
+      if (!record) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      if (args.visible === true) {
+        activateDocumentBrowser(record, record.agentId || "");
+        positionDocumentBrowserView(record);
+      } else if (typeof record.view.setVisible === "function") {
+        record.view.setVisible(false);
+      }
       return null;
     }
     case "document_browser_back": {

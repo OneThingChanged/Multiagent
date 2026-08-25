@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import type { LayoutNode } from "../types";
-import { makeLeaf } from "./layout";
+import { makeLeaf, validateLayout } from "./layout";
 import {
   docFileExtension,
   docKindForPath,
   docTabBasename,
+  isBrowserTabId,
   isDocTabId,
+  makeBrowserTabId,
   makeDocTabId,
+  parseBrowserTabId,
   parseDocTabId,
   stripDocTabs,
 } from "./docTabs";
@@ -50,6 +53,29 @@ describe("doc tab ids", () => {
     expect(docTabBasename(id)).toBe("Setup.MD");
     expect(docFileExtension(id)).toBe("md");
     expect(docTabBasename("not-a-doc")).toBe("not-a-doc");
+  });
+
+  it("encodes ephemeral embedded-browser tabs inside the virtual tab namespace", () => {
+    const id = makeBrowserTabId("browser-123");
+    expect(isDocTabId(id)).toBe(true);
+    expect(isBrowserTabId(id)).toBe(true);
+    expect(parseBrowserTabId(id)).toBe("browser-123");
+    expect(isBrowserTabId(makeDocTabId("p", "docs/page.html"))).toBe(false);
+  });
+
+  it("drops live browser ids when a persisted layout is restored", () => {
+    const layout: LayoutNode = {
+      type: "leaf",
+      id: "l1",
+      tabs: ["agent-1", makeBrowserTabId("browser-123")],
+      activeIndex: 1,
+    };
+    expect(validateLayout(layout, new Set(["agent-1"]))).toEqual({
+      type: "leaf",
+      id: "l1",
+      tabs: ["agent-1"],
+      activeIndex: 0,
+    });
   });
 });
 

@@ -107,6 +107,7 @@ export function TerminalArea({
   chatModeAgents,
   onToggleChat,
   getDocumentOwner,
+  onOpenBrowser,
   onOpenMarkdownPath,
   onOpenImagePath,
   onOpenFolderPath,
@@ -136,6 +137,7 @@ export function TerminalArea({
   chatModeAgents: Set<string>;
   onToggleChat: (agentId: string) => void;
   getDocumentOwner: (docId: string) => string | null;
+  onOpenBrowser: (path: Path, ownerAgentId: string | null) => void;
   onOpenMarkdownPath: (
     agentId: string,
     path: string,
@@ -273,6 +275,7 @@ export function TerminalArea({
     onToggleChat,
     getDocumentOwner,
     fallbackDocumentAgentId,
+    onOpenBrowser,
     onOpenMarkdownPath,
     onOpenImagePath,
     onOpenFolderPath,

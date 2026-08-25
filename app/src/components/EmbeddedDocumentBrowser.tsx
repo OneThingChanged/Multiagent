@@ -5,6 +5,7 @@ import type { DocumentBrowserSnapshot, RuntimeCommand } from "../platform/ipcCon
 type EmbeddedDocumentBrowserProps = {
   browserId: string;
   documentPath: string;
+  active?: boolean;
 };
 
 const browserCommands = [
@@ -57,6 +58,7 @@ const browserLeases = new Map<string, BrowserLease>();
 export function EmbeddedDocumentBrowser({
   browserId,
   documentPath,
+  active = true,
 }: EmbeddedDocumentBrowserProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [snapshot, setSnapshot] = useState<DocumentBrowserSnapshot>({
@@ -76,6 +78,7 @@ export function EmbeddedDocumentBrowser({
   }, [documentPath, snapshot.relativePath, snapshot.url]);
 
   const syncBounds = useCallback(() => {
+    if (!active) return;
     const host = hostRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
@@ -89,7 +92,16 @@ export function EmbeddedDocumentBrowser({
       width,
       height,
     }).catch(() => {});
-  }, [browserId]);
+  }, [active, browserId]);
+
+  useEffect(() => {
+    void invoke("document_browser_visibility", {
+      browserId,
+      visible: active,
+    }).then(() => {
+      if (active) syncBounds();
+    }).catch(() => {});
+  }, [active, browserId, syncBounds]);
 
   useEffect(() => {
     let active = true;
@@ -122,6 +134,7 @@ export function EmbeddedDocumentBrowser({
   }, [browserId]);
 
   useLayoutEffect(() => {
+    if (!active) return;
     const host = hostRef.current;
     if (!host) return;
     syncBounds();

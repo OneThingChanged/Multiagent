@@ -1,5 +1,5 @@
 import type { LayoutNode, LeafNode, Path, SplitNode, Group } from "../types";
-import { isDocTabId } from "./docTabs";
+import { isBrowserTabId, isDocTabId } from "./docTabs";
 import { isGitHistoryTabId } from "./gitHistoryTabs";
 
 export function makeLeaf(agentId: string): LeafNode {
@@ -190,6 +190,9 @@ export function validateLayout(
     }
     const validTabs: string[] = [];
     for (const t of tabs) {
+      // Browser ids refer to live Electron WebContentsViews and cannot be
+      // restored after the process exits. Drop them from persisted layouts.
+      if (isBrowserTabId(t)) continue;
       // Doc tabs (doc:<projectId>:<path>) have no backing agent; keep them so
       // open documents survive an app restart.
       if (!validIds.has(t) && !isDocTabId(t) && !isGitHistoryTabId(t)) continue;

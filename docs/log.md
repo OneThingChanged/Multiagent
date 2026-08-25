@@ -1,5 +1,11 @@
 # OKF Update Log
 
+## 2026-08-26
+
+* **Visible browser automation**: Added a `+` control to every pane for opening Google in an embedded tab and made session-owned MCP browser actions reveal the affected tab while preserving its split placement.
+* **Browser tab lifecycle**: Recorded that inactive native browser views remain alive but hidden, and ephemeral browser tabs are discarded during workspace restoration.
+* **Remote focus boundary**: Clarified that Remote browser control updates the shared browser without stealing the desktop operator's current tab or focus.
+
 ## 2026-08-24
 
 * **Remote shared browser**: Added an approved-session, same-origin-controlled browser relay with shared tab IDs, memory-only JPEG frames, scaled touch input, navigation, and explicit mobile text/key controls for desktop-local sites.

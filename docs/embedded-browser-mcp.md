@@ -18,6 +18,9 @@ sources:
   - id: browser-ui
     resource: ../app/src/components/EmbeddedDocumentBrowser.tsx
     title: "Embedded browser toolbar and selection UI"
+  - id: browser-tabs-ui
+    resource: ../app/src/components/PaneSlot.tsx
+    title: "Pane browser tabs and reveal UI"
   - id: annotation-preload
     resource: ../app/electron/browser-annotation-preload.cjs
     title: "Isolated annotation preload"
@@ -38,6 +41,12 @@ all visible workspaces therefore leaves the browser profile and its hidden tab
 alive with the system-tray process. Each tab has a stable browser ID; agents
 share the tab list and select tabs by ID. Cookies are shared between MultiAgent
 tabs but remain separate from Chrome and Edge profiles.[^electron-main]
+
+Every pane tab strip exposes a `+` action that creates a new embedded browser
+tab at Google. Browser tabs participate in the same split, move, select, and
+close operations as session and document tabs. Inactive browser views remain
+alive but hidden, so switching tabs preserves navigation state without allowing
+the native view to cover the selected pane.[^browser-tabs-ui][^electron-main]
 
 ## Managed MCP connection
 
@@ -64,6 +73,13 @@ The fixed tools are:
 
 Arbitrary page JavaScript is intentionally not exposed as a tool.
 
+An agent MCP action that opens, navigates, clicks, types, reloads, or moves
+through browser history also attaches the target browser ID to that agent's
+current pane and selects it. The user can therefore watch the shared browser as
+the agent searches or interacts with a page. `browser_open` accepts an omitted
+URL and opens Google by default. A browser tab already moved to another split
+keeps that split instead of being duplicated.[^browser-server][^electron-main]
+
 ## Remote human control
 
 The authenticated Remote PWA can project these same tabs as memory-only JPEG
@@ -72,6 +88,10 @@ executed by the desktop browser, which also makes desktop-local HTTP services
 reachable through the approved Remote session. Remote taps, drag scrolling,
 wheel events, allowlisted keys, and explicit text are translated into native
 Electron input events using the frame's source dimensions.[^electron-main]
+
+Remote relay actions update the shared browser but do not select a desktop tab
+or steal focus from the local operator. Only session-owned MCP actions request
+automatic desktop reveal.[^electron-main]
 
 This relay is deliberately narrower than MCP. It returns tab metadata and
 pixels, not DOM snapshots, cookies, storage, or profile files. Frames are never
@@ -107,6 +127,7 @@ configuration changes because MCP clients load configuration at startup.
 [^browser-server]: Managed browser MCP server
 [^browser-context]: Snapshot and annotation sanitization
 [^browser-ui]: Embedded browser toolbar and selection UI
+[^browser-tabs-ui]: Pane browser tabs and reveal UI
 [^annotation-preload]: Isolated annotation preload
 [^preview-service]: Project-scoped HTML preview service
 [^electron-main]: Native browser ownership and integration routes
