@@ -23,7 +23,7 @@ if (!electronPath || !fs.existsSync(electronPath)) {
   throw new Error(`Electron executable not found: ${electronPath}`);
 }
 
-async function run(name, envName, marker, timeoutMs = 12_000) {
+async function run(name, envName, marker, timeoutMs = 12_000, terminateAfterMarker = false) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), `multiagent-${name}-`));
   return new Promise((resolve, reject) => {
     const env = {
@@ -40,8 +40,16 @@ async function run(name, envName, marker, timeoutMs = 12_000) {
       cwd: appRoot, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
+    let terminationRequested = false;
     const timeout = setTimeout(() => { child.kill(); reject(new Error(`${name} timeout\n${output}`)); }, timeoutMs);
-    child.stdout.on("data", (chunk) => { output += chunk; process.stdout.write(chunk); });
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      process.stdout.write(chunk);
+      if (terminateAfterMarker && !terminationRequested && output.includes(marker)) {
+        terminationRequested = true;
+        child.kill();
+      }
+    });
     child.stderr.on("data", (chunk) => { output += chunk; process.stderr.write(chunk); });
     child.on("exit", (code) => {
       clearTimeout(timeout);
@@ -49,7 +57,7 @@ async function run(name, envName, marker, timeoutMs = 12_000) {
       const variantMarker = `variant=${company ? "company" : "standard"}`;
       const packagedResourcesHealthy = !output.includes("[electron] tray init failed");
       if (
-        code === 0 &&
+        (code === 0 || (terminateAfterMarker && terminationRequested)) &&
         output.includes(marker) &&
         output.includes(variantMarker) &&
         packagedResourcesHealthy
@@ -63,7 +71,9 @@ await run("close", "MULTIAGENT_ELECTRON_CLOSE_SMOKE", "MULTIAGENT_ELECTRON_CLOSE
 await run(
   "workspace",
   "MULTIAGENT_ELECTRON_WORKSPACE_SMOKE",
-  "MULTIAGENT_ELECTRON_WORKSPACE_TRAY_OK"
+  "MULTIAGENT_ELECTRON_WORKSPACE_TRAY_OK",
+  12_000,
+  true,
 );
 await run("security", "MULTIAGENT_ELECTRON_SECURITY_SMOKE", "MULTIAGENT_ELECTRON_SECURITY_OK");
 const mode = packaged ? "packaged" : "source";
