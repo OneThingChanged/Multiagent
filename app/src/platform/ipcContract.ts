@@ -304,7 +304,7 @@ export type RuntimeCommandContract = {
   };
   chat_blocks: {
     args: { id: string; sessionId?: string };
-    result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string; lifecycle?: "working" | "idle" };
+    result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string; lifecycle?: "working" | "idle"; sessionId?: string };
   };
   git_status: {
     args: { folder: string };

@@ -2765,6 +2765,7 @@ async function sendInput(agentId, message) {
   if (!(await sendRaw(agentId, text))) return false;
   await new Promise((resolve) => setTimeout(resolve, 80));
   if (!(await sendRaw(agentId, "\r"))) return false;
+  if (text === "/clear") clearRemoteChatHistory(agentId);
   showToast("전송했습니다.");
   return true;
 }
@@ -4002,6 +4003,52 @@ let chatVisible = CHAT_PAGE;
 let lastChatData = null;
 let chatHiddenCount = 0;
 let chatAutoLoading = false;
+// /api/chat intentionally sends a bounded transcript tail. Keep already-seen
+// blocks per session in this page so older turns do not disappear as that tail
+// window advances during a long-running conversation.
+const chatHistoryStore = new Map();
+const rawChatKeys = new Map();
+const pendingChatClears = new Map();
+
+function chatBlockKey(block) {
+  return JSON.stringify(block);
+}
+
+function mergeChatHistory(previous, incoming) {
+  if (!incoming.length) return previous;
+  if (!previous.length) return incoming.slice();
+  const previousOffset = Math.max(0, previous.length - incoming.length);
+  const previousKeys = previous.slice(previousOffset).map(chatBlockKey);
+  const incomingKeys = incoming.map(chatBlockKey);
+  const maxOverlap = Math.min(previousKeys.length, incomingKeys.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const previousStart = previousKeys.length - overlap;
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (previousKeys[previousStart + index] !== incomingKeys[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return previous.concat(incoming.slice(overlap));
+  }
+  return previous.concat(incoming);
+}
+
+function rawChatKey(blocks) {
+  if (!blocks.length) return "0";
+  return `${blocks.length}|${chatBlockKey(blocks[0])}|${chatBlockKey(blocks[blocks.length - 1])}`;
+}
+
+function clearRemoteChatHistory(agentId) {
+  pendingChatClears.set(agentId, rawChatKeys.get(agentId) || "0");
+  chatHistoryStore.delete(agentId);
+  if (chatAgent === agentId) {
+    lastChatData = { blocks: [], missing: true };
+    lastChatKey = "";
+    renderChat(lastChatData);
+  }
+}
 
 // Auto-reveal older turns when the user scrolls to the top of the chat (the
 // "이전 대화 더 보기" button stays as an explicit affordance). Prepending grows
@@ -4155,6 +4202,9 @@ async function fetchChat(agentId) {
   if (agentId !== chatAgent) {
     chatAgent = agentId;
     chatVisible = CHAT_PAGE; // reset pagination when switching sessions
+    lastChatKey = "";
+    lastChatData = chatHistoryStore.get(agentId)?.data || null;
+    if (lastChatData) renderChat(lastChatData);
   }
   const seq = ++chatRequestSeq;
   try {
@@ -4162,10 +4212,37 @@ async function fetchChat(agentId) {
     let data = await response.json().catch(() => ({ blocks: [] }));
     if (!response.ok) data = { blocks: [], error: true };
     if (seq !== chatRequestSeq) return; // a newer request superseded this one
-    const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+    const cached = chatHistoryStore.get(agentId);
+    if (data?.error && cached?.data) {
+      // An HTTP failure is transient just like a network exception: keep the
+      // last conversation visible instead of replacing it with an error card.
+      lastChatData = cached.data;
+      return;
+    }
+    const incoming = Array.isArray(data?.blocks) ? data.blocks : [];
+    const incomingKey = rawChatKey(incoming);
+    const pendingClearKey = pendingChatClears.get(agentId);
+    if (pendingClearKey !== undefined) {
+      if (incomingKey === pendingClearKey) return;
+      pendingChatClears.delete(agentId);
+    }
+    rawChatKeys.set(agentId, incomingKey);
+    const sessionChanged = Boolean(
+      data?.sessionId && cached?.sessionId && data.sessionId !== cached.sessionId
+    );
+    const previous = sessionChanged ? [] : (cached?.data?.blocks || []);
+    const blocks = data?.unsupported || data?.error
+      ? incoming
+      : mergeChatHistory(previous, incoming);
+    if (!data?.unsupported && !data?.error && blocks.length) {
+      data = { ...data, blocks, missing: false };
+      chatHistoryStore.set(agentId, { sessionId: data.sessionId || cached?.sessionId, data });
+    } else if (data?.missing && previous.length) {
+      data = { ...cached.data, lifecycle: data.lifecycle ?? cached.data.lifecycle };
+    }
     const last = blocks[blocks.length - 1];
     // Skip re-render when nothing changed so opened tool/▸ details stay open.
-    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}|${data?.error ? 1 : 0}`;
+    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.lifecycle || ""}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}|${data?.error ? 1 : 0}`;
     if (key === lastChatKey) return;
     lastChatKey = key;
     renderChat(data);

@@ -14,6 +14,7 @@ import {
   type AutocompleteTrigger,
 } from "../lib/composerAutocomplete";
 import type { AppThemeId } from "../lib/appTheme";
+import { mergeChatHistory } from "../lib/chatHistory";
 import type { ChatBlock, ChatDiffLine } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
 
@@ -36,6 +37,25 @@ type Attachment =
   | { kind: "image"; path: string; dataUrl: string }
   | { kind: "text"; text: string };
 const attachStore = new Map<string, Attachment[]>();
+// Parsed transcript tails are bounded by the Electron backend. Retain the
+// already-seen prefix for the life of this renderer so switching views or a
+// long-running conversation cannot make older turns disappear.
+const historyStore = new Map<string, { sessionId?: string; blocks: ChatBlock[] }>();
+
+function historyFor(agentId: string, sessionId?: string): ChatBlock[] {
+  const cached = historyStore.get(agentId);
+  if (!cached) return [];
+  if (sessionId && cached.sessionId && cached.sessionId !== sessionId) {
+    historyStore.delete(agentId);
+    return [];
+  }
+  if (sessionId && !cached.sessionId) cached.sessionId = sessionId;
+  return cached.blocks;
+}
+
+function rememberHistory(agentId: string, sessionId: string | undefined, blocks: ChatBlock[]) {
+  historyStore.set(agentId, { sessionId, blocks });
+}
 // A text paste at/above this size collapses into a chip instead of filling the
 // input inline.
 const PASTE_COLLAPSE_CHARS = 300;
@@ -227,8 +247,9 @@ export function ChatView({
   assistantMessage?: string | null;
   folder?: string;
 }) {
-  const [blocks, setBlocks] = useState<ChatBlock[]>([]);
-  const [status, setStatus] = useState<Status>("loading");
+  const initialHistory = historyFor(agentId, sessionId);
+  const [blocks, setBlocks] = useState<ChatBlock[]>(() => initialHistory);
+  const [status, setStatus] = useState<Status>(() => initialHistory.length ? "ready" : "loading");
   const [tool, setTool] = useState<string | undefined>(undefined);
   // Turn lifecycle from the transcript — overrides a stale hook "working".
   const [lifecycle, setLifecycle] = useState<"working" | "idle" | undefined>(undefined);
@@ -265,9 +286,10 @@ export function ChatView({
   const clearedSigRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const cached = historyFor(agentId, sessionId);
     keyRef.current = "";
-    setStatus("loading");
-    setBlocks([]);
+    setStatus(cached.length ? "ready" : "loading");
+    setBlocks(cached);
     setVisible(CHAT_PAGE);
     setPending([]);
     setQueue(queueStore.get(agentId) ?? []); // restore this session's reservations
@@ -275,7 +297,7 @@ export function ChatView({
     setStoppedKey(null);
     firstLoadRef.current = true;
     clearedSigRef.current = null;
-  }, [agentId]);
+  }, [agentId, sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -287,7 +309,8 @@ export function ChatView({
           setStatus("unsupported");
           return;
         }
-        const next = result.blocks ?? [];
+        const incoming = result.blocks ?? [];
+        const next = mergeChatHistory(historyFor(agentId, sessionId), incoming);
         if (result.tool) setTool(result.tool);
         setLifecycle(result.lifecycle);
         // Drop optimistic echoes now present in the transcript (exact match on
@@ -305,6 +328,7 @@ export function ChatView({
           if (key === clearedSigRef.current) return;
           clearedSigRef.current = null;
         }
+        rememberHistory(agentId, sessionId, next);
         if (key === keyRef.current) return;
         keyRef.current = key;
         msgKeyRef.current = key;
@@ -506,6 +530,7 @@ export function ChatView({
         // /clear resets the agent's conversation — mirror it in the view right
         // away and suppress the pre-clear transcript until it changes on disk.
         clearedSigRef.current = keyRef.current || "empty";
+        historyStore.delete(agentId);
         keyRef.current = "";
         setBlocks([]);
         setPending([]);

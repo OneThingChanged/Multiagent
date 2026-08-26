@@ -2859,7 +2859,7 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
   }
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
     if ((transcriptMissUntil.get(id) ?? 0) > Date.now()) {
-      return { blocks: [], truncated: false, missing: true, tool: declaredTool ?? undefined };
+      return { blocks: [], truncated: false, missing: true, tool: declaredTool ?? undefined, sessionId };
     }
     const resolved = resolveChatTranscriptBySession(declaredTool, sessionId);
     if (resolved) {
@@ -2874,13 +2874,13 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
   }
   if (!transcriptPath) {
     if (declaredTool !== "codex" && declaredTool !== "claude") {
-      return { blocks: [], truncated: false, missing: true, unsupported: true };
+      return { blocks: [], truncated: false, missing: true, unsupported: true, sessionId };
     }
-    return { blocks: [], truncated: false, missing: true, tool: declaredTool };
+    return { blocks: [], truncated: false, missing: true, tool: declaredTool, sessionId };
   }
   ensureChatWatch(transcriptPath); // push a refresh when the file changes
   const result = await readChatTranscript(tool, transcriptPath);
-  return { ...result, tool };
+  return { ...result, tool, sessionId };
 }
 
 function resolveDocPath(folder, requested) {
