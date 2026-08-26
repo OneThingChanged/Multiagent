@@ -1593,6 +1593,27 @@ export class RemoteDashboardService {
     return `multiagent_remote=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
   }
 
+  githubOAuthRedirectUri() {
+    const publicHostname = String(this.config.public_hostname || "").trim();
+    if (!publicHostname) return "";
+    try {
+      const publicUrl = new URL(`https://${publicHostname}`);
+      if (
+        publicUrl.protocol !== "https:" ||
+        publicUrl.username ||
+        publicUrl.password ||
+        publicUrl.pathname !== "/" ||
+        publicUrl.search ||
+        publicUrl.hash
+      ) {
+        return "";
+      }
+      return new URL("/auth/github/callback", publicUrl).href;
+    } catch {
+      return "";
+    }
+  }
+
   async registerLogin(login) {
     if (!this.isApproved(login) && !this.access.pending.some((value) => value.toLowerCase() === login.toLowerCase())) {
       this.access.pending.push(login);
@@ -1661,20 +1682,27 @@ export class RemoteDashboardService {
       for (const [key, value] of this.mobileAuthTickets) {
         if (!value?.expiresAt || value.expiresAt < now) this.mobileAuthTickets.delete(key);
       }
+      const redirectUri = this.githubOAuthRedirectUri();
+      if (!redirectUri) {
+        response.writeHead(503, { "content-type": "text/plain; charset=utf-8" })
+          .end("Settings에서 올바른 Remote 공개 호스트네임을 설정해 주세요.");
+        return true;
+      }
       const state = crypto.randomBytes(18).toString("hex");
       this.states.set(state, {
         expiresAt: now + 10 * 60_000,
         mobileProfileId: mobileProfileId || null,
+        redirectUri,
       });
       const redirect = new URL("https://github.com/login/oauth/authorize");
       redirect.searchParams.set("client_id", this.config.client_id);
       redirect.searchParams.set("state", state);
+      redirect.searchParams.set("redirect_uri", redirectUri);
       response.writeHead(302, { location: redirect.href }).end();
       return true;
     }
-    // Accept both the documented path and the shorter /auth/callback, since
-    // GitHub uses the OAuth App's registered callback URL (we don't send an
-    // explicit redirect_uri) and users often register the shorter form.
+    // Keep accepting the legacy shorter path for callbacks issued before the
+    // canonical /auth/github/callback route was configured.
     if (
       url.pathname !== "/auth/github/callback" &&
       url.pathname !== "/auth/callback"
@@ -1690,10 +1718,19 @@ export class RemoteDashboardService {
       return true;
     }
     this.states.delete(state);
+    const redirectUri = typeof stateEntry === "object"
+      ? String(stateEntry?.redirectUri || "")
+      : "";
+    const tokenRequest = {
+      client_id: this.config.client_id,
+      client_secret: this.config.client_secret,
+      code,
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+    };
     const tokenResponse = await this.fetchImpl("https://github.com/login/oauth/access_token", {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ client_id: this.config.client_id, client_secret: this.config.client_secret, code }),
+      body: JSON.stringify(tokenRequest),
       signal: AbortSignal.timeout(15_000),
     });
     const token = (await tokenResponse.json()).access_token;

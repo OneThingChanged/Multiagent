@@ -1348,9 +1348,11 @@ describe("Electron dashboard server", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-mobile-oauth-"));
     roots.push(root);
     const requests = [];
-    const fetchImpl = async (url) => {
+    const tokenRequests = [];
+    const fetchImpl = async (url, options = {}) => {
       requests.push(String(url));
       if (String(url).endsWith("/login/oauth/access_token")) {
+        tokenRequests.push(JSON.parse(String(options.body || "{}")));
         return new Response(JSON.stringify({ access_token: "token-123" }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -1387,7 +1389,7 @@ describe("Electron dashboard server", () => {
     );
     const githubUrl = new URL(start.headers.get("location"));
     const callback = await fetch(
-      `${status.url}/auth/callback?code=code-123&state=${githubUrl.searchParams.get("state")}`,
+      `${status.url}/auth/github/callback?code=code-123&state=${githubUrl.searchParams.get("state")}`,
       { redirect: "manual" },
     );
     const appUrl = new URL(callback.headers.get("location"));
@@ -1403,6 +1405,9 @@ describe("Electron dashboard server", () => {
 
     expect(start.status).toBe(302);
     expect(githubUrl.origin).toBe("https://github.com");
+    expect(githubUrl.searchParams.get("redirect_uri")).toBe(
+      "https://agent.example.com/auth/github/callback",
+    );
     expect(callback.status).toBe(302);
     expect(callback.headers.get("set-cookie")).toBeNull();
     expect(appUrl.protocol).toBe("multiagent:");
@@ -1419,6 +1424,12 @@ describe("Electron dashboard server", () => {
       "https://github.com/login/oauth/access_token",
       "https://api.github.com/user",
     ]);
+    expect(tokenRequests).toEqual([{
+      client_id: "client-123",
+      client_secret: "fixture-value",
+      code: "code-123",
+      redirect_uri: "https://agent.example.com/auth/github/callback",
+    }]);
   });
 
   it("waits for a quick tunnel URL before reporting the tunnel ready", async () => {
