@@ -21,6 +21,10 @@ import {
 import { stopForegroundMonitor } from "./src/lib/foregroundMonitor";
 import { removeMobileSessionAccess } from "./src/lib/sessionAccess";
 import {
+  forgetProfileView,
+  rememberProfileView,
+} from "./src/lib/profileViews";
+import {
   createRemoteProfile,
   parseRemoteProfileState,
   upsertRemoteProfile,
@@ -43,6 +47,7 @@ export default function App() {
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [connectedProfileId, setConnectedProfileId] = useState<string | null>(null);
+  const [openedProfileIds, setOpenedProfileIds] = useState<string[]>([]);
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
@@ -97,6 +102,7 @@ export default function App() {
       if (!profile) return;
       setSelectedProfileId(profile.id);
       setProfileSettingsOpen(false);
+      setOpenedProfileIds((current) => rememberProfileView(current, profile.id));
       setConnectedProfileId(profile.id);
       setMobileAuthTarget({ ...mobileAuth, nonce: Date.now() });
       void persistProfiles(profiles, profile.id);
@@ -110,6 +116,7 @@ export default function App() {
     if (!profile) return;
     setSelectedProfileId(profile.id);
     setProfileSettingsOpen(false);
+    setOpenedProfileIds((current) => rememberProfileView(current, profile.id));
     setConnectedProfileId(profile.id);
     setNotificationTarget({ ...target, profileId: profile.id, nonce: Date.now() });
     void persistProfiles(profiles, profile.id);
@@ -138,6 +145,7 @@ export default function App() {
       await persistProfiles(nextProfiles, profile.id);
       setProfiles(nextProfiles);
       setSelectedProfileId(profile.id);
+      setOpenedProfileIds((current) => rememberProfileView(current, profile.id));
       setConnectedProfileId(profile.id);
       setProfileSettingsOpen(false);
     } catch (error) {
@@ -158,6 +166,7 @@ export default function App() {
     await persistProfiles(profiles, profile.id);
     setSelectedProfileId(profile.id);
     setProfileSettingsOpen(false);
+    setOpenedProfileIds((current) => rememberProfileView(current, profile.id));
     setConnectedProfileId(profile.id);
   };
 
@@ -173,6 +182,7 @@ export default function App() {
     await persistProfiles(nextProfiles, nextSelected);
     setProfiles(nextProfiles);
     setSelectedProfileId(nextSelected);
+    setOpenedProfileIds((current) => forgetProfileView(current, profile.id));
     if (connectedProfileId === profile.id) setConnectedProfileId(null);
   };
 
@@ -180,6 +190,7 @@ export default function App() {
     await persistProfiles(profiles, profile.id);
     setSelectedProfileId(profile.id);
     setProfileSettingsOpen(false);
+    setOpenedProfileIds((current) => rememberProfileView(current, profile.id));
     setConnectedProfileId(profile.id);
     setNotificationTarget({
       profileId: profile.id,
@@ -190,6 +201,8 @@ export default function App() {
   };
 
   const connectedProfile = profiles.find((profile) => profile.id === connectedProfileId) ?? null;
+  const hubOpen = profiles.length > 0 && !connectedProfile && !profileSettingsOpen;
+  const settingsOpen = !connectedProfile && (profiles.length === 0 || profileSettingsOpen);
 
   return (
     <SafeAreaProvider>
@@ -199,40 +212,81 @@ export default function App() {
           <ActivityIndicator color="#55e4d4" size="large" />
           <Text style={styles.bootText}>MultiAgent 연결 준비 중…</Text>
         </View>
-      ) : connectedProfile ? (
-        <RemoteScreen
-          key={connectedProfile.id}
-          profile={connectedProfile}
-          mobileAuthTarget={mobileAuthTarget?.profileId === connectedProfile.id ? mobileAuthTarget : null}
-          notificationTarget={notificationTarget?.profileId === connectedProfile.id ? notificationTarget : null}
-          onMobileAuthConsumed={() => setMobileAuthTarget(null)}
-          onNotificationConsumed={() => setNotificationTarget(null)}
-          onManageProfiles={() => setConnectedProfileId(null)}
-        />
-      ) : profiles.length > 0 && !profileSettingsOpen ? (
-        <SessionHubScreen
-          profiles={profiles}
-          onOpenProfile={selectProfile}
-          onOpenSession={openSession}
-          onManageProfiles={() => setProfileSettingsOpen(true)}
-        />
       ) : (
-        <ConnectionScreen
-          profiles={profiles}
-          selectedProfileId={selectedProfileId}
-          busy={connecting}
-          error={connectionError}
-          onConnect={connect}
-          onSelect={selectProfile}
-          onDelete={deleteProfile}
-          onClose={profiles.length > 0 ? () => setProfileSettingsOpen(false) : undefined}
-        />
+        <View style={styles.app}>
+          {profiles.map((profile) => {
+            if (!openedProfileIds.includes(profile.id)) return null;
+            const active = connectedProfileId === profile.id;
+            return (
+              <View
+                key={profile.id}
+                pointerEvents={active ? "auto" : "none"}
+                accessibilityElementsHidden={!active}
+                importantForAccessibility={active ? "auto" : "no-hide-descendants"}
+                style={[styles.surface, !active && styles.hiddenSurface]}
+              >
+                <RemoteScreen
+                  active={active}
+                  profile={profile}
+                  mobileAuthTarget={mobileAuthTarget?.profileId === profile.id ? mobileAuthTarget : null}
+                  notificationTarget={notificationTarget?.profileId === profile.id ? notificationTarget : null}
+                  onMobileAuthConsumed={() => setMobileAuthTarget(null)}
+                  onNotificationConsumed={() => setNotificationTarget(null)}
+                  onReturnToHub={() => setConnectedProfileId(null)}
+                  onManageProfiles={() => {
+                    setConnectedProfileId(null);
+                    setProfileSettingsOpen(true);
+                  }}
+                />
+              </View>
+            );
+          })}
+          {hubOpen && (
+            <View style={styles.surface}>
+              <SessionHubScreen
+                profiles={profiles}
+                onOpenProfile={selectProfile}
+                onOpenSession={openSession}
+                onManageProfiles={() => setProfileSettingsOpen(true)}
+              />
+            </View>
+          )}
+          {settingsOpen && (
+            <View style={styles.surface}>
+              <ConnectionScreen
+                profiles={profiles}
+                selectedProfileId={selectedProfileId}
+                busy={connecting}
+                error={connectionError}
+                onConnect={connect}
+                onSelect={selectProfile}
+                onDelete={deleteProfile}
+                onClose={profiles.length > 0 ? () => setProfileSettingsOpen(false) : undefined}
+              />
+            </View>
+          )}
+        </View>
       )}
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  app: {
+    flex: 1,
+    position: "relative",
+    backgroundColor: "#06101a",
+  },
+  surface: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  hiddenSurface: {
+    display: "none",
+  },
   boot: {
     flex: 1,
     alignItems: "center",

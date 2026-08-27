@@ -63,6 +63,16 @@ launch. The app opens the combined Session Hub by default. Use `서버 설정` t
 add, rename-by-readding, or delete a PC; opening a server directly remains
 available when login or desktop approval is required.
 
+Each PC WebView is created lazily the first time that profile is opened and is
+kept mounted while the APK stays alive. Returning to the Session Hub or opening
+another PC therefore preserves that profile's authenticated page, scroll state,
+and WebView navigation history without mixing origins. Android Back first walks
+the active WebView's own history and then returns to the native Session Hub. A
+deleted profile immediately destroys its retained WebView and revokes its native
+access tokens. A full app process restart intentionally starts from the Session
+Hub and creates fresh WebViews while normal protected login cookies remain
+subject to the server's expiration policy.
+
 ## Multi-PC Session Hub
 
 After an approved Remote page loads in the APK, it issues a separate revocable

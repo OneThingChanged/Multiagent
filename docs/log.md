@@ -1,5 +1,10 @@
 # OKF Update Log
 
+## 2026-08-27
+
+* **APK profile view sessions**: Recorded lazy per-PC WebView retention across Session Hub and profile switches, with deletion as the explicit teardown boundary.
+* **Android Back order**: Defined active WebView history as the first destination and the native combined Session Hub as the fallback instead of exiting the app or expanding the toolbar.
+
 ## 2026-08-26
 
 * **Visible browser automation**: Added a `+` control to every pane for opening Google in an embedded tab and made session-owned MCP browser actions reveal the affected tab while preserving its split placement.

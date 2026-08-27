@@ -36,22 +36,27 @@ import {
   registerMobileSessionAccess,
 } from "../lib/sessionAccess";
 import type { RemoteProfile } from "../lib/profiles";
+import { resolveRemoteBackAction } from "../lib/profileViews";
 
 type Props = {
+  active: boolean;
   profile: RemoteProfile;
   mobileAuthTarget: { profileId: string; ticket: string; nonce: number } | null;
   notificationTarget: { profileId: string | null; agentId: string; url: string; nonce: number } | null;
   onMobileAuthConsumed: () => void;
   onNotificationConsumed: () => void;
+  onReturnToHub: () => void;
   onManageProfiles: () => void;
 };
 
 export function RemoteScreen({
+  active,
   profile,
   mobileAuthTarget,
   notificationTarget,
   onMobileAuthConsumed,
   onNotificationConsumed,
+  onReturnToHub,
   onManageProfiles,
 }: Props) {
   const safeAreaInsets = useSafeAreaInsets();
@@ -94,22 +99,20 @@ export function RemoteScreen({
   };
 
   useEffect(() => {
+    if (!active) return;
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
-        if (canGoBack) {
+        if (resolveRemoteBackAction(canGoBack) === "web-history") {
           webView.current?.goBack();
           return true;
         }
-        if (toolbarCollapsed) {
-          setToolbarCollapsed(false);
-          return true;
-        }
-        return false;
+        onReturnToHub();
+        return true;
       }
     );
     return () => subscription.remove();
-  }, [canGoBack, toolbarCollapsed]);
+  }, [active, canGoBack, onReturnToHub]);
 
   const dispatchToPage = (eventName: string, detail: unknown) => {
     if (!pageLoaded.current) return false;
@@ -235,7 +238,7 @@ export function RemoteScreen({
               style={styles.toolButton}
               onPress={() => {
                 if (canGoBack) webView.current?.goBack();
-                else onManageProfiles();
+                else onReturnToHub();
               }}
               accessibilityLabel="뒤로"
             >
@@ -290,7 +293,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.3.4"
+          applicationNameForUserAgent="MultiAgentMobile/0.3.5"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}

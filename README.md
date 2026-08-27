@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.17-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.18-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 

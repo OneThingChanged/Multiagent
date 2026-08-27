@@ -31,6 +31,12 @@ sources:
   - id: mobile-manifest
     resource: ../mobile/package.json
     title: "Android client manifest"
+  - id: mobile-shell
+    resource: ../mobile/App.tsx
+    title: "Android profile and retained WebView shell"
+  - id: mobile-remote-screen
+    resource: ../mobile/src/screens/RemoteScreen.tsx
+    title: "Android Remote WebView and back navigation"
 ---
 
 # Remote service
@@ -100,6 +106,14 @@ authentication through an app link/ticket flow. A foreground monitor can keep
 an authenticated connection while the app is backgrounded and display local
 completion notifications without Firebase.[^mobile-manifest][^device-monitor]
 
+Opening a profile lazily creates one WebView for that PC. The APK keeps an opened
+profile view mounted but hidden when the operator returns to the combined Session
+Hub or switches PCs, preserving page state and that WebView's navigation history
+for the lifetime of the app process. Only the visible profile handles Android
+Back: it traverses WebView history first, then returns to the Session Hub. Views
+remain origin-bound, and deleting a profile destroys its retained view and
+revokes its native access tokens.[^mobile-shell][^mobile-remote-screen]
+
 Foreground-monitor bearer tokens are individually revocable. Revoking an
 account or changing the configured owner removes its device-monitor access.
 
@@ -122,3 +136,5 @@ Operational Dashboard behavior is documented separately in
 [^device-monitor]: Android foreground-monitor token service
 [^runtime-variant]: Runtime variant restrictions
 [^mobile-manifest]: Android client manifest
+[^mobile-shell]: Android profile and retained WebView shell
+[^mobile-remote-screen]: Android Remote WebView and back navigation
