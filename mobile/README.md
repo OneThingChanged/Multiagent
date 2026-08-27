@@ -3,7 +3,9 @@
 Android client shell for the desktop MultiAgent Remote service. The native app
 stores multiple approved PC profiles and loads the selected PC's mobile-first
 Remote PWA in a constrained WebView. Registered PCs can keep independent
-background monitor connections while only one WebView is visible.
+background monitor connections while only one WebView is visible. The launch
+screen merges privacy-safe session metadata from every registered PC into one
+native Session Hub; selecting a session opens the matching Remote profile.
 
 ## Development
 
@@ -47,8 +49,9 @@ in Git. Approved Remote browser users then see an `APK` button in the top bar.
 2. Start the Remote server and HTTPS tunnel.
 3. Enter a PC name and its HTTPS tunnel URL in the mobile app.
 4. Complete the existing GitHub device login and desktop approval flow.
-5. Return to the native connection list to add another PC. Login, approval,
-   and notification enablement are completed independently for each PC.
+5. Return to the Session Hub, open `서버 설정`, and add another PC. Login,
+   approval, session access, and notification enablement are completed
+   independently for each PC.
 
 Quick Tunnel URLs can change after a restart. A named Cloudflare tunnel is
 recommended for a persistent mobile endpoint.
@@ -56,8 +59,22 @@ recommended for a persistent mobile endpoint.
 The app accepts plain HTTP only for loopback, the Android emulator host, and
 private IPv4 addresses. Public Remote endpoints must use HTTPS. Registered
 profiles and the last selected PC are restored automatically on the next
-launch; expand the thin native connection bar and use the settings button to
-switch, add, rename-by-readding, or delete a PC.
+launch. The app opens the combined Session Hub by default. Use `서버 설정` to
+add, rename-by-readding, or delete a PC; opening a server directly remains
+available when login or desktop approval is required.
+
+## Multi-PC Session Hub
+
+After an approved Remote page loads in the APK, it issues a separate revocable
+mobile session token. The APK stores it with Android Keystore and queries all
+registered PCs in parallel only when the hub opens or the user refreshes it.
+There is no periodic background polling for the hub.
+
+The dedicated endpoint exposes only the session id, alias, project, AI tool,
+activity state, and active flag. Terminal output, chat history, prompts,
+attachments, file paths, and input APIs are not exposed. Browser requests are
+rejected on this bearer-token endpoint. Deleting a server profile revokes both
+its native session token and its optional notification-monitor token.
 
 ## Background monitoring
 

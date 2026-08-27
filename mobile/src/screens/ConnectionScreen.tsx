@@ -23,6 +23,7 @@ type Props = {
   onConnect: (name: string, url: string) => void;
   onSelect: (profile: RemoteProfile) => void;
   onDelete: (profile: RemoteProfile) => void;
+  onClose?: () => void;
 };
 
 export function ConnectionScreen({
@@ -33,6 +34,7 @@ export function ConnectionScreen({
   onConnect,
   onSelect,
   onDelete,
+  onClose,
 }: Props) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -53,6 +55,11 @@ export function ConnectionScreen({
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.page}
         >
+          {profiles.length > 0 && onClose && (
+            <Pressable style={styles.closeButton} onPress={onClose}>
+              <Text style={styles.closeText}>전체 세션으로</Text>
+            </Pressable>
+          )}
           <View style={styles.hero}>
             <Image source={require("../../assets/icon.png")} style={styles.logo} />
             <Text style={styles.title}>MultiAgent Mobile</Text>
@@ -153,7 +160,7 @@ export function ConnectionScreen({
             </Text>
           </View>
 
-          <Text style={styles.version}>Mobile 0.3.3</Text>
+          <Text style={styles.version}>Mobile 0.3.4</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -178,6 +185,21 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: "center",
     marginBottom: 26,
+  },
+  closeButton: {
+    alignSelf: "flex-end",
+    marginBottom: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "#234358",
+    borderRadius: 8,
+    backgroundColor: "#0a1925",
+  },
+  closeText: {
+    color: "#78d9cf",
+    fontSize: 10,
+    fontWeight: "800",
   },
   profileSection: {
     gap: 8,

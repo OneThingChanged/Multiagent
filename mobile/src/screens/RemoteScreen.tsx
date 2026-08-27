@@ -31,6 +31,10 @@ import {
   stopForegroundMonitor,
   type ForegroundMonitorState,
 } from "../lib/foregroundMonitor";
+import {
+  mobileSessionAccessStatus,
+  registerMobileSessionAccess,
+} from "../lib/sessionAccess";
 import type { RemoteProfile } from "../lib/profiles";
 
 type Props = {
@@ -55,6 +59,7 @@ export function RemoteScreen({
   const webView = useRef<WebView>(null);
   const pageLoaded = useRef(false);
   const nativeMonitorState = useRef<ForegroundMonitorState | null>(null);
+  const nativeSessionAccessState = useRef<{ active: boolean } | null>(null);
   const pendingOpen = useRef<{ agentId: string; url: string } | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -123,8 +128,14 @@ export function RemoteScreen({
     });
   };
 
+  const deliverSessionAccessState = (state: { active: boolean }) => {
+    nativeSessionAccessState.current = state;
+    dispatchToPage("multiagent:native-session-access-state", state);
+  };
+
   useEffect(() => {
     void foregroundMonitorStatus(profile.id, remoteOrigin).then((state) => deliverMonitorState(state));
+    void mobileSessionAccessStatus(profile.id, remoteOrigin).then(deliverSessionAccessState);
   }, [profile.id]);
 
   // Android edge-to-edge layout can change its bottom inset when rotating or
@@ -154,6 +165,15 @@ export function RemoteScreen({
     if (request.type === "multiagent:start-native-monitor") {
       void startForegroundMonitor(profile.id, profile.name, remoteOrigin, request.token, request.cursor)
         .then((state) => deliverMonitorState(state, true));
+      return;
+    }
+    if (request.type === "multiagent:register-native-session-access") {
+      void registerMobileSessionAccess(
+        profile.id,
+        profile.name,
+        remoteOrigin,
+        request.token,
+      ).then(deliverSessionAccessState);
       return;
     }
     if (request.type === "multiagent:open-external-preview") {
@@ -270,7 +290,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.3.3"
+          applicationNameForUserAgent="MultiAgentMobile/0.3.4"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}
@@ -287,6 +307,9 @@ export function RemoteScreen({
                 ...nativeMonitorState.current,
                 userInitiated: false,
               });
+            }
+            if (pageLoaded.current && nativeSessionAccessState.current) {
+              dispatchToPage("multiagent:native-session-access-state", nativeSessionAccessState.current);
             }
             if (pageLoaded.current && pendingOpen.current) {
               dispatchToPage("multiagent:native-notification-open", pendingOpen.current);

@@ -13,6 +13,7 @@ const pluginDir = path.dirname(fileURLToPath(import.meta.url));
 const templateDir = path.resolve(pluginDir, "../native/android");
 const packageName = "com.onethingchanged.multiagent.mobile";
 const kotlinFiles = [
+  "MobileSessionStorage.kt",
   "MonitorStorage.kt",
   "MultiAgentMonitorModule.kt",
   "MultiAgentMonitorPackage.kt",
@@ -95,4 +96,4 @@ function withForegroundMonitor(config) {
   return config;
 }
 
-export default createRunOncePlugin(withForegroundMonitor, "multiagent-foreground-monitor", "2.0.0");
+export default createRunOncePlugin(withForegroundMonitor, "multiagent-foreground-monitor", "2.1.0");

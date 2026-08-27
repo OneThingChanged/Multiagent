@@ -28,6 +28,62 @@ const DEFAULT_REMOTE_MOBILE_APK_PATH = path.join(
   "downloads",
   "MultiAgent-Mobile.apk",
 );
+
+function remoteMobileSessionStatus(agent) {
+  const hookEvent = String(agent?.hook?.event || "").trim().toLowerCase();
+  const rawStatus = String(agent?.status || "").trim().toLowerCase();
+  if (["exited", "unreachable", "offline"].includes(rawStatus)) return "offline";
+  if (["cancelled", "canceled", "interrupted", "aborted"].includes(hookEvent)) return "idle";
+  if (rawStatus === "recovering") return "recovering";
+  if (rawStatus === "starting") return "starting";
+  if (
+    agent?.hook?.interactive_question ||
+    ["waiting", "blocked", "permission-request"].includes(rawStatus) ||
+    ["waiting", "blocked", "permission-request"].includes(hookEvent)
+  ) return "attention";
+  if (rawStatus === "working" || ["working", "tool-start", "tool-end"].includes(hookEvent)) {
+    return "working";
+  }
+  if (hookEvent === "done" || rawStatus === "done") return "done";
+  if (["running", "idle"].includes(rawStatus)) return "idle";
+  return "offline";
+}
+
+function remoteMobileSessionSnapshot(agentsValue, viewValue) {
+  const agents = Array.isArray(agentsValue) ? agentsValue : [];
+  const view = viewValue && typeof viewValue === "object" ? viewValue : {};
+  const projects = new Map(
+    (Array.isArray(view.projects) ? view.projects : [])
+      .filter((project) => project?.id)
+      .map((project) => [String(project.id), project]),
+  );
+  const merged = new Map();
+  for (const agent of Array.isArray(view.agents) ? view.agents : []) {
+    if (agent?.id) merged.set(String(agent.id), { ...agent });
+  }
+  for (const agent of agents) {
+    if (agent?.id) merged.set(String(agent.id), { ...(merged.get(String(agent.id)) || {}), ...agent });
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    sessions: [...merged.values()].map((agent) => {
+      const id = String(agent.id || "").slice(0, 128);
+      const projectId = String(agent.projectId || "").slice(0, 128);
+      const status = remoteMobileSessionStatus(agent);
+      return {
+        id,
+        name: (String(agent.name || id).trim() || id).slice(0, 120),
+        projectId,
+        project: (
+          String(agent.project || agent.projectName || projects.get(projectId)?.name || "기타").trim() || "기타"
+        ).slice(0, 120),
+        tool: (String(agent.tool || agent.aiToolId || "shell").trim() || "shell").slice(0, 60),
+        status,
+        active: status !== "offline",
+      };
+    }),
+  };
+}
 const REMOTE_DOCUMENT_EXTENSIONS = new Map([
   [".md", "markdown"],
   [".markdown", "markdown"],
@@ -1491,6 +1547,14 @@ export class RemoteDashboardService {
     try { this.view = typeof view === "string" ? JSON.parse(view) : view; } catch { this.view = {}; }
   }
 
+  mobileSessionSnapshot() {
+    const runtime = this.stateProvider?.() ?? {};
+    return remoteMobileSessionSnapshot(
+      Array.isArray(runtime.agents) ? runtime.agents : this.agents,
+      runtime.view && typeof runtime.view === "object" ? runtime.view : this.view,
+    );
+  }
+
   accessList() { return { pending: [...this.access.pending], approved: [...this.access.approved] }; }
   async approve(login) {
     this.access.pending = this.access.pending.filter((value) => value.toLowerCase() !== login.toLowerCase());
@@ -1893,6 +1957,29 @@ export class RemoteDashboardService {
           }
           return;
         }
+        if (
+          (request.method === "GET" && url.pathname === "/api/mobile/sessions") ||
+          (request.method === "DELETE" && url.pathname === "/api/mobile/device")
+        ) {
+          if (request.headers.origin) {
+            sendJson(response, 403, { error: "browser origin is not allowed" }, { "cache-control": "no-store" });
+            return;
+          }
+          const match = String(request.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
+          const token = match?.[1] || "";
+          if (request.method === "DELETE") {
+            const result = this.deviceMonitorService.revoke(token);
+            sendJson(response, result.revoked ? 200 : 401, result, { "cache-control": "no-store" });
+            return;
+          }
+          const device = this.deviceMonitorService.authenticate(token);
+          if (!device) {
+            sendJson(response, 401, { error: "invalid or expired mobile device token" }, { "cache-control": "no-store" });
+            return;
+          }
+          sendJson(response, 200, this.mobileSessionSnapshot(), { "cache-control": "no-store" });
+          return;
+        }
         const login = this.sessionLogin(request);
         const approved = this.isDirectLocal(request) || this.isApproved(login);
         if (!approved) {
@@ -1945,6 +2032,30 @@ export class RemoteDashboardService {
             });
           } catch (error) {
             sendJson(response, 400, { error: error?.message || "invalid device request" });
+          }
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/mobile/device") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          const deviceLogin = login || (this.isDirectLocal(request) ? "__local__" : "");
+          if (!deviceLogin) {
+            sendJson(response, 401, { error: "authenticated login required" });
+            return;
+          }
+          try {
+            await readJson(request);
+            sendJson(response, 201, this.deviceMonitorService.issue(deviceLogin), {
+              "cache-control": "no-store",
+            });
+          } catch (error) {
+            sendJson(response, 400, { error: error?.message || "invalid mobile device request" });
           }
           return;
         }

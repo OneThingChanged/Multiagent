@@ -1863,25 +1863,41 @@ async function captureRemoteBrowserFrame(record, body = {}) {
   let image;
   if (record.win === browserHostWindow) {
     // WebContentsView.capturePage rejects a fully hidden host on Windows with
-    // "Current display surface not available". CDP captures Chromium's own
-    // compositor frame without displaying the host or writing it to disk.
+    // "Current display surface not available". Keep the host off-screen, but
+    // briefly make it active so Chromium produces a compositor frame for CDP.
+    const hostWasVisible = record.win.isVisible();
     const remoteDebugger = record.view.webContents.debugger;
     let attachedHere = false;
+    let captureTimeout = null;
     try {
+      if (!hostWasVisible) {
+        record.win.showInactive();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       if (!remoteDebugger.isAttached()) {
         remoteDebugger.attach("1.3");
         attachedHere = true;
       }
-      const captured = await remoteDebugger.sendCommand("Page.captureScreenshot", {
-        format: "jpeg",
-        quality,
-        fromSurface: true,
-        captureBeyondViewport: false,
-        optimizeForSpeed: true,
-      });
+      const captured = await Promise.race([
+        remoteDebugger.sendCommand("Page.captureScreenshot", {
+          format: "jpeg",
+          quality,
+          fromSurface: true,
+          captureBeyondViewport: false,
+          optimizeForSpeed: true,
+        }),
+        new Promise((_, reject) => {
+          captureTimeout = setTimeout(
+            () => reject(new Error("백그라운드 브라우저 화면 캡처 시간이 초과됐습니다.")),
+            5_000
+          );
+        }),
+      ]);
       image = nativeImage.createFromBuffer(Buffer.from(captured.data || "", "base64"));
     } finally {
+      if (captureTimeout) clearTimeout(captureTimeout);
       if (attachedHere && remoteDebugger.isAttached()) remoteDebugger.detach();
+      if (!hostWasVisible && !record.win.isDestroyed()) record.win.hide();
     }
   } else {
     image = await record.view.webContents.capturePage();
@@ -5028,10 +5044,11 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
     `[electron] workspace window created id=${initialWindow.id} workspace=${lastWorkspaceWindowId}`
   );
   if (bridgeSmoke) {
-    initialWindow.webContents.once("did-finish-load", async () => {
+    const runBridgeSmoke = async () => {
       const id = "electron-bridge-smoke";
       const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
       try {
+        console.log("[electron-smoke] bridge verification started");
         // Production starts the shared browser broker before an AI CLI so its
         // MCP handshake cannot race startup. Exercise the Remote frame bridge
         // in that same order, independently of the PTY smoke below.
@@ -5040,6 +5057,7 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
           action: "status",
           body: {},
         });
+        console.log("[electron-smoke] remote browser status received");
         const browserTabId = browserStatus.tabs?.[0]?.tabId;
         const browserFrame = browserTabId
           ? await handleRemoteBrowser({
@@ -5134,7 +5152,12 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
         for (const ptyId of [...ptys.keys()]) closePty(ptyId);
         app.exit(1);
       }
-    });
+    };
+    initialWindow.webContents.once("did-finish-load", runBridgeSmoke);
+    if (!initialWindow.webContents.isLoadingMainFrame()) {
+      initialWindow.webContents.removeListener("did-finish-load", runBridgeSmoke);
+      void runBridgeSmoke();
+    }
   }
   if (securitySmoke) {
     initialWindow.webContents.once("did-finish-load", async () => {

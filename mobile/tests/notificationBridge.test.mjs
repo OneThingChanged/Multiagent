@@ -22,6 +22,10 @@ test("accepts only validated native bridge requests", () => {
     { type: "multiagent:start-native-monitor", token, cursor: 42 },
   );
   assert.deepEqual(
+    parseNativeBridgeRequest(JSON.stringify({ type: "multiagent:register-native-session-access", token })),
+    { type: "multiagent:register-native-session-access", token },
+  );
+  assert.deepEqual(
     parseNativeBridgeRequest('{"type":"multiagent:stop-native-monitor"}'),
     { type: "multiagent:stop-native-monitor", revoke: true },
   );
@@ -30,6 +34,7 @@ test("accepts only validated native bridge requests", () => {
     { type: "multiagent:open-external-preview", url: "https://agent.example.com/preview/token/report.html" },
   );
   assert.equal(parseNativeBridgeRequest('{"type":"multiagent:start-native-monitor","token":"bad"}'), null);
+  assert.equal(parseNativeBridgeRequest('{"type":"multiagent:register-native-session-access","token":"bad"}'), null);
   assert.equal(parseNativeBridgeRequest('{"type":"multiagent:open-external-preview","url":42}'), null);
   assert.equal(parseNativeBridgeRequest('{"type":"open-external-url"}'), null);
   assert.equal(parseNativeBridgeRequest("not json"), null);

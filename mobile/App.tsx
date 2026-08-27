@@ -12,12 +12,14 @@ import {
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionScreen } from "./src/screens/ConnectionScreen";
 import { RemoteScreen } from "./src/screens/RemoteScreen";
+import { SessionHubScreen } from "./src/screens/SessionHubScreen";
 import { normalizeRemoteUrl } from "./src/lib/remoteUrl";
 import {
   normalizeMobileAuthOpenUrl,
   normalizeNotificationOpenUrl,
 } from "./src/lib/notificationBridge";
 import { stopForegroundMonitor } from "./src/lib/foregroundMonitor";
+import { removeMobileSessionAccess } from "./src/lib/sessionAccess";
 import {
   createRemoteProfile,
   parseRemoteProfileState,
@@ -41,6 +43,7 @@ export default function App() {
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [connectedProfileId, setConnectedProfileId] = useState<string | null>(null);
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [notificationTarget, setNotificationTarget] = useState<NotificationTarget | null>(null);
@@ -65,7 +68,7 @@ export default function App() {
         const state = parseRemoteProfileState(storedProfiles, legacyUrl);
         setProfiles(state.profiles);
         setSelectedProfileId(state.selectedProfileId);
-        setConnectedProfileId(state.selectedProfileId);
+        setConnectedProfileId(null);
         if (!storedProfiles && state.profiles.length > 0) {
           void persistProfiles(state.profiles, state.selectedProfileId);
         }
@@ -93,6 +96,7 @@ export default function App() {
       const profile = profiles.find((item) => item.id === mobileAuth.profileId);
       if (!profile) return;
       setSelectedProfileId(profile.id);
+      setProfileSettingsOpen(false);
       setConnectedProfileId(profile.id);
       setMobileAuthTarget({ ...mobileAuth, nonce: Date.now() });
       void persistProfiles(profiles, profile.id);
@@ -105,6 +109,7 @@ export default function App() {
       : profiles.find((item) => item.id === selectedProfileId) ?? profiles[0];
     if (!profile) return;
     setSelectedProfileId(profile.id);
+    setProfileSettingsOpen(false);
     setConnectedProfileId(profile.id);
     setNotificationTarget({ ...target, profileId: profile.id, nonce: Date.now() });
     void persistProfiles(profiles, profile.id);
@@ -134,6 +139,7 @@ export default function App() {
       setProfiles(nextProfiles);
       setSelectedProfileId(profile.id);
       setConnectedProfileId(profile.id);
+      setProfileSettingsOpen(false);
     } catch (error) {
       const message =
         error instanceof Error && error.name === "AbortError"
@@ -151,11 +157,15 @@ export default function App() {
     setConnectionError("");
     await persistProfiles(profiles, profile.id);
     setSelectedProfileId(profile.id);
+    setProfileSettingsOpen(false);
     setConnectedProfileId(profile.id);
   };
 
   const deleteProfile = async (profile: RemoteProfile) => {
-    await stopForegroundMonitor(profile.id, profile.baseUrl, true);
+    await Promise.allSettled([
+      stopForegroundMonitor(profile.id, profile.baseUrl, true),
+      removeMobileSessionAccess(profile.id, profile.baseUrl, true),
+    ]);
     const nextProfiles = profiles.filter((item) => item.id !== profile.id);
     const nextSelected = selectedProfileId === profile.id
       ? nextProfiles[0]?.id ?? null
@@ -164,6 +174,19 @@ export default function App() {
     setProfiles(nextProfiles);
     setSelectedProfileId(nextSelected);
     if (connectedProfileId === profile.id) setConnectedProfileId(null);
+  };
+
+  const openSession = async (profile: RemoteProfile, agentId: string) => {
+    await persistProfiles(profiles, profile.id);
+    setSelectedProfileId(profile.id);
+    setProfileSettingsOpen(false);
+    setConnectedProfileId(profile.id);
+    setNotificationTarget({
+      profileId: profile.id,
+      agentId,
+      url: `/?agent=${encodeURIComponent(agentId)}`,
+      nonce: Date.now(),
+    });
   };
 
   const connectedProfile = profiles.find((profile) => profile.id === connectedProfileId) ?? null;
@@ -186,6 +209,13 @@ export default function App() {
           onNotificationConsumed={() => setNotificationTarget(null)}
           onManageProfiles={() => setConnectedProfileId(null)}
         />
+      ) : profiles.length > 0 && !profileSettingsOpen ? (
+        <SessionHubScreen
+          profiles={profiles}
+          onOpenProfile={selectProfile}
+          onOpenSession={openSession}
+          onManageProfiles={() => setProfileSettingsOpen(true)}
+        />
       ) : (
         <ConnectionScreen
           profiles={profiles}
@@ -195,6 +225,7 @@ export default function App() {
           onConnect={connect}
           onSelect={selectProfile}
           onDelete={deleteProfile}
+          onClose={profiles.length > 0 ? () => setProfileSettingsOpen(false) : undefined}
         />
       )}
     </SafeAreaProvider>

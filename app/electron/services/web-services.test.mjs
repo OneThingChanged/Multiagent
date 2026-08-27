@@ -335,6 +335,8 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain('fetch("/api/push/subscription"');
     expect(appScriptBody).toContain('fetch("/api/monitor/device"');
     expect(appScriptBody).toContain('type: "multiagent:start-native-monitor"');
+    expect(appScriptBody).toContain('fetch("/api/mobile/device"');
+    expect(appScriptBody).toContain('type: "multiagent:register-native-session-access"');
     expect(appScriptBody).not.toContain("/api/push/native-subscription");
     expect(appScriptBody).not.toContain("ExpoPushToken");
     expect(appScriptBody).toContain("compactWorkspaceMedia.matches");
@@ -986,7 +988,15 @@ describe("Electron dashboard server", () => {
     });
     services.push(service);
     service.config.server_port = 0;
-    service.syncAgents([{ id: "agent-1", name: "Build", project: "ProjectA" }]);
+    service.syncAgents([{
+      id: "agent-1",
+      name: "Build",
+      project: "ProjectA",
+      tool: "codex",
+      status: "working",
+      output: "SECRET terminal output",
+      hook: { prompt: "SECRET prompt" },
+    }]);
     const status = await service.start();
 
     const blocked = await fetch(`${status.url}/api/monitor/device`, {
@@ -1000,6 +1010,23 @@ describe("Electron dashboard server", () => {
       body: "{}",
     });
     const issued = await issuedResponse.json();
+    const mobileIssuedResponse = await fetch(`${status.url}/api/mobile/device`, {
+      method: "POST",
+      headers: { origin: status.url, "content-type": "application/json" },
+      body: "{}",
+    });
+    const mobileIssued = await mobileIssuedResponse.json();
+    const mobileSessionsResponse = await fetch(`${status.url}/api/mobile/sessions`, {
+      headers: { authorization: `Bearer ${mobileIssued.token}` },
+    });
+    const mobileSessions = await mobileSessionsResponse.json();
+    const mobileSessionsBlocked = await fetch(`${status.url}/api/mobile/sessions`, {
+      headers: {
+        authorization: `Bearer ${mobileIssued.token}`,
+        origin: "https://evil.example",
+      },
+    });
+    const mobileSessionsUnauthorized = await fetch(`${status.url}/api/mobile/sessions`);
     const polling = fetch(`${status.url}/api/monitor/device?cursor=${issued.cursor}`, {
       headers: { authorization: `Bearer ${issued.token}` },
     });
@@ -1011,6 +1038,13 @@ describe("Electron dashboard server", () => {
     });
     const eventResponse = await polling;
     const eventBody = await eventResponse.json();
+    const mobileRevoked = await fetch(`${status.url}/api/mobile/device`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${mobileIssued.token}` },
+    });
+    const mobileRejected = await fetch(`${status.url}/api/mobile/sessions`, {
+      headers: { authorization: `Bearer ${mobileIssued.token}` },
+    });
     const revoked = await fetch(`${status.url}/api/monitor/device`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${issued.token}` },
@@ -1022,6 +1056,21 @@ describe("Electron dashboard server", () => {
     expect(blocked.status).toBe(403);
     expect(issuedResponse.status).toBe(201);
     expect(issued.token).toMatch(/^ma1_[A-Za-z0-9_-]{43}$/);
+    expect(mobileIssuedResponse.status).toBe(201);
+    expect(mobileIssued.token).toMatch(/^ma1_[A-Za-z0-9_-]{43}$/);
+    expect(mobileSessionsResponse.status).toBe(200);
+    expect(mobileSessions.sessions).toEqual([{
+      id: "agent-1",
+      name: "Build",
+      projectId: "",
+      project: "ProjectA",
+      tool: "codex",
+      status: "working",
+      active: true,
+    }]);
+    expect(JSON.stringify(mobileSessions)).not.toContain("SECRET");
+    expect(mobileSessionsBlocked.status).toBe(403);
+    expect(mobileSessionsUnauthorized.status).toBe(401);
     expect(eventResponse.status).toBe(200);
     expect(eventBody.events).toEqual([expect.objectContaining({
       type: "agent-done",
@@ -1030,6 +1079,8 @@ describe("Electron dashboard server", () => {
       body: "작업이 완료되었습니다.",
     })]);
     expect(JSON.stringify(eventBody)).not.toContain("SECRET");
+    expect(mobileRevoked.status).toBe(200);
+    expect(mobileRejected.status).toBe(401);
     expect(revoked.status).toBe(200);
     expect(rejected.status).toBe(401);
   });

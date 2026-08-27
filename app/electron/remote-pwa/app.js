@@ -4500,6 +4500,36 @@ async function ensureBackgroundPush(registration) {
   }
 }
 
+let nativeSessionAccessPending = false;
+async function ensureNativeSessionAccess(detail) {
+  if (
+    detail?.active ||
+    nativeSessionAccessPending ||
+    !window.__MULTIAGENT_NATIVE_APP__ ||
+    !window.ReactNativeWebView?.postMessage
+  ) return;
+  nativeSessionAccessPending = true;
+  try {
+    const response = await fetch("/api/mobile/device", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) return;
+    const registration = await response.json();
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: "multiagent:register-native-session-access",
+      token: text(registration.token),
+    }));
+  } catch {
+    // The native hub will report this profile as login-required/offline and can
+    // retry the next time the authenticated Remote page is opened.
+  } finally {
+    nativeSessionAccessPending = false;
+  }
+}
+
 async function enableNotifications() {
   if (window.__MULTIAGENT_NATIVE_APP__ && window.ReactNativeWebView?.postMessage) {
     if (backgroundPushEnabled) {
@@ -5105,6 +5135,9 @@ navigator.serviceWorker?.addEventListener("message", (event) => {
 });
 addEventListener("multiagent:native-monitor-state", (event) => {
   applyNativeMonitorState(event.detail);
+});
+addEventListener("multiagent:native-session-access-state", (event) => {
+  void ensureNativeSessionAccess(event.detail);
 });
 addEventListener("multiagent:native-notification-open", (event) => {
   const agentId = text(event.detail?.agentId);

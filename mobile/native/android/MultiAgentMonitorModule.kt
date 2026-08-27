@@ -10,6 +10,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
 class MultiAgentMonitorModule(
@@ -17,6 +18,7 @@ class MultiAgentMonitorModule(
 ) : ReactContextBaseJavaModule(context) {
   private val executor = Executors.newCachedThreadPool()
   private val storage = MonitorStorage(context)
+  private val sessionStorage = MobileSessionStorage(context)
 
   override fun getName() = "MultiAgentMonitor"
 
@@ -96,6 +98,77 @@ class MultiAgentMonitorModule(
     })
   }
 
+  @ReactMethod
+  fun registerSessionAccess(
+    profileIdValue: String,
+    profileNameValue: String,
+    baseUrlValue: String,
+    token: String,
+    promise: Promise,
+  ) {
+    try {
+      val profileId = profileIdValue.trim()
+      if (!MonitorStorage.PROFILE_ID_PATTERN.matches(profileId)) {
+        throw IllegalArgumentException("잘못된 PC 프로필입니다.")
+      }
+      val baseUrl = validateBaseUrl(baseUrlValue)
+      val profileName = profileNameValue.trim().take(60)
+        .ifBlank { Uri.parse(baseUrl).host ?: "MultiAgent PC" }
+      if (!MonitorStorage.TOKEN_PATTERN.matches(token)) {
+        throw IllegalArgumentException("잘못된 모바일 조회 토큰입니다.")
+      }
+      val previous = sessionStorage.loadAll().find {
+        it.profileId == profileId || it.baseUrl.equals(baseUrl, ignoreCase = true)
+      }
+      sessionStorage.upsert(MobileSessionAccess(profileId, profileName, baseUrl, token))
+      if (previous != null && previous.token != token) {
+        executor.execute { revokeSessionAccess(previous) }
+      }
+      promise.resolve(Arguments.createMap().apply { putBoolean("active", true) })
+    } catch (error: Throwable) {
+      promise.reject("SESSION_ACCESS_REGISTER_FAILED", error.message, error)
+    }
+  }
+
+  @ReactMethod
+  fun removeSessionAccess(
+    profileIdValue: String,
+    baseUrlValue: String,
+    revokeToken: Boolean,
+    promise: Promise,
+  ) {
+    val removed = sessionStorage.remove(profileIdValue.trim(), baseUrlValue.trim().trimEnd('/'))
+    if (revokeToken && removed != null) executor.execute { revokeSessionAccess(removed) }
+    promise.resolve(Arguments.createMap().apply { putBoolean("active", false) })
+  }
+
+  @ReactMethod
+  fun getSessionAccessStatus(profileIdValue: String, baseUrlValue: String, promise: Promise) {
+    val profileId = profileIdValue.trim()
+    val baseUrl = baseUrlValue.trim().trimEnd('/')
+    promise.resolve(Arguments.createMap().apply {
+      putBoolean("active", sessionStorage.loadAll().any {
+        it.profileId == profileId || it.baseUrl.equals(baseUrl, ignoreCase = true)
+      })
+    })
+  }
+
+  @ReactMethod
+  fun listSessionSnapshots(promise: Promise) {
+    executor.execute {
+      try {
+        val futures = sessionStorage.loadAll().map { access ->
+          executor.submit(Callable { fetchSessionSnapshot(access) })
+        }
+        val results = Arguments.createArray()
+        futures.forEach { results.pushMap(it.get()) }
+        promise.resolve(results)
+      } catch (error: Throwable) {
+        promise.reject("SESSION_SNAPSHOT_FAILED", error.message, error)
+      }
+    }
+  }
+
   private fun validateBaseUrl(value: String): String {
     val uri = Uri.parse(value.trim())
     val scheme = uri.scheme?.lowercase()
@@ -117,6 +190,39 @@ class MultiAgentMonitorModule(
       (parts[0] == 192 && parts[1] == 168)
   }
 
+  private fun fetchSessionSnapshot(access: MobileSessionAccess) = Arguments.createMap().apply {
+    putString("profileId", access.profileId)
+    putString("baseUrl", access.baseUrl)
+    var connection: HttpURLConnection? = null
+    try {
+      connection = URL("${access.baseUrl}/api/mobile/sessions").openConnection() as HttpURLConnection
+      connection.requestMethod = "GET"
+      connection.connectTimeout = 8_000
+      connection.readTimeout = 8_000
+      connection.setRequestProperty("Authorization", "Bearer ${access.token}")
+      connection.setRequestProperty("Accept", "application/json")
+      val status = connection.responseCode
+      val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+      val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }?.take(512_000).orEmpty()
+      putInt("statusCode", status)
+      if (status == 200) {
+        putBoolean("ok", true)
+        putString("body", body)
+      } else {
+        putBoolean("ok", false)
+        putBoolean("authRequired", status == 401 || status == 403)
+        putString("error", if (status == 401) "로그인이 필요합니다." else "서버 응답 오류 ($status)")
+        if (status == 401) sessionStorage.remove(access.profileId, access.baseUrl)
+      }
+    } catch (error: Throwable) {
+      putBoolean("ok", false)
+      putBoolean("authRequired", false)
+      putString("error", error.message ?: "서버에 연결하지 못했습니다.")
+    } finally {
+      connection?.disconnect()
+    }
+  }
+
   private fun revoke(config: MonitorConfig) {
     try {
       val connection = URL("${config.baseUrl}/api/monitor/device").openConnection() as HttpURLConnection
@@ -125,6 +231,19 @@ class MultiAgentMonitorModule(
       connection.readTimeout = 10_000
       connection.setRequestProperty("Authorization", "Bearer ${config.token}")
       connection.inputStream.use { it.readBytes() }
+      connection.disconnect()
+    } catch (_: Throwable) {}
+  }
+
+  private fun revokeSessionAccess(access: MobileSessionAccess) {
+    try {
+      val connection = URL("${access.baseUrl}/api/mobile/device").openConnection() as HttpURLConnection
+      connection.requestMethod = "DELETE"
+      connection.connectTimeout = 10_000
+      connection.readTimeout = 10_000
+      connection.setRequestProperty("Authorization", "Bearer ${access.token}")
+      val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+      stream?.use { it.readBytes() }
       connection.disconnect()
     } catch (_: Throwable) {}
   }
