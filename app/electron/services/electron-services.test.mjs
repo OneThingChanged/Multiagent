@@ -544,4 +544,119 @@ describe("Electron session resolution", () => {
       })
     ).resolves.toBeNull();
   });
+
+  it("groups requested current-session storage by project and session id", async () => {
+    const baseDir = temporaryDirectory();
+    const codexRoot = path.join(baseDir, "codex");
+    const claudeRoot = path.join(baseDir, "claude");
+    const folder = path.join(baseDir, "project");
+    const otherFolder = path.join(baseDir, "other-project");
+    const codexId = "11111111-1111-4111-8111-111111111111";
+    const claudeId = "22222222-2222-4222-8222-222222222222";
+    const staleId = "33333333-3333-4333-8333-333333333333";
+    await fsPromises.mkdir(codexRoot, { recursive: true });
+    await fsPromises.mkdir(path.join(claudeRoot, claudeId, "subagents"), { recursive: true });
+    await fsPromises.mkdir(folder);
+    await fsPromises.mkdir(otherFolder);
+
+    const line = (id, cwd) =>
+      `${JSON.stringify({ type: "session_meta", payload: { id, cwd } })}\n`;
+    await fsPromises.writeFile(
+      path.join(codexRoot, `${codexId}.jsonl`),
+      `${line(codexId, folder)}codex-body`
+    );
+    await fsPromises.writeFile(
+      path.join(codexRoot, `${staleId}.jsonl`),
+      `${line(staleId, folder)}stale-body`
+    );
+    await fsPromises.writeFile(
+      path.join(claudeRoot, `${claudeId}.jsonl`),
+      `${line(claudeId, folder)}claude-body`
+    );
+    await fsPromises.writeFile(
+      path.join(claudeRoot, claudeId, "subagents", "agent-child.jsonl"),
+      `${line(claudeId, folder)}subagent-body`
+    );
+    await fsPromises.writeFile(
+      path.join(claudeRoot, "other.jsonl"),
+      `${line(claudeId, otherFolder)}other-body`
+    );
+
+    const service = new SessionService(path.join(baseDir, "state"));
+    service.transcriptRoots = (tool) => [tool === "codex" ? codexRoot : claudeRoot];
+    const results = await service.storageForSessions({
+      folder,
+      sessions: [
+        { aiToolId: "codex", sessionId: codexId },
+        { aiToolId: "claude", sessionId: claudeId },
+      ],
+      force: true,
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results.find((entry) => entry.aiToolId === "codex")).toMatchObject({
+      sessionId: codexId,
+      fileCount: 1,
+    });
+    const claude = results.find((entry) => entry.aiToolId === "claude");
+    expect(claude).toMatchObject({ sessionId: claudeId, fileCount: 2 });
+    expect(claude.bytes).toBeGreaterThan(0);
+    expect(claude.primaryPath).toBe(
+      path.resolve(fs.realpathSync.native(path.join(claudeRoot, `${claudeId}.jsonl`)))
+    );
+    expect(results.some((entry) => entry.sessionId === staleId)).toBe(false);
+
+    const projectCatalog = await service.storageForSessions({
+      folder,
+      includeAllProjectSessions: true,
+    });
+    expect(projectCatalog.map((entry) => entry.sessionId).sort()).toEqual(
+      [codexId, claudeId, staleId].sort()
+    );
+  });
+
+  it("persists a metadata-only session catalog and reuses it without a tree scan", async () => {
+    const baseDir = temporaryDirectory();
+    const transcripts = path.join(baseDir, "codex");
+    const storageDir = path.join(baseDir, "state");
+    const folder = path.join(baseDir, "project");
+    const sessionId = "55555555-5555-4555-8555-555555555555";
+    await fsPromises.mkdir(transcripts, { recursive: true });
+    await fsPromises.mkdir(folder);
+    const transcriptPath = path.join(transcripts, `${sessionId}.jsonl`);
+    await fsPromises.writeFile(
+      transcriptPath,
+      `${JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: folder } })}\nSECRET_TRANSCRIPT_BODY`
+    );
+
+    const first = new SessionService(storageDir);
+    first.transcriptRoots = () => [transcripts];
+    await first.storageForSessions({
+      folder,
+      sessions: [{ aiToolId: "codex", sessionId }],
+    });
+
+    const catalogPath = path.join(storageDir, "session-storage-catalog.json");
+    const catalogBody = await fsPromises.readFile(catalogPath, "utf8");
+    const catalog = JSON.parse(catalogBody);
+    expect(catalog).toMatchObject({ version: 1 });
+    expect(catalog.entries).toHaveLength(1);
+    expect(catalog.entries[0]).toMatchObject({
+      aiToolId: "codex",
+      sessionId,
+      cwd: folder,
+    });
+    expect(catalogBody).not.toContain("SECRET_TRANSCRIPT_BODY");
+
+    const restored = new SessionService(storageDir);
+    restored.scan = async () => {
+      throw new Error("catalog hit must not scan transcript roots");
+    };
+    await expect(restored.storageForSessions({
+      folder,
+      sessions: [{ aiToolId: "codex", sessionId }],
+    })).resolves.toMatchObject([
+      { aiToolId: "codex", sessionId, fileCount: 1 },
+    ]);
+  });
 });

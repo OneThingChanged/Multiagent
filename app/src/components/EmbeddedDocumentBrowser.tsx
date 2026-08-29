@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import {
+  areNativeViewsOccluded,
+  subscribeNativeViewOcclusion,
+} from "../lib/nativeViewOcclusion";
 import { invoke, listen } from "../platform/runtime";
 import type { DocumentBrowserSnapshot, RuntimeCommand } from "../platform/ipcContract";
 
@@ -71,6 +75,13 @@ export function EmbeddedDocumentBrowser({
     loading: true,
   });
   const [address, setAddress] = useState(documentPath);
+  const [nativeViewsOccluded, setNativeViewsOccluded] = useState(areNativeViewsOccluded);
+  const browserVisible = active && !nativeViewsOccluded;
+
+  useEffect(
+    () => subscribeNativeViewOcclusion(setNativeViewsOccluded),
+    [],
+  );
 
   useEffect(() => {
     const nextAddress = snapshot.url || snapshot.relativePath || documentPath;
@@ -78,7 +89,7 @@ export function EmbeddedDocumentBrowser({
   }, [documentPath, snapshot.relativePath, snapshot.url]);
 
   const syncBounds = useCallback(() => {
-    if (!active) return;
+    if (!browserVisible) return;
     const host = hostRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
@@ -92,16 +103,16 @@ export function EmbeddedDocumentBrowser({
       width,
       height,
     }).catch(() => {});
-  }, [active, browserId]);
+  }, [browserId, browserVisible]);
 
   useEffect(() => {
     void invoke("document_browser_visibility", {
       browserId,
-      visible: active,
+      visible: browserVisible,
     }).then(() => {
-      if (active) syncBounds();
+      if (browserVisible) syncBounds();
     }).catch(() => {});
-  }, [active, browserId, syncBounds]);
+  }, [browserId, browserVisible, syncBounds]);
 
   useEffect(() => {
     let active = true;
@@ -134,7 +145,7 @@ export function EmbeddedDocumentBrowser({
   }, [browserId]);
 
   useLayoutEffect(() => {
-    if (!active) return;
+    if (!browserVisible) return;
     const host = hostRef.current;
     if (!host) return;
     syncBounds();
@@ -145,7 +156,7 @@ export function EmbeddedDocumentBrowser({
       observer.disconnect();
       window.removeEventListener("resize", syncBounds);
     };
-  }, [syncBounds]);
+  }, [browserVisible, syncBounds]);
 
   useEffect(() => {
     const lease = browserLeases.get(browserId) ?? { mounts: 0, closeTimer: null };

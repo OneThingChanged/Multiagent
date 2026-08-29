@@ -3542,6 +3542,43 @@ function App() {
     }
   }, [acknowledgeAttentionItem, requestSelectAgent]);
 
+  const clearDeletedSessionReferences = useCallback(
+    (aiToolId: string, sessionId: string) => {
+      const normalizedSessionId = sessionId.toLowerCase();
+      const affectedAgentIds = new Set(
+        agentsRef.current
+          .filter(
+            (agent) =>
+              agent.aiToolId === aiToolId &&
+              agent.lastSessionId?.toLowerCase() === normalizedSessionId
+          )
+          .map((agent) => agent.id)
+      );
+      setAgents((current) =>
+        current.map((agent) =>
+          affectedAgentIds.has(agent.id)
+            ? { ...agent, lastSessionId: undefined }
+            : agent
+        )
+      );
+      if (affectedAgentIds.size === 0) return;
+      setGroups((current) =>
+        current.map((group) => {
+          if (!group.sessionPins) return group;
+          const sessionPins = { ...group.sessionPins };
+          let changed = false;
+          for (const agentId of affectedAgentIds) {
+            if (sessionPins[agentId]?.toLowerCase() !== normalizedSessionId) continue;
+            delete sessionPins[agentId];
+            changed = true;
+          }
+          return changed ? { ...group, sessionPins } : group;
+        })
+      );
+    },
+    []
+  );
+
   // ---- Derived
 
   const activeProject = useMemo(
@@ -3917,6 +3954,7 @@ function App() {
                   prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
                 )
               }
+              onSessionDeleted={clearDeletedSessionReferences}
               disabledTools={disabledTools}
               onClose={() => setPropertiesAgentId(null)}
             />
@@ -3930,6 +3968,7 @@ function App() {
             <ProjectPropertiesModal
               project={target}
               agents={agents}
+              onSessionDeleted={clearDeletedSessionReferences}
               onClose={() => setPropertiesProjectId(null)}
             />
           );

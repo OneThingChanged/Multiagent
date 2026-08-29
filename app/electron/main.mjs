@@ -189,7 +189,7 @@ let closeSmokeStartedAt = null;
 let workspaceSmokeStarted = false;
 /** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
 const workspaceWindows = new Map();
-/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean}>} */
+/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, rendererHidden: boolean}>} */
 const documentBrowserWindows = new Map();
 const documentBrowserByShellWebContents = new Map();
 /** @type {Map<string, string>} agentId → browser/tab id */
@@ -393,6 +393,7 @@ let hookReady = null;
 let browserReady = null;
 let hookMaintenanceTimer = null;
 let hookMaintenancePromise = null;
+let sessionCatalogTimer = null;
 
 async function ensureBrowserIntegrationReady() {
   const backgroundRecord = backgroundBrowserTabId
@@ -1081,7 +1082,9 @@ function positionDocumentBrowserView(record, bounds = record?.bounds) {
   if (!bounds) return;
   record.bounds = bounds;
   record.view.setBounds(bounds);
-  if (typeof record.view.setVisible === "function") record.view.setVisible(true);
+  if (typeof record.view.setVisible === "function") {
+    record.view.setVisible(record.rendererHidden !== true);
+  }
 }
 
 function documentBrowserSnapshot(record, extra = {}) {
@@ -1149,7 +1152,9 @@ function activateDocumentBrowser(record, agentId = "") {
     if (candidate.win !== record.win || candidate === record) continue;
     if (typeof candidate.view.setVisible === "function") candidate.view.setVisible(false);
   }
-  if (typeof record.view.setVisible === "function") record.view.setVisible(true);
+  if (typeof record.view.setVisible === "function") {
+    record.view.setVisible(record.rendererHidden !== true);
+  }
   documentBrowserByShellWebContents.set(record.shellWebContentsId, record.id);
   const normalizedAgentId = String(agentId || "").trim();
   if (normalizedAgentId) {
@@ -1598,6 +1603,7 @@ async function createDocumentBrowserWindowNow({
     inspectionSendToSession: false,
     persistent: true,
     background: Boolean(background),
+    rendererHidden: false,
   };
   documentBrowserWindows.set(browserId, record);
   if (record.agentId) documentBrowserByAgent.set(record.agentId, browserId);
@@ -4527,6 +4533,7 @@ async function invokeCommand(event, command, rawArgs) {
         asString(args.browserId),
       );
       if (!record) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
+      record.rendererHidden = args.visible !== true;
       if (args.visible === true) {
         activateDocumentBrowser(record, record.agentId || "");
         positionDocumentBrowserView(record);
@@ -4668,6 +4675,60 @@ async function invokeCommand(event, command, rawArgs) {
       return readChatTranscript(args.tool, args.path);
     case "chat_blocks":
       return chatBlocksForAgent(args.id, args.sessionId);
+    case "session_storage_list": {
+      const sessions = await sessionService.storageForSessions({
+        folder: args.folder,
+        sessions: args.sessions,
+        includeAllProjectSessions: args.includeAllProjectSessions === true,
+      });
+      return {
+        sessions,
+        totalBytes: sessions.reduce((total, entry) => total + entry.bytes, 0),
+      };
+    }
+    case "session_storage_delete": {
+      const requestedSession = {
+        aiToolId: args.aiToolId,
+        sessionId: args.sessionId,
+      };
+      const runningAgentIds = new Set([
+        ...(args.agentId ? [args.agentId] : []),
+        ...sessionService.agentIdsForSession({
+          folder: args.folder,
+          sessionId: args.sessionId,
+        }),
+      ]);
+      if ([...runningAgentIds].some((agentId) => terminalSessions.has(agentId))) {
+        throw new Error("실행 중인 세션의 JSONL은 삭제할 수 없습니다. 세션을 먼저 비활성화하세요.");
+      }
+      const [storage] = await sessionService.storageForSessions({
+        folder: args.folder,
+        sessions: [requestedSession],
+        force: true,
+      });
+      if (!storage) {
+        throw new Error("현재 프로젝트에서 해당 세션 JSONL을 찾을 수 없습니다.");
+      }
+      let trashedFiles = 0;
+      for (const transcriptPath of storage.paths) {
+        if (!fs.existsSync(transcriptPath)) continue;
+        await shell.trashItem(transcriptPath);
+        trashedFiles += 1;
+      }
+      await sessionService.forgetSession({
+        folder: args.folder,
+        aiToolId: args.aiToolId,
+        sessionId: args.sessionId,
+        transcriptPaths: storage.paths,
+      });
+      const normalizedSessionId = args.sessionId.trim().toLowerCase();
+      for (const [agentId, transcriptPath] of agentTranscripts) {
+        if (String(transcriptPath).toLowerCase().includes(normalizedSessionId)) {
+          agentTranscripts.delete(agentId);
+        }
+      }
+      return { trashedFiles, reclaimedBytes: storage.bytes };
+    }
     case "git_status":
       return gitStatusForTree(args.folder);
     case "git_changes":
@@ -4981,6 +5042,10 @@ app.on("before-quit", (event) => {
     clearInterval(hookMaintenanceTimer);
     hookMaintenanceTimer = null;
   }
+  if (sessionCatalogTimer) {
+    clearInterval(sessionCatalogTimer);
+    sessionCatalogTimer = null;
+  }
   terminalSessions.closeAll("app-quit");
   void hookService.stop();
   void monitorService.stop();
@@ -5033,6 +5098,20 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
     await maintainActiveHooks();
   }, 60_000);
   hookMaintenanceTimer.unref?.();
+  if (!smokeMode) {
+    void sessionService.refreshCatalog().then((catalog) => {
+      console.log(`[electron] session catalog ready files=${catalog.files}`);
+    }).catch((error) => {
+      console.warn("[electron] session catalog refresh failed", error);
+    });
+    sessionCatalogTimer = setInterval(() => {
+      if (forceClosing) return;
+      void sessionService.refreshCatalog().catch((error) => {
+        console.warn("[electron] session catalog refresh failed", error);
+      });
+    }, 5 * 60_000);
+    sessionCatalogTimer.unref?.();
+  }
   await loadSshSecrets();
   if (monitorService.config.enabled) await monitorService.start().catch(console.error);
   if (usageDashboard.config.enabled) await usageDashboard.start().catch(console.error);

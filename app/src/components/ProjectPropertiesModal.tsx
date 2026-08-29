@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { Agent, Project } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
+import { SessionStorageList } from "./SessionStorageList";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -14,10 +15,12 @@ function formatDate(ms: number | undefined) {
 export function ProjectPropertiesModal({
   project,
   agents,
+  onSessionDeleted,
   onClose,
 }: {
   project: Project;
   agents: Agent[];
+  onSessionDeleted?: (aiToolId: string, sessionId: string) => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -70,7 +73,7 @@ export function ProjectPropertiesModal({
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
-        className="modal session-props-modal"
+        className="modal session-props-modal project-props-modal"
         role="dialog"
         aria-modal="true"
         onMouseDown={(e) => e.stopPropagation()}
@@ -96,6 +99,12 @@ export function ProjectPropertiesModal({
             </div>
           ))}
         </div>
+        <SessionStorageList
+          folder={project.folder}
+          agents={projectAgents}
+          scope="project"
+          onSessionDeleted={onSessionDeleted}
+        />
         <div className="modal-actions">
           <button className="btn-primary" onClick={onClose}>
             닫기

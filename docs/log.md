@@ -1,5 +1,11 @@
 # OKF Update Log
 
+## 2026-08-30
+
+* **Session JSONL catalog**: Documented project-scoped Codex/Claude transcript ownership, grouped storage totals, current-session properties, and metadata-only persistence.
+* **Safe transcript deletion**: Recorded live-session protection and Recycle Bin deletion with post-delete catalog cleanup.
+* **Native browser occlusion**: Recorded that React image overlays temporarily hide Electron browser views and resist delayed bounds updates before restoring the active tab.
+
 ## 2026-08-27
 
 * **APK profile view sessions**: Recorded lazy per-PC WebView retention across Session Hub and profile switches, with deletion as the explicit teardown boundary.

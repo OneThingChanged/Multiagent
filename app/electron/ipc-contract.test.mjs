@@ -27,6 +27,33 @@ describe("Electron IPC contract", () => {
     ).toThrow("folder");
   });
 
+  it("limits session storage access to explicit current session ids", () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    expect(contract.assertInvokeRequest("session_storage_list", {
+      folder: "K:\\AI\\MultiAgent",
+      sessions: [{ aiToolId: "codex", sessionId }],
+    })).toMatchObject({ sessions: [{ aiToolId: "codex", sessionId }] });
+    expect(contract.assertInvokeRequest("session_storage_list", {
+      folder: "K:\\AI\\MultiAgent",
+      includeAllProjectSessions: true,
+    })).toMatchObject({ includeAllProjectSessions: true });
+    expect(contract.assertInvokeRequest("session_storage_delete", {
+      folder: "K:\\AI\\MultiAgent",
+      aiToolId: "claude",
+      sessionId,
+      agentId: "agent-a",
+    })).toMatchObject({ aiToolId: "claude", sessionId });
+    expect(() => contract.assertInvokeRequest("session_storage_list", {
+      folder: "K:\\AI\\MultiAgent",
+      sessions: [],
+    })).toThrow("queries");
+    expect(() => contract.assertInvokeRequest("session_storage_delete", {
+      folder: "K:\\AI\\MultiAgent",
+      aiToolId: "codex",
+      sessionId: "../../other-project",
+    })).toThrow("id");
+  });
+
   it("validates terminal cursors, actions and write bounds", () => {
     expect(contract.assertInvokeRequest("attach_terminal", {
       id: "agent", afterSequence: 12,
@@ -70,6 +97,39 @@ describe("Electron IPC contract", () => {
       width: 0,
       height: 480,
     })).toThrow("positive");
+  });
+
+  it("validates embedded document browser visibility", () => {
+    expect(contract.assertInvokeRequest("document_browser_visibility", {
+      browserId: "browser",
+      visible: false,
+    })).toMatchObject({ browserId: "browser", visible: false });
+    expect(() => contract.assertInvokeRequest("document_browser_visibility", {
+      browserId: "browser",
+      visible: "false",
+    })).toThrow("visibility flag");
+  });
+
+  it("supports document previews and standalone HTTP(S) browser tabs", () => {
+    expect(contract.assertInvokeRequest("document_browser_open", {
+      folder: "K:\\AI\\MultiAgent",
+      relativePath: "docs/index.html",
+    })).toMatchObject({ relativePath: "docs/index.html" });
+    expect(contract.assertInvokeRequest("document_browser_open", {
+      folder: "",
+      relativePath: "",
+      initialUrl: "https://www.google.com/",
+    })).toMatchObject({ initialUrl: "https://www.google.com/" });
+    expect(() => contract.assertInvokeRequest("document_browser_open", {
+      folder: "",
+      relativePath: "docs/index.html",
+      initialUrl: "https://www.google.com/",
+    })).toThrow("provided together");
+    expect(() => contract.assertInvokeRequest("document_browser_open", {
+      folder: "",
+      relativePath: "",
+      initialUrl: "file:///C:/secret.txt",
+    })).toThrow("http or https");
   });
 
   it("allows only HTTP(S) navigation in the embedded browser", () => {

@@ -3,6 +3,7 @@ import type { Agent, Project } from "../types";
 import { toolForId } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 import { SessionWorkerFields } from "./SessionWorkerFields";
+import { SessionStorageList } from "./SessionStorageList";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -29,6 +30,7 @@ export function SessionPropertiesModal({
   agent,
   project,
   onUpdateAgent,
+  onSessionDeleted,
   disabledTools = [],
   onClose,
 }: {
@@ -40,6 +42,7 @@ export function SessionPropertiesModal({
       Pick<Agent, "dangerous" | "useAltScreen" | "workerSettings">
     >
   ) => void;
+  onSessionDeleted?: (aiToolId: string, sessionId: string) => void;
   disabledTools?: string[];
   onClose: () => void;
 }) {
@@ -137,6 +140,13 @@ export function SessionPropertiesModal({
             </div>
           ))}
         </div>
+        <SessionStorageList
+          folder={agent.folder || project?.folder || ""}
+          agents={[
+            sshHostId && !agent.sshHostId ? { ...agent, sshHostId } : agent,
+          ]}
+          onSessionDeleted={onSessionDeleted}
+        />
         {(supportsDangerous || supportsAltScreen || supportsWorkers) && (
           <div className="session-props-toggles">
             {supportsDangerous && (

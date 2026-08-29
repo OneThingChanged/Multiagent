@@ -27,6 +27,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "document_browser_open",
   "document_browser_ready",
   "document_browser_bounds",
+  "document_browser_visibility",
   "document_browser_back",
   "document_browser_forward",
   "document_browser_reload",
@@ -43,6 +44,8 @@ const INVOKE_COMMANDS = Object.freeze([
   "read_text_file",
   "read_chat_transcript",
   "chat_blocks",
+  "session_storage_list",
+  "session_storage_delete",
   "git_status",
   "git_changes",
   "git_stage",
@@ -157,6 +160,8 @@ const invokeSet = new Set(INVOKE_COMMANDS);
 const deliveredSet = new Set(DELIVERED_EVENTS);
 const emittedSet = new Set(EMITTED_EVENTS);
 const SESSION_ACTIONS = new Set(["sleep", "close", "restart", "quit"]);
+const SESSION_STORAGE_TOOLS = new Set(["codex", "claude"]);
+const SESSION_STORAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function assertAllowed(set, value, kind) {
   if (typeof value !== "string" || !set.has(value)) {
@@ -234,8 +239,22 @@ function assertInvokeRequest(command, rawArgs) {
       }
       break;
     case "document_browser_open":
-      assertPathString(args.folder, "document browser folder");
-      assertPathString(args.relativePath, "document browser relative path");
+      assertPathString(args.folder, "document browser folder", true);
+      assertPathString(args.relativePath, "document browser relative path", true);
+      {
+        const hasFolder = args.folder.trim().length > 0;
+        const hasRelativePath = args.relativePath.trim().length > 0;
+        if (hasFolder !== hasRelativePath) {
+          throw new TypeError(
+            "Electron document browser folder and relative path must be provided together"
+          );
+        }
+        if (!hasFolder) {
+          assertHttpUrl(args.initialUrl, "document browser initial URL");
+        } else if (args.initialUrl !== undefined && args.initialUrl !== "") {
+          assertHttpUrl(args.initialUrl, "document browser initial URL");
+        }
+      }
       if (args.agentId !== undefined && (
         typeof args.agentId !== "string" ||
         args.agentId.trim().length < 1 ||
@@ -268,6 +287,18 @@ function assertInvokeRequest(command, rawArgs) {
         args.browserId.length > 128
       ) {
         throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      break;
+    case "document_browser_visibility":
+      if (
+        typeof args.browserId !== "string" ||
+        args.browserId.trim().length < 1 ||
+        args.browserId.length > 128
+      ) {
+        throw new TypeError("Electron document browser id must be a non-empty string");
+      }
+      if (typeof args.visible !== "boolean") {
+        throw new TypeError("Electron document browser visibility flag must be boolean");
       }
       break;
     case "document_browser_navigate":
@@ -378,6 +409,47 @@ function assertInvokeRequest(command, rawArgs) {
     case "chat_blocks":
       if (typeof args.id !== "string" || !args.id.trim()) {
         throw new TypeError("Electron chat_blocks id must be a string");
+      }
+      break;
+    case "session_storage_list":
+      assertPathString(args.folder, "session storage folder");
+      if (
+        args.includeAllProjectSessions !== undefined &&
+        typeof args.includeAllProjectSessions !== "boolean"
+      ) {
+        throw new TypeError("Electron session storage project scope is invalid");
+      }
+      if (
+        !Array.isArray(args.sessions ?? []) ||
+        (!args.includeAllProjectSessions && (args.sessions ?? []).length < 1) ||
+        (args.sessions ?? []).length > 200 ||
+        (args.sessions ?? []).some(
+          (entry) =>
+            !entry ||
+            !SESSION_STORAGE_TOOLS.has(entry.aiToolId) ||
+            typeof entry.sessionId !== "string" ||
+            !SESSION_STORAGE_ID_RE.test(entry.sessionId.trim())
+        )
+      ) {
+        throw new TypeError("Electron session storage queries are invalid");
+      }
+      break;
+    case "session_storage_delete":
+      assertPathString(args.folder, "session storage folder");
+      if (!SESSION_STORAGE_TOOLS.has(args.aiToolId)) {
+        throw new TypeError("Electron session storage tool is invalid");
+      }
+      if (
+        typeof args.sessionId !== "string" ||
+        !SESSION_STORAGE_ID_RE.test(args.sessionId.trim())
+      ) {
+        throw new TypeError("Electron session storage id is invalid");
+      }
+      if (
+        args.agentId !== undefined &&
+        (typeof args.agentId !== "string" || !args.agentId.trim() || args.agentId.length > 256)
+      ) {
+        throw new TypeError("Electron session storage agent id is invalid");
       }
       break;
     case "git_status":

@@ -15,6 +15,7 @@ export type RuntimeCommand =
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "list_git_submodules"
   | "read_text_file" | "read_chat_transcript" | "chat_blocks" | "search_files"
+  | "session_storage_list" | "session_storage_delete"
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
   | "git_branches" | "git_checkout" | "git_diff_tool" | "git_file_history"
@@ -203,6 +204,19 @@ export type ChatBlock = {
   isError?: boolean;
 };
 
+export type SessionStorageQuery = {
+  aiToolId: "codex" | "claude";
+  sessionId: string;
+};
+
+export type SessionStorageEntry = SessionStorageQuery & {
+  bytes: number;
+  fileCount: number;
+  updatedAt: number;
+  primaryPath: string | null;
+  paths: string[];
+};
+
 export type GitFileCommit = {
   hash: string;
   subject: string;
@@ -305,6 +319,23 @@ export type RuntimeCommandContract = {
   chat_blocks: {
     args: { id: string; sessionId?: string };
     result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string; lifecycle?: "working" | "idle"; sessionId?: string };
+  };
+  session_storage_list: {
+    args: {
+      folder: string;
+      sessions?: SessionStorageQuery[];
+      includeAllProjectSessions?: boolean;
+    };
+    result: { sessions: SessionStorageEntry[]; totalBytes: number };
+  };
+  session_storage_delete: {
+    args: {
+      folder: string;
+      aiToolId: "codex" | "claude";
+      sessionId: string;
+      agentId?: string;
+    };
+    result: { trashedFiles: number; reclaimedBytes: number };
   };
   git_status: {
     args: { folder: string };

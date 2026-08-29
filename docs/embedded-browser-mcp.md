@@ -30,6 +30,12 @@ sources:
   - id: electron-main
     resource: ../app/electron/main.mjs
     title: "Native browser ownership and integration routes"
+  - id: image-viewer
+    resource: ../app/src/components/ImageViewer.tsx
+    title: "Image viewer native-view occlusion"
+  - id: native-view-occlusion
+    resource: ../app/src/lib/nativeViewOcclusion.ts
+    title: "Renderer overlay blockers for native views"
 ---
 
 # Embedded browser MCP
@@ -47,6 +53,12 @@ tab at Google. Browser tabs participate in the same split, move, select, and
 close operations as session and document tabs. Inactive browser views remain
 alive but hidden, so switching tabs preserves navigation state without allowing
 the native view to cover the selected pane.[^browser-tabs-ui][^electron-main]
+
+Electron native browser views render above normal React layers. When the image
+viewer opens, it acquires a shared native-view blocker; every embedded browser
+temporarily hides its `WebContentsView` and restores only the active tab after
+the viewer closes. Main-process visibility state also prevents a delayed bounds
+update from exposing a blocked browser again.[^image-viewer][^native-view-occlusion][^electron-main]
 
 ## Managed MCP connection
 
@@ -131,3 +143,5 @@ configuration changes because MCP clients load configuration at startup.
 [^annotation-preload]: Isolated annotation preload
 [^preview-service]: Project-scoped HTML preview service
 [^electron-main]: Native browser ownership and integration routes
+[^image-viewer]: Image viewer native-view occlusion
+[^native-view-occlusion]: Renderer overlay blockers for native views

@@ -30,6 +30,12 @@ sources:
   - id: settings
     resource: ../app/src/components/SettingsModal.tsx
     title: "Settings surface"
+  - id: session-storage-ui
+    resource: ../app/src/components/SessionStorageList.tsx
+    title: "Session JSONL storage catalog UI"
+  - id: session-storage-service
+    resource: ../app/electron/services/session-service.mjs
+    title: "Session JSONL metadata catalog"
 ---
 
 # Workspace interactions
@@ -67,6 +73,24 @@ Runtime state and work state are distinct. Starting/recovering describes the
 process lifecycle; working/waiting/blocked/done comes from hooks. A completion
 highlight clears when the user opens the session or submits new work.
 
+## Session transcript storage
+
+MultiAgent keeps a metadata-only catalog of local Codex and Claude JSONL
+transcripts under Electron user data. Project ownership is derived from each
+transcript's `cwd` and session ID instead of the provider's date-based folder
+layout. Multiple files with one session ID, including Claude child-agent
+records, are grouped into one session total.[^session-storage-service]
+
+Project properties list every catalogued transcript session for that project;
+session properties show only the currently linked session ID. Each row exposes
+its aggregate size, file count, last modification time, and primary path.
+Remote session storage is not scanned.[^session-storage-ui]
+
+Deletion requires confirmation and moves the matched JSONL files to the OS
+Recycle Bin. MultiAgent refuses deletion while the associated session has a
+live terminal, then removes the deleted paths from its catalog after a
+successful move.[^session-storage-ui][^session-storage-service]
+
 ## Files, Git, and documents
 
 The right sidebar selects the project root or a discovered Git submodule,
@@ -97,3 +121,5 @@ The domain invariants behind these interactions are documented in
 [^file-tree]: File tree panel
 [^document-viewer]: Document viewer
 [^settings]: Settings surface
+[^session-storage-ui]: Session JSONL storage catalog UI
+[^session-storage-service]: Session JSONL metadata catalog
