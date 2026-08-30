@@ -21,7 +21,7 @@ export function createTerminalHandlers({
       terminalSessions.resize(args.id, args.cols, args.rows);
       return null;
     }],
-    // Compatibility for the Tauri-era renderer and Electron smoke scripts.
+    // Direct close command used by the renderer and Electron smoke scripts.
     ["kill_pty", (_event, args) => {
       terminalSessions.close(args.id, "close");
       return null;

@@ -21,9 +21,6 @@ sources:
   - id: standard-builder
     resource: ../app/scripts/build-electron-standard.mjs
     title: "Standard build and APK verification"
-  - id: transition-manifest
-    resource: ../app/scripts/write-electron-transition-manifest.mjs
-    title: "Legacy Tauri-to-Electron manifest writer"
   - id: mobile-builder
     resource: ../mobile/scripts/build-apk.mjs
     title: "Signed Android build"
@@ -40,17 +37,21 @@ A complete stable release contains:
 
 * Standard Windows x64 NSIS installer, blockmap, and `latest.yml`;
 * Company Windows x64 NSIS installer, blockmap, and its updater manifest;
-* signed Android APK plus non-secret verification metadata for Standard;
-* signed transition JSON manifests for older Tauri installations while that
-  transition path remains supported.[^desktop-manifest][^standard-config][^company-config]
+* signed Android APK plus non-secret verification metadata for Standard.[^desktop-manifest][^standard-config][^company-config]
 
 Portable executables are intentionally excluded.
 
 ## Secrets and signing
 
-Desktop signing material, Tauri transition signing keys, Android keystores, and
-passwords live outside Git. Public certificate fingerprints and artifact hashes
-may be published; private keys and credential-bearing `.env` files may not.
+Android keystores and passwords live outside Git. Public certificate
+fingerprints and artifact hashes may be published; private keys and
+credential-bearing `.env` files may not.
+
+The current Windows pipeline does not configure a trusted Authenticode
+certificate. Electron Updater verifies each installer against the SHA-512 value
+in its YAML manifest, but Windows may still show an unknown-publisher warning.
+Do not describe a Windows artifact as code-signed unless
+`Get-AuthenticodeSignature` independently reports `Valid`.
 
 The Standard desktop build verifies the Android package name, version,
 architectures, APK hash, and certificate fingerprint before copying it into the
@@ -87,26 +88,24 @@ release staging directory. Verification failure stops the build.[^standard-build
    npm run electron:company-packaged-lifecycle-smoke
    ```
 
-6. Apply the required updater/transition signatures. Generate transition
-   manifests only after the exact installers they reference are signed:
+   Record Windows signature status explicitly:
 
    ```powershell
-   npm run release:electron-transition-manifest
+   Get-AuthenticodeSignature .\electron-dist\MultiAgent-Setup-X.Y.Z-x64.exe
+   Get-AuthenticodeSignature .\electron-dist\company\MultiAgentCompany-Setup-X.Y.Z-x64.exe
    ```
 
-7. Inspect `app/electron-dist/` and the Company/mobile subdirectories. Reject
+6. Inspect `app/electron-dist/` and the Company/mobile subdirectories. Reject
    stale files from another version before uploading.
-8. Commit the source/version change, create tag `vX.Y.Z`, push the branch and
+7. Commit the source/version change, create tag `vX.Y.Z`, push the branch and
    tag, then publish the GitHub release as Latest with the complete artifact set.
-9. Download the published artifacts through their public URLs and verify hashes,
+8. Download the published artifacts through their public URLs and verify hashes,
    signatures, manifests, installer version, updater visibility, and APK download.
 
 ## Updater rules
 
 Electron Updater consumes the YAML manifests and blockmaps produced for each
-variant. Standard and Company identities/channels must never cross. Older Tauri
-clients consume the separately signed JSON transition manifests generated from
-the final Electron installer names and signatures.[^transition-manifest]
+variant. Standard and Company identities/channels must never cross.
 
 Do not publish a manifest before its binary exists at the referenced URL. Do
 not mark a partial release Latest. A release is complete only after installation
@@ -116,5 +115,4 @@ and update paths have been checked from published assets, not just local output.
 [^standard-config]: Standard package configuration
 [^company-config]: Company package configuration
 [^standard-builder]: Standard build and APK verification
-[^transition-manifest]: Legacy Tauri-to-Electron updater transition
 [^mobile-builder]: Signed Android build

@@ -1,98 +1,95 @@
-# MultiAgent — Portable Setup
+# MultiAgent — 개발 및 빌드 설정
 
-이 폴더를 통째로 새 PC에 복사한 뒤 아래 순서대로.
+MultiAgent 데스크톱 앱은 Electron 단일 런타임을 사용합니다.
 
-## 1. 사전 설치 (한 번만)
+## 1. 사전 설치
 
-| 도구 | 버전 | 설치 |
+| 도구 | 버전 | 용도 |
 |---|---|---|
-| **Node.js** | 24+ | https://nodejs.org/ (LTS) — `node -v` 로 확인 |
-| **Rust toolchain** | 1.95+ stable | https://rustup.rs/ — `rustup-init.exe` 실행 후 기본값 |
-| **Visual Studio 2022 Build Tools** | latest | https://visualstudio.microsoft.com/visual-cpp-build-tools/ → **"Desktop development with C++"** 워크로드 체크 |
-| **PowerShell 7+** | 7.4+ 권장 | Microsoft Store 또는 https://github.com/PowerShell/PowerShell/releases (없으면 Windows PowerShell 5.1로 자동 폴백) |
-| **WebView2** | — | Windows 11엔 이미 포함. Windows 10이면 Microsoft Edge 설치돼 있으면 OK |
+| **Node.js** | 24+ | 프런트엔드, Electron, 빌드 스크립트 |
+| **Visual Studio 2022 Build Tools** | latest | `node-pty` 네이티브 모듈. **Desktop development with C++** 워크로드 필요 |
+| **PowerShell** | 7+ 권장 | 개발·검증 스크립트 |
 
-> Rust 설치 후 새 터미널 열어야 PATH 반영됨.
+실행할 AI CLI(`codex`, `claude` 등)는 각각 PATH에서 찾을 수 있어야 합니다.
+CLI가 없어도 앱은 실행되지만 해당 에이전트 세션은 시작할 수 없습니다.
 
-옵션:
-- **Claude Code CLI** — `claude` 명령이 PATH에 있어야 에이전트가 동작. https://docs.anthropic.com/en/docs/claude-code
-- **Codex CLI** — `codex` 명령. https://developers.openai.com/codex/cli
+배포용 `MultiAgent-Setup-<version>-x64.exe`에는 Electron 런타임이 포함되므로,
+일반 사용자는 Node.js나 개발 도구를 설치할 필요가 없습니다.
 
-(둘 다 없어도 앱은 떠요. "Shell only" 모드만 됨)
-
-## 2. 의존성 받기
+## 2. 의존성 설치
 
 ```powershell
-cd <이폴더>/app
+cd "K:\AI\MultiAgent\app"
 npm install
 ```
 
-- 약 ~30초, 90MB
-- `node_modules/` 가 생김 (앱 폴더에서만 필요)
+## 3. 개발 실행
 
-## 3. 실행
-
-### 개발 모드 (HMR, 코드 수정하면 즉시 반영)
 ```powershell
-npm run tauri dev
+npm run electron:dev
 ```
-- 첫 cargo 빌드 2~3분 (Rust deps 컴파일 + tauri 본체)
-- 이후엔 ~20초 내
 
-### 릴리즈 빌드 (배포용 EXE/MSI/NSIS)
-```powershell
-npm run tauri build
-```
-- 1~3분 (incremental은 1분 내)
-- 결과물:
-  - `app/src-tauri/target/release/app.exe` — 단독 실행 ~11MB
-  - `app/src-tauri/target/release/bundle/msi/MultiAgent_<ver>_x64_en-US.msi`
-  - `app/src-tauri/target/release/bundle/nsis/MultiAgent_<ver>_x64-setup.exe`
+Vite 개발 서버는 고정 포트 `4420`을 사용하고 Electron 호스트가 이 서버를
+불러옵니다. PTY, preload, 내장 브라우저, 트레이와 로컬 서비스는 Electron
+메인 프로세스가 소유합니다.
 
-### 테스트 실행
+## 4. 테스트와 빌드
+
 ```powershell
 npm test
+npm run build
+npm run electron:smoke
 ```
-Vitest 회귀 테스트.
 
-## 4. 트러블슈팅
+Company 인스톨러:
 
-| 증상 | 원인/해결 |
+```powershell
+npm run electron:dist:company
+```
+
+Standard 인스톨러는 Remote에서 내려받을 서명된 Android APK를 검증한 뒤
+패키징합니다. 로컬 APK 경로와 허용 인증서 SHA-256을 설정한 다음 실행합니다.
+
+```powershell
+$env:MULTIAGENT_MOBILE_APK_PATH = "<서명된 APK 절대경로>"
+$env:MULTIAGENT_ANDROID_CERT_SHA256 = "<인증서 SHA-256>"
+npm run electron:dist
+```
+
+두 Windows variant를 차례로 빌드하려면 다음 명령을 사용합니다.
+
+```powershell
+npm run electron:dist:all
+```
+
+모든 Electron 산출물은 `app/electron-dist/` 아래에 생성됩니다. 실제 릴리스의
+서명·APK 검증·게시 순서는 `docs/release-playbook.md`를 따릅니다.
+
+## 5. 트러블슈팅
+
+| 증상 | 확인 방법 |
 |---|---|
-| `cargo: command not found` | Rust 설치 후 터미널 재시작 |
-| `link.exe not found` 또는 `MSVC linker error` | VS Build Tools에서 C++ workload 안 깔림 |
-| `webview2 not found` 런타임 | Edge/WebView2 Runtime 설치: https://developer.microsoft.com/microsoft-edge/webview2/ |
-| Vite 4420 포트 점유 | `Get-NetTCPConnection -LocalPort 4420 \| Stop-Process` |
-| `app.exe` 락 (rebuild 실패) | 이전 앱 안 죽었음: `taskkill /F /IM app.exe` |
-| Claude/Codex 에이전트가 spawn은 되는데 코드 실행 안 됨 | `claude` / `codex` 명령이 PATH에 없는 거. PowerShell에서 `claude --version` 으로 확인 |
+| `node-pty` 설치/로딩 실패 | Visual Studio Build Tools의 C++ 워크로드와 현재 Node.js 아키텍처 확인 |
+| Vite 4420 포트 점유 | `Get-NetTCPConnection -LocalPort 4420`으로 PID를 확인하고 해당 개발 프로세스만 종료 |
+| 패키징 중 APK 검증 실패 | APK 경로, package name, 버전, 인증서 SHA-256 확인 |
+| 에이전트가 시작되지 않음 | PowerShell에서 `codex --version` 또는 `claude --version` 확인 |
+| 패키징 앱과 개발 앱 상태가 다름 | `npm run electron:packaged-smoke`와 lifecycle smoke 실행 |
 
-## 5. 폴더 구조 (포함된 파일 요약)
+## 6. 주요 폴더
 
-```
-_export/
-├─ SETUP.md            ← 이 파일
-├─ docs/               ← 프로젝트 문서 (ARCHITECTURE, RESUME, UX, BUILD, KNOWN_ISSUES, README)
-└─ app/
-   ├─ package.json + package-lock.json  ← npm deps 고정
-   ├─ tsconfig*.json, vite.config.ts, index.html
-   ├─ .vscode/extensions.json
-   ├─ public/          ← 정적 에셋 (svg)
-   ├─ src/             ← React 프론트엔드
-   │  ├─ App.tsx, main.tsx, App.css, types.ts
-   │  ├─ lib/          ← layout / persistence / terminal / path / groupOps + groupOps.test
-   │  └─ components/   ← Sidebar / TerminalArea / PaneSlot / Splitter / NewAgentModal / Toast / Menus
-   └─ src-tauri/       ← Rust 백엔드
-      ├─ Cargo.toml + Cargo.lock  ← cargo deps 고정
-      ├─ tauri.conf.json, build.rs
-      ├─ capabilities/default.json
-      ├─ icons/        ← 앱 아이콘 세트
-      └─ src/lib.rs + main.rs
+```text
+MultiAgent/
+├─ app/
+│  ├─ assets/           # Electron 패키징 자산
+│  ├─ electron/         # 메인 프로세스, preload, 서비스, IPC
+│  ├─ scripts/          # 개발·빌드·검증 스크립트
+│  ├─ src/              # React + TypeScript 렌더러
+│  └─ package.json      # Electron Builder와 npm 명령
+├─ docs/                # OKF v0.2 프로젝트 문서
+├─ mobile/              # Android 앱
+├─ site/                # 공개 소개 페이지
+└─ SETUP.md
 ```
 
-**포함 안 된 것** (새 PC에서 자동 생성됨):
-- `node_modules/` — `npm install` 로
-- `src-tauri/target/` — `cargo build` (tauri dev/build이 알아서)
-- `src-tauri/gen/schemas/` — Tauri 빌드 시 자동
-- `dist/` — Vite 빌드 산출물
-
-총 크기: ~737KB, 61개 파일. 압축하면 더 작아져요.
+`node_modules/`, `app/dist/`, `app/electron-dist/`, `mobile/artifacts/`는 생성
+산출물이며 Git에 커밋하지 않습니다.

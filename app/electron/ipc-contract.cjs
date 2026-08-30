@@ -70,7 +70,6 @@ const INVOKE_COMMANDS = Object.freeze([
   "delete_path",
   "resolve_terminal_path",
   "read_image_data_url",
-  "read_doc_asset",
   "play_system_sound",
   "read_audio_file",
   "clipboard_read_text",
@@ -120,8 +119,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "generate_ssh_key",
   "check_for_update",
   "download_and_install_update",
-  "export_tauri_storage",
-  "import_tauri_storage",
+  "storage_snapshot_get",
   "persist_storage_snapshot",
   "reopen_state_get",
   "reopen_state_clear",
@@ -389,11 +387,6 @@ function assertInvokeRequest(command, rawArgs) {
     case "delete_path":
       assertPathString(args.folder, "folder");
       assertPathString(args.relativePath, "relative path");
-      break;
-    case "read_doc_asset":
-      assertPathString(args.folder, "folder");
-      assertPathString(args.containerRelative, "container relative path");
-      assertPathString(args.ref, "asset reference");
       break;
     case "rename_path":
       assertPathString(args.folder, "folder");

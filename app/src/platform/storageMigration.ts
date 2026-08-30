@@ -87,11 +87,11 @@ export async function syncReopenStateBeforeRender() {
  * A runtime with no revision marker is entering the shared store for the first
  * time, so its existing records are unioned with the shared records by stable
  * id. Once a marker exists, the shared revision is authoritative. This keeps
- * intentional deletions deleted while protecting rich Tauri data from an
- * older empty Electron migration snapshot.
+ * intentional deletions deleted while protecting an existing local workspace
+ * from an older empty shared snapshot.
  */
 export async function syncSharedStorageBeforeRender() {
-  const snapshot = await invoke<StorageSnapshot | null>("import_tauri_storage").catch(
+  const snapshot = await invoke<StorageSnapshot | null>("storage_snapshot_get").catch(
     () => null
   );
   const localValues = captureSharedWorkspaceValues();

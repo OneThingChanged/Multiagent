@@ -53,7 +53,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 - **Quick Open** (`Ctrl+K`) — projects, sessions, Screens, docs, and commands in one search
 - **Attention Center** — unread waiting/blocked/completed items that jump to the session
 - Customizable keyboard shortcuts, four themes (Soft / GitHub / Warm / Light), multi-window, always-on-top
-- **Auto-updates** from signed GitHub Releases
+- **Auto-updates** from GitHub Releases with SHA-512 manifest integrity checks
 
 ## Supported Agents
 
@@ -69,14 +69,13 @@ Any CLI works in **Shell only** mode — you get the terminal without hooks, res
 
 ## Requirements
 
-**Runtime:** Windows 10/11 (WebView2 runtime — included with Windows 11), plus the agent CLIs you plan to use (`claude`, `codex`, … on PATH)
+**Runtime:** Windows 10/11, plus the agent CLIs you plan to use (`claude`, `codex`, … on PATH)
 
 **Development:**
 
 | Tool | Version |
 |---|---|
 | Node.js | 24+ |
-| Rust | 1.95+ stable |
 | Visual Studio 2022 Build Tools | "Desktop development with C++" workload |
 | PowerShell | 7+ recommended (falls back to 5.1) |
 
@@ -86,7 +85,6 @@ Any CLI works in **Shell only** mode — you get the terminal without hooks, res
 cd app
 npm install
 
-npm run tauri dev       # Tauri shell (dev, HMR on port 4420)
 npm run electron:dev    # Electron shell (dev, HMR on port 4420)
 ```
 
@@ -95,13 +93,11 @@ npm run electron:dev    # Electron shell (dev, HMR on port 4420)
 ```bash
 npm test                       # vitest unit/integration tests
 
-npm run tauri build            # Tauri release (standard)
-npm run tauri:build:all        # Tauri standard + company
 npm run electron:dist          # Electron installer (standard)
 npm run electron:dist:all      # Electron standard + company
 ```
 
-Tauri artifacts land in `app/src-tauri/target/release/bundle/` (the NSIS `*-setup.exe` is the recommended installer); Electron artifacts land in `app/electron-dist/`.
+Electron installers, blockmaps, and updater manifests land in `app/electron-dist/`.
 Standard Electron packaging requires an external release-signed Android APK plus its
 allowed certificate SHA-256 in `MULTIAGENT_MOBILE_APK_PATH` and
 `MULTIAGENT_ANDROID_CERT_SHA256`; it fails before packaging rather than bundling a
@@ -111,18 +107,18 @@ source-tree or debug APK. Company packaging remains APK-free.
 
 | Variant | Identifier | Remote PWA / Tunnel |
 |---|---|---|
-| **standard** | `com.jintae.multiagent` | ✅ included |
-| **company** | `com.jintae.multiagent.company` | ❌ removed (UI and backend) |
+| **standard** | `com.jintae.multiagent.electron` | ✅ included |
+| **company** | `com.jintae.multiagent.company.electron` | ❌ removed (UI and backend) |
 
-Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Signed-release and update-manifest procedures are documented in [docs/release-playbook.md](docs/release-playbook.md).
+Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Release verification and update-manifest procedures are documented in [docs/release-playbook.md](docs/release-playbook.md).
 
 ## Project Structure
 
 ```text
 ├─ app/                    # Desktop app
 │  ├─ src/                 # React 19 + TypeScript renderer
-│  ├─ src-tauri/           # Legacy Tauri updater-transition assets
 │  ├─ electron/            # Production main process + services (node-pty)
+│  ├─ assets/              # Electron packaging assets
 │  └─ scripts/             # Build / release scripts
 ├─ docs/                   # OKF v0.2 project knowledge
 ├─ SETUP.md                # Setup guide
@@ -140,7 +136,6 @@ The canonical OKF v0.2 knowledge index is [`docs/index.md`](docs/index.md):
 - [session-lifecycle-and-resume.md](docs/session-lifecycle-and-resume.md) — PTY lifecycle, hooks, cancellation, and provider resume
 - [local-dashboard.md](docs/local-dashboard.md) / [usage-accounting.md](docs/usage-accounting.md) — local Dashboard and usage accounting
 - [development-and-build.md](docs/development-and-build.md) / [release-playbook.md](docs/release-playbook.md) — development, packaging, signing, and publication
-- [electron-migration-decision.md](docs/electron-migration-decision.md) — production-runtime decision record
 - [known-limitations.md](docs/known-limitations.md) — confirmed constraints and review triggers
 
 ## License

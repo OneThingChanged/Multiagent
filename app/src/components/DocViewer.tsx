@@ -5,10 +5,8 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { Project } from "../types";
 import type { AppThemeId } from "../lib/appTheme";
-import type { TextFileResult, DocAssetResult } from "../platform/ipcContract";
+import type { TextFileResult } from "../platform/ipcContract";
 import { docKindForPath, parseDocTabId, type DocKind } from "../lib/docTabs";
-import { isElectronRuntime } from "../platform/electronBridge";
-import { htmlNeedsAssetInlining, inlineHtmlAssets } from "../lib/htmlAssets";
 import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
 
 function joinFolderPath(folder: string, relativePath: string) {
@@ -36,12 +34,6 @@ function fencedSource(content: string, language: string) {
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   return `${fence}${language}\n${content}\n${fence}`;
 }
-
-// Tauri keeps the legacy in-pane fallback. Electron opens HTML in the
-// isolated Document Browser instead, so this script is never injected into
-// the trusted Electron renderer.
-const DOC_LINK_SCRIPT =
-  'document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();if(e.ctrlKey||e.metaKey)window.open(h,"_blank","noopener")}else if(!/^#/.test(a.getAttribute("href")||""))e.preventDefault()},!0);document.addEventListener("auxclick",function(e){if(1!==e.button)return;var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=a.href||"";if(/^https?:/i.test(h)){e.preventDefault();window.open(h,"_blank","noopener")}},!0);';
 
 type DocViewerState =
   | { phase: "loading" }
@@ -72,8 +64,6 @@ export function DocViewer({
     browserId: string;
     docId: string;
   } | null>(null);
-  const electronRuntime = isElectronRuntime();
-
   useEffect(() => {
     if (!relativePath) {
       setState({ phase: "error", message: "잘못된 문서 탭입니다." });
@@ -96,7 +86,7 @@ export function DocViewer({
       // Do not copy arbitrary project HTML into the trusted application
       // renderer. The Electron Document Browser validates and streams it
       // through the isolated preview origin before it is shown.
-      if (kind === "html" && electronRuntime) {
+      if (kind === "html") {
         try {
           const result = await invoke<{ browserId: string }>("document_browser_open", {
             folder,
@@ -111,35 +101,13 @@ export function DocViewer({
         }
         return;
       }
-      if (kind === "markdown" || kind === "html") {
+      if (kind === "markdown") {
         const content = await invoke<string>("read_markdown_file", {
           folder,
           relativePath,
         });
         if (cancelled) return;
-        if (kind === "markdown") {
-          setState({ phase: "markdown", content });
-          return;
-        }
-        if (kind === "html" && !electronRuntime) {
-          let html = content;
-          if (htmlNeedsAssetInlining(content)) {
-            html = await inlineHtmlAssets(content, {
-              htmlRelative: relativePath,
-              readAsset: (containerRelative, ref) =>
-                invoke<DocAssetResult>("read_doc_asset", {
-                  folder,
-                  containerRelative,
-                  ref,
-                }).catch(() => null),
-            });
-          }
-          if (cancelled) return;
-          setState({ phase: "html", content: html });
-          return;
-        }
-        if (cancelled) return;
-        setState({ phase: "html", content: null });
+        setState({ phase: "markdown", content });
         return;
       }
       if (kind === "image") {
@@ -176,7 +144,7 @@ export function DocViewer({
     return () => {
       cancelled = true;
     };
-  }, [docId, folder, relativePath, reloadKey, electronRuntime, agentId]);
+  }, [docId, folder, relativePath, reloadKey, agentId]);
 
   const fullPath = folder && relativePath
     ? joinFolderPath(folder, relativePath)
@@ -189,7 +157,7 @@ export function DocViewer({
     if (fullPath) invoke("reveal_local_path", { path: fullPath }).catch(() => {});
   };
   const openBrowser = async () => {
-    if (!electronRuntime || !folder || !relativePath) return;
+    if (!folder || !relativePath) return;
     try {
       const result = await invoke<{ browserId: string }>("document_browser_open", {
         folder,
@@ -202,8 +170,7 @@ export function DocViewer({
     }
   };
   const browserOpenForThisDocument = embeddedBrowser?.docId === docId;
-  const usesEmbeddedHtmlBrowser =
-    electronRuntime && docKindForPath(relativePath) === "html";
+  const usesEmbeddedHtmlBrowser = docKindForPath(relativePath) === "html";
 
   return (
     <div className={`doc-view docs-theme-${theme}`}>
@@ -253,13 +220,13 @@ export function DocViewer({
             </ReactMarkdown>
           </div>
         )}
-        {state.phase === "html" && electronRuntime && browserOpenForThisDocument && embeddedBrowser && (
+        {state.phase === "html" && browserOpenForThisDocument && embeddedBrowser && (
           <EmbeddedDocumentBrowser
             browserId={embeddedBrowser.browserId}
             documentPath={relativePath}
           />
         )}
-        {state.phase === "html" && electronRuntime && !browserOpenForThisDocument && (
+        {state.phase === "html" && !browserOpenForThisDocument && (
           <div className="doc-html-launch">
             <div className="doc-html-launch-icon">HTML</div>
             <div className="doc-html-launch-title">전용 브라우저에서 문서 열기</div>
@@ -273,14 +240,6 @@ export function DocViewer({
               </button>
             </div>
           </div>
-        )}
-        {state.phase === "html" && !electronRuntime && (
-          <iframe
-            className="doc-html-frame"
-            sandbox="allow-scripts allow-popups"
-            srcDoc={`${state.content ?? ""}\n<script>${DOC_LINK_SCRIPT}</script>`}
-            title={`${relativePath} — 링크는 Ctrl+클릭으로 브라우저에서 열립니다`}
-          />
         )}
         {state.phase === "image" && (
           <div className="doc-image-wrap">

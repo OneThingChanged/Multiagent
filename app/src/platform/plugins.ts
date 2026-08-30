@@ -1,11 +1,3 @@
-import { open as tauriOpenDialog } from "@tauri-apps/plugin-dialog";
-import {
-  isPermissionGranted as tauriIsPermissionGranted,
-  requestPermission as tauriRequestPermission,
-} from "@tauri-apps/plugin-notification";
-import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
-import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
-import { check as tauriCheck } from "@tauri-apps/plugin-updater";
 import { electronBridge } from "./electronBridge";
 import { listen } from "./runtime";
 
@@ -27,17 +19,14 @@ export async function openDialog(options: {
   filters?: Array<{ name: string; extensions: string[] }>;
 }): Promise<string | string[] | null> {
   const bridge = electronBridge();
-  if (bridge) return bridge.showOpenDialog(options);
-  return tauriOpenDialog(options);
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.showOpenDialog(options);
 }
 
 export async function openUrl(url: string) {
   const bridge = electronBridge();
-  if (bridge) {
-    await bridge.invoke("open_external_url", { url });
-    return;
-  }
-  await tauriOpenUrl(url);
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  await bridge.invoke("open_external_url", { url });
 }
 
 export async function writeClipboardText(text: string) {
@@ -50,44 +39,37 @@ export async function writeClipboardText(text: string) {
 }
 
 export async function isPermissionGranted() {
-  if (electronBridge()) return true;
-  return tauriIsPermissionGranted();
+  return Boolean(electronBridge());
 }
 
 export async function requestPermission() {
-  if (electronBridge()) return "granted" as const;
-  return tauriRequestPermission();
+  return electronBridge() ? "granted" as const : "denied" as const;
 }
 
 export async function check(): Promise<Update | null> {
   const bridge = electronBridge();
-  if (bridge) {
-    const info = await bridge.invoke<{ version: string } | null>("check_for_update");
-    if (!info) return null;
-    return {
-      version: info.version,
-      async downloadAndInstall(listener) {
-        const unlisten = listener
-          ? await listen<UpdateDownloadEvent>("update:progress", (event) =>
-              listener(event.payload)
-            )
-          : null;
-        try {
-          await bridge.invoke("download_and_install_update");
-        } finally {
-          unlisten?.();
-        }
-      },
-    };
-  }
-  return (await tauriCheck()) as Update | null;
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  const info = await bridge.invoke<{ version: string } | null>("check_for_update");
+  if (!info) return null;
+  return {
+    version: info.version,
+    async downloadAndInstall(listener) {
+      const unlisten = listener
+        ? await listen<UpdateDownloadEvent>("update:progress", (event) =>
+            listener(event.payload)
+          )
+        : null;
+      try {
+        await bridge.invoke("download_and_install_update");
+      } finally {
+        unlisten?.();
+      }
+    },
+  };
 }
 
 export async function relaunch() {
   const bridge = electronBridge();
-  if (bridge) {
-    await bridge.invoke("relaunch");
-    return;
-  }
-  await tauriRelaunch();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  await bridge.invoke("relaunch");
 }

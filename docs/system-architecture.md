@@ -98,8 +98,7 @@ MCP](embedded-browser-mcp.md).[^electron-main]
    filesystem, or page-JavaScript execution.
 4. Add success and rejection tests at the boundary.
 
-Electron is the production host. Tauri files remain only for the updater
-transition described in [Electron migration decision](electron-migration-decision.md).
+Electron is the only desktop host and release target.
 
 [^electron-main]: Electron main process
 [^preload]: Renderer preload bridge

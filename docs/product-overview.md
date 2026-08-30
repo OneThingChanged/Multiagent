@@ -65,7 +65,8 @@ constrained WebView; it does not embed the desktop runtime.[^mobile-manifest]
 * always-on shared browser tabs controlled through a fixed MCP tool surface;
 * local token accounting plus provider account-limit snapshots;
 * loopback Dashboard, authenticated Remote access, and MiraControl integration;
-* signed Standard and Company installers plus a separately signed Android APK.
+* Standard and Company installers with SHA-512 updater manifests plus a
+  separately signed Android APK.
 
 ## Product variants
 

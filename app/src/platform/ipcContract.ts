@@ -26,7 +26,7 @@ export type RuntimeCommand =
   | "create_file" | "create_directory"
   | "rename_path" | "duplicate_path" | "delete_path"
   | "resolve_terminal_path"
-  | "read_image_data_url" | "read_doc_asset" | "play_system_sound" | "read_audio_file"
+  | "read_image_data_url" | "play_system_sound" | "read_audio_file"
   | "clipboard_read_text" | "clipboard_write_text" | "save_clipboard_image"
   | "check_tools" | "qwen_region_get" | "qwen_region_set"
   | "show_native_notification"
@@ -43,8 +43,8 @@ export type RuntimeCommand =
   | "start_monitor_server" | "stop_monitor_server" | "ssh_password_set"
   | "ssh_password_clear" | "ssh_password_has" | "ssh_test"
   | "get_ssh_public_key" | "generate_ssh_key" | "check_for_update"
-  | "download_and_install_update" | "export_tauri_storage"
-  | "import_tauri_storage" | "persist_storage_snapshot"
+  | "download_and_install_update" | "storage_snapshot_get"
+  | "persist_storage_snapshot"
   | "reopen_state_get" | "reopen_state_clear" | "relaunch";
 
 export type RuntimeEventName =
@@ -111,14 +111,6 @@ export type TextFileResult =
   | { kind: "text"; content: string }
   | { kind: "binary" }
   | { kind: "too_large"; size: number };
-
-// Result of reading a local asset referenced by an HTML doc tab. Containment
-// against the project root is enforced in the main process; anything outside,
-// missing, or unsupported returns null so the reference renders as-is.
-export type DocAssetResult =
-  | { kind: "data"; dataUrl: string; relativePath: string }
-  | { kind: "text"; text: string; relativePath: string }
-  | null;
 
 export type DocumentBrowserSnapshot = {
   browserId: string;
@@ -307,10 +299,6 @@ export type RuntimeCommandContract = {
   read_text_file: {
     args: { folder: string; relativePath: string };
     result: TextFileResult;
-  };
-  read_doc_asset: {
-    args: { folder: string; containerRelative: string; ref: string };
-    result: DocAssetResult;
   };
   read_chat_transcript: {
     args: { tool: string; path: string };

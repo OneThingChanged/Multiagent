@@ -37,8 +37,8 @@ export function workspaceWindowContext(
 ): WorkspaceWindowContext {
   const params = new URLSearchParams(search ?? "");
   const id = normalizeWorkspaceWindowId(params.get("workspaceWindowId"));
-  // Browser/Tauri and old Electron entry URLs have no workspace id. Treat that
-  // as the primary legacy workspace so existing layouts migrate once.
+  // Entry URLs without a workspace id map to the primary workspace so existing
+  // layouts migrate once.
   const restore =
     !params.has("workspaceWindowId") || params.get("restoreWorkspace") === "1";
   return {

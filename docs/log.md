@@ -1,5 +1,11 @@
 # OKF Update Log
 
+## 2026-08-31
+
+* **Electron-only runtime**: Removed the retired desktop host, its build dependencies, updater-transition signatures, manifests, storage command aliases, and renderer fallbacks.
+* **Release simplification**: Defined Standard and Company Electron NSIS/YAML artifacts plus the signed Android APK as the complete release set.
+* **Signing status clarification**: Recorded that Windows installers currently rely on updater SHA-512 integrity and are not Authenticode-signed; Android remains release-signed.
+
 ## 2026-08-30
 
 * **Session JSONL catalog**: Documented project-scoped Codex/Claude transcript ownership, grouped storage totals, current-session properties, and metadata-only persistence.
@@ -28,5 +34,5 @@
 
 * **In-place conversion**: Converted the existing `docs/` tree into the canonical OKF v0.2 bundle instead of maintaining a duplicate `okf/` directory.
 * **Deduplication**: Assigned one durable concept to each existing document and replaced repeated implementation, security, build, and lifecycle explanations with cross-links.
-* **Source reconciliation**: Updated current-runtime claims to Electron sources and retained Tauri only as a transition concern.
+* **Source reconciliation**: Updated current-runtime claims to the production Electron sources.
 * **Normalization**: Renamed concepts to lowercase kebab-case, redirected repository documentation links to `docs/index.md`, and removed the duplicate `docs/README.md` map.

@@ -23,8 +23,8 @@ sources:
 # Local Dashboard
 
 The production Dashboard is `LocalDashboardService` in the Electron process.
-It binds to loopback and projects desktop-owned state into the shared web client;
-it is not the legacy Tauri `monitor.rs` service.[^web-services]
+It binds to loopback and projects desktop-owned state into the shared web
+client.[^web-services]
 
 ## Data and control surface
 

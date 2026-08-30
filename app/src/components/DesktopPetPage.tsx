@@ -225,7 +225,6 @@ export function DesktopPetPage() {
 
       <div
         className="desktop-pet-drag"
-        data-tauri-drag-region
         title="끌어서 이동"
         onClick={(event) => event.stopPropagation()}
       >

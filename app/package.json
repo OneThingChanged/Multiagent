@@ -23,23 +23,11 @@
     "electron:dist": "node scripts/build-electron-standard.mjs",
     "electron:dist:company": "node scripts/build-electron-company.mjs",
     "electron:dist:all": "node scripts/build-electron-all.mjs",
-    "tauri": "tauri",
-    "tauri:build:standard": "node scripts/build-variant.mjs standard",
-    "tauri:build:company": "node scripts/build-variant.mjs company",
-    "tauri:build:all": "node scripts/build-all-variants.mjs",
-    "release:build:all": "node scripts/build-all-variants.mjs --require-signed",
-    "release:manifests": "node scripts/write-latest-json.mjs",
-    "release:electron-transition-manifest": "node scripts/write-electron-transition-manifest.mjs",
+    "release:build:all": "node scripts/build-electron-all.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-notification": "^2.3.3",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.10.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-serialize": "^0.14.0",
@@ -56,7 +44,6 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^5.2.0",
@@ -86,7 +73,7 @@
       "electron/**",
       "!electron/remote-pwa/downloads/**",
       "package.json",
-      "src-tauri/icons/icon.ico",
+      "assets/icon.ico",
       "node_modules/node-pty/**",
       "node_modules/@xterm/xterm/**",
       "node_modules/web-push/**"
@@ -95,7 +82,7 @@
       "output": "electron-dist"
     },
     "win": {
-      "icon": "src-tauri/icons/icon.ico",
+      "icon": "assets/icon.ico",
       "target": [
         "nsis"
       ]

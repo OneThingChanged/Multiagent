@@ -32,6 +32,9 @@ sources:
   - id: runtime-variant
     resource: ../app/electron/runtime-variant.cjs
     title: "Variant restrictions"
+  - id: desktop-manifest
+    resource: ../app/package.json
+    title: "Desktop updater and packaging configuration"
 ---
 
 # Known limitations
@@ -84,6 +87,13 @@ or remote-only transcripts are not reconstructed from provider servers.[^usage-s
 Company runtime intentionally disables external Remote/tunnel operations and
 does not package the Android APK.[^runtime-variant]
 
+## Windows distribution
+
+Windows installers currently have no trusted Authenticode signature. Update
+manifests carry the installer SHA-512 and Electron Updater verifies it, but a
+fresh manual installation can still show an unknown-publisher warning. Revisit
+this limitation when a trusted Windows code-signing certificate is configured.[^desktop-manifest]
+
 ## Review policy
 
 This concept remains `draft` because limitations are time-sensitive. Promote or
@@ -98,3 +108,4 @@ do not keep completed fixes here as “implemented candidates.”
 [^preview-service]: Bounded project preview
 [^usage-service]: Local usage derivation
 [^runtime-variant]: Variant restrictions
+[^desktop-manifest]: Desktop updater and packaging configuration

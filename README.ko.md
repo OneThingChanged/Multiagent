@@ -53,7 +53,7 @@
 - **Quick Open** (`Ctrl+K`) — 프로젝트·세션·Screen·문서·명령 통합 검색
 - **Attention Center** — 읽지 않은 대기/차단/완료 항목을 모아 보고 클릭 시 해당 세션으로 이동
 - 커스터마이즈 가능한 단축키, 4종 테마(Soft / GitHub / Warm / Light), 멀티 윈도우, 항상 위
-- 서명된 GitHub Releases 기반 **자동 업데이트**
+- SHA-512 manifest 무결성 검사를 사용하는 GitHub Releases 기반 **자동 업데이트**
 
 ## 지원 에이전트
 
@@ -69,14 +69,13 @@
 
 ## 실행 환경
 
-**런타임:** Windows 10/11 (WebView2 런타임 — Windows 11 기본 포함), 사용할 에이전트 CLI (`claude`, `codex` 등이 PATH에 있어야 함)
+**런타임:** Windows 10/11, 사용할 에이전트 CLI (`claude`, `codex` 등이 PATH에 있어야 함)
 
 **개발:**
 
 | 도구 | 버전 |
 |---|---|
 | Node.js | 24+ |
-| Rust | 1.95+ stable |
 | Visual Studio 2022 Build Tools | "Desktop development with C++" 워크로드 |
 | PowerShell | 7+ 권장 (없으면 5.1로 폴백) |
 
@@ -86,7 +85,6 @@
 cd app
 npm install
 
-npm run tauri dev       # Tauri 셸 (개발 모드, 4420 포트 HMR)
 npm run electron:dev    # Electron 셸 (개발 모드, 4420 포트 HMR)
 ```
 
@@ -95,20 +93,18 @@ npm run electron:dev    # Electron 셸 (개발 모드, 4420 포트 HMR)
 ```bash
 npm test                       # vitest 단위/통합 테스트
 
-npm run tauri build            # Tauri 릴리즈 (standard)
-npm run tauri:build:all        # Tauri standard + company
 npm run electron:dist          # Electron 인스톨러 (standard)
 npm run electron:dist:all      # Electron standard + company
 ```
 
-Tauri 산출물은 `app/src-tauri/target/release/bundle/`에 생성됩니다 (NSIS `*-setup.exe`가 배포용 설치 파일). Electron 산출물은 `app/electron-dist/`에 생성됩니다.
+Electron 인스톨러, blockmap, 업데이터 manifest는 `app/electron-dist/`에 생성됩니다.
 
 ## 빌드 Variant
 
 | Variant | 식별자 | Remote PWA / 터널 |
 |---|---|---|
-| **standard** | `com.jintae.multiagent` | ✅ 포함 |
-| **company** | `com.jintae.multiagent.company` | ❌ 제외 (UI와 백엔드 모두) |
+| **standard** | `com.jintae.multiagent.electron` | ✅ 포함 |
+| **company** | `com.jintae.multiagent.company.electron` | ❌ 제외 (UI와 백엔드 모두) |
 
 두 variant는 같은 코드·같은 버전을 쓰고, 식별자·업데이트 채널·원격 기능만 다릅니다. 서명 릴리즈와 업데이트 manifest 절차는 [docs/release-playbook.md](docs/release-playbook.md)를 참고하세요.
 
@@ -117,8 +113,8 @@ Tauri 산출물은 `app/src-tauri/target/release/bundle/`에 생성됩니다 (NS
 ```text
 ├─ app/                    # 데스크톱 앱
 │  ├─ src/                 # React 19 + TypeScript 렌더러
-│  ├─ src-tauri/           # 레거시 Tauri 업데이터 전환 자산
 │  ├─ electron/            # 프로덕션 메인 프로세스 + 서비스 (node-pty)
+│  ├─ assets/              # Electron 패키징 자산
 │  └─ scripts/             # 빌드 / 릴리즈 스크립트
 ├─ docs/                   # OKF v0.2 프로젝트 지식
 ├─ SETUP.md                # 설치 안내
@@ -136,7 +132,6 @@ Tauri 산출물은 `app/src-tauri/target/release/bundle/`에 생성됩니다 (NS
 - [session-lifecycle-and-resume.md](docs/session-lifecycle-and-resume.md) — PTY 수명주기, 훅, 취소와 provider resume
 - [local-dashboard.md](docs/local-dashboard.md) / [usage-accounting.md](docs/usage-accounting.md) — 로컬 Dashboard와 사용량 집계
 - [development-and-build.md](docs/development-and-build.md) / [release-playbook.md](docs/release-playbook.md) — 개발, 패키징, 서명과 게시
-- [electron-migration-decision.md](docs/electron-migration-decision.md) — production runtime 결정 기록
 - [known-limitations.md](docs/known-limitations.md) — 확인된 제약과 재검토 조건
 
 ## 라이선스

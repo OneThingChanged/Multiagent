@@ -1,6 +1,6 @@
 # MultiAgent App
 
-This directory contains the Tauri 2 + React + TypeScript desktop app.
+This directory contains the Electron + React + TypeScript desktop app.
 
 ## 한국어
 
@@ -10,16 +10,16 @@ This directory contains the Tauri 2 + React + TypeScript desktop app.
 
 ```bash
 npm install
-npm run tauri dev
+npm run electron:dev
 ```
 
 ### 릴리즈 빌드
 
 ```bash
-npm run tauri build
+npm run electron:dist
 ```
 
-빌드 산출물은 `src-tauri/target/release/bundle/` 아래에 생성됩니다.
+빌드 산출물은 `electron-dist/` 아래에 생성됩니다.
 
 ## English
 
@@ -29,13 +29,13 @@ The root `README.md` contains the full project overview. This directory contains
 
 ```bash
 npm install
-npm run tauri dev
+npm run electron:dev
 ```
 
 ### Release Build
 
 ```bash
-npm run tauri build
+npm run electron:dist
 ```
 
-Build artifacts are generated under `src-tauri/target/release/bundle/`.
+Build artifacts are generated under `electron-dist/`.

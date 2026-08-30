@@ -97,7 +97,7 @@ describe("Electron hook configuration", () => {
     expect(hookInternals.mergeCodex(codex, "C:\\helper\\notify.ps1", "K:\\AI\\MultiAgent\\app\\electron\\services\\browser-mcp-server.mjs")).toBe(codex);
   });
 
-  it("upgrades legacy Tauri Codex entries without removing user hooks", () => {
+  it("replaces stale managed Codex entries without removing user hooks", () => {
     const existing = `model = "gpt"
 
 [[hooks.Stop]]

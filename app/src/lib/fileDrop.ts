@@ -54,7 +54,7 @@ export function extractDroppedFilePaths(
     try {
       resolvedPath = resolveFilePath?.(file)?.trim() ?? "";
     } catch {
-      // Keep the browser/Tauri fallbacks available if a runtime resolver fails.
+      // Keep browser-provided path fallbacks available if runtime resolution fails.
     }
     const path =
       resolvedPath ||

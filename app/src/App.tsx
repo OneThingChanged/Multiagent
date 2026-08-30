@@ -2802,7 +2802,6 @@ function App() {
       invoke<string | null>("relink_cli_session", {
         aiToolId: agent.aiToolId,
         folder,
-        // Tauri can narrow transcript matching by alias; Electron ignores it.
         agentName: agent.name,
       })
         .then((sessionId) => {

@@ -27,5 +27,4 @@ configuration that supports it.
 
 * [Development and build](development-and-build.md) - Local setup, tests, smoke checks, and desktop/mobile build entry points.
 * [Release playbook](release-playbook.md) - Signing, artifact verification, publication, and updater invariants.
-* [Electron migration decision](electron-migration-decision.md) - Production-runtime decision and remaining transition assets.
 * [Known limitations](known-limitations.md) - Confirmed constraints and explicitly unverified follow-up items.

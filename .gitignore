@@ -16,7 +16,7 @@ pnpm-debug.log*
 /.claude/settings.local.json
 /.qwen/
 
-# Tauri updater signing keys — never commit private keys
+# Local signing keys — never commit private keys
 /signing/
 *.key
 *.keystore

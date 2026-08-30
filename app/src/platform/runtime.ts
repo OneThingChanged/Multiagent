@@ -1,10 +1,3 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { emit as tauriEmit, listen as tauriListen } from "@tauri-apps/api/event";
-import {
-  getCurrentWindow as getTauriCurrentWindow,
-  UserAttentionType,
-} from "@tauri-apps/api/window";
-import { getCurrentWebview as getTauriCurrentWebview } from "@tauri-apps/api/webview";
 import { electronBridge } from "./electronBridge";
 import type {
   RuntimeCommand,
@@ -15,7 +8,10 @@ import type {
   TypedRuntimeCommand,
 } from "./ipcContract";
 
-export { UserAttentionType };
+export enum UserAttentionType {
+  Critical = 1,
+  Informational = 2,
+}
 
 export type RuntimeEvent<T> = { payload: T };
 export type RuntimeUnlisten = () => void;
@@ -33,8 +29,8 @@ export async function invoke<T = unknown>(
   args?: Record<string, unknown>
 ): Promise<T> {
   const bridge = electronBridge();
-  if (bridge) return bridge.invoke<T>(command, args);
-  return tauriInvoke<T>(command, args);
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.invoke<T>(command, args);
 }
 
 export async function listen<T>(
@@ -42,10 +38,8 @@ export async function listen<T>(
   listener: (event: RuntimeEvent<T>) => void
 ): Promise<RuntimeUnlisten> {
   const bridge = electronBridge();
-  if (bridge) {
-    return bridge.onEvent<T>(eventName, (payload) => listener({ payload }));
-  }
-  return tauriListen<T>(eventName, listener);
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.onEvent<T>(eventName, (payload) => listener({ payload }));
 }
 
 export async function emit(
@@ -53,13 +47,13 @@ export async function emit(
   payload?: unknown
 ): Promise<void> {
   const bridge = electronBridge();
-  if (bridge) return bridge.emit(eventName, payload);
-  await tauriEmit(eventName, payload);
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.emit(eventName, payload);
 }
 
 export function getCurrentWindow() {
   const bridge = electronBridge();
-  if (!bridge) return getTauriCurrentWindow();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
   return {
     setAlwaysOnTop: (enabled: boolean) => bridge.window.setAlwaysOnTop(enabled),
     isFocused: () => bridge.window.isFocused(),
@@ -78,7 +72,7 @@ type DragDropPayload = {
 
 export function getCurrentWebview() {
   const bridge = electronBridge();
-  if (!bridge) return getTauriCurrentWebview();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
 
   return {
     async onDragDropEvent(

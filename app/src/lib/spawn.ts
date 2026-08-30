@@ -112,7 +112,6 @@ export async function buildSpawnArgs(
             aiToolId: agent.aiToolId,
             folder: agent.folder,
             agentId: agent.id,
-            // Kept for the Tauri transcript matcher; Electron uses agentId.
             agentName: agent.name,
             preferredSessionId: candidateSessionId,
           });
