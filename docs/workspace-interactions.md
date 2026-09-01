@@ -12,6 +12,12 @@ sources:
   - id: app-shell
     resource: ../app/src/App.tsx
     title: "Workspace shell and actions"
+  - id: session-lifecycle-actions
+    resource: ../app/src/hooks/useSessionLifecycleActions.ts
+    title: "Session deletion and runtime lifecycle actions"
+  - id: workspace-focus
+    resource: ../app/src/lib/workspaceFocus.ts
+    title: "Active terminal focus recovery"
   - id: sidebar
     resource: ../app/src/components/Sidebar.tsx
     title: "Project and session sidebar"
@@ -50,6 +56,13 @@ Removing a session from the sidebar deactivates its live PTY. Permanent session
 deletion is a separate confirmed action from the session context menu. Project
 creation can create an initial session using the tool and dangerous-mode choice
 made in the creation flow.[^app-shell]
+
+Before permanent deletion opens its native confirmation dialog, MultiAgent
+commits removal of context-menu and drag backdrops. Whether confirmation is
+cancelled or deletion finishes, transient interaction state is cleared again
+and the surviving active terminal is focused after its pane mounts. Layout
+state and imperative refs advance together so deletion cannot leave keyboard or
+pointer input bound to the removed session.[^session-lifecycle-actions][^workspace-focus]
 
 ## Screens, tabs, and splits
 
@@ -115,6 +128,8 @@ The domain invariants behind these interactions are documented in
 [System architecture](system-architecture.md).
 
 [^app-shell]: Workspace shell and actions
+[^session-lifecycle-actions]: Session deletion and runtime lifecycle actions
+[^workspace-focus]: Active terminal focus recovery
 [^sidebar]: Project and session sidebar
 [^pane-slot]: Pane and tab host
 [^terminal-area]: Terminal and chat surface

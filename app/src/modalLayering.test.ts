@@ -31,5 +31,8 @@ describe("desktop overlay layering", () => {
     expect(source).toContain("{visibleProjectFolderContextMenu && (");
     expect(source).toContain("{visibleTabContextMenu && (");
     expect(source).toContain("onClose={dismissTransientMenus}");
+    expect(source).toContain("flushSync(clearTransientInteractionState)");
+    expect(source).toContain("beforeDeleteConfirm: flushTransientInteractionState");
+    expect(source).toContain("afterDeleteSettled: settleSessionDeletionUi");
   });
 });

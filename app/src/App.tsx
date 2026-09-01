@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   getCurrentWindow,
   invoke,
@@ -100,6 +101,7 @@ import {
 } from "./lib/attention";
 import { useAttentionState } from "./hooks/useAttentionState";
 import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
+import { scheduleActiveTerminalFocus } from "./lib/workspaceFocus";
 import type { QuickOpenItem } from "./lib/quickOpen";
 import {
   clearScrollback,
@@ -2020,6 +2022,43 @@ function App() {
     };
   }, [pushToast, remoteEnabled, runtimeFlags]);
 
+  const dismissTransientMenus = useCallback(() => {
+    setContextMenu(null);
+    setProjectContextMenu(null);
+    setProjectFolderContextMenu(null);
+    setTabContextMenu(null);
+  }, []);
+
+  const clearTransientInteractionState = useCallback(() => {
+    dismissTransientMenus();
+    setDragState(null);
+    setDropTarget(null);
+  }, [dismissTransientMenus]);
+
+  const flushTransientInteractionState = useCallback(() => {
+    // Session deletion opens a blocking native confirmation dialog. Commit the
+    // menu removal first so its fixed backdrop cannot survive the dialog.
+    flushSync(clearTransientInteractionState);
+  }, [clearTransientInteractionState]);
+
+  const restoreWorkspaceFocus = useCallback(() => {
+    scheduleActiveTerminalFocus({
+      getState: () => ({
+        groups: groupsRef.current,
+        activeGroupId: activeGroupIdRef.current,
+        activePath: activePathRef.current,
+      }),
+      getTarget: (agentId) => termsRef.current.get(agentId)?.term,
+      requestFrame: window.requestAnimationFrame.bind(window),
+      cancelFrame: window.cancelAnimationFrame.bind(window),
+    });
+  }, []);
+
+  const settleSessionDeletionUi = useCallback(() => {
+    flushTransientInteractionState();
+    restoreWorkspaceFocus();
+  }, [flushTransientInteractionState, restoreWorkspaceFocus]);
+
   // ---- Group operations (delegated to lib/groupOps as pure functions)
 
   const applyGroupOp = useCallback(
@@ -2030,6 +2069,12 @@ function App() {
           activeGroupId: activeGroupIdRef.current,
           activePath: activePathRef.current,
         });
+        // Keep imperative readers in lockstep with the React state update.
+        // Session deletion immediately uses these refs to focus the surviving
+        // pane, so waiting for a later effect would expose stale layout state.
+        groupsRef.current = next.groups;
+        activeGroupIdRef.current = next.activeGroupId;
+        activePathRef.current = next.activePath;
         setActiveGroupId(next.activeGroupId);
         setActivePath(next.activePath);
         return next.groups;
@@ -2051,6 +2096,8 @@ function App() {
     termsRef,
     setAgents,
     applyGroupOp,
+    beforeDeleteConfirm: flushTransientInteractionState,
+    afterDeleteSettled: settleSessionDeletionUi,
   });
 
   const commitGroupState = useCallback((next: groupOps.GroupState) => {
@@ -2646,13 +2693,6 @@ function App() {
 
   // ---- Context menu
 
-  const dismissTransientMenus = useCallback(() => {
-    setContextMenu(null);
-    setProjectContextMenu(null);
-    setProjectFolderContextMenu(null);
-    setTabContextMenu(null);
-  }, []);
-
   const onSidebarContextMenu = useCallback(
     (agentId: string, x: number, y: number) => {
       dismissTransientMenus();
@@ -2833,6 +2873,10 @@ function App() {
     ) => {
       if (!contextMenu) return;
       const id = contextMenu.agentId;
+      if (action === "delete") {
+        void removeAgent(id);
+        return;
+      }
       dismissTransientMenus();
       if (action === "open") requestSelectAgent(id);
       else if (action === "open-new-window") openNewAppWindow(id);
@@ -2844,8 +2888,6 @@ function App() {
       else if (action === "clear-session-pin") clearContextGroupSessionPins(id);
       else if (action === "deactivate") {
         void deactivateAgent(id);
-      } else if (action === "delete") {
-        void removeAgent(id);
       } else if (action === "relink") {
         relinkSession(id);
       } else if (action === "properties") {

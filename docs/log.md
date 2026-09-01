@@ -1,5 +1,9 @@
 # OKF Update Log
 
+## 2026-09-01
+
+* **Session deletion input recovery**: Documented synchronous context-backdrop cleanup, atomic layout reference updates, and surviving-terminal focus restoration after confirmed or cancelled deletion.
+
 ## 2026-08-31
 
 * **Electron-only runtime**: Removed the retired desktop host, its build dependencies, updater-transition signatures, manifests, storage command aliases, and renderer fallbacks.

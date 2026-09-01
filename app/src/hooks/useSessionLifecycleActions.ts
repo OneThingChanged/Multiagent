@@ -24,6 +24,8 @@ type SessionLifecycleOptions = {
   termsRef: RefValue<Map<string, TerminalEntry>>;
   setAgents: Dispatch<SetStateAction<Agent[]>>;
   applyGroupOp: ApplyGroupOp;
+  beforeDeleteConfirm?: () => void;
+  afterDeleteSettled?: () => void;
 };
 
 function disposeTerminal(
@@ -45,6 +47,8 @@ export function useSessionLifecycleActions({
   termsRef,
   setAgents,
   applyGroupOp,
+  beforeDeleteConfirm,
+  afterDeleteSettled,
 }: SessionLifecycleOptions) {
   const recoverExitedAgent = useCallback(async (agentId: string) => {
     const wasIdle =
@@ -150,26 +154,44 @@ export function useSessionLifecycleActions({
       );
       return;
     }
-    if (!window.confirm(sessionDeletionMessage(agent.name))) return;
+    // The context-menu backdrop must be removed from the committed DOM before
+    // opening the blocking native confirmation dialog. Otherwise the queued
+    // React update can leave an invisible full-window click blocker behind.
+    beforeDeleteConfirm?.();
+    if (!window.confirm(sessionDeletionMessage(agent.name))) {
+      afterDeleteSettled?.();
+      return;
+    }
 
-    removedAgentIdsRef.current.add(agentId);
-    await invoke(
-      isElectronRuntime() ? "terminal_session_action" : "kill_pty",
-      isElectronRuntime()
-        ? { id: agentId, action: "close" }
-        : { id: agentId }
-    ).catch(() => {});
-    disposeTerminal(termsRef, agentId);
-    clearScrollback(agentId);
-    setAgents((current) =>
-      current.filter((agent) => agent.id !== agentId)
-    );
-    applyGroupOp((state) =>
-      groupOps.removeAgentFromLayout(state, agentId)
-    );
+    try {
+      removedAgentIdsRef.current.add(agentId);
+      await invoke(
+        isElectronRuntime() ? "terminal_session_action" : "kill_pty",
+        isElectronRuntime()
+          ? { id: agentId, action: "close" }
+          : { id: agentId }
+      ).catch(() => {});
+      disposeTerminal(termsRef, agentId);
+      clearScrollback(agentId);
+      // Prune the workspace before the catalog entry. This makes the surviving
+      // pane authoritative and avoids a second catalog-effect removal racing it.
+      applyGroupOp((state) =>
+        groupOps.removeAgentFromLayout(state, agentId)
+      );
+      setAgents((current) =>
+        current.filter((agent) => agent.id !== agentId)
+      );
+    } finally {
+      // Confirmation dialogs take keyboard focus even when deletion succeeds.
+      // The caller clears any remaining transient blockers and focuses the
+      // surviving active terminal after React has committed the new layout.
+      afterDeleteSettled?.();
+    }
   }, [
     agentsRef,
+    afterDeleteSettled,
     applyGroupOp,
+    beforeDeleteConfirm,
     detachedAgentIdsRef,
     removedAgentIdsRef,
     setAgents,
