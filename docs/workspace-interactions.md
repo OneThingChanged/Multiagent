@@ -92,7 +92,10 @@ Chat history is loaded from a durable SQLite index keyed by MultiAgent agent,
 provider, and provider session ID. Recent blocks appear first, older blocks are
 paged on demand, and local composer text is recorded before PTY delivery then
 confirmed against the provider transcript without duplication. Referenced local
-files appear as session artifacts that can be opened from the chat view.[^chat-view][^conversation-store]
+files appear as session artifacts that can be opened from the chat view. The
+rendered thread keeps tool calls in transcript order, groups only adjacent tool
+work, labels assistant output by provider, and exposes a jump-to-latest control
+when the operator reads above newly arriving output.[^chat-view][^conversation-store]
 
 Runtime state and work state are distinct. Starting/recovering describes the
 process lifecycle; working/waiting/blocked/done comes from hooks. A completion
@@ -107,8 +110,10 @@ layout. Multiple files with one session ID, including Claude child-agent
 records, are grouped into one session total.[^session-storage-service]
 
 Project properties list every catalogued transcript session for that project;
-session properties show only the currently linked session ID. Each row exposes
-its aggregate size, file count, last modification time, and primary path.
+session properties separate basic identity, the currently linked session ID,
+and launch-only options into focused tabs. The session-data tab exposes the
+current record's aggregate size, file count, last modification time, and primary
+path. Each panel scrolls independently while dialog actions remain available.
 Remote session storage is not scanned.[^session-storage-ui]
 
 Deletion requires confirmation and moves the matched JSONL files to the OS

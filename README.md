@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.21-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.22-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -26,7 +26,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 - **Desktop Pet** — an always-on-top, non-focusable mascot showing idle/working/done, running & completed counts, and the latest prompt; click to jump to the session
 
 ### Chat View
-- A rich conversation view alongside the raw terminal (for transcript-based tools): tool-call blocks with summaries and edit diffs, inline question/permission cards, thinking indicator
+- A readable conversation view alongside the raw terminal (for transcript-based tools): provider-labelled assistant cards, chronological tool groups with status, structured Markdown, and a jump-to-latest control
 - Per-session SQLite history restores prior conversation blocks after restart, pages older turns on demand, and catalogs referenced output files without mixing agents
 - Composer with `/` command and `@` file autocomplete, clipboard-image paste, large-paste collapsing, message queueing while the agent works, Esc to cancel
 
@@ -34,6 +34,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 - `SessionStart` hooks capture each tool's session ID; reopening a session runs `codex resume <id>` / `claude --resume <id>` automatically
 - Scrollback snapshots restore the terminal view after an app restart
 - **Relink to current session** recovers a lost resume target by scanning the newest on-disk transcript
+- Session properties separate identity, JSONL storage, and launch-only options into focused tabs with independent scrolling
 
 ### Files, Docs & Git
 - **File tree sidebar** — lazy-loaded project explorer with git status badges, find-files filter, and full file operations (new/duplicate/rename/delete/copy path)

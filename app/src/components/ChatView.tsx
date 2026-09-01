@@ -178,70 +178,127 @@ type ToolPair = {
   isError?: boolean;
 };
 
-function AssistantTurn({ run }: { run: ChatBlock[] }) {
-  const tools: ToolPair[] = [];
-  const body: ReactNode[] = [];
-  let pending: ToolPair | null = null;
+type AssistantSegment =
+  | { kind: "block"; block: ChatBlock; sourceIndex: number }
+  | { kind: "tools"; tools: ToolPair[] };
+
+export function groupAssistantBlocks(run: ChatBlock[]): AssistantSegment[] {
+  const segments: AssistantSegment[] = [];
+  let currentTools: ToolPair[] | null = null;
+  let awaitingResults: ToolPair[] = [];
+
+  const toolsForCurrentPosition = () => {
+    if (currentTools) return currentTools;
+    currentTools = [];
+    segments.push({ kind: "tools", tools: currentTools });
+    return currentTools;
+  };
+
   run.forEach((block, index) => {
     if (block.kind === "tool-call") {
-      pending = { name: block.name, input: block.input, summary: block.summary, diff: block.diff };
-      tools.push(pending);
+      const tool = { name: block.name, input: block.input, summary: block.summary, diff: block.diff };
+      toolsForCurrentPosition().push(tool);
+      awaitingResults.push(tool);
     } else if (block.kind === "tool-result") {
-      if (pending && pending.output === undefined) {
+      const pending = awaitingResults.shift();
+      if (pending) {
         pending.output = block.output;
         pending.isError = block.isError;
         if (!pending.diff && block.diff) pending.diff = block.diff;
-        pending = null;
       } else {
-        tools.push({ name: "result", output: block.output, isError: block.isError, diff: block.diff });
+        toolsForCurrentPosition().push({
+          name: "result",
+          output: block.output,
+          isError: block.isError,
+          diff: block.diff,
+        });
       }
-    } else if (block.kind === "reasoning") {
-      body.push(
-        <details key={`r${index}`} className="chat-work">
-          <summary>추론</summary>
-          <pre className="chat-reason">{block.text}</pre>
-        </details>
-      );
-    } else if (block.kind === "text") {
-      body.push(
-        <div key={`t${index}`} className="chat-md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-            {block.text ?? ""}
-          </ReactMarkdown>
-        </div>
-      );
-    } else if (block.kind === "image") {
-      body.push(
-        <div key={`i${index}`} className="chat-md">
-          🖼 이미지
-        </div>
-      );
+    } else {
+      currentTools = null;
+      awaitingResults = [];
+      segments.push({ kind: "block", block, sourceIndex: index });
     }
   });
+
+  return segments.filter((segment) => segment.kind !== "tools" || segment.tools.length > 0);
+}
+
+function ToolGroup({ tools }: { tools: ToolPair[] }) {
+  const failed = tools.filter((tool) => tool.isError).length;
+  const finished = tools.filter((tool) => tool.output !== undefined || tool.diff).length;
   return (
-    <div className="chat-turn">
-      <div className="chat-role">
-        <span className="chat-av">✦</span> Assistant
-      </div>
-      {tools.length > 0 && (
-        <details className="chat-work">
-          <summary>작업 · 툴 {tools.length}개</summary>
-          <div className="chat-tools">
-            {tools.map((tool, index) => (
-              <details key={index} className="chat-tool">
-                <summary>
+    <details className="chat-work chat-work-tools">
+      <summary>
+        <span>작업 {tools.length}개</span>
+        <span className={`chat-work-meta ${failed ? "err" : ""}`}>
+          {failed ? `오류 ${failed}` : finished === tools.length ? "완료" : "진행 중"}
+        </span>
+      </summary>
+      <div className="chat-tools">
+        {tools.map((tool, index) => {
+          const state = tool.isError ? "error" : tool.output !== undefined || tool.diff ? "done" : "pending";
+          return (
+            <details key={index} className="chat-tool">
+              <summary>
+                <span className={`chat-tool-state ${state}`} aria-label={state} />
+                <span className="chat-tool-label">
                   <span className="chat-tool-k">$</span> {toolLabel(tool)}
-                </summary>
-                {tool.diff && <ChatDiff diff={tool.diff} />}
-                {(tool.output !== undefined || !tool.diff) && (
-                  <pre className={tool.isError ? "err" : ""}>{tool.output ?? "(출력 없음)"}</pre>
-                )}
-              </details>
-            ))}
-          </div>
-        </details>
-      )}
-      {body}
+                </span>
+              </summary>
+              {tool.diff && <ChatDiff diff={tool.diff} />}
+              {(tool.output !== undefined || !tool.diff) && (
+                <pre className={tool.isError ? "err" : ""}>{tool.output ?? "(출력 없음)"}</pre>
+              )}
+            </details>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function assistantLabel(tool?: string) {
+  const normalized = tool?.toLowerCase() ?? "";
+  if (normalized.includes("codex")) return "Codex";
+  if (normalized.includes("claude")) return "Claude";
+  if (normalized.includes("qwen")) return "Qwen";
+  return "Assistant";
+}
+
+function AssistantTurn({ run, tool }: { run: ChatBlock[]; tool?: string }) {
+  const segments = groupAssistantBlocks(run);
+  return (
+    <div className="chat-turn assistant">
+      <div className="chat-role">
+        <span className="chat-av">✦</span> {assistantLabel(tool)}
+      </div>
+      {segments.map((segment, index) => {
+        if (segment.kind === "tools") {
+          return <ToolGroup key={`tools-${index}`} tools={segment.tools} />;
+        }
+        const { block, sourceIndex } = segment;
+        if (block.kind === "reasoning") {
+          return (
+            <details key={`r${sourceIndex}`} className="chat-work">
+              <summary>추론</summary>
+              <pre className="chat-reason">{block.text}</pre>
+            </details>
+          );
+        }
+        if (block.kind === "text") {
+          return (
+            <div key={`t${sourceIndex}`} className="chat-md">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {block.text ?? ""}
+              </ReactMarkdown>
+            </div>
+          );
+        }
+        if (block.kind === "image") {
+          return <div key={`i${sourceIndex}`} className="chat-md chat-image-note">🖼 이미지</div>;
+        }
+        return null;
+      })}
     </div>
   );
 }
@@ -284,6 +341,7 @@ export function ChatView({
   // Signature of the prompt the user just answered (hides its card).
   const [answeredPromptSig, setAnsweredPromptSig] = useState("");
   const [visible, setVisible] = useState(CHAT_PAGE);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   // Reserved (queued) messages waiting to be sent while the agent is working.
   // Restored from the module store so switching to the terminal and back keeps
   // them; every mutation writes back through mutateQueue.
@@ -317,6 +375,7 @@ export function ChatView({
     setIndexing(false);
     setArtifacts([]);
     setVisible(CHAT_PAGE);
+    setShowJumpToLatest(false);
     setPending([]);
     setQueue(queueStore.get(storeKey) ?? []); // restore this exact conversation's reservations
     setAnsweredPromptSig("");
@@ -385,8 +444,13 @@ export function ChatView({
         // sticks at the top when re-entering the chat from another session.
         if (nearBottom && !firstLoad) {
           requestAnimationFrame(() => {
-            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+              setShowJumpToLatest(false);
+            }
           });
+        } else if (!nearBottom && !firstLoad) {
+          setShowJumpToLatest(true);
         }
       } catch {
         // Keep the last conversation on a transient IPC error.
@@ -494,8 +558,19 @@ export function ChatView({
   // layout effect below has restored position for the pending load.
   const onScroll = () => {
     const el = scrollRef.current;
-    if (!el || status !== "ready" || !historyAvailable) return;
-    if (el.scrollTop < 80 && anchorHeightRef.current === null) loadOlder();
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowJumpToLatest(distanceFromBottom > 160);
+    if (status === "ready" && historyAvailable && el.scrollTop < 80 && anchorHeightRef.current === null) {
+      void loadOlder();
+    }
+  };
+
+  const jumpToLatest = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setShowJumpToLatest(false);
   };
 
   // Prepending older turns grows content above the viewport; shift scrollTop by
@@ -518,6 +593,7 @@ export function ChatView({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    setShowJumpToLatest(false);
     firstLoadRef.current = false;
   }, [status, blocks, visible]);
 
@@ -527,7 +603,7 @@ export function ChatView({
         <UserMessage text={blocks[range.start].text ?? ""} />
       </div>
     ) : (
-      <AssistantTurn key={`a${range.start}`} run={blocks.slice(range.start, range.end)} />
+      <AssistantTurn key={`a${range.start}`} run={blocks.slice(range.start, range.end)} tool={tool} />
     )
   );
 
@@ -698,34 +774,41 @@ export function ChatView({
         {indexing && (
           <div className="chat-indexing">이전 대화를 저장소에 정리하는 중… 최근 대화는 바로 볼 수 있습니다.</div>
         )}
-        <ConversationArtifacts artifacts={artifacts} />
-        {status === "ready" && visibleTurns}
-        {pending.map((t, i) => (
-          <div key={`pending-${i}`} className="chat-turn user">
-            <UserMessage text={t} />
-          </div>
-        ))}
-        {busy && status !== "unsupported" && status !== "loading" && (
-          <div className="chat-thinking" aria-live="polite">
-            <span className="chat-thinking-dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            {agentStatus === "recovering" ? "복구 중…" : initializing ? "시작 중…" : "작업 중…"}
-            {!initializing && (
-              <button
-                type="button"
-                className="chat-stop"
-                onClick={interrupt}
-                title="진행 취소 (Esc)"
-              >
-                ■ 중단
-              </button>
-            )}
-          </div>
-        )}
+        <div className="chat-thread">
+          <ConversationArtifacts artifacts={artifacts} />
+          {status === "ready" && visibleTurns}
+          {pending.map((t, i) => (
+            <div key={`pending-${i}`} className="chat-turn user pending">
+              <UserMessage text={t} />
+            </div>
+          ))}
+          {busy && status !== "unsupported" && status !== "loading" && (
+            <div className="chat-thinking" aria-live="polite">
+              <span className="chat-thinking-dots">
+                <i />
+                <i />
+                <i />
+              </span>
+              {agentStatus === "recovering" ? "복구 중…" : initializing ? "시작 중…" : "작업 중…"}
+              {!initializing && (
+                <button
+                  type="button"
+                  className="chat-stop"
+                  onClick={interrupt}
+                  title="진행 취소 (Esc)"
+                >
+                  ■ 중단
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+      {showJumpToLatest && (
+        <button type="button" className="chat-jump-latest" onClick={jumpToLatest}>
+          ↓ 최신 대화로 이동
+        </button>
+      )}
       {showPrompt && prompt && (
         <div className={`chat-prompt ${prompt.kind}`}>
           <div className="chat-prompt-text">

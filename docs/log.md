@@ -1,5 +1,10 @@
 # OKF Update Log
 
+## 2026-09-02
+
+* **Readable chat timeline**: Documented provider-labelled assistant cards, transcript-ordered tool groups, richer Markdown hierarchy, and explicit latest-message navigation.
+* **Tabbed session properties**: Documented separate basic-information, session-data, and launch-option panels with bounded independent scrolling.
+
 ## 2026-09-01
 
 * **Persistent conversation store**: Documented session-isolated SQLite chat restoration, incremental transcript indexing, paged history, referenced artifacts, and verified configurable storage migration.

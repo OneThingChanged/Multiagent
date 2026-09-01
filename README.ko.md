@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-[![Version](https://img.shields.io/badge/version-0.6.21-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.22-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -26,7 +26,7 @@
 - **Desktop Pet** — 포커스를 뺏지 않는 항상-위 마스코트. idle/working/done 표정, 작업 중·완료 수 배지, 최신 질문 말풍선. 클릭하면 해당 세션으로 이동
 
 ### 채팅 뷰
-- 원시 터미널 옆에서 쓰는 리치 대화 뷰(transcript 기반 도구 전용): 요약·diff가 있는 도구 호출 블록, 인라인 질문/권한 카드, "작업 중…" 인디케이터
+- 원시 터미널 옆에서 쓰는 가독성 높은 대화 뷰(transcript 기반 도구 전용): 프로바이더별 응답 카드, 상태가 보이는 시간순 도구 그룹, 구조화된 Markdown, 최신 대화 이동 버튼
 - 세션별 SQLite 이력으로 재시작 후 이전 대화를 복원하고, 오래된 대화를 나눠 불러오며, 에이전트 간 혼합 없이 참조된 산출물 파일을 관리
 - 컴포저에 `/` 명령·`@` 파일 자동완성, 클립보드 이미지 붙여넣기, 대용량 붙여넣기 칩 축소, 작업 중 메시지 큐잉, Esc로 취소
 
@@ -34,6 +34,7 @@
 - `SessionStart` hook이 각 도구의 세션 ID를 캡처. 세션을 다시 열면 `codex resume <id>` / `claude --resume <id>`가 자동 실행
 - 앱 재시작 후에도 스크롤백 스냅샷으로 터미널 화면 복원
 - **현재 세션으로 재등록** — 디스크의 최신 transcript를 스캔해 잃어버린 resume 대상을 복구
+- 세션 속성은 기본 정보, JSONL 저장소, 다음 실행부터 적용되는 옵션을 독립 스크롤 탭으로 분리
 
 ### 파일, 문서 & Git
 - **파일 트리 사이드바** — lazy 로딩 프로젝트 탐색기, git 상태 뱃지, 파일명 검색, 파일 작업 전체(새 파일/복제/이름 변경/삭제/경로 복사)
