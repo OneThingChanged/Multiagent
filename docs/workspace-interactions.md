@@ -27,6 +27,9 @@ sources:
   - id: terminal-area
     resource: ../app/src/components/TerminalArea.tsx
     title: "Terminal and chat surface"
+  - id: chat-view
+    resource: ../app/src/components/ChatView.tsx
+    title: "Persistent chat history and artifacts"
   - id: file-tree
     resource: ../app/src/components/FileTreePanel.tsx
     title: "File tree panel"
@@ -42,6 +45,9 @@ sources:
   - id: session-storage-service
     resource: ../app/electron/services/session-service.mjs
     title: "Session JSONL metadata catalog"
+  - id: conversation-store
+    resource: ../app/electron/services/conversation-store.mjs
+    title: "Per-session conversation store"
 ---
 
 # Workspace interactions
@@ -82,6 +88,12 @@ transcript-backed chat view; other tools remain terminal-only. Sending to an
 inactive chat-capable session first activates it and then waits for startup
 readiness before delivery.[^terminal-area]
 
+Chat history is loaded from a durable SQLite index keyed by MultiAgent agent,
+provider, and provider session ID. Recent blocks appear first, older blocks are
+paged on demand, and local composer text is recorded before PTY delivery then
+confirmed against the provider transcript without duplication. Referenced local
+files appear as session artifacts that can be opened from the chat view.[^chat-view][^conversation-store]
+
 Runtime state and work state are distinct. Starting/recovering describes the
 process lifecycle; working/waiting/blocked/done comes from hooks. A completion
 highlight clears when the user opens the session or submits new work.
@@ -116,9 +128,11 @@ in the same Screen layout without becoming agents.[^document-viewer]
 
 ## Settings and notifications
 
-Settings govern available tools, hooks, shortcuts, Remote, SSH, appearance, and
-session defaults. Launch-only settings apply on the next PTY start rather than
-mutating an existing process.[^settings]
+Settings govern available tools, hooks, shortcuts, Remote, SSH, appearance,
+session defaults, and the conversation-store directory. Moving that directory
+uses a verified database migration; resetting returns to the application-data
+default. Launch-only settings apply on the next PTY start rather than mutating
+an existing process.[^settings][^conversation-store]
 
 Completion attention is visual and can also drive desktop/Remote notifications.
 Notification state must never be treated as authoritative work completion; hook
@@ -133,8 +147,10 @@ The domain invariants behind these interactions are documented in
 [^sidebar]: Project and session sidebar
 [^pane-slot]: Pane and tab host
 [^terminal-area]: Terminal and chat surface
+[^chat-view]: Persistent chat history and artifacts
 [^file-tree]: File tree panel
 [^document-viewer]: Document viewer
 [^settings]: Settings surface
 [^session-storage-ui]: Session JSONL storage catalog UI
 [^session-storage-service]: Session JSONL metadata catalog
+[^conversation-store]: Per-session conversation store

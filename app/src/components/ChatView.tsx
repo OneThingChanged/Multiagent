@@ -15,7 +15,7 @@ import {
 } from "../lib/composerAutocomplete";
 import type { AppThemeId } from "../lib/appTheme";
 import { mergeChatHistory } from "../lib/chatHistory";
-import type { ChatBlock, ChatDiffLine } from "../platform/ipcContract";
+import type { ChatBlock, ChatBlocksResult, ChatDiffLine, ConversationArtifact } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
 
 // While the agent is working, composer sends are queued and drained one at a
@@ -37,40 +37,21 @@ type Attachment =
   | { kind: "image"; path: string; dataUrl: string }
   | { kind: "text"; text: string };
 const attachStore = new Map<string, Attachment[]>();
-// Parsed transcript tails are bounded by the Electron backend. Retain the
-// already-seen prefix for the life of this renderer so switching views or a
-// long-running conversation cannot make older turns disappear.
-const historyStore = new Map<string, { sessionId?: string; blocks: ChatBlock[] }>();
-
-function historyFor(agentId: string, sessionId?: string): ChatBlock[] {
-  const cached = historyStore.get(agentId);
-  if (!cached) return [];
-  if (sessionId && cached.sessionId && cached.sessionId !== sessionId) {
-    historyStore.delete(agentId);
-    return [];
-  }
-  if (sessionId && !cached.sessionId) cached.sessionId = sessionId;
-  return cached.blocks;
-}
-
-function rememberHistory(agentId: string, sessionId: string | undefined, blocks: ChatBlock[]) {
-  historyStore.set(agentId, { sessionId, blocks });
-}
 // A text paste at/above this size collapses into a chip instead of filling the
 // input inline.
 const PASTE_COLLAPSE_CHARS = 300;
 const PASTE_COLLAPSE_LINES = 5;
 
-// Desktop conversation view: renders an agent's own transcript (Codex/Claude)
-// as a chat, the same shape the Remote client shows. Polls chat_blocks while
-// visible and skips re-render when nothing changed so open tool details stay
-// open. The terminal remains the source of truth; this is a read-only view.
+// Desktop conversation view: renders the session-specific conversation kept in
+// MultiAgent's SQLite store. Provider JSONL is incrementally ingested by the
+// Electron backend, so unmounting this renderer never loses or mixes history.
 
 type Status = "loading" | "unsupported" | "empty" | "ready";
 
 // Render only the most recent N turns so a long transcript paints fast;
 // older turns are revealed on demand.
 const CHAT_PAGE = 10;
+const CHAT_DB_PAGE = 400;
 
 // Pull image file paths (quoted, Windows, or POSIX absolute) out of a user
 // message so they can render as thumbnails in the bubble instead of raw paths.
@@ -119,6 +100,42 @@ function UserMessage({ text }: { text: string }) {
         <ChatImage key={`${p}-${i}`} path={p} />
       ))}
     </div>
+  );
+}
+
+function artifactBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ConversationArtifacts({ artifacts }: { artifacts: ConversationArtifact[] }) {
+  if (!artifacts.length) return null;
+  const openArtifact = (artifact: ConversationArtifact) => {
+    void invoke("open_local_path", { path: artifact.path }).catch(() => {});
+  };
+  return (
+    <details className="chat-artifacts">
+      <summary>결과물 · {artifacts.length}개</summary>
+      <div className="chat-artifact-list">
+        {artifacts.map((artifact) => {
+          const name = artifact.path.split(/[\\/]/).pop() || artifact.path;
+          return (
+            <button
+              type="button"
+              className="chat-artifact"
+              key={artifact.path}
+              title={artifact.path}
+              onClick={() => openArtifact(artifact)}
+            >
+              <span className="chat-artifact-kind">{artifact.kind.toUpperCase()}</span>
+              <span className="chat-artifact-name">{name}</span>
+              <span className="chat-artifact-size">{artifactBytes(artifact.size)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -247,9 +264,14 @@ export function ChatView({
   assistantMessage?: string | null;
   folder?: string;
 }) {
-  const initialHistory = historyFor(agentId, sessionId);
-  const [blocks, setBlocks] = useState<ChatBlock[]>(() => initialHistory);
-  const [status, setStatus] = useState<Status>(() => initialHistory.length ? "ready" : "loading");
+  const storeKey = `${agentId}:${sessionId || "unbound"}`;
+  const [blocks, setBlocks] = useState<ChatBlock[]>([]);
+  const blocksRef = useRef<ChatBlock[]>([]);
+  const [status, setStatus] = useState<Status>("loading");
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [artifacts, setArtifacts] = useState<ConversationArtifact[]>([]);
   const [tool, setTool] = useState<string | undefined>(undefined);
   // Turn lifecycle from the transcript — overrides a stale hook "working".
   const [lifecycle, setLifecycle] = useState<"working" | "idle" | undefined>(undefined);
@@ -265,7 +287,7 @@ export function ChatView({
   // Reserved (queued) messages waiting to be sent while the agent is working.
   // Restored from the module store so switching to the terminal and back keeps
   // them; every mutation writes back through mutateQueue.
-  const [queue, setQueue] = useState<string[]>(() => queueStore.get(agentId) ?? []);
+  const [queue, setQueue] = useState<string[]>(() => queueStore.get(storeKey) ?? []);
   const lastDispatchRef = useRef(0);
   // Messages just sent from the composer, echoed instantly so the chat updates
   // without waiting for the next poll; dropped once the transcript includes them.
@@ -286,31 +308,47 @@ export function ChatView({
   const clearedSigRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const cached = historyFor(agentId, sessionId);
     keyRef.current = "";
-    setStatus(cached.length ? "ready" : "loading");
-    setBlocks(cached);
+    blocksRef.current = [];
+    setStatus("loading");
+    setBlocks([]);
+    setHasOlder(false);
+    setLoadingOlder(false);
+    setIndexing(false);
+    setArtifacts([]);
     setVisible(CHAT_PAGE);
     setPending([]);
-    setQueue(queueStore.get(agentId) ?? []); // restore this session's reservations
+    setQueue(queueStore.get(storeKey) ?? []); // restore this exact conversation's reservations
     setAnsweredPromptSig("");
     setStoppedKey(null);
     firstLoadRef.current = true;
     clearedSigRef.current = null;
-  }, [agentId, sessionId]);
+  }, [agentId, sessionId, storeKey]);
 
   useEffect(() => {
     let cancelled = false;
     const fetchBlocks = async () => {
       try {
-        const result = await invoke("chat_blocks", { id: agentId, sessionId });
+        const result = await invoke("chat_blocks", {
+          id: agentId,
+          sessionId,
+          limit: CHAT_DB_PAGE,
+        });
         if (cancelled) return;
         if (result.unsupported) {
           setStatus("unsupported");
           return;
         }
         const incoming = result.blocks ?? [];
-        const next = mergeChatHistory(historyFor(agentId, sessionId), incoming);
+        const switchingToPersistentHistory =
+          incoming.some((block) => block.sequence != null) &&
+          blocksRef.current.some((block) => block.sequence == null);
+        const next = switchingToPersistentHistory
+          ? incoming
+          : mergeChatHistory(blocksRef.current, incoming);
+        setHasOlder(result.hasOlder === true);
+        setIndexing(result.indexing === true);
+        if (result.artifacts) setArtifacts(result.artifacts);
         if (result.tool) setTool(result.tool);
         setLifecycle(result.lifecycle);
         // Drop optimistic echoes now present in the transcript (exact match on
@@ -320,7 +358,7 @@ export function ChatView({
         );
         setPending((prev) => prev.filter((t) => !userTexts.has(t)));
         const last = next[next.length - 1];
-        const key = `${next.length}:${String(last?.text ?? last?.output ?? "").length}`;
+        const key = `${next.length}:${last?.sequence ?? "direct"}:${JSON.stringify(last ?? {}).slice(-160)}`;
         // After "/clear", keep the view empty until the transcript actually
         // changes (agent emptied it or cut over to a new session). Restoring the
         // pre-clear content on the next poll would undo the clear visually.
@@ -328,7 +366,6 @@ export function ChatView({
           if (key === clearedSigRef.current) return;
           clearedSigRef.current = null;
         }
-        rememberHistory(agentId, sessionId, next);
         if (key === keyRef.current) return;
         keyRef.current = key;
         msgKeyRef.current = key;
@@ -338,6 +375,7 @@ export function ChatView({
         const nearBottom = el
           ? el.scrollHeight - el.scrollTop - el.clientHeight < 80
           : true;
+        blocksRef.current = next;
         setBlocks(next);
         setStatus(next.length ? "ready" : "empty");
         // Follow live updates only when the user was already near the bottom.
@@ -404,11 +442,51 @@ export function ChatView({
   }
 
   const hidden = Math.max(0, ranges.length - visible);
+  const historyAvailable = hidden > 0 || hasOlder;
 
-  const loadOlder = () => {
+  const loadOlder = async () => {
+    if (loadingOlder) return;
     const el = scrollRef.current;
     anchorHeightRef.current = el ? el.scrollHeight : null;
-    setVisible((v) => v + CHAT_PAGE * 2);
+    if (hidden > 0) {
+      setVisible((v) => v + CHAT_PAGE * 2);
+      return;
+    }
+    const beforeSequence = blocksRef.current[0]?.sequence;
+    if (!beforeSequence) {
+      anchorHeightRef.current = null;
+      setHasOlder(false);
+      return;
+    }
+    setLoadingOlder(true);
+    try {
+      const result: ChatBlocksResult = await invoke("chat_blocks", {
+        id: agentId,
+        sessionId,
+        beforeSequence,
+        limit: CHAT_DB_PAGE,
+      });
+      const known = new Set(
+        blocksRef.current.map((block) => block.sequence).filter((value) => value != null)
+      );
+      const older = (result.blocks ?? []).filter(
+        (block) => block.sequence == null || !known.has(block.sequence)
+      );
+      if (older.length > 0) {
+        const next = older.concat(blocksRef.current);
+        blocksRef.current = next;
+        setBlocks(next);
+        setVisible((value) => value + CHAT_PAGE * 2);
+      } else {
+        anchorHeightRef.current = null;
+      }
+      setHasOlder(result.hasOlder === true);
+      if (result.artifacts) setArtifacts(result.artifacts);
+    } catch {
+      anchorHeightRef.current = null;
+    } finally {
+      setLoadingOlder(false);
+    }
   };
 
   // Auto-reveal older turns when the user scrolls to the top (button remains
@@ -416,7 +494,7 @@ export function ChatView({
   // layout effect below has restored position for the pending load.
   const onScroll = () => {
     const el = scrollRef.current;
-    if (!el || status !== "ready" || hidden <= 0) return;
+    if (!el || status !== "ready" || !historyAvailable) return;
     if (el.scrollTop < 80 && anchorHeightRef.current === null) loadOlder();
   };
 
@@ -428,7 +506,7 @@ export function ChatView({
       el.scrollTop += el.scrollHeight - anchorHeightRef.current;
       anchorHeightRef.current = null;
     }
-  }, [visible]);
+  }, [visible, blocks]);
 
   // First paint after a fresh mount (opening the chat, or re-entering it from
   // another session) pins to the bottom once the blocks have actually committed
@@ -530,8 +608,8 @@ export function ChatView({
         // /clear resets the agent's conversation — mirror it in the view right
         // away and suppress the pre-clear transcript until it changes on disk.
         clearedSigRef.current = keyRef.current || "empty";
-        historyStore.delete(agentId);
         keyRef.current = "";
+        blocksRef.current = [];
         setBlocks([]);
         setPending([]);
         setVisible(CHAT_PAGE);
@@ -540,6 +618,11 @@ export function ChatView({
         firstLoadRef.current = true;
       } else {
         setPending((p) => [...p, value]);
+        void invoke("conversation_record_user_message", {
+          id: agentId,
+          sessionId,
+          text: value,
+        }).catch(() => {});
       }
       void invoke("write_pty", { id: agentId, data: value }).catch(() => {});
       window.setTimeout(() => {
@@ -552,7 +635,7 @@ export function ChatView({
       window.setTimeout(() => fetchRef.current(), 700);
       window.setTimeout(() => fetchRef.current(), 1600);
     },
-    [agentId]
+    [agentId, sessionId]
   );
 
   // Mutate the queue and mirror it into the module store so it survives the
@@ -561,12 +644,12 @@ export function ChatView({
     (fn: (q: string[]) => string[]) => {
       setQueue((prev) => {
         const next = fn(prev);
-        if (next.length) queueStore.set(agentId, next);
-        else queueStore.delete(agentId);
+        if (next.length) queueStore.set(storeKey, next);
+        else queueStore.delete(storeKey);
         return next;
       });
     },
-    [agentId]
+    [storeKey]
   );
 
   // Composer submit: send now if the agent is ready and nothing is queued;
@@ -603,11 +686,19 @@ export function ChatView({
         {status === "empty" && !pending.length && (
           <div className="chat-empty">아직 대화 기록이 없습니다.</div>
         )}
-        {status === "ready" && hidden > 0 && (
-          <button type="button" className="chat-more" onClick={loadOlder}>
-            ▲ 이전 대화 더 보기 ({hidden})
+        {status === "ready" && historyAvailable && (
+          <button type="button" className="chat-more" onClick={loadOlder} disabled={loadingOlder}>
+            {loadingOlder
+              ? "이전 대화를 불러오는 중…"
+              : hidden > 0
+                ? `▲ 이전 대화 더 보기 (${hidden})`
+                : "▲ 저장된 이전 대화 더 보기"}
           </button>
         )}
+        {indexing && (
+          <div className="chat-indexing">이전 대화를 저장소에 정리하는 중… 최근 대화는 바로 볼 수 있습니다.</div>
+        )}
+        <ConversationArtifacts artifacts={artifacts} />
         {status === "ready" && visibleTurns}
         {pending.map((t, i) => (
           <div key={`pending-${i}`} className="chat-turn user">
@@ -677,7 +768,7 @@ export function ChatView({
         </div>
       )}
       {status !== "unsupported" && (
-        <ChatComposer agentId={agentId} onSend={sendMessage} busy={busy} tool={tool} folder={folder} />
+        <ChatComposer storageKey={storeKey} onSend={sendMessage} busy={busy} tool={tool} folder={folder} />
       )}
     </div>
   );
@@ -690,21 +781,21 @@ export function ChatView({
 type AcItem = { value: string; label: string; desc?: string };
 
 function ChatComposer({
-  agentId,
+  storageKey,
   onSend,
   busy,
   tool,
   folder,
 }: {
-  agentId: string;
+  storageKey: string;
   onSend: (text: string) => void;
   busy: boolean;
   tool?: string;
   folder?: string;
 }) {
-  const [text, setText] = useState(() => draftStore.get(agentId) ?? "");
+  const [text, setText] = useState(() => draftStore.get(storageKey) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
-    () => attachStore.get(agentId) ?? []
+    () => attachStore.get(storageKey) ?? []
   );
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // Autocomplete popup (/slash or @file).
@@ -775,20 +866,20 @@ function ChatComposer({
 
   // Restore the persisted draft/attachments when the session changes.
   useEffect(() => {
-    setText(draftStore.get(agentId) ?? "");
-    setAttachments(attachStore.get(agentId) ?? []);
-  }, [agentId]);
+    setText(draftStore.get(storageKey) ?? "");
+    setAttachments(attachStore.get(storageKey) ?? []);
+  }, [storageKey]);
 
   const updateText = (value: string) => {
     setText(value);
-    if (value) draftStore.set(agentId, value);
-    else draftStore.delete(agentId);
+    if (value) draftStore.set(storageKey, value);
+    else draftStore.delete(storageKey);
   };
   const updateAttachments = (fn: (a: Attachment[]) => Attachment[]) => {
     setAttachments((prev) => {
       const next = fn(prev);
-      if (next.length) attachStore.set(agentId, next);
-      else attachStore.delete(agentId);
+      if (next.length) attachStore.set(storageKey, next);
+      else attachStore.delete(storageKey);
       return next;
     });
   };

@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-[![Version](https://img.shields.io/badge/version-0.6.20-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.21-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -27,6 +27,7 @@
 
 ### 채팅 뷰
 - 원시 터미널 옆에서 쓰는 리치 대화 뷰(transcript 기반 도구 전용): 요약·diff가 있는 도구 호출 블록, 인라인 질문/권한 카드, "작업 중…" 인디케이터
+- 세션별 SQLite 이력으로 재시작 후 이전 대화를 복원하고, 오래된 대화를 나눠 불러오며, 에이전트 간 혼합 없이 참조된 산출물 파일을 관리
 - 컴포저에 `/` 명령·`@` 파일 자동완성, 클립보드 이미지 붙여넣기, 대용량 붙여넣기 칩 축소, 작업 중 메시지 큐잉, Esc로 취소
 
 ### 세션 Resume

@@ -34,6 +34,7 @@ import {
 } from "./services/miracontrol-integration.mjs";
 import { ReopenJournal } from "./services/reopen-journal.mjs";
 import { SessionService } from "./services/session-service.mjs";
+import { ConversationStoreManager } from "./services/conversation-store.mjs";
 import {
   CodexScrollbackFilter,
   PassThroughTerminalFilter,
@@ -111,6 +112,7 @@ const packagedRendererUrl = pathToFileURL(path.join(appRoot, "dist", "index.html
 const MAX_DOC_FILES = 500;
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_FOREGROUND_CONVERSATION_INGEST_BYTES = 16 * 1024 * 1024;
 const DOC_EXTENSIONS = new Set([".md", ".markdown", ".html", ".htm"]);
 const IMAGE_MIME = new Map([
   [".png", "image/png"],
@@ -319,6 +321,10 @@ const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
   runtimeVariant.localDataDirectory
 );
+const conversationStoreManager = new ConversationStoreManager({
+  configDir: app.getPath("userData"),
+  defaultRoot: path.join(hookBaseDir, "conversation-store"),
+});
 const browserMcpScriptPath = app.isPackaged
   ? path.join(process.resourcesPath, "app.asar.unpacked", "electron", "services", "browser-mcp-server.mjs")
   : path.join(appRoot, "electron", "services", "browser-mcp-server.mjs");
@@ -343,6 +349,33 @@ function publishAgentHookEvent(eventName, payload) {
     const transcriptPath = normalizeTranscriptPath(payload.transcript_path);
     if (transcriptPath) agentTranscripts.set(payload.id, transcriptPath);
     if (payload.session_id) agentSessionIds.set(payload.id, payload.session_id);
+    if (transcriptPath && payload.session_id) {
+      const catalogAgent = usageIndex?.catalog?.agents?.find(
+        (agent) => agent.id === payload.id
+      );
+      const provider =
+        ptys.get(payload.id)?.aiToolId ||
+        catalogAgent?.aiToolId ||
+        (transcriptPath.replace(/\\/g, "/").toLowerCase().includes("/.claude/projects/")
+          ? "claude"
+          : transcriptPath.replace(/\\/g, "/").toLowerCase().includes("/.codex/sessions/")
+            ? "codex"
+            : null);
+      if (provider === "codex" || provider === "claude") {
+        void conversationStoreManager.ingestTranscript({
+          agentId: payload.id,
+          sessionId: payload.session_id,
+          provider,
+          transcriptPath,
+          projectPath: payload.cwd || catalogAgent?.folder || ptys.get(payload.id)?.cwd || null,
+          title: catalogAgent?.name || ptys.get(payload.id)?.name || null,
+        }).then(() => {
+          sendEventToAll("chat:changed", { path: transcriptPath, agentId: payload.id });
+        }).catch((error) => {
+          console.warn("[electron] conversation ingest failed", error?.message || error);
+        });
+      }
+    }
     if (payload.event === "done" && transcriptPath) {
       try {
         usageIndex.ingestHook(
@@ -2857,12 +2890,37 @@ function resolveChatTranscriptBySession(preferredTool, sessionId) {
   return null;
 }
 
-async function chatBlocksForAgent(agentId, sessionIdArg) {
+function conversationMetadataForAgent(agentId) {
+  const id = asString(agentId).trim();
+  const catalogAgent = usageIndex.catalog.agents.find((agent) => agent.id === id);
+  const live = ptys.get(id);
+  return {
+    id,
+    catalogAgent,
+    provider: live?.aiToolId || catalogAgent?.aiToolId || agentTranscriptTool.get(id) || null,
+    projectPath: catalogAgent?.folder || live?.cwd || null,
+    title: catalogAgent?.name || live?.name || null,
+  };
+}
+
+async function storedChatBlocks({ id, sessionId, tool, beforeSequence, limit }) {
+  if (!sessionId || (tool !== "codex" && tool !== "claude")) return null;
+  return conversationStoreManager.listBlocks({
+    agentId: id,
+    sessionId,
+    provider: tool,
+    beforeSequence,
+    limit,
+  });
+}
+
+async function chatBlocksForAgent(agentId, sessionIdArg, options = {}) {
   const id = asString(agentId).trim();
   // Prefer the live PTY, but fall back to the synced catalog so idle/restored
   // sessions (no live PTY, no fresh hook) still resolve their tool + session.
-  const catalogAgent = usageIndex.catalog.agents.find((agent) => agent.id === id);
-  const declaredTool = ptys.get(id)?.aiToolId || catalogAgent?.aiToolId || null;
+  const metadata = conversationMetadataForAgent(id);
+  const catalogAgent = metadata.catalogAgent;
+  const declaredTool = metadata.provider;
   // The frontend passes the agent's own CLI session id (provider/last session),
   // which survives restarts — the authoritative key for its transcript.
   const sessionId =
@@ -2880,6 +2938,16 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
   }
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
     if ((transcriptMissUntil.get(id) ?? 0) > Date.now()) {
+      const stored = await storedChatBlocks({
+        id,
+        sessionId,
+        tool: declaredTool,
+        beforeSequence: options.beforeSequence,
+        limit: options.limit,
+      });
+      if (stored?.conversationId) {
+        return { ...stored, truncated: stored.hasOlder, missing: true, tool: declaredTool, sessionId };
+      }
       return { blocks: [], truncated: false, missing: true, tool: declaredTool ?? undefined, sessionId };
     }
     const resolved = resolveChatTranscriptBySession(declaredTool, sessionId);
@@ -2897,10 +2965,73 @@ async function chatBlocksForAgent(agentId, sessionIdArg) {
     if (declaredTool !== "codex" && declaredTool !== "claude") {
       return { blocks: [], truncated: false, missing: true, unsupported: true, sessionId };
     }
+    const stored = await storedChatBlocks({
+      id,
+      sessionId,
+      tool: declaredTool,
+      beforeSequence: options.beforeSequence,
+      limit: options.limit,
+    });
+    if (stored?.conversationId) {
+      return { ...stored, truncated: stored.hasOlder, missing: true, tool: declaredTool, sessionId };
+    }
     return { blocks: [], truncated: false, missing: true, tool: declaredTool, sessionId };
   }
   ensureChatWatch(transcriptPath); // push a refresh when the file changes
   const result = await readChatTranscript(tool, transcriptPath);
+  try {
+    const ingestInput = {
+      agentId: id,
+      sessionId,
+      provider: tool,
+      transcriptPath,
+      projectPath: metadata.projectPath,
+      title: metadata.title,
+    };
+    const transcriptStat = await fsPromises.stat(transcriptPath);
+    const progress = await conversationStoreManager.sourceProgress(ingestInput);
+    const remainingBytes = Math.max(0, transcriptStat.size - progress.lastOffset);
+    if (
+      progress.conversationId &&
+      remainingBytes > MAX_FOREGROUND_CONVERSATION_INGEST_BYTES
+    ) {
+      // A multi-GB provider transcript must never block opening Chat. Keep the
+      // recent direct tail visible while the durable store catches up in the
+      // background; source offsets make this resumable after restart.
+      void conversationStoreManager.ingestTranscript(ingestInput).catch((error) => {
+        console.warn("[electron] background conversation ingest failed", error?.message || error);
+      });
+      return {
+        ...result,
+        indexing: true,
+        conversationId: progress.conversationId,
+        tool,
+        sessionId,
+      };
+    }
+    if (remainingBytes > 0) {
+      await conversationStoreManager.ingestTranscript(ingestInput);
+    }
+    const stored = await storedChatBlocks({
+      id,
+      sessionId,
+      tool,
+      beforeSequence: options.beforeSequence,
+      limit: options.limit,
+    });
+    if (stored?.conversationId) {
+      return {
+        ...stored,
+        truncated: stored.hasOlder,
+        missing: false,
+        lifecycle: result.lifecycle,
+        tool,
+        sessionId,
+      };
+    }
+  } catch (error) {
+    console.warn("[electron] conversation store read failed", error?.message || error);
+  }
   return { ...result, tool, sessionId };
 }
 
@@ -4604,7 +4735,40 @@ async function invokeCommand(event, command, rawArgs) {
     case "read_chat_transcript":
       return readChatTranscript(args.tool, args.path);
     case "chat_blocks":
-      return chatBlocksForAgent(args.id, args.sessionId);
+      return chatBlocksForAgent(args.id, args.sessionId, {
+        beforeSequence: args.beforeSequence,
+        limit: args.limit,
+      });
+    case "conversation_record_user_message": {
+      const metadata = conversationMetadataForAgent(args.id);
+      const sessionId =
+        asString(args.sessionId).trim() ||
+        agentSessionIds.get(metadata.id) ||
+        metadata.catalogAgent?.lastSessionId ||
+        null;
+      if (
+        !sessionId ||
+        (metadata.provider !== "codex" && metadata.provider !== "claude")
+      ) {
+        return null;
+      }
+      const recorded = await conversationStoreManager.recordUserMessage({
+        agentId: metadata.id,
+        sessionId,
+        provider: metadata.provider,
+        projectPath: metadata.projectPath,
+        title: metadata.title,
+        text: args.text,
+      });
+      if (recorded) {
+        sendEventToAll("chat:changed", { agentId: metadata.id, conversationId: recorded.conversationId });
+      }
+      return recorded;
+    }
+    case "conversation_storage_get":
+      return conversationStoreManager.status();
+    case "conversation_storage_set":
+      return conversationStoreManager.setRoot(args.path ?? null);
     case "session_storage_list": {
       const sessions = await sessionService.storageForSessions({
         folder: args.folder,
@@ -4979,6 +5143,7 @@ app.on("before-quit", (event) => {
   void usageDashboard.stop();
   void documentPreviewService.close();
   usageIndex.close();
+  conversationStoreManager.close();
   void remoteService.stop();
   void tunnelService.stop();
 });

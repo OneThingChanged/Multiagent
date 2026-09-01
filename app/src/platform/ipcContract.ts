@@ -15,6 +15,7 @@ export type RuntimeCommand =
   | "read_markdown_file" | "resolve_markdown_path" | "list_directory"
   | "list_git_submodules"
   | "read_text_file" | "read_chat_transcript" | "chat_blocks" | "search_files"
+  | "conversation_record_user_message" | "conversation_storage_get" | "conversation_storage_set"
   | "session_storage_list" | "session_storage_delete"
   | "git_status" | "git_changes" | "git_stage"
   | "git_unstage" | "git_discard" | "git_commit"
@@ -194,6 +195,43 @@ export type ChatBlock = {
   diff?: ChatDiffLine[];
   output?: string;
   isError?: boolean;
+  sequence?: number;
+};
+
+export type ChatBlocksResult = {
+  blocks: ChatBlock[];
+  truncated?: boolean;
+  missing?: boolean;
+  unsupported?: boolean;
+  tool?: string;
+  lifecycle?: "working" | "idle";
+  sessionId?: string;
+  conversationId?: string | null;
+  hasOlder?: boolean;
+  firstSequence?: number | null;
+  total?: number;
+  indexing?: boolean;
+  artifacts?: ConversationArtifact[];
+};
+
+export type ConversationArtifact = {
+  kind: string;
+  path: string;
+  size: number;
+  modifiedAt: number | null;
+};
+
+export type ConversationStorageStatus = {
+  path: string;
+  defaultPath: string;
+  custom: boolean;
+  databasePath: string;
+  available: boolean;
+  error: string | null;
+  bytes: number;
+  conversations: number;
+  blocks: number;
+  artifacts: number;
 };
 
 export type SessionStorageQuery = {
@@ -305,8 +343,20 @@ export type RuntimeCommandContract = {
     result: { blocks: ChatBlock[]; truncated: boolean; missing: boolean };
   };
   chat_blocks: {
-    args: { id: string; sessionId?: string };
-    result: { blocks: ChatBlock[]; truncated?: boolean; missing?: boolean; unsupported?: boolean; tool?: string; lifecycle?: "working" | "idle"; sessionId?: string };
+    args: { id: string; sessionId?: string; beforeSequence?: number; limit?: number };
+    result: ChatBlocksResult;
+  };
+  conversation_record_user_message: {
+    args: { id: string; sessionId?: string; text: string };
+    result: { conversationId: string; sequence: number; block: ChatBlock } | null;
+  };
+  conversation_storage_get: {
+    args: Record<string, never>;
+    result: ConversationStorageStatus;
+  };
+  conversation_storage_set: {
+    args: { path: string | null };
+    result: ConversationStorageStatus;
   };
   session_storage_list: {
     args: {

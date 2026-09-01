@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.20-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.21-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -27,6 +27,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 
 ### Chat View
 - A rich conversation view alongside the raw terminal (for transcript-based tools): tool-call blocks with summaries and edit diffs, inline question/permission cards, thinking indicator
+- Per-session SQLite history restores prior conversation blocks after restart, pages older turns on demand, and catalogs referenced output files without mixing agents
 - Composer with `/` command and `@` file autocomplete, clipboard-image paste, large-paste collapsing, message queueing while the agent works, Esc to cancel
 
 ### Session Resume

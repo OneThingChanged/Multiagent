@@ -31,6 +31,7 @@ import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import type { CommandShortcuts } from "../lib/commandRegistry";
 import type { SshHost } from "../types";
 import { toolForId } from "../types";
+import type { ConversationStorageStatus } from "../platform/ipcContract";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
   { id: "system", label: "System" },
@@ -135,6 +136,7 @@ type DiagnosticExportState =
 type SettingsCategory =
   | "general"
   | "agents"
+  | "data"
   | "shortcuts"
   | "hooks"
   | "dashboard"
@@ -177,6 +179,9 @@ const IconInfo = () => (
 const IconBranch = () => (
   <svg {...svgProps}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="9" r="2.5" /><path d="M6 8.5v7" /><path d="M18 11.5v1a4 4 0 0 1-4 4H6" /></svg>
 );
+const IconDatabase = () => (
+  <svg {...svgProps}><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></svg>
+);
 
 type NavEntry = {
   id: SettingsCategory;
@@ -191,6 +196,7 @@ type NavEntry = {
 const ALL_NAV_ENTRIES: NavEntry[] = [
   { id: "general", group: "Workspace", label: "General", title: "General", sub: "테마 · 알림음 · 데스크톱 펫", keywords: "theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
   { id: "agents", group: "Workspace", label: "Agents", title: "Agents", sub: "연결 상황 · 사용량 바 · Qwen 리전", keywords: "agent 에이전트 연결 connection status usage 사용량 bar qwen region 리전 나라 country", icon: <IconActivity /> },
+  { id: "data", group: "Workspace", label: "Data & Sessions", title: "Data & Sessions", sub: "세션별 대화 · 산출물 저장 위치", keywords: "data 데이터 conversation 대화 session 세션 storage 저장소 path 경로 artifact 산출물", icon: <IconDatabase /> },
   { id: "shortcuts", group: "Workspace", label: "Shortcuts", title: "Shortcuts", sub: "명령별 키보드 단축키", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
   { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
   { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
@@ -222,7 +228,8 @@ function emptySshDraft(): SshHost {
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 type QwenRegionInfo = {
@@ -480,6 +487,60 @@ export function SettingsModal({
   });
   const [diagnosticExport, setDiagnosticExport] =
     useState<DiagnosticExportState>({ status: "idle" });
+  const [conversationStorage, setConversationStorage] =
+    useState<ConversationStorageStatus | null>(null);
+  const [conversationStorageBusy, setConversationStorageBusy] = useState(false);
+  const [conversationStorageError, setConversationStorageError] = useState<string | null>(null);
+
+  const refreshConversationStorage = () => {
+    setConversationStorageError(null);
+    void invoke("conversation_storage_get", {})
+      .then(setConversationStorage)
+      .catch((error) => setConversationStorageError(String(error)));
+  };
+
+  useEffect(refreshConversationStorage, []);
+
+  const applyConversationStoragePath = async (nextPath: string | null) => {
+    setConversationStorageBusy(true);
+    setConversationStorageError(null);
+    try {
+      const next = await invoke("conversation_storage_set", { path: nextPath });
+      setConversationStorage(next);
+    } catch (error) {
+      setConversationStorageError(
+        error instanceof Error ? error.message : String(error)
+      );
+    } finally {
+      setConversationStorageBusy(false);
+    }
+  };
+
+  const handlePickConversationStorage = async () => {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (typeof selected === "string" && selected) {
+        await applyConversationStoragePath(selected);
+      }
+    } catch (error) {
+      setConversationStorageError(
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
+
+  const handleResetConversationStorage = () => {
+    if (!conversationStorage?.custom) return;
+    if (!window.confirm("기존 대화 저장소를 기본 Local AppData 경로로 안전하게 복사할까요?")) return;
+    void applyConversationStoragePath(null);
+  };
+
+  const handleOpenConversationStorage = () => {
+    if (!conversationStorage?.path) return;
+    void invoke("open_local_path", { path: conversationStorage.path }).catch((error) => {
+      setConversationStorageError(error instanceof Error ? error.message : String(error));
+    });
+  };
 
   const [sshHosts, setSshHosts] = useState<SshHost[]>(() => loadSshHosts());
   const [sshDraft, setSshDraft] = useState<SshHost>(() => emptySshDraft());
@@ -1147,6 +1208,110 @@ export function SettingsModal({
             showUsageBar={showUsageBar}
             onShowUsageBarChange={onShowUsageBarChange}
           />
+        )}
+
+        {tab === "data" && (
+        <div className="app-settings-section">
+          <div className="field-label">대화·산출물 저장 위치</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">현재 위치</span>
+              <span className="app-about-value">
+                {conversationStorage?.custom ? "사용자 지정" : "Local AppData (기본값)"}
+              </span>
+            </div>
+            <label className="field app-remote-field">
+              <span className="field-label">Storage root</span>
+              <div className="folder-row">
+                <input
+                  value={conversationStorage?.path ?? "불러오는 중…"}
+                  readOnly
+                  spellCheck={false}
+                  title={conversationStorage?.path ?? ""}
+                />
+                <button
+                  type="button"
+                  className="browse-btn"
+                  onClick={handlePickConversationStorage}
+                  disabled={conversationStorageBusy}
+                >
+                  Choose…
+                </button>
+              </div>
+            </label>
+            <div className="app-update-message">
+              세션별 사용자 메시지·AI 응답·도구 실행·발견된 산출물 경로를 MultiAgent 전용
+              SQLite에 저장합니다. 새 위치를 선택하면 기존 데이터를 검증한 뒤 복사하고,
+              이전 저장소는 백업으로 남깁니다. 전용 빈 폴더를 선택해 주세요.
+            </div>
+            {conversationStorageError && (
+              <div className="app-update-message app-update-error">
+                {conversationStorageError}
+              </div>
+            )}
+            {conversationStorage && !conversationStorage.available && (
+              <div className="app-update-message app-update-error">
+                저장소 연결 안 됨: {conversationStorage.error}. 원본 Codex·Claude 기록으로 임시 표시하며,
+                이 위치를 다시 선택하거나 다른 전용 폴더로 변경해 주세요.
+              </div>
+            )}
+            <div className="app-update-actions">
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleOpenConversationStorage}
+                disabled={!conversationStorage || conversationStorageBusy}
+              >
+                폴더 열기
+              </button>
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={handleResetConversationStorage}
+                disabled={!conversationStorage?.custom || conversationStorageBusy}
+              >
+                기본 경로 복원
+              </button>
+              <button
+                className="btn-secondary app-update-btn"
+                onClick={refreshConversationStorage}
+                disabled={conversationStorageBusy}
+              >
+                {conversationStorageBusy ? "이동 중…" : "새로고침"}
+              </button>
+            </div>
+          </div>
+
+          <div className="field-label" style={{ marginTop: 14 }}>저장 현황</div>
+          <div className="app-about-card">
+            <div className="app-about-row">
+              <span className="app-about-label">대화</span>
+              <span className="app-about-value">
+                {conversationStorage ? `${conversationStorage.conversations.toLocaleString()}개` : "—"}
+              </span>
+            </div>
+            <div className="app-about-row">
+              <span className="app-about-label">대화 블록</span>
+              <span className="app-about-value">
+                {conversationStorage ? `${conversationStorage.blocks.toLocaleString()}개` : "—"}
+              </span>
+            </div>
+            <div className="app-about-row">
+              <span className="app-about-label">산출물 인덱스</span>
+              <span className="app-about-value">
+                {conversationStorage ? `${conversationStorage.artifacts.toLocaleString()}개` : "—"}
+              </span>
+            </div>
+            <div className="app-about-row">
+              <span className="app-about-label">사용 용량</span>
+              <span className="app-about-value">
+                {conversationStorage ? formatBytes(conversationStorage.bytes) : "—"}
+              </span>
+            </div>
+            <div className="app-update-message">
+              기본 위치는 Windows Local AppData이며 Git 저장소나 설치 파일에는 포함되지 않습니다.
+              원본 Codex·Claude JSONL이 없어져도 이미 수집한 대화는 이 저장소에서 계속 볼 수 있습니다.
+            </div>
+          </div>
+        </div>
         )}
 
         {tab === "shortcuts" && (

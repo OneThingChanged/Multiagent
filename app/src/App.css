@@ -5312,6 +5312,16 @@ body.files-resizing .files-resizer::after {
 .chat-empty { color: var(--app-muted); font-size: 13px; text-align: center; padding: 30px 0; }
 .chat-more { align-self: center; margin: 2px auto 10px; padding: 7px 16px; border: 1px solid var(--app-border); border-radius: 16px; background: transparent; color: var(--app-muted); font-size: 12px; cursor: pointer; }
 .chat-more:hover { color: var(--app-text); }
+.chat-more:disabled { cursor: wait; opacity: 0.7; }
+.chat-indexing { align-self: center; margin: 0 auto 10px; color: var(--app-muted); font-size: 11px; }
+.chat-artifacts { margin: 0 0 10px; border: 1px solid var(--app-border); border-radius: 7px; background: var(--app-panel-soft); }
+.chat-artifacts > summary { cursor: pointer; padding: 7px 10px; color: var(--app-soft-text); font-size: 12px; }
+.chat-artifact-list { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 8px; }
+.chat-artifact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border: 1px solid var(--app-border); border-radius: 5px; background: var(--app-input-bg); color: var(--app-text); cursor: pointer; text-align: left; }
+.chat-artifact:hover { border-color: var(--app-accent); }
+.chat-artifact-kind { flex: 0 0 auto; color: var(--app-accent); font: 600 10px Consolas, monospace; }
+.chat-artifact-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.chat-artifact-size { flex: 0 0 auto; color: var(--app-muted); font-size: 10px; }
 .chat-turn { display: flex; flex-direction: column; gap: 7px; }
 .chat-turn.user { align-items: flex-end; }
 .chat-user {

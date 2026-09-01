@@ -12,6 +12,9 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("get_agent_window_usage");
     expect(contract.INVOKE_COMMANDS).toContain("claim_agent_for_window");
     expect(contract.INVOKE_COMMANDS).toContain("list_git_submodules");
+    expect(contract.INVOKE_COMMANDS).toContain("conversation_storage_get");
+    expect(contract.INVOKE_COMMANDS).toContain("conversation_storage_set");
+    expect(contract.INVOKE_COMMANDS).toContain("conversation_record_user_message");
     expect(contract.DELIVERED_EVENTS).toContain("remote:create-session");
     expect(contract.DELIVERED_EVENTS).toContain("remote:rename-session");
   });

@@ -30,6 +30,9 @@ sources:
   - id: reopen-journal
     resource: ../app/electron/services/reopen-journal.mjs
     title: "Full-exit recovery journal"
+  - id: conversation-store
+    resource: ../app/electron/services/conversation-store.mjs
+    title: "Per-session conversation index"
 ---
 
 # Session lifecycle and resume
@@ -74,8 +77,16 @@ application exit cannot preserve OS processes: live sessions are journaled,
 their process trees are closed, and the next launch reconstructs them using
 provider resume metadata.[^reopen-journal][^spawn]
 
-The provider transcript is the canonical conversation record. Terminal
-scrollback is a display buffer and must not be treated as durable resume data.
+The provider transcript remains the canonical provider resume record.
+MultiAgent incrementally indexes its complete JSONL lines into a session-isolated
+SQLite store for chat restoration, paging, locally submitted composer messages,
+and referenced artifact discovery. Terminal scrollback is only a display buffer
+and must not be treated as durable resume or conversation data.[^conversation-store]
+
+The conversation database defaults to Electron local application data and can
+be migrated to a user-selected directory. Migration verifies the copied SQLite
+database before activation; an unavailable custom directory is reported instead
+of silently opening an empty replacement database.[^conversation-store]
 
 ## Constraints
 
@@ -93,3 +104,4 @@ scrollback is a display buffer and must not be treated as durable resume data.
 [^lifecycle]: Renderer session lifecycle transitions
 [^hook-service]: Hook receiver and configuration
 [^reopen-journal]: Full-exit recovery journal
+[^conversation-store]: Per-session conversation index

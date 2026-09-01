@@ -44,6 +44,9 @@ const INVOKE_COMMANDS = Object.freeze([
   "read_text_file",
   "read_chat_transcript",
   "chat_blocks",
+  "conversation_record_user_message",
+  "conversation_storage_get",
+  "conversation_storage_set",
   "session_storage_list",
   "session_storage_delete",
   "git_status",
@@ -402,6 +405,35 @@ function assertInvokeRequest(command, rawArgs) {
     case "chat_blocks":
       if (typeof args.id !== "string" || !args.id.trim()) {
         throw new TypeError("Electron chat_blocks id must be a string");
+      }
+      if (args.beforeSequence !== undefined) {
+        assertPositiveInteger(args.beforeSequence, "chat block cursor", Number.MAX_SAFE_INTEGER);
+      }
+      if (args.limit !== undefined) {
+        assertPositiveInteger(args.limit, "chat block limit", 1000);
+      }
+      break;
+    case "conversation_record_user_message":
+      if (typeof args.id !== "string" || !args.id.trim() || args.id.length > 256) {
+        throw new TypeError("Electron conversation agent id must be a non-empty string");
+      }
+      if (
+        args.sessionId !== undefined &&
+        (typeof args.sessionId !== "string" || args.sessionId.length > 256)
+      ) {
+        throw new TypeError("Electron conversation session id is invalid");
+      }
+      if (typeof args.text !== "string" || !args.text.trim() || args.text.length > 1024 * 1024) {
+        throw new TypeError("Electron conversation message must be a non-empty string up to 1 MiB");
+      }
+      break;
+    case "conversation_storage_set":
+      if (
+        args.path !== undefined &&
+        args.path !== null &&
+        (typeof args.path !== "string" || args.path.length > 4096)
+      ) {
+        throw new TypeError("Electron conversation storage path is invalid");
       }
       break;
     case "session_storage_list":
