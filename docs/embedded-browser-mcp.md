@@ -52,7 +52,10 @@ Every pane tab strip exposes a `+` action that creates a new embedded browser
 tab at Google. Browser tabs participate in the same split, move, select, and
 close operations as session and document tabs. Inactive browser views remain
 alive but hidden, so switching tabs preserves navigation state without allowing
-the native view to cover the selected pane.[^browser-tabs-ui][^electron-main]
+the native view to cover the selected pane. A temporary React unmount during
+pane movement or layout reconciliation does not own the native view lifetime;
+only explicitly closing the browser tab destroys that view. This prevents a
+visible tab shell from outliving its Electron `WebContentsView`.[^browser-ui][^browser-tabs-ui][^electron-main]
 
 Electron native browser views render above normal React layers. When the image
 viewer opens, it acquires a shared native-view blocker; every embedded browser

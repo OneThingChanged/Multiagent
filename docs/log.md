@@ -1,5 +1,9 @@
 # OKF Update Log
 
+## 2026-09-03
+
+* **Stable embedded browser lifetime**: Moved native `WebContentsView` destruction from transient React component unmounts to explicit browser-tab closure, preventing pane moves and layout reconciliation from leaving a visible but blank browser tab.
+
 ## 2026-09-02
 
 * **Microsoft Store MSIX implementation**: Added an isolated Store runtime, exact-identity manifest rendering, fail-closed unsigned production packaging, local development signing, content/hash verification, packaged smokes, and administrator-only install/WACK entry points.

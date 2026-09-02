@@ -56,9 +56,11 @@ import {
 } from "./lib/layout";
 import * as groupOps from "./lib/groupOps";
 import {
+  isBrowserTabId,
   makeBrowserTabId,
   isDocTabId,
   makeDocTabId,
+  parseBrowserTabId,
   parseDocTabId,
   stripDocTabs,
 } from "./lib/docTabs";
@@ -2277,6 +2279,16 @@ function App() {
     if (isDocTabId(agentId) || isGitHistoryTabId(agentId)) {
       // Doc and git-history tabs are simply discarded (no detached solo group,
       // no reopen history in v1).
+      if (isBrowserTabId(agentId)) {
+        const browserId = parseBrowserTabId(agentId);
+        documentOwnerByTabRef.current.delete(agentId);
+        if (browserId && isElectronRuntime()) {
+          // A browser component can be transiently unmounted while panes are
+          // moved or React reconciles the layout. Native browser lifetime must
+          // therefore follow an explicit tab close, not component unmount.
+          void invoke("document_browser_close", { browserId }).catch(() => {});
+        }
+      }
       const next = groupOps.closeDocTab(
         {
           groups: groupsRef.current,

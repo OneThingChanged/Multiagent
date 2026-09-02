@@ -28,11 +28,6 @@ function normalizeBrowserAddress(rawAddress: string) {
   return /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
 }
 
-type BrowserLease = {
-  mounts: number;
-  closeTimer: number | null;
-};
-
 type ElementPreview = {
   label?: string;
   tag?: string;
@@ -53,11 +48,6 @@ function asElementPreview(value: unknown): ElementPreview | null {
 function asDeliveryPreview(value: unknown): DeliveryPreview | null {
   return value && typeof value === "object" ? value as DeliveryPreview : null;
 }
-
-// A document tab can be remounted while it is dragged to another split pane.
-// Keep the native view alive across that one-tick handoff instead of letting
-// the old pane close the view that the new pane has just adopted.
-const browserLeases = new Map<string, BrowserLease>();
 
 export function EmbeddedDocumentBrowser({
   browserId,
@@ -157,29 +147,6 @@ export function EmbeddedDocumentBrowser({
       window.removeEventListener("resize", syncBounds);
     };
   }, [browserVisible, syncBounds]);
-
-  useEffect(() => {
-    const lease = browserLeases.get(browserId) ?? { mounts: 0, closeTimer: null };
-    if (lease.closeTimer !== null) {
-      window.clearTimeout(lease.closeTimer);
-      lease.closeTimer = null;
-    }
-    lease.mounts += 1;
-    browserLeases.set(browserId, lease);
-
-    return () => {
-      const current = browserLeases.get(browserId);
-      if (!current) return;
-      current.mounts = Math.max(0, current.mounts - 1);
-      if (current.mounts > 0 || current.closeTimer !== null) return;
-      current.closeTimer = window.setTimeout(() => {
-        const latest = browserLeases.get(browserId);
-        if (!latest || latest.mounts > 0) return;
-        browserLeases.delete(browserId);
-        void invoke("document_browser_close", { browserId }).catch(() => {});
-      }, 0);
-    };
-  }, [browserId]);
 
   const command = (name: (typeof browserCommands)[number]) => {
     void invoke(name, { browserId }).catch((error) => {
