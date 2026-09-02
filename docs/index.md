@@ -19,7 +19,7 @@ configuration that supports it.
 * [Session lifecycle and resume](session-lifecycle-and-resume.md) - PTY startup, hooks, cancellation, shutdown, and provider resume.
 * [Local Dashboard](local-dashboard.md) - Loopback monitoring, terminal, document, and usage surfaces.
 * [MiraControl integration](miracontrol-integration.md) - Authenticated session state, activation, and guarded input API.
-* [Remote service](remote-service.md) - External Remote/PWA/Android access and its authentication boundary.
+* [Remote service](remote-service.md) - External Remote/PWA/Android access, authentication boundary, and conversation UX prototype.
 * [Usage accounting](usage-accounting.md) - Local token indexing, historical aggregation, and account limits.
 * [Embedded browser MCP](embedded-browser-mcp.md) - Always-on shared browser tabs, managed MCP startup, annotations, and isolation rules.
 

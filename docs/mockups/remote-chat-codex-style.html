@@ -1,0 +1,1389 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MultiAgent Remote 대화 화면 UX 시안">
+  <title>MultiAgent · Remote 대화 UX 시안</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #080c11;
+      --canvas-2: #0b1118;
+      --panel: #101720;
+      --panel-raised: #141c26;
+      --panel-soft: #0d151e;
+      --line: #202c38;
+      --line-strong: #2d3d4d;
+      --text: #e7edf4;
+      --text-soft: #bac6d3;
+      --muted: #7d8b9a;
+      --muted-2: #5a6877;
+      --cyan: #67d7ea;
+      --cyan-soft: rgba(103, 215, 234, .13);
+      --blue: #79aefc;
+      --green: #61db9b;
+      --green-soft: rgba(97, 219, 155, .13);
+      --amber: #f3be69;
+      --red: #ef8996;
+      --shadow: 0 22px 60px rgba(0, 0, 0, .28);
+      --radius: 14px;
+      --font: "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.55;
+      overflow-x: hidden;
+    }
+
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template: 58px minmax(0, 1fr) / 244px minmax(0, 1fr) 228px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 51% -20%, rgba(51, 111, 142, .13), transparent 37%),
+        var(--canvas);
+    }
+    .app.split-mode { grid-template-columns: 244px minmax(0, 1fr) 228px; }
+    .app.rail-collapsed { grid-template-columns: 244px minmax(0, 1fr) 0; }
+    .app.rail-collapsed .right-rail { display: none; }
+
+    .topbar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 13, 18, .96);
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 204px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid #346375;
+      border-radius: 9px;
+      background: linear-gradient(145deg, #153341, #0b202c);
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .brand small { display: block; margin-top: 1px; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .04em; }
+    .top-center { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+    .sync-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(16, 23, 32, .75);
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .sync-state strong { color: var(--text-soft); font-weight: 700; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+    .status-dot.pending { background: var(--amber); box-shadow: 0 0 0 4px rgba(243, 190, 105, .12); }
+    .top-actions { display: flex; align-items: center; gap: 7px; }
+    .icon-button, .quiet-button {
+      display: inline-grid;
+      min-width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--panel-soft);
+      color: var(--text-soft);
+      cursor: pointer;
+    }
+    .icon-button:hover, .quiet-button:hover { border-color: var(--line-strong); background: var(--panel-raised); color: var(--text); }
+    .icon-button svg, .quiet-button svg, .button-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .mobile-menu { display: none; }
+
+    .sidebar, .right-rail {
+      min-height: 0;
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2a3947 transparent;
+      background: rgba(10, 16, 23, .92);
+    }
+    .sidebar { grid-column: 1; grid-row: 2; border-right: 1px solid var(--line); padding: 15px 13px; }
+    .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .sidebar-head h2 { margin: 0; color: var(--muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+    .new-session {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 9px;
+      border: 1px solid #2d5967;
+      border-radius: 8px;
+      background: var(--cyan-soft);
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .new-session svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 2; }
+    .search-box { position: relative; margin-bottom: 18px; }
+    .search-box svg { position: absolute; top: 10px; left: 10px; width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.7; }
+    .search-box input {
+      width: 100%;
+      height: 34px;
+      padding: 0 10px 0 31px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      outline: 0;
+      background: #0d151e;
+      color: var(--text);
+      font-size: 11px;
+    }
+    .search-box input::placeholder { color: var(--muted-2); }
+    .side-label { margin: 17px 4px 8px; color: #647687; font-size: 9px; font-weight: 900; letter-spacing: .13em; }
+    .project-item, .history-item {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      gap: 9px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .project-item { min-height: 38px; padding: 0 9px; color: var(--text-soft); }
+    .project-item:hover, .history-item:hover { background: rgba(24, 37, 48, .7); }
+    .project-item.active { border-color: #274553; background: #12232d; color: var(--text); }
+    .folder-icon { color: var(--amber); font-size: 13px; }
+    .project-item strong { flex: 1; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .project-item small { color: var(--muted); font-size: 9px; }
+    .history-list { display: grid; gap: 3px; }
+    .history-item { position: relative; align-items: flex-start; min-height: 59px; padding: 9px; }
+    .history-item.active { border-color: #2a5361; background: #132b35; }
+    .history-marker { width: 7px; height: 7px; flex: none; margin-top: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(97, 219, 155, .1); }
+    .history-marker.idle { background: var(--muted-2); box-shadow: none; }
+    .history-copy { min-width: 0; flex: 1; }
+    .history-copy strong { display: block; overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item.active .history-copy strong { color: var(--text); }
+    .history-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .history-time { color: var(--muted-2); font-size: 9px; white-space: nowrap; }
+    .sidebar-footer { margin-top: 22px; padding: 12px 4px 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+    .sidebar-footer strong { color: var(--text-soft); }
+
+    .workspace { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: rgba(8, 13, 18, .72); }
+    .conversation-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 11px 26px; border-bottom: 1px solid var(--line); }
+    .conversation-title { min-width: 0; }
+    .conversation-title .crumb { display: block; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-title h1 { overflow: hidden; margin: 2px 0 0; color: var(--text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-actions { display: flex; align-items: center; gap: 7px; }
+    .notes-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); color: var(--text-soft); font-size: 10px; cursor: pointer; }
+    .notes-button:hover { background: var(--panel-raised); color: var(--text); }
+    .notes-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .view-switcher { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #0d151e; }
+    .view-switcher-label { margin: 0 3px 0 6px; color: var(--muted-2); font-size: 9px; font-weight: 800; letter-spacing: .04em; white-space: nowrap; }
+    .view-switcher button { min-height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .view-switcher button:hover { color: var(--text-soft); background: var(--panel-raised); }
+    .view-switcher button.active { border-color: #2d6371; background: var(--cyan-soft); color: var(--cyan); }
+    .view-switcher button[aria-pressed="true"] { border-color: #2d6371; background: var(--cyan-soft); color: var(--cyan); }
+    .view-help { max-width: 720px; margin: 8px auto 0; padding: 0 26px; color: var(--muted-2); font-size: 9px; text-align: center; }
+
+    .pane-grid { display: flex; flex: 1; min-width: 0; min-height: 0; }
+    .chat-pane { display: flex; min-width: 0; min-height: 0; flex: 1 1 100%; flex-direction: column; background: rgba(8, 13, 18, .72); }
+    .chat-pane[hidden] { display: none; }
+    .pane-session-header { display: none; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; padding: 7px 15px; border-bottom: 1px solid var(--line); background: rgba(13, 21, 30, .9); }
+    .pane-session-copy { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .pane-session-copy > span:first-child { flex: none; color: var(--muted-2); font-family: var(--mono); font-size: 9px; }
+    .pane-session-copy strong { overflow: hidden; color: var(--text-soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .pane-session-copy small { color: var(--muted); font-size: 9px; white-space: nowrap; }
+    .pane-focus { min-height: 25px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; white-space: nowrap; }
+    .pane-focus:hover { border-color: #356272; color: var(--text-soft); }
+    .chat-pane.active-pane .pane-session-header { background: linear-gradient(90deg, rgba(18, 49, 59, .96), rgba(13, 24, 33, .92)); box-shadow: inset 3px 0 0 var(--cyan); }
+    .chat-pane.active-pane .pane-focus { border-color: #2d6371; background: var(--cyan-soft); color: var(--cyan); }
+    .pane-status { display: none; align-items: center; gap: 7px; min-height: 31px; padding: 0 15px; border-bottom: 1px solid rgba(32, 44, 56, .72); color: var(--muted); font-size: 9px; }
+    .pane-status .status-dot { width: 6px; height: 6px; box-shadow: 0 0 0 3px var(--green-soft); }
+    .pane-status strong { color: var(--green); }
+    .pane-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border: 1px solid rgba(243, 190, 105, .35); border-radius: 999px; color: var(--amber); font-size: 9px; white-space: nowrap; }
+    .split-hint { display: none; margin-left: auto; color: var(--muted-2); font-size: 9px; }
+    .workspace.split-mode .pane-grid { gap: 1px; background: var(--line); }
+    .workspace.split-mode .chat-pane { background: #0b1118; }
+    .workspace.split-mode .chat-pane .pane-session-header, .workspace.split-mode .pane-status { display: flex; }
+    .workspace.split-mode .split-hint { display: inline; }
+    .workspace.split-mode .sync-banner { width: calc(100% - 30px); margin-top: 10px; }
+    .workspace.split-mode .chat-scroll { padding: 12px 15px 18px; }
+    .workspace.split-mode .conversation { width: min(570px, 100%); }
+    .workspace.split-mode .composer-wrap { padding: 7px 15px 13px; }
+    .workspace.split-mode .composer { width: min(570px, 100%); }
+    .workspace.split-mode .message.user > div { width: min(92%, 490px); }
+    .workspace.split-mode .answer h2 { font-size: 17px; }
+    .workspace.split-mode .answer p { font-size: 12px; }
+    .workspace.split-mode .activity-item strong { font-size: 9px; }
+    .workspace.split-mode .activity-item time { display: none; }
+    .workspace.long-mode .pane-grid { display: block; overflow: hidden; }
+    .workspace.long-mode .chat-pane { width: 100%; }
+    .workspace.long-mode .chat-pane.secondary-pane { display: none; }
+    .workspace.long-mode .answer:not(.answer-long) { display: none !important; }
+    .workspace.long-mode .answer-long { display: block; }
+    .answer-long { display: none; }
+    .answer-long h2 { margin-top: 3px; }
+    .answer-long h3 { margin: 22px 0 8px; color: var(--text); font-size: 14px; line-height: 1.35; }
+    .answer-long ul, .answer-long ol { margin: 8px 0 16px; padding-left: 21px; color: var(--text-soft); font-size: 12px; line-height: 1.75; }
+    .answer-long li + li { margin-top: 4px; }
+    .answer-long .stress-label { display: inline-flex; align-items: center; min-height: 23px; margin-bottom: 9px; padding: 0 8px; border: 1px solid rgba(243, 190, 105, .45); border-radius: 999px; background: rgba(243, 190, 105, .1); color: var(--amber); font-size: 9px; font-weight: 800; }
+    .wide-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #25323f; border-radius: 10px; scrollbar-width: thin; scrollbar-color: #2a3947 transparent; }
+    .wide-scroll .code-block { min-width: 660px; margin: 0; overflow: visible; border: 0; border-radius: 0; }
+    .wide-table { width: 720px; border-collapse: collapse; color: var(--text-soft); font-size: 10px; }
+    .wide-table th, .wide-table td { padding: 9px 11px; border-bottom: 1px solid #25323f; text-align: left; white-space: nowrap; }
+    .wide-table th { color: var(--cyan); background: #101c26; font-size: 9px; letter-spacing: .04em; }
+    .wide-table tr:last-child td { border-bottom: 0; }
+    .long-tool-log { margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; background: #0d151e; }
+    .long-tool-log summary { padding: 10px 12px; color: var(--text-soft); font-size: 10px; font-weight: 800; cursor: pointer; }
+    .long-tool-log summary::marker { color: var(--cyan); }
+    .long-tool-log pre { max-height: 190px; margin: 0; overflow: auto; padding: 0 12px 12px; color: var(--muted); font-family: var(--mono); font-size: 9px; line-height: 1.7; white-space: pre-wrap; }
+    .long-result-note { padding: 8px 10px; border-left: 2px solid var(--cyan); background: rgba(103, 215, 234, .06); color: var(--text-soft); font-size: 10px; }
+
+    .sync-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 16px auto 0;
+      width: min(760px, calc(100% - 52px));
+      min-height: 44px;
+      padding: 8px 12px;
+      border: 1px solid #254a53;
+      border-radius: 10px;
+      background: linear-gradient(90deg, rgba(18, 48, 55, .72), rgba(14, 31, 41, .72));
+    }
+    .sync-banner-copy { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-soft); font-size: 10px; }
+    .sync-banner-copy strong { color: var(--green); }
+    .sync-banner-copy span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sync-icon { display: grid; width: 24px; height: 24px; flex: none; place-items: center; border-radius: 7px; background: var(--green-soft); color: var(--green); }
+    .sync-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .simulate-button {
+      flex: none;
+      min-height: 29px;
+      padding: 0 10px;
+      border: 1px solid #356b76;
+      border-radius: 7px;
+      background: rgba(51, 117, 131, .16);
+      color: var(--cyan);
+      font-size: 10px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .simulate-button:hover { background: rgba(51, 117, 131, .28); }
+    .simulate-button:disabled { cursor: wait; opacity: .7; }
+
+    .chat-scroll { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 17px 26px 25px; scrollbar-color: #2a3947 transparent; scrollbar-width: thin; }
+    .conversation { width: min(720px, 100%); margin: 0 auto; padding-bottom: 18px; }
+    .date-divider { display: flex; align-items: center; gap: 12px; margin: 2px 0 20px; color: var(--muted-2); font-size: 9px; }
+    .date-divider::before, .date-divider::after { height: 1px; flex: 1; background: var(--line); content: ""; }
+    .message { display: flex; margin: 0 0 20px; }
+    .message.user { justify-content: flex-end; }
+    .message.user > div { width: min(550px, 86%); min-width: 0; }
+    .user-bubble { width: 100%; max-width: 100%; overflow-wrap: anywhere; padding: 10px 14px; border: 1px solid #2a3743; border-radius: 16px 16px 4px 16px; background: #1b242e; color: var(--text); font-size: 13px; line-height: 1.6; box-shadow: 0 8px 22px rgba(0, 0, 0, .12); }
+    .user-meta { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: 5px; color: var(--muted-2); font-size: 9px; }
+    .user-meta .check { color: var(--green); }
+    .assistant { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 11px; }
+    .assistant-avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #356272; border-radius: 9px; background: #122c37; color: var(--cyan); font-size: 11px; font-weight: 900; }
+    .assistant-body { min-width: 0; }
+    .assistant-label { display: flex; align-items: center; gap: 7px; min-height: 27px; color: var(--muted); font-size: 10px; }
+    .assistant-label strong { color: var(--text-soft); font-size: 11px; }
+    .provider-pill { padding: 2px 6px; border: 1px solid #33414f; border-radius: 999px; color: var(--muted); font-size: 8px; }
+
+    .activity-row {
+      margin: 2px 0 17px 39px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .activity-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 42px; padding: 0 3px; border: 0; background: transparent; color: var(--text-soft); text-align: left; cursor: pointer; }
+    .activity-toggle:hover { color: var(--text); }
+    .activity-summary { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .activity-summary svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .activity-summary strong { font-size: 11px; font-weight: 700; }
+    .activity-summary span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-chevron { width: 14px; height: 14px; flex: none; color: var(--muted); transition: transform .18s ease; }
+    .activity-toggle[aria-expanded="true"] .activity-chevron { transform: rotate(180deg); }
+    .activity-details { display: none; padding: 0 0 10px 24px; }
+    .activity-details.open { display: grid; gap: 7px; }
+    .activity-item { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+    .activity-item svg { width: 13px; height: 13px; fill: none; stroke: var(--muted-2); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .activity-item strong { overflow: hidden; color: var(--text-soft); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-item time { color: var(--muted-2); font-size: 9px; }
+
+    .working-card { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; padding: 12px 14px; border: 1px dashed #35434e; border-radius: 11px; background: rgba(18, 25, 33, .55); color: var(--text-soft); }
+    .working-spinner { width: 15px; height: 15px; flex: none; border: 2px solid #30404c; border-top-color: var(--cyan); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .working-copy { min-width: 0; }
+    .working-copy strong { display: block; font-size: 11px; }
+    .working-copy span { display: block; overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+    .answer { display: none; animation: answer-in .25s ease both; }
+    .answer.visible { display: block; }
+    @keyframes answer-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .answer h2 { margin: 2px 0 9px; color: var(--text); font-size: 20px; line-height: 1.25; letter-spacing: -.03em; }
+    .answer p { margin: 0 0 13px; color: var(--text-soft); font-size: 13px; line-height: 1.75; }
+    .answer p strong { color: var(--text); }
+    .result-card { margin: 15px 0 16px; overflow: hidden; border: 1px solid #294759; border-radius: 12px; background: linear-gradient(145deg, rgba(19, 43, 54, .8), rgba(14, 26, 36, .8)); }
+    .result-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #29404e; }
+    .result-card-head strong { font-size: 11px; }
+    .result-card-head span { color: var(--green); font-size: 9px; }
+    .result-card-body { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 13px 12px; }
+    .file-badge { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid #355b6c; border-radius: 10px; background: #102c38; color: var(--cyan); font-family: var(--mono); font-size: 10px; font-weight: 800; }
+    .result-card-body strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .result-card-body small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .open-result { min-height: 29px; padding: 0 9px; border: 1px solid #3b6b76; border-radius: 7px; background: rgba(79, 172, 192, .12); color: var(--cyan); font-size: 10px; font-weight: 800; cursor: pointer; }
+    .open-result:hover { background: rgba(79, 172, 192, .24); }
+    .code-block { position: relative; margin: 16px 0; overflow: auto; border: 1px solid #25323f; border-radius: 10px; background: #0b1117; }
+    .code-label { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-bottom: 1px solid #202b36; color: var(--muted); font-family: var(--mono); font-size: 9px; }
+    .code-block pre { margin: 0; padding: 12px; color: #b9d9e0; font-family: var(--mono); font-size: 10px; line-height: 1.7; }
+    .code-block .kw { color: #c7a5ff; }
+    .code-block .fn { color: #7ed9ff; }
+    .code-block .str { color: #a9d98b; }
+    .answer-actions { display: flex; align-items: center; gap: 5px; margin-top: 16px; }
+    .answer-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 29px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .answer-actions button:hover { border-color: var(--line); background: var(--panel-soft); color: var(--text-soft); }
+    .answer-actions svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .attachment-chip { display: none; align-items: center; gap: 6px; width: fit-content; margin: 0 0 8px; padding: 5px 8px; border: 1px solid #34535f; border-radius: 7px; background: var(--cyan-soft); color: var(--text-soft); font-size: 10px; }
+    .attachment-chip.visible { display: inline-flex; }
+    .attachment-chip svg { width: 13px; height: 13px; fill: none; stroke: var(--cyan); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .attachment-chip button { display: grid; width: 17px; height: 17px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+    .attachment-chip button:hover { background: rgba(255,255,255,.08); color: var(--text); }
+
+    .jump-latest { position: sticky; bottom: 12px; z-index: 2; display: flex; justify-content: center; pointer-events: none; }
+    .jump-latest button { display: none; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border: 1px solid #35606b; border-radius: 999px; background: rgba(12, 28, 37, .95); color: var(--cyan); font-size: 10px; box-shadow: var(--shadow); pointer-events: auto; cursor: pointer; }
+    .jump-latest button.visible { display: inline-flex; }
+    .jump-latest svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+
+    .composer-wrap { padding: 8px 26px 18px; border-top: 1px solid rgba(32, 44, 56, .7); background: linear-gradient(180deg, rgba(8, 13, 18, .55), rgba(8, 13, 18, .98) 38%); }
+    .composer { width: min(720px, 100%); margin: 0 auto; }
+    .composer-box { border: 1px solid #2a3744; border-radius: 14px; background: #111922; box-shadow: 0 12px 30px rgba(0, 0, 0, .2); }
+    .composer-box:focus-within { border-color: #3d6978; box-shadow: 0 0 0 3px rgba(103, 215, 234, .07); }
+    .composer textarea { display: block; width: 100%; min-height: 51px; max-height: 130px; padding: 12px 13px 4px; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; line-height: 1.55; }
+    .composer textarea::placeholder { color: var(--muted-2); }
+    .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 8px; }
+    .composer-left, .composer-right { display: flex; align-items: center; gap: 5px; }
+    .composer-tool { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; padding: 0 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .composer-tool:hover { border-color: var(--line); background: var(--panel-raised); color: var(--text-soft); }
+    .composer-tool svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .send-button { display: inline-grid; width: 29px; height: 29px; place-items: center; border: 0; border-radius: 9px; background: var(--text); color: #0b1117; cursor: pointer; }
+    .send-button:hover { background: white; }
+    .send-button:disabled { background: #34404b; color: #7b8793; cursor: not-allowed; }
+    .send-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    .composer-hint { margin: 6px 2px 0; color: var(--muted-2); font-size: 9px; text-align: right; }
+
+    .right-rail { grid-column: 3; grid-row: 2; min-width: 0; border-left: 1px solid var(--line); padding: 13px 12px; overflow-y: auto; }
+    .rail-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .rail-heading-copy { min-width: 0; }
+    .rail-heading h2 { margin: 0; color: var(--text-soft); font-size: 11px; }
+    .rail-heading span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .rail-heading-actions { display: flex; align-items: center; gap: 5px; }
+    .rail-collapse, .rail-open-toggle { display: inline-grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); color: var(--muted); cursor: pointer; }
+    .rail-collapse:hover, .rail-open-toggle:hover { border-color: var(--line-strong); background: var(--panel-raised); color: var(--text); }
+    .rail-collapse svg, .rail-open-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .rail-open-toggle { display: none; }
+    .app.rail-collapsed .rail-open-toggle { display: inline-grid; }
+    .rail-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; margin-bottom: 11px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #0b121a; }
+    .rail-tab { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 30px; padding: 0 4px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; font-weight: 800; cursor: pointer; }
+    .rail-tab:hover { background: var(--panel-raised); color: var(--text-soft); }
+    .rail-tab[aria-selected="true"] { border-color: #2d6371; background: var(--cyan-soft); color: var(--cyan); }
+    .rail-tab:focus-visible { position: relative; z-index: 1; }
+    .tab-badge { display: inline-grid; min-width: 15px; height: 15px; place-items: center; padding: 0 3px; border-radius: 999px; background: #26323f; color: var(--text-soft); font-family: var(--mono); font-size: 8px; font-weight: 800; }
+    .tab-badge.working { background: rgba(243, 190, 105, .16); color: var(--amber); }
+    .tab-badge.done { background: var(--green-soft); color: var(--green); }
+    .tab-badge.question { background: rgba(121, 174, 252, .17); color: var(--blue); }
+    .tab-badge.error { background: rgba(239, 137, 150, .16); color: var(--red); }
+    .rail-panel[hidden] { display: none; }
+    .rail-card { margin-bottom: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(15, 23, 32, .74); }
+    .rail-card:last-child { margin-bottom: 0; }
+    .rail-card h3 { margin: 0 0 10px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .rail-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin: 8px 0; color: var(--muted); font-size: 10px; }
+    .rail-row strong { color: var(--text-soft); font-weight: 700; text-align: right; }
+    .rail-row strong.green { color: var(--green); }
+    .rail-divider { height: 1px; margin: 11px 0; background: var(--line); }
+    .rail-progress { height: 5px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: #202d38; }
+    .rail-progress span { display: block; width: 76%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--green)); }
+    .event-list { display: grid; gap: 9px; }
+    .event { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 7px; align-items: start; color: var(--muted); font-size: 9px; }
+    .event i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--muted-2); }
+    .event i.green { background: var(--green); }
+    .event strong { display: block; color: var(--text-soft); font-size: 10px; }
+    .event small { display: block; margin-top: 2px; color: var(--muted-2); font-size: 8px; }
+    .rail-tip { color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .rail-tip strong { color: var(--cyan); }
+    .rail-state-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .rail-state-line strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-state-label { margin-left: auto; padding: 2px 6px; border: 1px solid rgba(243, 190, 105, .34); border-radius: 999px; color: var(--amber); font-family: var(--mono); font-size: 8px; }
+    .rail-state-label.done { border-color: rgba(97, 219, 155, .34); color: var(--green); }
+    .rail-state-label.question { border-color: rgba(121, 174, 252, .34); color: var(--blue); }
+    .rail-state-label.error { border-color: rgba(239, 137, 150, .34); color: var(--red); }
+    .rail-state-copy { margin: 7px 0 0 13px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .state-legend { display: grid; gap: 5px; margin-top: 10px; }
+    .state-legend button { display: flex; align-items: center; gap: 7px; min-height: 27px; padding: 0 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; text-align: left; cursor: pointer; }
+    .state-legend button:hover { border-color: var(--line); background: var(--panel-soft); color: var(--text-soft); }
+    .state-legend i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px rgba(243, 190, 105, .1); }
+    .state-legend .question i { background: var(--blue); box-shadow: 0 0 0 3px rgba(121, 174, 252, .1); }
+    .state-legend .error i { background: var(--red); box-shadow: 0 0 0 3px rgba(239, 137, 150, .1); }
+    .state-legend span { margin-left: auto; color: var(--muted-2); font-family: var(--mono); font-size: 8px; }
+    .file-list, .change-list { display: grid; gap: 4px; }
+    .file-row, .change-row { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 29px; padding: 0 6px; border-radius: 6px; color: var(--text-soft); font-size: 9px; }
+    .file-row:hover, .change-row:hover { background: var(--panel-soft); }
+    .file-row svg, .change-row svg { width: 13px; height: 13px; flex: none; fill: none; stroke: var(--muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .file-row strong, .change-row strong { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .file-row small, .change-row small { color: var(--muted-2); font-size: 8px; white-space: nowrap; }
+    .change-row small.added { color: var(--green); }
+    .change-row small.modified { color: var(--amber); }
+    .rail-link { display: inline-flex; margin-top: 8px; padding: 0 6px; border: 0; background: transparent; color: var(--cyan); font-size: 9px; cursor: pointer; }
+    .rail-link:hover { text-decoration: underline; }
+    .rail-drawer-backdrop { display: none; }
+
+    .toast { position: fixed; right: 21px; bottom: 21px; z-index: 30; display: flex; align-items: center; gap: 8px; max-width: min(360px, calc(100vw - 34px)); padding: 10px 13px; border: 1px solid #355b65; border-radius: 9px; background: #122630; color: var(--text-soft); font-size: 10px; box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast svg { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--green); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+
+    .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; padding: 20px; background: rgba(2, 6, 10, .72); backdrop-filter: blur(4px); }
+    .modal-backdrop.visible { display: grid; }
+    .notes-modal { width: min(510px, 100%); max-height: min(680px, calc(100vh - 40px)); overflow: auto; border: 1px solid #33424f; border-radius: 15px; background: #111a23; box-shadow: var(--shadow); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 17px; border-bottom: 1px solid var(--line); }
+    .modal-head h2 { margin: 0; font-size: 15px; }
+    .modal-body { padding: 16px 17px 19px; }
+    .modal-body p { margin: 0 0 15px; color: var(--text-soft); font-size: 12px; line-height: 1.75; }
+    .note-grid { display: grid; gap: 9px; }
+    .note { padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: #0d151e; }
+    .note strong { display: block; margin-bottom: 3px; color: var(--cyan); font-size: 11px; }
+    .note span { color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .modal-foot { display: flex; justify-content: flex-end; padding: 0 17px 16px; }
+    .modal-close { min-height: 31px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-raised); color: var(--text-soft); font-size: 10px; cursor: pointer; }
+    .modal-close:hover { color: var(--text); }
+
+    @media (max-width: 1060px) {
+      .app { grid-template-columns: 220px minmax(0, 1fr) 214px; }
+      .brand { min-width: 180px; }
+      .view-help { padding: 0 18px; }
+    }
+
+    @media (max-width: 720px) {
+      body { font-size: 13px; }
+      .app { display: flex; flex-direction: column; min-height: 100svh; overflow: visible; }
+      .topbar { position: sticky; top: 0; min-height: 52px; overflow: hidden; padding: 0 10px; gap: 9px; }
+      .brand { min-width: 0; flex: 1; gap: 8px; }
+      .brand-mark { width: 28px; height: 28px; }
+      .brand small { display: none; }
+      .top-center { display: none; }
+      .top-actions { gap: 4px; }
+      .top-actions .quiet-button { display: none; }
+      .top-actions .rail-open-toggle { display: inline-grid; }
+      .mobile-menu { display: inline-grid; }
+      .sidebar { position: fixed; inset: 52px auto 0 0; z-index: 15; display: block; width: min(286px, 84vw); padding: 15px 13px; box-shadow: 16px 0 35px rgba(0, 0, 0, .32); transform: translateX(-105%); transition: transform .22s ease; }
+      .sidebar.open { transform: translateX(0); }
+      .workspace { min-height: calc(100svh - 52px); }
+      .conversation-header { min-height: 57px; padding: 9px 12px; }
+      .conversation-title h1 { font-size: 13px; }
+      .notes-button { min-width: 31px; padding: 0; justify-content: center; }
+      .notes-button span { display: none; }
+      .conversation-actions { flex-wrap: wrap; justify-content: flex-end; }
+      .view-switcher { order: 2; max-width: 100%; overflow-x: auto; }
+      .view-switcher-label { display: none; }
+      .view-switcher button { min-height: 25px; padding: 0 7px; font-size: 8px; }
+      .view-help { width: calc(100% - 24px); margin-top: 6px; padding: 0; text-align: left; }
+      .sync-banner { align-items: flex-start; flex-wrap: wrap; width: calc(100% - 24px); max-width: calc(100% - 24px); margin-top: 10px; overflow: hidden; padding: 8px 9px; }
+      .sync-banner-copy { flex: 1; min-width: 0; overflow: hidden; }
+      .sync-banner-copy { align-items: flex-start; font-size: 9px; line-height: 1.45; }
+      .sync-icon { width: 21px; height: 21px; }
+      .simulate-button { width: 100%; max-width: none; overflow: hidden; padding: 0 8px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+      .chat-scroll { padding: 12px 12px 16px; }
+      .conversation { width: 100%; }
+      .message, .assistant, .activity-row { min-width: 0; max-width: 100%; }
+      .date-divider { margin-bottom: 16px; }
+      .message.user > div { width: 91%; max-width: 91%; }
+      .user-bubble { width: 100%; max-width: 100%; font-size: 12px; }
+      .assistant { grid-template-columns: 25px minmax(0, 1fr); gap: 8px; }
+      .assistant-avatar { width: 25px; height: 25px; border-radius: 8px; font-size: 10px; }
+      .activity-row { margin-left: 33px; }
+      .activity-summary span { display: none; }
+      .answer h2 { font-size: 18px; }
+      .answer p { font-size: 12px; }
+      .result-card-body { grid-template-columns: 36px minmax(0, 1fr); }
+      .file-badge { width: 36px; height: 36px; }
+      .open-result { grid-column: 2; justify-self: start; }
+      .composer-wrap { padding: 7px 12px 11px; }
+      .composer textarea { min-height: 47px; font-size: 12px; }
+      .composer-hint { display: none; }
+      .toast { right: 12px; bottom: 12px; }
+      .modal-backdrop { padding: 12px; }
+      .workspace.split-mode .pane-grid { display: flex; flex-direction: column; gap: 8px; overflow: auto; background: var(--canvas); }
+      .workspace.split-mode .chat-pane { flex: 0 0 min(72svh, 590px); min-height: 480px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      .workspace.split-mode .chat-pane.secondary-pane { display: flex; }
+      .workspace.split-mode .pane-session-header { min-height: 40px; padding: 7px 10px; }
+      .workspace.split-mode .pane-status { padding: 0 10px; }
+      .workspace.split-mode .sync-banner { width: calc(100% - 20px); max-width: none; }
+      .workspace.split-mode .chat-scroll { padding: 10px 10px 14px; }
+      .workspace.split-mode .composer-wrap { padding: 6px 10px 9px; }
+      .workspace.split-mode .conversation { width: 100%; }
+      .workspace.split-mode .pane-focus { font-size: 8px; }
+      .workspace.long-mode .pane-grid { overflow: auto; }
+      .answer-long ul, .answer-long ol { font-size: 11px; }
+      .wide-scroll .code-block { min-width: 610px; }
+      .right-rail { position: fixed; inset: 52px 0 0 auto; z-index: 17; display: block; width: min(330px, 91vw); padding: 13px 12px; border-left: 1px solid var(--line-strong); box-shadow: -18px 0 42px rgba(0, 0, 0, .38); transform: translateX(105%); transition: transform .22s ease; }
+      .right-rail.open { transform: translateX(0); }
+      .app.rail-collapsed .right-rail { display: block; }
+      .app.rail-collapsed .rail-open-toggle { display: inline-grid; }
+      .rail-collapse { display: inline-grid; }
+      .rail-drawer-backdrop { position: fixed; inset: 52px 0 0; z-index: 16; display: block; background: rgba(2, 6, 10, .54); opacity: 0; pointer-events: none; transition: opacity .22s ease; }
+      .rail-drawer-backdrop.visible { opacity: 1; pointer-events: auto; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <button class="icon-button mobile-menu" id="mobileMenu" type="button" aria-label="세션 목록 열기" aria-expanded="false" aria-controls="sessionSidebar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">M</span>
+        <span>MultiAgent<small>REMOTE WORKSPACE</small></span>
+      </div>
+      <div class="top-center">
+        <div class="sync-state" id="syncState" role="status" aria-live="polite">
+          <span class="status-dot" id="syncDot" aria-hidden="true"></span>
+          <strong id="syncLabel">자동 동기화 켜짐</strong>
+          <span id="syncTime">방금 전 · 14:32:08</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="quiet-button" type="button" id="notesButton" aria-label="UX 시안 설명 열기" title="UX 시안 설명">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v.01M12 14a3 3 0 1 0-3-3M12 14v-1a3 3 0 0 1 3-3M5 5h14v14H5z"></path></svg>
+        </button>
+        <button class="icon-button" type="button" aria-label="알림" title="알림">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg>
+        </button>
+        <button class="rail-open-toggle" type="button" data-right-rail-toggle aria-label="우측 사이드바 열기" title="우측 사이드바 열기" aria-expanded="true" aria-controls="rightRail">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM15 5v14M18 9h.01M18 12h.01M18 15h.01"></path></svg>
+        </button>
+      </div>
+    </header>
+
+    <aside class="sidebar" id="sessionSidebar" aria-label="프로젝트와 세션 목록">
+      <div class="sidebar-head">
+        <h2>Workspace</h2>
+        <button class="new-session" type="button" id="newSessionButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          새 대화
+        </button>
+      </div>
+      <label class="search-box">
+        <span class="sr-only">세션 검색</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2"></circle><path d="m16 16 4.2 4.2"></path></svg>
+        <input type="search" placeholder="세션 검색" autocomplete="off">
+      </label>
+
+      <div class="side-label">PROJECTS</div>
+      <button class="project-item active" type="button">
+        <span class="folder-icon" aria-hidden="true">▰</span>
+        <strong>ProjectA</strong>
+        <small>6</small>
+      </button>
+      <button class="project-item" type="button">
+        <span class="folder-icon" aria-hidden="true">▰</span>
+        <strong>MultiAgent</strong>
+        <small>12</small>
+      </button>
+
+      <div class="side-label">RECENT SESSIONS</div>
+      <div class="history-list">
+        <button class="history-item active" type="button">
+          <span class="history-marker" aria-hidden="true"></span>
+          <span class="history-copy"><strong>Remote UX 검토</strong><small>Codex · 결과물 자동 반영</small></span>
+          <span class="history-time">지금</span>
+        </button>
+        <button class="history-item" type="button">
+          <span class="history-marker" aria-hidden="true"></span>
+          <span class="history-copy"><strong>문서 뷰어 개선</strong><small>Claude · 완료</small></span>
+          <span class="history-time">어제</span>
+        </button>
+        <button class="history-item" type="button">
+          <span class="history-marker idle" aria-hidden="true"></span>
+          <span class="history-copy"><strong>Usage dashboard</strong><small>Codex · 보관됨</small></span>
+          <span class="history-time">8/31</span>
+        </button>
+        <button class="history-item" type="button">
+          <span class="history-marker idle" aria-hidden="true"></span>
+          <span class="history-copy"><strong>브라우저 MCP 테스트</strong><small>Codex · 보관됨</small></span>
+          <span class="history-time">8/29</span>
+        </button>
+      </div>
+      <div class="sidebar-footer"><strong>세션 저장소</strong><br>이 대화와 결과물은 세션별로 저장됩니다.</div>
+    </aside>
+
+    <main class="workspace" aria-label="Remote 대화">
+      <div class="conversation-header">
+        <div class="conversation-title">
+          <span class="crumb">ProjectA / Remote UX 검토</span>
+          <h1>결과물이 바로 보이는 대화 흐름</h1>
+        </div>
+        <div class="conversation-actions">
+          <div class="view-switcher" role="group" aria-label="대화 레이아웃 선택">
+            <span class="view-switcher-label">시안 보기</span>
+            <button type="button" data-view-target="single" aria-pressed="true" class="active">단일</button>
+            <button type="button" data-view-target="split" aria-pressed="false">좌우 분할</button>
+            <button type="button" data-view-target="long" aria-pressed="false">장문 결과</button>
+          </div>
+          <button class="notes-button" type="button" id="notesButtonMain">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg>
+            <span>시안 메모</span>
+          </button>
+        </div>
+      </div>
+      <p class="view-help" id="viewHelp">기본 단일 대화 흐름입니다. 결과 도착 시 작업을 펼치지 않아도 현재 대화에 바로 나타납니다.</p>
+
+      <div class="pane-grid" id="paneGrid">
+        <section class="chat-pane active-pane" id="primaryPane" data-pane="primary" data-session-alias="Remote UX 검토" data-agent="Codex" data-model="GPT-5.6 Sol" data-connection="정상" data-lifecycle="실행 중" data-session-id="ma-8f31…c4e2" data-project="ProjectA" data-path="K:/AI/ProjectA" aria-label="Remote UX 검토 세션">
+          <div class="pane-session-header">
+            <div class="pane-session-copy"><span>01</span><strong>Remote UX 검토</strong><small>Codex · ProjectA</small></div>
+            <button class="pane-focus" type="button" data-pane-focus="primary" aria-pressed="true">활성 세션</button>
+          </div>
+          <div class="pane-status"><span class="status-dot" aria-hidden="true"></span><strong>연결 정상</strong><span>ma-8f31…c4e2 · 결과 자동 반영</span><span class="split-hint">이 창에서만 스크롤·입력</span></div>
+
+      <div class="sync-banner">
+        <div class="sync-banner-copy">
+          <span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"></path></svg></span>
+          <span><strong id="bannerStatus">실시간 연결</strong> · 작업 이벤트와 결과물을 자동으로 반영합니다.</span>
+        </div>
+        <button class="simulate-button" type="button" id="simulateResult">결과 도착 시뮬레이션</button>
+      </div>
+
+      <div class="chat-scroll" id="chatScroll">
+        <div class="conversation" id="conversation">
+          <div class="date-divider"><span>오늘 · 14:30</span></div>
+
+          <article class="message user">
+            <div>
+              <div class="user-bubble">리모트 대화에서 작업 결과가 도착하면 펼치지 않아도 바로 보이게 하고, Codex처럼 읽기 편한 흐름으로 정리해줘.</div>
+              <div class="user-meta"><span>나 · 14:30</span><span class="check" aria-label="전달됨">✓✓</span></div>
+            </div>
+          </article>
+
+          <section class="activity-row" aria-label="작업 활동">
+            <button class="activity-toggle" type="button" id="activityToggle" aria-expanded="false" aria-controls="activityDetails">
+              <span class="activity-summary">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2M21 12a9 9 0 1 1-2.6-6.4"></path></svg>
+                <strong id="workedLabel">Worked for 1m 46s</strong>
+                <span id="activitySummary">4개 활동 · 접혀 있음</span>
+              </span>
+              <svg class="activity-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+            <div class="activity-details" id="activityDetails">
+              <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h5"></path></svg><strong>대화 로그와 작업 상태를 동기화함</strong><time>14:30:18</time></div>
+              <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9 4-4 4 4M12 5v9M5 19h14"></path></svg><strong>변경된 파일 3개를 세션 결과로 수집함</strong><time>14:31:02</time></div>
+              <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10h8M8 14h4"></path></svg><strong>HTML 미리보기 생성 및 검증</strong><time>14:31:37</time></div>
+              <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><strong>결과 이벤트 대기 중</strong><time>지금</time></div>
+            </div>
+          </section>
+
+          <section class="message assistant" aria-live="polite">
+            <div class="assistant-avatar" aria-hidden="true">M</div>
+            <div class="assistant-body">
+              <div class="assistant-label"><strong>MultiAgent</strong><span class="provider-pill">Codex</span><span id="answerMeta">작업 중</span></div>
+
+              <div class="working-card" id="workingCard">
+                <span class="working-spinner" aria-hidden="true"></span>
+                <span class="working-copy"><strong>결과를 정리하고 있습니다</strong><span>완료 이벤트가 도착하면 이 영역에 결과가 자동으로 표시됩니다.</span></span>
+              </div>
+
+              <div class="answer" id="answer">
+                <h2>결과가 도착했습니다.</h2>
+                <p><strong>대화 화면을 열어 둔 상태에서도</strong> 결과 이벤트를 받으면 작업을 다시 펼치지 않고 바로 이 위치에 반영합니다. 새 결과는 세션 저장소에도 함께 기록됩니다.</p>
+                <div class="result-card">
+                  <div class="result-card-head"><strong>생성된 결과물</strong><span>자동 반영됨 · 14:32:08</span></div>
+                  <div class="result-card-body">
+                    <span class="file-badge" aria-hidden="true">HTML</span>
+                    <span><strong>remote-chat-ux-prototype.html</strong><small>docs/mockups · 42.8 KB · 미리보기 가능</small></span>
+                    <button class="open-result" type="button" id="openResult">열어보기</button>
+                  </div>
+                </div>
+                <p>핵심 흐름은 작업 로그와 결과 메시지를 분리하고, 결과 도착 시 화면에 즉시 삽입하는 것입니다. 사용자가 위쪽을 읽고 있을 때만 작은 “새 결과” 버튼을 보여 줍니다.</p>
+                <div class="code-block" aria-label="구현 요약 코드">
+                  <div class="code-label"><span>sync-result.ts</span><span>요약</span></div>
+                  <pre><span class="kw">on</span>(<span class="str">"result:created"</span>, (event) =&gt; {
+  <span class="fn">appendResult</span>(event.result);
+  <span class="fn">announce</span>(<span class="str">"새 결과가 도착했습니다"</span>);
+});</pre>
+                </div>
+                <div class="answer-actions">
+                  <button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h11v11H8zM5 16H4V5h11v1"></path></svg>복사</button>
+                  <button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>후속 질문</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="answer answer-long" id="longAnswer" aria-live="polite" aria-labelledby="longAnswerTitle">
+            <div class="assistant" aria-hidden="true">
+              <div class="assistant-avatar">M</div>
+              <div class="assistant-body">
+                <div class="assistant-label"><strong>MultiAgent</strong><span class="provider-pill">Codex</span><span>장문 결과 · 완료</span></div>
+                <span class="stress-label">장문 결과 스트레스 테스트</span>
+                <h2 id="longAnswerTitle">세션 결과를 길게 읽어도 흐름이 무너지지 않습니다.</h2>
+                <p><strong>내용이 긴 결과는 한 덩어리로 밀어 넣지 않고</strong> 제목·목록·코드·표·파일 결과로 나눕니다. 사용자는 필요한 부분만 펼치고, 현재 위치를 잃지 않은 채 최신 결과로 이동할 수 있습니다.</p>
+
+                <h3>1. 결과 요약</h3>
+                <p>이번 작업은 Remote 대화의 자동 갱신과 레이아웃 전환을 검토하기 위한 예시입니다. 장문 결과도 기본 폭 안에서 읽히며, 폭이 넓은 자료는 해당 블록만 가로 스크롤됩니다.</p>
+                <ul>
+                  <li>결과 이벤트를 받으면 작업 로그를 펼치지 않아도 결과 카드가 즉시 추가됩니다.</li>
+                  <li>사용자가 이전 메시지를 읽는 중이면 화면을 강제로 끌어내리지 않고 최신 이동 버튼만 표시합니다.</li>
+                  <li>파일 결과는 파일명·경로·크기·열기 동작을 한 카드에서 확인합니다.</li>
+                </ul>
+
+                <h3>2. 처리 단계</h3>
+                <ol>
+                  <li>세션별 이벤트 순서를 확인하고 마지막으로 렌더링한 결과와 비교합니다.</li>
+                  <li>새 결과가 확인되면 메시지 스트림과 세션 저장소에 함께 기록합니다.</li>
+                  <li>현재 스크롤이 최신 위치인지 판단한 뒤 자동 이동 또는 알림 버튼을 선택합니다.</li>
+                  <li>긴 도구 로그와 부가 데이터는 접힌 상태로 남겨 본문 가독성을 지킵니다.</li>
+                </ol>
+
+                <h3>3. 넓은 코드 블록은 블록 안에서만 스크롤</h3>
+                <div class="wide-scroll" tabindex="0" aria-label="가로로 스크롤할 수 있는 넓은 코드 예시">
+                  <div class="code-block">
+                    <div class="code-label"><span>remote-sync-pipeline.ts</span><span>가로 스크롤 예시</span></div>
+                    <pre><span class="kw">const</span> result = <span class="kw">await</span> sessionStore.<span class="fn">readSince</span>(cursor, { includeToolLogs: <span class="str">true</span>, includeArtifacts: <span class="str">true</span>, preserveScrollAnchor: <span class="str">true</span> });
+<span class="kw">if</span> (result.sequence &gt; lastSequence) renderer.<span class="fn">append</span>(result, { announce: <span class="str">"새 결과가 도착했습니다"</span>, autoScroll: viewport.<span class="fn">isNearBottom</span>() });</pre>
+                  </div>
+                </div>
+
+                <h3>4. 결과 항목 비교</h3>
+                <div class="wide-scroll" tabindex="0" aria-label="가로로 스크롤할 수 있는 결과 비교 표">
+                  <table class="wide-table">
+                    <thead><tr><th>항목</th><th>상태</th><th>이벤트 순서</th><th>저장 위치</th><th>사용자 동작</th></tr></thead>
+                    <tbody>
+                      <tr><td>대화 메시지</td><td>반영 완료</td><td>evt_1042</td><td>현재 세션 기록</td><td>후속 질문</td></tr>
+                      <tr><td>HTML 결과물</td><td>미리보기 가능</td><td>evt_1043</td><td>artifacts/report.html</td><td>열어보기</td></tr>
+                      <tr><td>도구 로그</td><td>접힘</td><td>evt_1044–evt_1089</td><td>session/tool-log.jsonl</td><td>필요할 때 펼치기</td></tr>
+                      <tr><td>이미지 첨부</td><td>저장 완료</td><td>evt_1090</td><td>attachments/selection.png</td><td>뷰어 열기</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <details class="long-tool-log">
+                  <summary>도구 로그 48개 · 기본 접힘 · 세부 실행 기록 보기</summary>
+                  <pre>[14:31:02] session.read cursor=evt_1041 result=4 records
+[14:31:04] artifact.scan files=3 changed=2
+[14:31:08] html.preview path=docs/mockups/remote-chat-codex-style.html status=ready
+[14:31:12] result.persist session=ma-8f31…c4e2 bytes=43812
+[14:31:17] notify.enqueue channel=remote priority=normal
+[14:31:21] viewport.anchor current=previous-message action=preserve
+[14:31:37] result:created sequence=1089 autoScroll=false reason=user-reading-history
+[14:32:08] result:acknowledged artifact=remote-chat-ux-prototype.html</pre>
+                </details>
+
+                <div class="result-card">
+                  <div class="result-card-head"><strong>생성된 결과물 3개</strong><span>세션에 저장됨 · 14:32:08</span></div>
+                  <div class="result-card-body"><span class="file-badge" aria-hidden="true">HTML</span><span><strong>remote-chat-ux-prototype.html</strong><small>docs/mockups · 42.8 KB · 미리보기 가능</small></span><button class="open-result" type="button">열어보기</button></div>
+                  <div class="long-result-note">긴 결과에서도 카드와 최신 이동 버튼은 항상 화면의 다음 동작으로 연결됩니다.</div>
+                </div>
+                <div class="answer-actions"><button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h11v11H8zM5 16H4V5h11v1"></path></svg>전체 결과 복사</button><button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>후속 질문</button></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="jump-latest"><button type="button" id="jumpLatest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg>새 결과 · 최신으로 이동</button></div>
+      </div>
+
+      <div class="composer-wrap">
+        <form class="composer" id="composerForm">
+          <div class="attachment-chip" id="attachmentChip">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.4-8.4"></path></svg>
+            selection.png
+            <button type="button" id="removeAttachment" aria-label="첨부 제거">×</button>
+          </div>
+          <div class="composer-box">
+            <label class="sr-only" for="composerInput">메시지 입력</label>
+            <textarea id="composerInput" rows="1" placeholder="무엇이든 요청하세요"></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-left">
+                <button class="composer-tool" type="button" id="attachButton"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.4-8.4"></path></svg>첨부</button>
+                <button class="composer-tool" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9M12 7v5l3 2"></path></svg>자동 동기화</button>
+              </div>
+              <div class="composer-right"><span class="sr-only" id="sendHint">Enter로 전송, Shift+Enter로 줄바꿈</span><button class="send-button" id="sendButton" type="submit" aria-label="메시지 전송" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3.5-6.5zM5 12h6.5"></path></svg></button></div>
+            </div>
+          </div>
+          <div class="composer-hint">Enter로 전송 · Shift + Enter로 줄바꿈 · 결과는 현재 세션에 저장됩니다.</div>
+        </form>
+      </div>
+        </section>
+
+        <section class="chat-pane secondary-pane" id="secondaryPane" data-pane="secondary" data-session-alias="문서 정리" data-agent="Claude" data-model="Claude Sonnet" data-connection="정상" data-lifecycle="대기 중" data-session-id="ma-3c42…a98d" data-project="MultiAgent" data-path="K:/AI/MultiAgent" aria-label="문서 정리 세션" hidden>
+          <div class="pane-session-header">
+            <div class="pane-session-copy"><span>02</span><strong>문서 정리</strong><small>Claude · MultiAgent</small></div>
+            <button class="pane-focus" type="button" data-pane-focus="secondary" aria-pressed="false">활성화</button>
+          </div>
+          <div class="pane-status"><span class="status-dot" aria-hidden="true"></span><strong data-secondary-status>연결 정상</strong><span>ma-3c42…a98d · 독립 세션</span><span class="split-hint">이 창에서만 스크롤·입력</span></div>
+
+          <div class="sync-banner">
+            <div class="sync-banner-copy">
+              <span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"></path></svg></span>
+              <span><strong data-secondary-banner>실시간 연결</strong> · 이 세션의 결과만 자동 반영합니다.</span>
+            </div>
+            <span class="pane-badge">대기 중</span>
+          </div>
+
+          <div class="chat-scroll pane-scroll" data-pane-scroll="secondary">
+            <div class="conversation">
+              <div class="date-divider"><span>오늘 · 14:29</span></div>
+              <article class="message user"><div><div class="user-bubble">문서 폴더를 정리하고 결과 HTML과 Markdown을 목록으로 보여줘.</div><div class="user-meta"><span>나 · 14:29</span><span class="check" aria-label="전달됨">✓✓</span></div></div></article>
+              <section class="activity-row" aria-label="문서 정리 작업 활동">
+                <button class="activity-toggle" type="button" aria-expanded="false" aria-controls="secondaryActivityDetails">
+                  <span class="activity-summary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2M21 12a9 9 0 1 1-2.6-6.4"></path></svg><strong>Worked for 48s</strong><span>3개 활동 · 접혀 있음</span></span>
+                  <svg class="activity-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                </button>
+                <div class="activity-details" id="secondaryActivityDetails">
+                  <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h5"></path></svg><strong>문서 트리를 스캔함</strong><time>14:29:14</time></div>
+                  <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9 4-4 4 4M12 5v9M5 19h14"></path></svg><strong>Markdown 7개와 HTML 2개를 찾음</strong><time>14:29:38</time></div>
+                  <div class="activity-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><strong>결과 이벤트 대기 중</strong><time>지금</time></div>
+                </div>
+              </section>
+              <section class="message assistant" aria-live="polite">
+                <div class="assistant-avatar" aria-hidden="true">M</div>
+                <div class="assistant-body">
+                  <div class="assistant-label"><strong>MultiAgent</strong><span class="provider-pill">Claude</span><span data-secondary-answer-meta>작업 중</span></div>
+                  <div class="working-card" data-secondary-working>
+                    <span class="working-spinner" aria-hidden="true"></span><span class="working-copy"><strong>문서 목록을 정리하고 있습니다</strong><span>이 세션은 별도로 진행되며 다른 창의 스크롤에 영향을 주지 않습니다.</span></span>
+                  </div>
+                  <div class="answer" data-secondary-answer>
+                    <h2>문서 정리가 완료되었습니다.</h2>
+                    <p>두 번째 세션의 결과는 첫 번째 세션과 분리되어 표시됩니다. 각 창에서 독립적으로 스크롤하고 후속 질문을 보낼 수 있습니다.</p>
+                    <div class="result-card"><div class="result-card-head"><strong>문서 인덱스</strong><span>자동 반영됨</span></div><div class="result-card-body"><span class="file-badge" aria-hidden="true">MD</span><span><strong>docs/index.md</strong><small>문서 9개 · 12.4 KB</small></span><button class="open-result" type="button">열어보기</button></div></div>
+                    <div class="answer-actions"><button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h11v11H8zM5 16H4V5h11v1"></path></svg>복사</button><button type="button" class="copy-answer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>후속 질문</button></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div class="jump-latest"><button type="button" data-jump-pane="secondary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg>새 결과 · 최신으로 이동</button></div>
+          </div>
+
+          <div class="composer-wrap">
+            <form class="composer" data-composer="secondary">
+              <div class="attachment-chip" data-attachment-chip>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.4-8.4"></path></svg>
+                docs.zip <button type="button" data-remove-attachment aria-label="첨부 제거">×</button>
+              </div>
+              <div class="composer-box"><label class="sr-only" for="secondaryComposerInput">문서 정리 세션 메시지 입력</label><textarea id="secondaryComposerInput" rows="1" placeholder="문서 정리 세션에 요청하세요"></textarea><div class="composer-toolbar"><div class="composer-left"><button class="composer-tool" type="button" data-attach-button><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.4-8.4"></path></svg>첨부</button><button class="composer-tool" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9M12 7v5l3 2"></path></svg>자동 동기화</button></div><div class="composer-right"><button class="send-button" type="submit" aria-label="문서 정리 세션 메시지 전송" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3.5-6.5zM5 12h6.5"></path></svg></button></div></div></div>
+              <div class="composer-hint">이 세션에만 전송 · Enter로 전송 · Shift + Enter로 줄바꿈</div>
+            </form>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="right-rail" id="rightRail" aria-label="작업 공간 사이드바">
+      <div class="rail-heading">
+        <div class="rail-heading-copy">
+          <h2>작업 공간</h2>
+          <span id="railContext">세션 상태 · Remote UX 검토</span>
+        </div>
+        <div class="rail-heading-actions">
+          <span class="rail-live">LIVE</span>
+          <button class="rail-collapse" type="button" data-right-rail-toggle aria-label="우측 사이드바 접기" title="우측 사이드바 접기" aria-expanded="true" aria-controls="rightRail">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5H4v14h16zM9 5v14M6 9h.01M6 12h.01M6 15h.01"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="rail-tabs" role="tablist" aria-label="작업 공간 정보">
+        <button class="rail-tab" id="railTabFiles" type="button" role="tab" aria-selected="false" aria-controls="railPanelFiles" tabindex="-1" data-rail-tab="files">
+          파일 <span class="tab-badge" aria-label="파일 12개">12</span>
+        </button>
+        <button class="rail-tab" id="railTabSource" type="button" role="tab" aria-selected="false" aria-controls="railPanelSource" tabindex="-1" data-rail-tab="source">
+          소스 제어 <span class="tab-badge" aria-label="변경사항 4개">4</span>
+        </button>
+        <button class="rail-tab" id="railTabStatus" type="button" role="tab" aria-selected="true" aria-controls="railPanelStatus" tabindex="0" data-rail-tab="status">
+          상태 <span class="tab-badge working" id="tabStatusBadge" aria-label="작업 중">●</span>
+        </button>
+      </div>
+
+      <section class="rail-panel" id="railPanelStatus" role="tabpanel" aria-labelledby="railTabStatus" data-rail-panel="status">
+        <div class="rail-card">
+          <h3>활성 세션</h3>
+          <div class="rail-state-line">
+            <span class="status-dot pending" id="railStateDot" aria-hidden="true"></span>
+            <strong id="railStateValue">작업 중</strong>
+            <span class="rail-state-label" id="railStateLabel">working</span>
+          </div>
+          <p class="rail-state-copy" id="railStateCopy">결과 이벤트를 기다리는 중입니다. 작업을 펼치지 않아도 결과가 도착하면 대화에 바로 반영됩니다.</p>
+        </div>
+        <div class="rail-card">
+          <h3>현재 세션</h3>
+          <div class="rail-row"><span>별명</span><strong id="railSessionName">Remote UX 검토</strong></div>
+          <div class="rail-row"><span>에이전트</span><strong id="railAgent">Codex</strong></div>
+          <div class="rail-row"><span>모델</span><strong id="railModel">GPT-5.6 Sol</strong></div>
+          <div class="rail-row"><span>연결</span><strong class="green" id="railConnection">정상</strong></div>
+          <div class="rail-row"><span>수명주기</span><strong id="railLifecycle">실행 중</strong></div>
+          <div class="rail-row"><span>세션 ID</span><strong id="railSessionId">ma-8f31…c4e2</strong></div>
+          <div class="rail-row"><span>프로젝트</span><strong id="railProject">ProjectA</strong></div>
+          <div class="rail-row"><span>경로</span><strong id="railPath">K:/AI/ProjectA</strong></div>
+        </div>
+        <div class="rail-card">
+          <h3>동기화</h3>
+          <div class="rail-row"><span>마지막 이벤트</span><strong id="railEvent">작업 중</strong></div>
+          <div class="rail-row"><span>마지막 동기화</span><strong id="railSyncTime">14:31:37</strong></div>
+          <div class="rail-row"><span>폴링 간격</span><strong>2초</strong></div>
+          <div class="rail-progress" aria-label="동기화 상태 76%"><span id="railProgressBar"></span></div>
+          <div class="event-list" style="margin-top: 11px">
+            <div class="event"><i class="green"></i><div><strong>작업 이벤트 수신</strong><small>14:31:37 · 2초 전</small></div></div>
+            <div class="event"><i></i><div><strong>결과 이벤트 대기</strong><small id="railEventHint">자동 반영 예정</small></div></div>
+          </div>
+        </div>
+        <div class="rail-card">
+          <h3>상태 배지 예시</h3>
+          <div class="state-legend" aria-label="세션 상태 배지 예시">
+            <button type="button" data-demo-state="working"><i aria-hidden="true"></i><strong>작업 중</strong><span>working</span></button>
+            <button class="question" type="button" data-demo-state="question"><i aria-hidden="true"></i><strong>질문 필요</strong><span>question</span></button>
+            <button class="error" type="button" data-demo-state="error"><i aria-hidden="true"></i><strong>오류</strong><span>error</span></button>
+          </div>
+        </div>
+        <div class="rail-card rail-tip"><strong>UX 포인트</strong><br>활성 세션을 따라 상태만 갱신하고 사이드바는 자동으로 열지 않습니다. 질문·오류 배지는 탭에서만 조용히 알려 줍니다.</div>
+      </section>
+
+      <section class="rail-panel" id="railPanelFiles" role="tabpanel" aria-labelledby="railTabFiles" data-rail-panel="files" hidden>
+        <div class="rail-card">
+          <h3>ProjectA · 최근 파일</h3>
+          <div class="file-list">
+            <div class="file-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg><strong>docs/remote-ux.md</strong><small>4.8 KB</small></div>
+            <div class="file-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg><strong>reports/session-summary.html</strong><small>32 KB</small></div>
+            <div class="file-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg><strong>src/remote-chat.js</strong><small>18 KB</small></div>
+            <div class="file-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg><strong>assets/selection.png</strong><small>1.2 MB</small></div>
+          </div>
+          <button class="rail-link" type="button">전체 파일 보기 →</button>
+        </div>
+        <div class="rail-card rail-tip"><strong>파일 탭</strong><br>현재 프로젝트의 최근 결과물과 변경 파일을 빠르게 확인합니다. 파일을 선택하면 문서·뷰어 탭으로 이동하는 흐름을 가정했습니다.</div>
+      </section>
+
+      <section class="rail-panel" id="railPanelSource" role="tabpanel" aria-labelledby="railTabSource" data-rail-panel="source" hidden>
+        <div class="rail-card">
+          <h3>변경사항 · 4개</h3>
+          <div class="change-list">
+            <div class="change-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12v14H6zM9 9h6M9 13h4"></path></svg><strong>remote-chat.js</strong><small class="modified">M</small></div>
+            <div class="change-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12v14H6zM9 9h6M9 13h4"></path></svg><strong>remote-chat.css</strong><small class="modified">M</small></div>
+            <div class="change-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12v14H6zM9 9h6M9 13h4"></path></svg><strong>docs/remote-ux.md</strong><small class="added">A</small></div>
+            <div class="change-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12v14H6zM9 9h6M9 13h4"></path></svg><strong>reports/session-summary.html</strong><small class="added">A</small></div>
+          </div>
+          <button class="rail-link" type="button">소스 제어 열기 →</button>
+        </div>
+        <div class="rail-card">
+          <h3>브랜치</h3>
+          <div class="rail-row"><span>현재</span><strong>main</strong></div>
+          <div class="rail-row"><span>동기화</span><strong class="green">최신</strong></div>
+          <div class="rail-row"><span>마지막 커밋</span><strong>2분 전</strong></div>
+        </div>
+      </section>
+    </aside>
+    <div class="rail-drawer-backdrop" id="railDrawerBackdrop" aria-hidden="true"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg><span id="toastText">완료</span></div>
+
+  <div class="modal-backdrop" id="notesModal" role="presentation">
+    <section class="notes-modal" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+      <div class="modal-head"><h2 id="notesTitle">Remote 대화 UX 시안 메모</h2><button class="icon-button" type="button" id="closeNotesTop" aria-label="메모 닫기">×</button></div>
+      <div class="modal-body">
+        <p>대화 화면을 보고 있는 동안에도 결과 이벤트를 별도 상태로 수신하고, 결과가 도착하면 메시지 스트림에 바로 삽입하는 흐름을 가정했습니다.</p>
+        <div class="note-grid">
+          <div class="note"><strong>즉시 반영</strong><span>작업 펼침 여부와 관계없이 결과 카드가 현재 대화 위치에 나타납니다. 사용자가 위쪽을 읽는 중이면 “새 결과” 버튼만 조용히 표시합니다.</span></div>
+          <div class="note"><strong>작업 로그 분리</strong><span>도구 호출·파일 수집·검증 같은 세부 과정은 Worked for 행 아래로 접어 긴 로그가 대화 가독성을 깨지 않게 합니다.</span></div>
+          <div class="note"><strong>세션 상태 탭</strong><span>파일·소스 제어와 같은 우측 사이드바 탭으로 제공합니다. 별명·모델·연결·수명주기·경로·동기화 상태는 현재 선택한 대화 패널을 따라 갱신되며, 완료·질문·오류는 탭 배지만 바꾸고 사이드바를 강제로 열지 않습니다.</span></div>
+          <div class="note"><strong>모바일 대응</strong><span>모바일에서는 세션 목록을 햄버거 드로어로, 우측 사이드바를 별도 오버레이 드로어로 엽니다. 둘을 닫으면 대화 컬럼과 입력창이 화면 전체 폭을 사용합니다.</span></div>
+          <div class="note"><strong>좌우 분할</strong><span>각 세션은 독립된 스크롤·상태·입력 영역을 갖고, 우측 세션 상태 탭은 마지막으로 선택한 패널을 따라갑니다. 사이드바를 접으면 대화 폭을 회수하고 좁은 화면에서는 두 대화를 세로로 쌓습니다.</span></div>
+          <div class="note"><strong>장문 결과</strong><span>제목·목록·결과 카드로 본문을 나누고, 넓은 코드와 표는 해당 블록 안에서만 가로 스크롤합니다. 긴 도구 로그는 기본 접힘으로 두며, 사용자가 위쪽을 읽는 중이면 최신 이동 버튼으로만 알립니다.</span></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button class="modal-close" type="button" id="closeNotes">닫기</button></div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+      const app = $(".app");
+      const workspace = $(".workspace");
+      const primaryPane = $("#primaryPane");
+      const secondaryPane = $("#secondaryPane");
+      const simulateButton = $("#simulateResult");
+      const syncDot = $("#syncDot");
+      const syncLabel = $("#syncLabel");
+      const syncTime = $("#syncTime");
+      const bannerStatus = $("#bannerStatus");
+      const railEvent = $("#railEvent");
+      const railEventHint = $("#railEventHint");
+      const toast = $("#toast");
+      const toastText = $("#toastText");
+      const notesModal = $("#notesModal");
+      const sidebar = $("#sessionSidebar");
+      const rightRail = $("#rightRail");
+      const railBackdrop = $("#railDrawerBackdrop");
+      const railContext = $("#railContext");
+      const railStateDot = $("#railStateDot");
+      const railStateValue = $("#railStateValue");
+      const railStateLabel = $("#railStateLabel");
+      const railStateCopy = $("#railStateCopy");
+      const tabStatusBadge = $("#tabStatusBadge");
+      const railSessionName = $("#railSessionName");
+      const railAgent = $("#railAgent");
+      const railModel = $("#railModel");
+      const railConnection = $("#railConnection");
+      const railLifecycle = $("#railLifecycle");
+      const railSessionId = $("#railSessionId");
+      const railProject = $("#railProject");
+      const railPath = $("#railPath");
+      const railSyncTime = $("#railSyncTime");
+      const railProgressBar = $("#railProgressBar");
+      const viewHelp = $("#viewHelp");
+      const panes = [primaryPane, secondaryPane];
+      let resultReady = false;
+      let currentView = "single";
+      let activePane = primaryPane;
+      let toastTimer;
+
+      const nowLabel = () => new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
+      const showToast = (message) => {
+        toastText.textContent = message;
+        toast.classList.add("visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("visible"), 2600);
+      };
+      const railStates = {
+        working: { label: "작업 중", code: "working", copy: "결과 이벤트를 기다리는 중입니다. 작업을 펼치지 않아도 결과가 도착하면 대화에 바로 반영됩니다.", badge: "●" },
+        done: { label: "완료", code: "done", copy: "새 결과가 세션 기록에 저장되었습니다. 현재 대화 위치가 최신이 아니면 이동 배지가 표시됩니다.", badge: "✓" },
+        question: { label: "질문 필요", code: "question", copy: "에이전트가 다음 단계를 진행하려면 사용자의 확인이 필요합니다. 대화는 계속 열어 둡니다.", badge: "?" },
+        error: { label: "오류", code: "error", copy: "작업 중 오류가 발생했습니다. 오류 상세와 재시도 동작을 상태 탭에서 확인합니다.", badge: "!" }
+      };
+      const setRailState = (state) => {
+        const config = railStates[state] || railStates.working;
+        rightRail.dataset.state = config.code;
+        railStateDot.className = `status-dot ${config.code === "working" ? "pending" : config.code}`;
+        railStateValue.textContent = config.label;
+        railStateLabel.className = `rail-state-label ${config.code === "working" ? "" : config.code}`;
+        railStateLabel.textContent = config.code;
+        railStateCopy.textContent = config.copy;
+        tabStatusBadge.className = `tab-badge ${config.code}`;
+        tabStatusBadge.textContent = config.badge;
+        tabStatusBadge.setAttribute("aria-label", `세션 ${config.label}`);
+        railProgressBar.style.width = config.code === "done" ? "100%" : config.code === "error" ? "38%" : config.code === "question" ? "68%" : "76%";
+      };
+      const updateRailForPane = (pane = activePane) => {
+        if (!pane || pane.hidden) return;
+        const { sessionAlias, agent, model, connection, lifecycle, sessionId, project, path } = pane.dataset;
+        railContext.textContent = `세션 상태 · ${sessionAlias}`;
+        railSessionName.textContent = sessionAlias;
+        railAgent.textContent = agent;
+        railModel.textContent = model;
+        railConnection.textContent = connection;
+        railLifecycle.textContent = resultReady ? "완료" : lifecycle;
+        railSessionId.textContent = sessionId;
+        railProject.textContent = project;
+        railPath.textContent = path;
+        railEvent.textContent = resultReady ? "결과 반영 완료" : "작업 중";
+        railEventHint.textContent = resultReady ? "방금 전 · 세션에 저장됨" : "자동 반영 예정";
+      };
+      const setActivePane = (pane, announce = true) => {
+        if (!pane || pane.hidden) return;
+        activePane = pane;
+        panes.forEach((entry) => entry.classList.toggle("active-pane", entry === pane));
+        $$('[data-pane-focus]').forEach((entry) => entry.setAttribute("aria-pressed", String(entry.dataset.paneFocus === pane.dataset.pane)));
+        updateRailForPane(pane);
+        if (announce) showToast(`${pane.dataset.sessionAlias} 세션을 활성화했습니다.`);
+      };
+      const scrollFor = (pane) => $(".pane-scroll", pane) || $("#chatScroll", pane);
+      const isNearBottom = (scroll) => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 42;
+      const updateJumpButton = (pane) => {
+        const scroll = scrollFor(pane);
+        if (!scroll) return;
+        const button = $(".jump-latest button", pane);
+        if (button) button.classList.toggle("visible", !isNearBottom(scroll));
+      };
+      const updateAllJumpButtons = () => panes.filter((pane) => !pane.hidden).forEach(updateJumpButton);
+
+      const setPaneReady = (pane, ready) => {
+        const working = $("#workingCard", pane) || $("[data-secondary-working]", pane);
+        const answer = $("#answer", pane) || $("[data-secondary-answer]", pane);
+        const longAnswer = $("#longAnswer", pane);
+        const answerMeta = $("#answerMeta", pane) || $("[data-secondary-answer-meta]", pane);
+        if (working) working.hidden = ready;
+        if (answer) answer.classList.toggle("visible", ready);
+        if (longAnswer) longAnswer.classList.toggle("visible", ready && currentView === "long");
+        if (answerMeta) answerMeta.textContent = ready ? "완료 · 방금 전" : "작업 중";
+        if (pane === secondaryPane) {
+          const secondaryStatus = $("[data-secondary-status]", pane);
+          const secondaryBanner = $("[data-secondary-banner]", pane);
+          if (secondaryStatus) secondaryStatus.textContent = ready ? "결과 반영 완료" : "연결 정상";
+          if (secondaryBanner) secondaryBanner.textContent = ready ? "새 결과 반영 완료" : "실시간 연결";
+        }
+      };
+
+      const setSync = (ready) => {
+        resultReady = ready;
+        syncDot.classList.toggle("pending", !ready);
+        syncLabel.textContent = ready ? "자동 동기화 완료" : "결과 이벤트 대기 중";
+        syncTime.textContent = ready ? `방금 전 · ${nowLabel()}` : "연결됨 · 결과 대기";
+        bannerStatus.textContent = ready ? "새 결과 반영 완료" : "실시간 연결";
+        setRailState(ready ? "done" : "working");
+        updateRailForPane();
+        railSyncTime.textContent = ready ? nowLabel() : "14:31:37";
+        panes.forEach((pane) => setPaneReady(pane, ready));
+        simulateButton.textContent = ready ? "작업중으로 되돌리기" : "결과 도착 시뮬레이션";
+      };
+
+      $$(".activity-toggle").forEach((toggle) => {
+        const details = document.getElementById(toggle.getAttribute("aria-controls"));
+        const summary = $(".activity-summary span", toggle);
+        toggle.addEventListener("click", () => {
+          const expanded = toggle.getAttribute("aria-expanded") === "true";
+          toggle.setAttribute("aria-expanded", String(!expanded));
+          if (details) details.classList.toggle("open", !expanded);
+          if (summary) summary.textContent = expanded ? `${summary.dataset.count || "4개 활동"} · 접혀 있음` : `${summary.dataset.count || "4개 활동"} · 자세히 보기`;
+        });
+        if (summary) summary.dataset.count = summary.textContent.split("·")[0].trim();
+      });
+
+      const setView = (view) => {
+        currentView = view;
+        app.classList.toggle("split-mode", view === "split");
+        app.classList.toggle("long-mode", view === "long");
+        workspace.classList.toggle("split-mode", view === "split");
+        workspace.classList.toggle("long-mode", view === "long");
+        secondaryPane.hidden = view !== "split";
+        if (view === "single" || view === "long") setActivePane(primaryPane, false);
+        else updateRailForPane();
+        $$("[data-view-target]").forEach((button) => {
+          const active = button.dataset.viewTarget === view;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        if (view === "single") viewHelp.textContent = "기본 단일 대화 흐름입니다. 결과 도착 시 작업을 펼치지 않아도 현재 대화에 바로 나타납니다.";
+        if (view === "split") viewHelp.textContent = "두 세션을 좌우로 비교합니다. 각 창의 스크롤·상태·입력은 서로 독립이며, 활성 세션은 청록색 테두리로 표시됩니다.";
+        if (view === "long") viewHelp.textContent = "장문 결과 스트레스 테스트입니다. 본문은 읽기 폭을 유지하고 넓은 코드·표만 블록 안에서 가로 스크롤합니다.";
+        if (view === "long" && !resultReady) setSync(true);
+        const longAnswer = $("#longAnswer");
+        if (longAnswer) longAnswer.classList.toggle("visible", resultReady && view === "long");
+        if (view === "split") showToast("두 세션을 독립된 창으로 나란히 표시합니다.");
+        if (view === "long") showToast("긴 결과의 줄바꿈·스크롤·접힘 규칙을 확인해보세요.");
+        setTimeout(updateAllJumpButtons, 20);
+      };
+      $$('[data-view-target]').forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewTarget)));
+
+      simulateButton.addEventListener("click", () => {
+        const wasAway = new Map(panes.map((pane) => [pane, !isNearBottom(scrollFor(pane))]));
+        simulateButton.disabled = true;
+        if (!resultReady) {
+          setTimeout(() => {
+            $("#workedLabel").textContent = "Worked for 1m 47s";
+            setSync(true);
+            showToast("새 결과가 도착해 모든 열린 세션에 바로 반영되었습니다.");
+            panes.filter((pane) => !pane.hidden).forEach((pane) => {
+              const scroll = scrollFor(pane);
+              if (wasAway.get(pane)) updateJumpButton(pane);
+              else scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+            });
+            simulateButton.disabled = false;
+          }, 420);
+        } else {
+          setTimeout(() => {
+            $("#workedLabel").textContent = "Worked for 1m 46s";
+            setSync(false);
+            showToast("작업중 상태 예시로 돌아갔습니다.");
+            panes.filter((pane) => !pane.hidden).forEach((pane) => scrollFor(pane).scrollTo({ top: scrollFor(pane).scrollHeight, behavior: "smooth" }));
+            simulateButton.disabled = false;
+          }, 220);
+        }
+      });
+
+      panes.forEach((pane) => {
+        const scroll = scrollFor(pane);
+        if (scroll) {
+          scroll.addEventListener("scroll", () => updateJumpButton(pane), { passive: true });
+          const jump = $(".jump-latest button", pane);
+          if (jump) jump.addEventListener("click", () => {
+            scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+            setTimeout(() => updateJumpButton(pane), 280);
+          });
+        }
+      });
+
+      $$('[data-pane-focus]').forEach((button) => button.addEventListener("click", () => {
+        const pane = button.dataset.paneFocus === "secondary" ? secondaryPane : primaryPane;
+        setActivePane(pane);
+      }));
+      panes.forEach((pane) => {
+        pane.addEventListener("pointerdown", () => setActivePane(pane, false));
+        pane.addEventListener("focusin", () => setActivePane(pane, false));
+      });
+
+      const setRailTab = (tabName, focus = false) => {
+        const tabs = $$('[data-rail-tab]');
+        tabs.forEach((tab) => {
+          const active = tab.dataset.railTab === tabName;
+          tab.setAttribute("aria-selected", String(active));
+          tab.tabIndex = active ? 0 : -1;
+          const panel = document.getElementById(tab.getAttribute("aria-controls"));
+          if (panel) panel.hidden = !active;
+          if (active && focus) tab.focus();
+        });
+      };
+      $$('[data-rail-tab]').forEach((tab, index, tabs) => {
+        tab.addEventListener("click", () => setRailTab(tab.dataset.railTab));
+        tab.addEventListener("keydown", (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+          setRailTab(tabs[next].dataset.railTab, true);
+        });
+      });
+
+      const narrowViewport = () => window.matchMedia("(max-width: 720px)").matches;
+      const setRightRailOpen = (open) => {
+        if (narrowViewport()) {
+          rightRail.classList.toggle("open", open);
+          railBackdrop.classList.toggle("visible", open);
+          app.classList.remove("rail-collapsed");
+        } else {
+          app.classList.toggle("rail-collapsed", !open);
+          rightRail.classList.remove("open");
+          railBackdrop.classList.remove("visible");
+        }
+        $$('[data-right-rail-toggle]').forEach((button) => {
+          button.setAttribute("aria-expanded", String(open));
+          button.setAttribute("aria-label", open ? "우측 사이드바 접기" : "우측 사이드바 열기");
+          button.title = open ? "우측 사이드바 접기" : "우측 사이드바 열기";
+        });
+      };
+      $$('[data-right-rail-toggle]').forEach((button) => button.addEventListener("click", () => {
+        const open = narrowViewport() ? !rightRail.classList.contains("open") : app.classList.contains("rail-collapsed");
+        setRightRailOpen(open);
+      }));
+      railBackdrop.addEventListener("click", () => setRightRailOpen(false));
+      $$('button.rail-link, .file-row, .change-row').forEach((item) => item.addEventListener("click", () => showToast("사이드바 상세 화면으로 이동하는 예시 동작입니다.")));
+      $$('[data-demo-state]').forEach((button) => button.addEventListener("click", () => {
+        setRailState(button.dataset.demoState);
+        railEvent.textContent = railStates[button.dataset.demoState].label;
+        railSyncTime.textContent = "방금 전";
+        showToast(`세션 상태 배지 예시: ${railStates[button.dataset.demoState].label}`);
+      }));
+
+      const wireComposer = (form) => {
+        const input = $("textarea", form);
+        const send = $(".send-button", form);
+        const resize = () => {
+          input.style.height = "auto";
+          input.style.height = `${Math.min(input.scrollHeight, 130)}px`;
+          send.disabled = !input.value.trim();
+        };
+        input.addEventListener("input", resize);
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (input.value.trim()) form.requestSubmit();
+          }
+        });
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          if (!input.value.trim()) return;
+          const isSecondary = form.dataset.composer === "secondary";
+          showToast(isSecondary ? "문서 정리 세션에 메시지를 추가했습니다." : "메시지가 현재 세션에 추가되었습니다.");
+          input.value = "";
+          resize();
+        });
+        const attach = $("#attachButton", form) || $("[data-attach-button]", form);
+        const chip = $("#attachmentChip", form) || $("[data-attachment-chip]", form);
+        const remove = $("#removeAttachment", form) || $("[data-remove-attachment]", form);
+        if (attach) attach.addEventListener("click", () => {
+          chip.classList.add("visible");
+          showToast(isSecondary ? "docs.zip 첨부 예시를 추가했습니다." : "selection.png 첨부 예시를 추가했습니다.");
+        });
+        if (remove) remove.addEventListener("click", () => chip.classList.remove("visible"));
+        resize();
+      };
+      $$('[data-composer], #composerForm').forEach(wireComposer);
+
+      $$(".open-result").forEach((button) => button.addEventListener("click", () => showToast("결과물 뷰어를 여는 동작입니다.")));
+      $$(".copy-answer").forEach((button) => button.addEventListener("click", () => showToast("예시 동작: 결과 내용을 복사했습니다.")));
+      $("#newSessionButton").addEventListener("click", () => showToast("새 세션 생성 화면으로 이동합니다."));
+
+      const openNotes = () => { notesModal.classList.add("visible"); $("#closeNotes").focus(); };
+      const closeNotes = () => { notesModal.classList.remove("visible"); };
+      $("#notesButton").addEventListener("click", openNotes);
+      $("#notesButtonMain").addEventListener("click", openNotes);
+      $("#closeNotes").addEventListener("click", closeNotes);
+      $("#closeNotesTop").addEventListener("click", closeNotes);
+      notesModal.addEventListener("click", (event) => { if (event.target === notesModal) closeNotes(); });
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeNotes(); sidebar.classList.remove("open"); $("#mobileMenu").setAttribute("aria-expanded", "false"); setRightRailOpen(false); } });
+
+      $("#mobileMenu").addEventListener("click", () => {
+        const open = sidebar.classList.toggle("open");
+        $("#mobileMenu").setAttribute("aria-expanded", String(open));
+      });
+      $$(".history-item, .project-item").forEach((item) => item.addEventListener("click", () => {
+        $$(".history-item, .project-item").forEach((entry) => entry.classList.remove("active"));
+        item.classList.add("active");
+        sidebar.classList.remove("open");
+      }));
+
+      const query = new URLSearchParams(location.search);
+      const requestedView = query.get("view");
+      const requestedTab = query.get("tab");
+      const requestedRail = query.get("rail");
+      setRightRailOpen(requestedRail === "open" ? true : requestedRail === "closed" ? false : !narrowViewport());
+      setRailTab(["files", "source", "status"].includes(requestedTab) ? requestedTab : "status");
+      setSync(false);
+      setView(["single", "split", "long"].includes(requestedView) ? requestedView : "single");
+      updateAllJumpButtons();
+    })();
+  </script>
+</body>
+</html>

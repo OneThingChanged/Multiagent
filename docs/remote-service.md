@@ -40,6 +40,9 @@ sources:
   - id: mobile-remote-screen
     resource: ../mobile/src/screens/RemoteScreen.tsx
     title: "Android Remote WebView and back navigation"
+  - id: remote-chat-ux-mockup
+    resource: mockups/remote-chat-codex-style.html
+    title: "Remote conversation and session-status UX prototype"
 ---
 
 # Remote service
@@ -81,6 +84,24 @@ Remote chat reads from the desktop conversation store with bounded sequence
 cursors. The browser keeps a rendering cache, but that cache is not the source
 of truth: reaching the top requests older stored pages, and an app/WebView
 reload can reconstruct the transcript from SQLite.[^electron-main][^remote-client]
+
+## Conversation UX prototype
+
+The interactive Remote prototype keeps the conversation as the primary surface
+and shows a completed result in transcript order without requiring the operator
+to expand its work log first. Tool activity remains collapsible, while long
+answers constrain tables and code blocks to their own horizontal scroll areas.
+Single-session, side-by-side, and long-result states are selectable in one file
+for layout review.[^remote-chat-ux-mockup]
+
+Files, source control, and session status share one right sidebar. The status
+tab follows the active conversation pane and summarizes alias, provider, model,
+connection, lifecycle, project path, and synchronization state. Completion,
+question, and error events update the tab badge without forcing the sidebar
+open. Desktop users can collapse the sidebar to recover conversation width;
+mobile users open it as an overlay drawer. This file is a design prototype, not
+an assertion that the production Remote client already implements every shown
+interaction.[^remote-chat-ux-mockup]
 
 Document endpoints expose bounded project-local Markdown, images, linked assets,
 and isolated HTML preview capabilities. They do not serve arbitrary absolute
@@ -167,3 +188,4 @@ Operational Dashboard behavior is documented separately in
 [^mobile-manifest]: Android client manifest
 [^mobile-shell]: Android profile and retained WebView shell
 [^mobile-remote-screen]: Android Remote WebView and back navigation
+[^remote-chat-ux-mockup]: Remote conversation and session-status UX prototype
