@@ -143,3 +143,5 @@ The canonical OKF v0.2 knowledge index is [`docs/index.md`](docs/index.md):
 ## License
 
 [MIT](LICENSE)
+
+Privacy information is available in [PRIVACY.md](PRIVACY.md).

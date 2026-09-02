@@ -139,3 +139,5 @@ Electron 인스톨러, blockmap, 업데이터 manifest는 `app/electron-dist/`�
 ## 라이선스
 
 [MIT](LICENSE)
+
+개인정보 처리 안내는 [PRIVACY.md](PRIVACY.md)에서 확인할 수 있습니다.
