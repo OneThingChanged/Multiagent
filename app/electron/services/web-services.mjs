@@ -2426,12 +2426,22 @@ export class RemoteDashboardService {
 }
 
 export class TunnelService {
-  constructor({ baseDir, getConfig, getLocalUrl, fetchImpl = fetch, spawnImpl = spawn }) {
+  constructor({
+    baseDir,
+    getConfig,
+    getLocalUrl,
+    fetchImpl = fetch,
+    spawnImpl = spawn,
+    allowDownload = true,
+    executableSearchPath = process.env.PATH || "",
+  }) {
     this.baseDir = baseDir;
     this.getConfig = getConfig;
     this.getLocalUrl = getLocalUrl;
     this.fetchImpl = fetchImpl;
     this.spawnImpl = spawnImpl;
+    this.allowDownload = allowDownload;
+    this.executableSearchPath = executableSearchPath;
     this.child = null;
     this.publicUrl = null;
     this.downloadPromise = null;
@@ -2440,8 +2450,20 @@ export class TunnelService {
   status() { return { running: Boolean(this.child && !this.child.killed), publicUrl: this.publicUrl }; }
 
   async ensureExecutable() {
-    const executable = path.join(this.baseDir, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    const executableName = process.platform === "win32" ? "cloudflared.exe" : "cloudflared";
+    const executable = path.join(this.baseDir, executableName);
     if (fs.existsSync(executable)) return executable;
+    for (const directory of this.executableSearchPath.split(path.delimiter)) {
+      const candidateDirectory = directory.trim().replace(/^"|"$/g, "");
+      if (!candidateDirectory) continue;
+      const candidate = path.join(candidateDirectory, executableName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    if (!this.allowDownload) {
+      throw new Error(
+        "Microsoft Store판은 실행 파일을 자동으로 내려받지 않습니다. cloudflared를 PATH에 설치해 주세요.",
+      );
+    }
     if (process.platform !== "win32") {
       throw new Error("cloudflared를 PATH 또는 MultiAgent 데이터 폴더에 설치해 주세요.");
     }

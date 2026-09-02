@@ -2,6 +2,8 @@
 
 ## 2026-09-02
 
+* **Microsoft Store MSIX implementation**: Added an isolated Store runtime, exact-identity manifest rendering, fail-closed unsigned production packaging, local development signing, content/hash verification, packaged smokes, and administrator-only install/WACK entry points.
+* **Store supply-chain boundary**: Excluded APKs, credential-like files, non-x64 node-pty payloads, and debug symbols from Store output; disabled Store runtime downloads of `cloudflared` while preserving PATH-based use.
 * **Acknowledged web session creation**: Remote and local Dashboard creation now waits for coordinator validation, agent ownership, and actual insertion before returning success; disabled tools are synchronized into both web surfaces and failures remain actionable in the editor.
 * **Remote conversation UX prototype**: Added single, split, and long-result review states with immediate result visibility, collapsible work logs, a tabbed right sidebar whose session status follows the active pane, non-disruptive event badges, and a mobile overlay drawer.
 * **Reliable image-tagged Remote submission**: Wrapped multiline Remote messages in terminal bracketed-paste markers before sending a discrete Enter, preventing image paths from remaining unsubmitted in Codex or Claude prompts.

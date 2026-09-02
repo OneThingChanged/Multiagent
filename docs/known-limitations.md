@@ -94,6 +94,11 @@ manifests carry the installer SHA-512 and Electron Updater verifies it, but a
 fresh manual installation can still show an unknown-publisher warning. Revisit
 this limitation when a trusted Windows code-signing certificate is configured.[^desktop-manifest]
 
+The Store MSIX pipeline is implemented but has not yet completed Partner Center
+identity binding, WACK, or Store certification. A development MSIX does not
+remove warnings for public users; only the Microsoft-signed Store result closes
+that distribution limitation.
+
 ## Review policy
 
 This concept remains `draft` because limitations are time-sensitive. Promote or

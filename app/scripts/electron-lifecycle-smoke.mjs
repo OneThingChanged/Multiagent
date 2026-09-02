@@ -10,7 +10,14 @@ const appRoot = path.resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 const packaged = process.argv.includes("--packaged");
 const company = process.argv.includes("--company");
-const outputDir = path.join(appRoot, "electron-dist", ...(company ? ["company"] : []));
+const store = process.argv.includes("--store");
+if (company && store) throw new Error("Choose only one Electron build variant.");
+const variant = company ? "company" : store ? "store" : "standard";
+const outputDir = path.join(
+  appRoot,
+  "electron-dist",
+  ...(variant === "standard" ? [] : [variant]),
+);
 const electronPath = packaged
   ? path.join(
       outputDir,
@@ -31,8 +38,8 @@ async function run(name, envName, marker, timeoutMs = 12_000, terminateAfterMark
       [envName]: "1",
       MULTIAGENT_ELECTRON_USER_DATA: userData,
       MULTIAGENT_LOCAL_DATA: path.join(userData, "local-data"),
-      ...(company && !packaged
-        ? { MULTIAGENT_BUILD_VARIANT: "company" }
+      ...(variant !== "standard" && !packaged
+        ? { MULTIAGENT_BUILD_VARIANT: variant }
         : {}),
     };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -54,7 +61,7 @@ async function run(name, envName, marker, timeoutMs = 12_000, terminateAfterMark
     child.on("exit", (code) => {
       clearTimeout(timeout);
       try { fs.rmSync(userData, { recursive: true, force: true }); } catch {}
-      const variantMarker = `variant=${company ? "company" : "standard"}`;
+      const variantMarker = `variant=${variant}`;
       const packagedResourcesHealthy = !output.includes("[electron] tray init failed");
       if (
         (code === 0 || (terminateAfterMarker && terminationRequested)) &&

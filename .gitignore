@@ -10,6 +10,7 @@ pnpm-debug.log*
 .env
 .env.*
 *.local
+/app/store/store-identity.local.json
 
 # Per-project agent config the app auto-generates (machine-local hooks)
 /.codex/

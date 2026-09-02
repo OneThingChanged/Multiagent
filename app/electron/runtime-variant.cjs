@@ -6,6 +6,7 @@ const VARIANTS = Object.freeze({
     localDataDirectory: "com.jintae.multiagent",
     updaterChannel: "latest",
     remoteEnabled: true,
+    updateProvider: "github",
   }),
   company: Object.freeze({
     id: "company",
@@ -14,12 +15,24 @@ const VARIANTS = Object.freeze({
     localDataDirectory: "com.jintae.multiagent.company",
     updaterChannel: "latest-company",
     remoteEnabled: false,
+    updateProvider: "github",
+  }),
+  store: Object.freeze({
+    id: "store",
+    displayName: "MultiAgent",
+    appUserModelId: null,
+    localDataDirectory: "com.jintae.multiagent.store",
+    userDataDirectory: "MultiAgent Store",
+    updaterChannel: null,
+    remoteEnabled: true,
+    updateProvider: "microsoft-store",
   }),
 });
 
 function normalizeVariant(value) {
-  return typeof value === "string" && value.trim().toLowerCase() === "company"
-    ? "company"
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "company" || normalized === "store"
+    ? normalized
     : "standard";
 }
 

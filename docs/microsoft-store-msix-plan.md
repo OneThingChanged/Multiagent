@@ -1,7 +1,7 @@
 ---
 type: Implementation Plan
 title: Microsoft Store MSIX delivery plan
-description: "Deferred plan for adding a Store-signed MSIX channel without disturbing the existing NSIS and Android releases."
+description: "Implemented Store-isolated MSIX channel and the remaining Partner Center certification and rollout gates."
 tags:
   - release
   - windows
@@ -18,6 +18,18 @@ sources:
   - id: electron-main
     resource: ../app/electron/main.mjs
     title: "Updater, storage, terminal, browser, and local-service runtime"
+  - id: store-builder
+    resource: ../app/scripts/build-electron-store.mjs
+    title: "Fail-closed Store MSIX builder"
+  - id: store-config
+    resource: ../app/electron-builder.store.cjs
+    title: "Store package contents and x64 filtering"
+  - id: store-manifest
+    resource: ../app/store/Package.appxmanifest.template.xml
+    title: "Packaged classic app manifest"
+  - id: store-verifier
+    resource: ../app/scripts/verify-electron-store-msix.mjs
+    title: "Store package integrity and content verifier"
   - id: electron-msix-guide
     resource: https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/guides/electron-packaging
     title: "Microsoft Electron MSIX packaging guide"
@@ -42,9 +54,18 @@ or its web installer, and Store-managed updates replace `electron-updater` for
 that build. Existing Standard and Company NSIS releases remain unchanged until
 the Store path has passed private-audience testing.[^electron-msix-guide][^store-distribution]
 
-This work is intentionally deferred until a Microsoft Store developer account
-exists and Partner Center has issued the product identity. No Store build code
-or manifest has been added yet.
+The isolated Store variant, manifest, x64 MSIX builder, development certificate,
+content verifier, packaged runtime smokes, and administrator-only WACK/install
+commands are implemented. On 2026-09-02 the development package
+`1.6.25.0` was built and signed, its manifest/hash/content checks passed, and
+the packaged Store runtime passed bridge, Dashboard, close, workspace, and
+security smokes.[^store-builder][^store-verifier]
+
+Production packaging and certification are intentionally fail-closed until
+Partner Center issues the exact product identity. The build does not accept the
+development identity for upload, and this non-administrator session could not
+install the development certificate into `LocalMachine\TrustedPeople` or run
+WACK. Those are the two remaining local verification actions before upload.
 
 ## Account prerequisite
 
@@ -69,7 +90,7 @@ publication, but this project will still load them from an ignored local
 configuration file so personal or organization-specific values are not added
 to Git by accident.
 
-## Phase 1: isolated Store build
+## Phase 1: isolated Store build — implemented
 
 1. Add a `store` runtime/build variant alongside `standard` and `company`.
 2. Add `electron:dist:store:dev` for a placeholder development identity and
@@ -85,31 +106,32 @@ to Git by accident.
 5. Keep Store-only configuration and generated packages out of the Standard and
    Company builders. Generated MSIX files remain ignored release artifacts.
 
-## Phase 2: Store runtime behavior
+## Phase 2: Store runtime behavior — implemented baseline
 
 1. Disable GitHub `electron-updater` checks, downloads, and install controls in
    the Store variant. Display that updates are managed by Microsoft Store.
-2. Give the Store package an explicit runtime identity and prevent it from
-   running concurrently with an NSIS instance that owns the same hook files,
-   browser broker, or local ports.
-3. On first Store launch, detect the existing Standard data directory, present
-   a migration action, and copy only supported settings, projects, session
-   catalog metadata, and conversation-store configuration. Preserve the source
-   until the user confirms the Store version works.
+2. The Store package uses separate `userData` and LocalAppData roots. Its local
+   servers already probe subsequent loopback ports when a Standard instance owns
+   a default port, so state and listener ownership do not cross variants.
+3. The first Store release deliberately keeps Standard data separate. Automatic
+   migration is not part of the current baseline; users must validate the Store
+   channel before any later opt-in import workflow is introduced.
 4. Verify that external Codex and Claude processes can still read the hook/MCP
    configuration and exchange data with the full-trust packaged process.
 5. Exclude the Android APK from the Store package. The Remote download surface
    should use the separately published, release-signed APK.
-6. Replace the runtime download-and-execute behavior for `cloudflared.exe` in
-   the Store variant with a reviewable strategy: either bundle a pinned,
-   license-compliant, hash-verified binary or require a separately installed
-   executable. Do not silently execute an unpinned latest binary in the Store
-   build.[^store-policy][^electron-main]
+6. The Store variant never downloads `cloudflared.exe`. It uses an existing
+   executable from the Store data directory or `PATH`, otherwise returns an
+   installation instruction. Standard retains its current download behavior.
+   This keeps dynamically acquired executable code out of the Store channel.
+   [^store-policy][^electron-main]
 
 ## Phase 3: local package verification
 
-1. Generate a development-only self-signed certificate outside the repository,
-   create a locally signed MSIX, and trust it only for the current test user.
+1. Generate a development-only self-signed certificate outside the repository
+   and create a locally signed MSIX. Installation requires an elevated shell so
+   the public certificate can be added to `LocalMachine\TrustedPeople`; the
+   private key remains in the creating user's certificate store.
 2. Install and launch the package without uninstalling the production NSIS
    version. Do not run both variants simultaneously during port and hook tests.
 3. Verify cold start, project selection, PTY creation, Codex/Claude discovery,
@@ -166,18 +188,31 @@ The Store path is ready when all of the following are true:
   personal address, or secret Store configuration is tracked by Git; and
 * the Windows App Certification Kit and Partner Center certification both pass.
 
-## Resume checklist
+## Production handoff checklist
 
-When the account is ready, resume from this document and provide or place the
-four non-secret Partner Center identity values in the agreed ignored local
-configuration file. Reconfirm the selected audience and the `cloudflared`
-packaging decision, then begin Phase 1. Do not start from the existing NSIS
-installer-submission route: that route still requires a publicly trusted code
-signing certificate, while the MSIX route receives complimentary Store signing.
+1. Reserve the product in Partner Center and copy
+   `Package/Identity/Name`, `Publisher`, `PublisherDisplayName`, and the Store
+   product ID into ignored `app/store/store-identity.local.json` using
+   `app/store/store-identity.example.json` as the template.
+2. In an administrator PowerShell, run `npm run electron:install:store:dev` and
+   `npm run electron:wack:store:dev` from `app/`.
+3. Run `npm run electron:dist:store`; it produces the unsigned, exact-identity
+   MSIX that Partner Center will sign after certification.
+4. Upload through a Private audience submission first and provide the
+   `runFullTrust` justification: MultiAgent is a local terminal/agent workspace
+   that launches user-selected CLI tools and reads user-selected project paths.
+
+Do not use the NSIS installer-submission route for this goal: it still requires
+a publicly trusted code-signing certificate, while the MSIX route receives
+complimentary Store signing.
 
 [^desktop-manifest]: Current Electron build and NSIS publication configuration
 [^runtime-variant]: Standard and Company runtime identities
 [^electron-main]: Updater, storage, terminal, browser, and local-service runtime
+[^store-builder]: Fail-closed Store MSIX builder
+[^store-config]: Store package contents and x64 filtering
+[^store-manifest]: Packaged classic app manifest
+[^store-verifier]: Store package integrity and content verifier
 [^electron-msix-guide]: Microsoft Electron MSIX packaging guide
 [^store-distribution]: Microsoft Store Win32 distribution options
 [^store-policy]: Microsoft Store policies

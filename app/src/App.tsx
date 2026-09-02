@@ -203,8 +203,9 @@ type RuntimeFlags = {
   workspace_window_id: string | null;
   coordinator: boolean;
   open_agent_id?: string | null;
-  build_variant?: "standard" | "company";
+  build_variant?: "standard" | "company" | "store";
   remote_enabled?: boolean;
+  update_provider?: "github" | "microsoft-store";
 };
 
 type AgentWindowUsage = {
@@ -3893,6 +3894,8 @@ function App() {
           onToggleTool={handleToggleTool}
           showUsageBar={showUsageBar}
           onShowUsageBarChange={handleShowUsageBarChange}
+          buildVariant={runtimeFlags?.build_variant ?? "standard"}
+          updateProvider={runtimeFlags?.update_provider ?? "github"}
           onClose={() => setSettingsOpen(false)}
         />
       )}

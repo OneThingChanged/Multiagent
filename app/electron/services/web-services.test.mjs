@@ -1574,4 +1574,41 @@ describe("Electron dashboard server", () => {
     expect(spawnedArgs).toEqual(["tunnel", "--url", "http://127.0.0.1:18800", "--no-autoupdate"]);
     await service.stop();
   });
+
+  it("does not download cloudflared when executable downloads are disabled", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-tunnel-store-"));
+    roots.push(root);
+    let fetched = false;
+    const service = new TunnelService({
+      baseDir: root,
+      getConfig: () => ({ tunnel_token: "", public_hostname: "" }),
+      getLocalUrl: () => "http://127.0.0.1:18800",
+      allowDownload: false,
+      executableSearchPath: "",
+      fetchImpl() {
+        fetched = true;
+        throw new Error("fetch must not be called");
+      },
+    });
+
+    await expect(service.ensureExecutable()).rejects.toThrow("자동으로 내려받지 않습니다");
+    expect(fetched).toBe(false);
+  });
+
+  it("uses an installed cloudflared from PATH without downloading it", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-tunnel-path-"));
+    const install = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-cloudflared-path-"));
+    roots.push(root, install);
+    const executable = path.join(install, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    fs.writeFileSync(executable, "stub");
+    const service = new TunnelService({
+      baseDir: root,
+      getConfig: () => ({ tunnel_token: "", public_hostname: "" }),
+      getLocalUrl: () => "http://127.0.0.1:18800",
+      allowDownload: false,
+      executableSearchPath: install,
+    });
+
+    await expect(service.ensureExecutable()).resolves.toBe(executable);
+  });
 });

@@ -96,6 +96,7 @@ const runtimeVariant = runtimeVariantModule.resolveRuntimeVariant({
   packageVariant,
 });
 const isCompanyBuild = runtimeVariant.id === "company";
+const isStoreBuild = runtimeVariant.id === "store";
 const devUrl = process.env.MULTIAGENT_DEV_URL?.trim() || null;
 const bridgeSmoke = process.env.MULTIAGENT_ELECTRON_BRIDGE_SMOKE === "1" ||
   process.argv.includes("--multiagent-bridge-smoke");
@@ -263,6 +264,12 @@ const transcriptMissUntil = new Map();
 app.setName(runtimeVariant.displayName);
 const userDataOverride = process.env.MULTIAGENT_ELECTRON_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", userDataOverride);
+else if (runtimeVariant.userDataDirectory) {
+  app.setPath(
+    "userData",
+    path.join(app.getPath("appData"), runtimeVariant.userDataDirectory)
+  );
+}
 const workspaceRegistryPath = path.join(
   app.getPath("userData"),
   "workspace-window.json"
@@ -316,7 +323,7 @@ if (!singleInstanceLockAcquired) {
 const reopenJournal = new ReopenJournal(
   path.join(app.getPath("userData"), "electron-reopen-state.json")
 );
-if (process.platform === "win32") {
+if (process.platform === "win32" && runtimeVariant.appUserModelId) {
   app.setAppUserModelId(runtimeVariant.appUserModelId);
 }
 const sessionService = new SessionService(app.getPath("userData"));
@@ -790,11 +797,12 @@ const tunnelService = new TunnelService({
   baseDir: hookBaseDir,
   getConfig: () => remoteService.config,
   getLocalUrl: () => remoteService.status().url,
+  allowDownload: !isStoreBuild,
 });
 const { autoUpdater } = electronUpdater;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.channel = runtimeVariant.updaterChannel;
+if (!isStoreBuild) autoUpdater.channel = runtimeVariant.updaterChannel;
 const electronTestUpdateFeed =
   "https://github.com/OneThingChanged/Multiagent/releases/download/electron-test/";
 let updateDownloaded = false;
@@ -805,12 +813,14 @@ const updaterLifecycle = new UpdaterLifecycle({
     app.exit(0);
   },
 });
-autoUpdater.on("error", (error) => {
-  updaterLifecycle.record("updater-error", error);
-});
-autoUpdater.on("update-downloaded", (info) => {
-  updaterLifecycle.record("update-downloaded", info?.version ?? null);
-});
+if (!isStoreBuild) {
+  autoUpdater.on("error", (error) => {
+    updaterLifecycle.record("updater-error", error);
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    updaterLifecycle.record("update-downloaded", info?.version ?? null);
+  });
+}
 closeCoordinator = new CloseCoordinator({
   onRequest() {
     sendEventToAll("app:close-requested", null);
@@ -853,6 +863,9 @@ const diagnosticsService = new DiagnosticsService({
 });
 
 async function checkForElectronUpdate() {
+  if (isStoreBuild) {
+    throw new Error("Microsoft Store 빌드는 Windows Store에서 업데이트를 관리합니다.");
+  }
   if (!app.isPackaged && !process.env.MULTIAGENT_UPDATE_FEED_URL) return null;
   updaterLifecycle.record("check-started");
   const result = await updaterLifecycle.withTimeout(
@@ -887,6 +900,9 @@ async function checkForElectronUpdate() {
 }
 
 async function downloadElectronUpdate() {
+  if (isStoreBuild) {
+    throw new Error("Microsoft Store 빌드는 앱 내부에서 업데이트를 설치할 수 없습니다.");
+  }
   updaterLifecycle.record("download-started");
   let lastTransferred = 0;
   const onProgress = (progress) => {
@@ -2404,6 +2420,9 @@ function closeEverything() {
 
 function completeCloseAction(action, trigger) {
   if (action === "install-update") {
+    if (isStoreBuild) {
+      throw new Error("Microsoft Store 빌드는 Windows Store에서 업데이트를 설치합니다.");
+    }
     forceClosing = true;
     updaterLifecycle.record("install-requested", trigger);
     updaterLifecycle.armInstallWatchdog();
@@ -4448,6 +4467,7 @@ async function invokeCommand(event, command, rawArgs) {
         }),
         build_variant: runtimeVariant.id,
         remote_enabled: runtimeVariant.remoteEnabled,
+        update_provider: runtimeVariant.updateProvider,
       };
     case "renderer_ready": {
       const runtime = runtimeByWebContents.get(event.sender.id);

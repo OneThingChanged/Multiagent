@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Release playbook
-description: "Signing, verification, publication, and updater invariants for Standard, Company, and Android artifacts."
+description: "Signing, verification, publication, and updater invariants for Standard, Company, Store, and Android artifacts."
 tags:
   - release
   - signing
@@ -18,6 +18,12 @@ sources:
   - id: company-config
     resource: ../app/electron-builder.company.cjs
     title: "Company package configuration"
+  - id: store-config
+    resource: ../app/electron-builder.store.cjs
+    title: "Microsoft Store package configuration"
+  - id: store-builder
+    resource: ../app/scripts/build-electron-store.mjs
+    title: "Microsoft Store MSIX build"
   - id: standard-builder
     resource: ../app/scripts/build-electron-standard.mjs
     title: "Standard build and APK verification"
@@ -37,7 +43,9 @@ A complete stable release contains:
 
 * Standard Windows x64 NSIS installer, blockmap, and `latest.yml`;
 * Company Windows x64 NSIS installer, blockmap, and its updater manifest;
-* signed Android APK plus non-secret verification metadata for Standard.[^desktop-manifest][^standard-config][^company-config]
+* signed Android APK plus non-secret verification metadata for Standard; and
+* after Partner Center enrollment, a separately certified Store x64 MSIX whose
+  acquisition and updates are managed by Microsoft Store.[^desktop-manifest][^standard-config][^company-config][^store-config]
 
 Portable executables are intentionally excluded.
 
@@ -52,6 +60,10 @@ certificate. Electron Updater verifies each installer against the SHA-512 value
 in its YAML manifest, but Windows may still show an unknown-publisher warning.
 Do not describe a Windows artifact as code-signed unless
 `Get-AuthenticodeSignature` independently reports `Valid`.
+
+That limitation applies to the direct NSIS channels. The Store upload MSIX is
+intentionally unsigned and receives Microsoft's signature after certification.
+Never publish or upload the locally signed development MSIX.
 
 The Standard desktop build verifies the Android package name, version,
 architectures, APK hash, and certificate fingerprint before copying it into the
@@ -107,6 +119,10 @@ release staging directory. Verification failure stops the build.[^standard-build
 Electron Updater consumes the YAML manifests and blockmaps produced for each
 variant. Standard and Company identities/channels must never cross.
 
+The Store variant disables Electron Updater and delegates acquisition and
+updates to Microsoft Store. It uses a separate data identity and must be built
+from the exact Partner Center identity file.[^store-builder]
+
 Do not publish a manifest before its binary exists at the referenced URL. Do
 not mark a partial release Latest. A release is complete only after installation
 and update paths have been checked from published assets, not just local output.
@@ -114,5 +130,7 @@ and update paths have been checked from published assets, not just local output.
 [^desktop-manifest]: Desktop version, scripts, and publish configuration
 [^standard-config]: Standard package configuration
 [^company-config]: Company package configuration
+[^store-config]: Microsoft Store package configuration
+[^store-builder]: Microsoft Store MSIX build
 [^standard-builder]: Standard build and APK verification
 [^mobile-builder]: Signed Android build

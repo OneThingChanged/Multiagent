@@ -12,7 +12,6 @@ import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
 import {
   APP_VERSION,
-  BUILD_VARIANT,
   IS_COMPANY_BUILD,
   RELEASES_URL,
 } from "../lib/appInfo";
@@ -383,6 +382,8 @@ export function SettingsModal({
   onToggleTool,
   showUsageBar,
   onShowUsageBarChange,
+  buildVariant,
+  updateProvider,
   onClose,
 }: {
   theme: AppThemeId;
@@ -397,6 +398,8 @@ export function SettingsModal({
   onToggleTool: (toolId: string, enabled: boolean) => void;
   showUsageBar: boolean;
   onShowUsageBarChange: (show: boolean) => void;
+  buildVariant: "standard" | "company" | "store";
+  updateProvider: "github" | "microsoft-store";
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<SettingsCategory>("general");
@@ -2064,7 +2067,11 @@ export function SettingsModal({
             <div className="app-about-row">
               <span className="app-about-label">Channel</span>
               <span className="app-about-value">
-                {BUILD_VARIANT === "company" ? "Company" : "Standard"}
+                {buildVariant === "company"
+                  ? "Company"
+                  : buildVariant === "store"
+                    ? "Microsoft Store"
+                    : "Standard"}
               </span>
             </div>
             {updateCheck.status === "available" && (
@@ -2091,23 +2098,25 @@ export function SettingsModal({
                 "Installing. The app will restart shortly."}
               {install.status === "error" &&
                 `Update install failed: ${install.message}`}
-              {install.status === "idle" &&
+              {updateProvider === "microsoft-store" &&
+                "업데이트는 Microsoft Store와 Windows에서 자동으로 관리됩니다."}
+              {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "idle" &&
                 "Click Check to see if a new release is available."}
-              {install.status === "idle" &&
+              {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "checking" &&
                 "Checking for updates..."}
-              {install.status === "idle" &&
+              {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "available" &&
                 "A newer release is available."}
-              {install.status === "idle" &&
+              {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "current" &&
                 "You are using the latest release."}
-              {install.status === "idle" &&
+              {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "error" &&
                 `Update check failed: ${updateCheck.message}`}
             </div>
-            <div className="app-update-actions">
+            {updateProvider !== "microsoft-store" && <div className="app-update-actions">
               <button
                 className="btn-secondary app-update-btn"
                 onClick={handleCheckForUpdates}
@@ -2134,7 +2143,7 @@ export function SettingsModal({
               >
                 Releases
               </button>
-            </div>
+            </div>}
           </div>
         </div>
 

@@ -11,15 +11,18 @@ const appRoot = path.resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 const { listPackage } = require("@electron/asar");
 const company = process.argv.includes("--company");
+const store = process.argv.includes("--store");
+if (company && store) throw new Error("Choose only one packaged build variant.");
+const variant = company ? "company" : store ? "store" : "standard";
 const executable = path.join(
   appRoot,
   "electron-dist",
-  ...(company ? ["company"] : []),
+  ...(variant === "standard" ? [] : [variant]),
   "win-unpacked",
   company ? "MultiAgentCompany.exe" : "MultiAgent.exe"
 );
 const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
-const variantMarker = `variant=${company ? "company" : "standard"}`;
+const variantMarker = `variant=${variant}`;
 
 if (!fs.existsSync(executable)) {
   console.error("Packaged Electron executable is missing. Run npm run electron:pack first.");
@@ -45,11 +48,11 @@ if (asarEntries.has(apkEntry)) {
   process.exit(1);
 }
 const stagedApk = path.join(path.dirname(executable), "resources", "mobile", "MultiAgent-Mobile.apk");
-if (company && fs.existsSync(stagedApk)) {
-  console.error("Company package unexpectedly contains the verified Remote APK resource.");
+if ((company || store) && fs.existsSync(stagedApk)) {
+  console.error(`${variant} package unexpectedly contains the verified Remote APK resource.`);
   process.exit(1);
 }
-if (!company && !fs.statSync(stagedApk, { throwIfNoEntry: false })?.isFile()) {
+if (variant === "standard" && !fs.statSync(stagedApk, { throwIfNoEntry: false })?.isFile()) {
   console.error("Standard package is missing the verified Remote APK resource.");
   process.exit(1);
 }

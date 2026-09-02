@@ -14,6 +14,7 @@ describe("Electron runtime variant", () => {
       localDataDirectory: "com.jintae.multiagent",
       updaterChannel: "latest",
       remoteEnabled: true,
+      updateProvider: "github",
     });
   });
 
@@ -25,6 +26,20 @@ describe("Electron runtime variant", () => {
       localDataDirectory: "com.jintae.multiagent.company",
       updaterChannel: "latest-company",
       remoteEnabled: false,
+      updateProvider: "github",
+    });
+  });
+
+  it("uses isolated data and Microsoft Store managed updates for Store builds", () => {
+    expect(resolveRuntimeVariant({ packageVariant: "store" })).toMatchObject({
+      id: "store",
+      displayName: "MultiAgent",
+      appUserModelId: null,
+      localDataDirectory: "com.jintae.multiagent.store",
+      userDataDirectory: "MultiAgent Store",
+      updaterChannel: null,
+      remoteEnabled: true,
+      updateProvider: "microsoft-store",
     });
   });
 
@@ -33,6 +48,13 @@ describe("Electron runtime variant", () => {
       environmentVariant: "company",
       packageVariant: "standard",
     }).id).toBe("company");
+  });
+
+  it("accepts a Store development environment override", () => {
+    expect(resolveRuntimeVariant({
+      environmentVariant: "store",
+      packageVariant: "standard",
+    }).id).toBe("store");
   });
 
   it("keeps shared Dashboard assets but excludes the Remote APK from Company", () => {

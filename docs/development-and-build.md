@@ -22,6 +22,12 @@ sources:
   - id: company-builder
     resource: ../app/scripts/build-electron-company.mjs
     title: "Company desktop build"
+  - id: store-builder
+    resource: ../app/scripts/build-electron-store.mjs
+    title: "Microsoft Store MSIX build"
+  - id: store-verifier
+    resource: ../app/scripts/verify-electron-store-msix.mjs
+    title: "Microsoft Store MSIX verifier"
   - id: mobile-manifest
     resource: ../mobile/package.json
     title: "Android scripts"
@@ -85,15 +91,45 @@ cd "K:\AI\MultiAgent\app"
 npm run electron:dist          # Standard NSIS
 npm run electron:dist:company  # Company NSIS
 npm run electron:dist:all      # Standard then Company
+npm run electron:dist:store:dev # Locally signed development MSIX
 ```
 
-Only NSIS installers are production targets; portable executables are not built.
+Standard and Company use NSIS; Microsoft Store uses an isolated x64 MSIX.
+Portable executables are not built.
 The Standard build fails closed unless it verifies the configured release APK,
 package name, architecture, hash, and signing certificate. The Company build
 uses a distinct identity and excludes the APK.[^standard-builder][^company-builder]
 
 Build output is under `app/electron-dist/`. It is generated material and must
 not be treated as source documentation.
+
+### Microsoft Store package
+
+The development path uses a placeholder identity and a self-signed certificate
+whose private key stays in `Cert:\CurrentUser\My`:
+
+```powershell
+cd "K:\AI\MultiAgent\app"
+npm run electron:dist:store:dev
+npm run electron:verify:store:dev
+npm run electron:store-packaged-smoke
+npm run electron:store-packaged-lifecycle-smoke
+```
+
+Installing that development package and running WACK require an administrator
+PowerShell because Windows must trust the public development certificate at the
+machine level:
+
+```powershell
+npm run electron:install:store:dev
+npm run electron:wack:store:dev
+```
+
+Production builds require the exact Partner Center fields in ignored
+`app/store/store-identity.local.json`. `npm run electron:dist:store` fails before
+building when the file is absent or invalid. The production MSIX remains
+unsigned for Partner Center to sign; it never contains the Android APK, signing
+keys, or Store credentials.[^store-builder][^store-verifier]
 
 ## Android APK
 
@@ -115,5 +151,7 @@ profile/authentication model is documented in [Remote service](remote-service.md
 [^dev-runner]: Electron development runner
 [^standard-builder]: Standard desktop build
 [^company-builder]: Company desktop build
+[^store-builder]: Microsoft Store MSIX build
+[^store-verifier]: Microsoft Store MSIX verifier
 [^mobile-manifest]: Android scripts
 [^mobile-builder]: Android APK build and verification

@@ -2,8 +2,11 @@ export const APP_VERSION = __MULTIAGENT_APP_VERSION__;
 export const BUILD_VARIANT =
   import.meta.env.VITE_MULTIAGENT_VARIANT === "company"
     ? "company"
+    : import.meta.env.VITE_MULTIAGENT_VARIANT === "store"
+      ? "store"
     : "standard";
 export const IS_COMPANY_BUILD = BUILD_VARIANT === "company";
+export const IS_STORE_BUILD = BUILD_VARIANT === "store";
 export const GITHUB_OWNER = "OneThingChanged";
 export const GITHUB_REPO = "Multiagent";
 export const REPOSITORY_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`;
