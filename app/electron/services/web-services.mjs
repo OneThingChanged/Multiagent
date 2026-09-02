@@ -1293,6 +1293,30 @@ export class LocalDashboardService {
             sendJson(response, 200, { ok: true });
             return;
           }
+          if (request.method === "POST" && url.pathname === "/api/session/submit") {
+            if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
+            if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+              sendJson(response, 415, { error: "application/json required" });
+              return;
+            }
+            const body = await readJson(request);
+            const id = String(body.id || "").trim();
+            const message = String(body.message || "");
+            if (!id || !message.trim() || message.length > 8 * 1024) {
+              sendJson(response, 400, { error: "invalid message" });
+              return;
+            }
+            if (typeof p.submitPty !== "function") {
+              sendJson(response, 501, { error: "message submission unavailable" });
+              return;
+            }
+            if (await p.submitPty(id, message) === false) {
+              sendJson(response, 409, { error: "session is not active" });
+              return;
+            }
+            sendJson(response, 200, { ok: true });
+            return;
+          }
           if (request.method === "POST" && url.pathname === "/api/attachment") {
             if (!this.isLocalOrigin(request)) { sendJson(response, 403, { error: "blocked" }); return; }
             if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
@@ -1363,8 +1387,16 @@ export class LocalDashboardService {
           }
           if (request.method === "GET" && url.pathname === "/api/chat") {
             const id = String(url.searchParams.get("id") || "").trim();
+            const beforeSequence = Number(url.searchParams.get("before"));
+            const requestedLimit = Number(url.searchParams.get("limit"));
+            const options = {
+              beforeSequence: Number.isSafeInteger(beforeSequence) && beforeSequence > 0 ? beforeSequence : null,
+              limit: Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+                ? Math.min(400, requestedLimit)
+                : 400,
+            };
             try {
-              sendJson(response, 200, (await p.chatProvider?.(id)) ?? { blocks: [], missing: true });
+              sendJson(response, 200, (await p.chatProvider?.(id, options)) ?? { blocks: [], missing: true });
             } catch (error) {
               sendJson(response, 500, { error: error.message, blocks: [] });
             }
@@ -1481,12 +1513,13 @@ export class LocalDashboardService {
 }
 
 export class RemoteDashboardService {
-  constructor({ baseDir, stateProvider, writePty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, createSession, renameSession, usageProvider, browserProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
+  constructor({ baseDir, stateProvider, writePty, submitPty, requestAccess, fetchImpl = fetch, terminalSnapshot, subscribeTerminal, terminalSize, chatProvider, restartSession, cancelSession, createSession, renameSession, usageProvider, browserProvider, mobileApkPath = DEFAULT_REMOTE_MOBILE_APK_PATH, pushService = null, deviceMonitorService = null }) {
     this.baseDir = baseDir;
     this.configPath = path.join(baseDir, "remote-config.json");
     this.accessPath = path.join(baseDir, "remote-access.json");
     this.stateProvider = stateProvider;
     this.writePty = writePty;
+    this.submitPty = submitPty ?? (() => false);
     this.requestAccess = requestAccess;
     this.fetchImpl = fetchImpl;
     this.terminalSnapshot = terminalSnapshot ?? (() => null);
@@ -2147,6 +2180,29 @@ export class RemoteDashboardService {
           sendJson(response, 200, { ok: true });
           return;
         }
+        if (request.method === "POST" && url.pathname === "/api/session/submit") {
+          if (!this.isSameOrigin(request)) {
+            sendJson(response, 403, { error: "cross-origin request blocked" });
+            return;
+          }
+          if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+            sendJson(response, 415, { error: "application/json required" });
+            return;
+          }
+          const body = await readJson(request);
+          const id = String(body.id || "").trim();
+          const message = String(body.message || "");
+          if (!id || !message.trim() || message.length > 8 * 1024) {
+            sendJson(response, 400, { error: "invalid message" });
+            return;
+          }
+          if (await this.submitPty(id, message) === false) {
+            sendJson(response, 409, { error: "session is not active" });
+            return;
+          }
+          sendJson(response, 200, { ok: true });
+          return;
+        }
         if (request.method === "POST" && url.pathname === "/api/attachment") {
           if (!this.isSameOrigin(request)) {
             sendJson(response, 403, { error: "cross-origin request blocked" });
@@ -2252,8 +2308,16 @@ export class RemoteDashboardService {
         }
         if (request.method === "GET" && url.pathname === "/api/chat") {
           const id = String(url.searchParams.get("id") || "").trim();
+          const beforeSequence = Number(url.searchParams.get("before"));
+          const requestedLimit = Number(url.searchParams.get("limit"));
+          const options = {
+            beforeSequence: Number.isSafeInteger(beforeSequence) && beforeSequence > 0 ? beforeSequence : null,
+            limit: Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+              ? Math.min(400, requestedLimit)
+              : 400,
+          };
           try {
-            const result = (await this.chatProvider?.(id)) ?? { blocks: [], missing: true };
+            const result = (await this.chatProvider?.(id, options)) ?? { blocks: [], missing: true };
             sendJson(response, 200, result);
           } catch (error) {
             sendJson(response, 500, { error: error.message, blocks: [] });

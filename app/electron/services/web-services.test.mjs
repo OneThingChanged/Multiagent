@@ -313,7 +313,7 @@ describe("Electron dashboard server", () => {
     expect(appScriptBody).toContain("function openChatFilePreview(agentId, projectId, rawPath, kind)");
     expect(appScriptBody).toContain("async function openChatHtmlDocument(agentId, projectId, rawPath)");
     expect(appScriptBody).toContain('if (kind === "html")');
-    expect(appScriptBody).toContain("selectDocuments(resolvedProjectId)");
+    expect(appScriptBody).toContain("await openRemoteHtmlPreview(projectId, path, agentId)");
     expect(appScriptBody).toContain('if (/\\.(?:html|htm)$/i.test(path)) return "html";');
     expect(appScriptBody).toContain("async function openRemoteHtmlPreview(projectId, relativePath, agentId");
     expect(appScriptBody).toContain("window.__MULTIAGENT_NATIVE_EXTERNAL_PREVIEW__");
@@ -725,6 +725,7 @@ describe("Electron dashboard server", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "multiagent-remote-input-"));
     roots.push(root);
     const writes = [];
+    const submissions = [];
     const activations = [];
     const cancellations = [];
     const creations = [];
@@ -734,6 +735,10 @@ describe("Electron dashboard server", () => {
       stateProvider: () => ({}),
       writePty(id, data) {
         writes.push({ id, data });
+        return id === "agent-1";
+      },
+      async submitPty(id, message) {
+        submissions.push({ id, message });
         return id === "agent-1";
       },
       restartSession(id) {
@@ -776,6 +781,16 @@ describe("Electron dashboard server", () => {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://attacker.invalid", "sec-fetch-site": "cross-site" },
       body: JSON.stringify({ id: "agent-1", data: "malicious\r" }),
+    });
+    const submitted = await fetch(`${status.url}/api/session/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-1", message: "한 번에 전송" }),
+    });
+    const blockedSubmit = await fetch(`${status.url}/api/session/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://attacker.invalid", "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({ id: "agent-1", message: "malicious" }),
     });
     const activated = await fetch(`${status.url}/api/session/restart`, {
       method: "POST",
@@ -838,6 +853,9 @@ describe("Electron dashboard server", () => {
     expect(accepted.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-1", data: "계속 진행해줘\r" }]);
     expect(blocked.status).toBe(403);
+    expect(submitted.status).toBe(200);
+    expect(blockedSubmit.status).toBe(403);
+    expect(submissions).toEqual([{ id: "agent-1", message: "한 번에 전송" }]);
     expect(activated.status).toBe(200);
     expect(activations).toEqual(["agent-offline"]);
     expect(cancelled.status).toBe(200);
@@ -1141,6 +1159,8 @@ describe("Electron dashboard server", () => {
     fs.writeFileSync(path.join(root, "docs", "local.html"), '<h1>Local HTML</h1><img src="local.png">');
     fs.writeFileSync(path.join(root, "docs", "local.png"), Buffer.from("89504e470d0a1a0a", "hex"));
     const writes = [];
+    const submissions = [];
+    const chatRequests = [];
     const cancellations = [];
     const service = new LocalDashboardService({
       title: "Monitor",
@@ -1167,7 +1187,15 @@ describe("Electron dashboard server", () => {
           writes.push({ id, data });
           return true;
         },
-        chatProvider: (id) => ({ blocks: [{ role: "user", kind: "text", text: `hi ${id}` }], missing: false }),
+        submitPty: async (id, message) => {
+          if (id === "agent-offline") return false;
+          submissions.push({ id, message });
+          return true;
+        },
+        chatProvider: (id, options) => {
+          chatRequests.push({ id, options });
+          return { blocks: [{ role: "user", kind: "text", text: `hi ${id}` }], missing: false };
+        },
         terminalSnapshot: () => null,
         subscribeTerminal: () => null,
         terminalSize: () => null,
@@ -1187,8 +1215,12 @@ describe("Electron dashboard server", () => {
     expect(state.pwa).toBe(true);
     const usage = await fetch(`${status.url}/api/usage?refresh=1`).then((r) => r.json());
     expect(usage.tokens).toMatchObject({ events: 2, totalTokens: 25 });
-    const chat = await fetch(`${status.url}/api/chat?id=agent-9`).then((r) => r.json());
+    const chat = await fetch(`${status.url}/api/chat?id=agent-9&before=450&limit=75`).then((r) => r.json());
     expect(chat.blocks[0].text).toBe("hi agent-9");
+    expect(chatRequests).toEqual([{
+      id: "agent-9",
+      options: { beforeSequence: 450, limit: 75 },
+    }]);
     const docs = await fetch(`${status.url}/api/docs?projectId=local-project`).then((r) => r.json());
     expect(docs.documents).toContainEqual({ name: "local.md", path: "docs/local.md", kind: "markdown" });
     const image = await fetch(
@@ -1211,6 +1243,13 @@ describe("Electron dashboard server", () => {
     });
     expect(input.status).toBe(200);
     expect(writes).toEqual([{ id: "agent-9", data: "go\r" }]);
+    const submitted = await fetch(`${status.url}/api/session/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-9", message: "submit once" }),
+    });
+    expect(submitted.status).toBe(200);
+    expect(submissions).toEqual([{ id: "agent-9", message: "submit once" }]);
     const cancelled = await fetch(`${status.url}/api/session/cancel`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: status.url },

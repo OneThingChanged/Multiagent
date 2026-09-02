@@ -3,6 +3,8 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+const appScript = fs.readFileSync(fileURLToPath(new URL("./app.js", import.meta.url)), "utf8");
+
 function loadChatFileLinkFunctions() {
   const source = fs.readFileSync(fileURLToPath(new URL("./app.js", import.meta.url)), "utf8");
   const start = source.indexOf("const CHAT_FILE_PATH_RE");
@@ -68,5 +70,14 @@ describe("Remote chat file links", () => {
     expect(external).toContain('href="https://example.com/result.png"');
     expect(external).not.toContain("data-chat-file-path");
     expect(noProject).not.toContain("data-chat-file-path");
+  });
+
+  it("opens HTML links directly through the capability preview", () => {
+    const start = appScript.indexOf("async function openChatHtmlDocument");
+    const end = appScript.indexOf("async function openChatFilePreview", start);
+    const implementation = appScript.slice(start, end);
+
+    expect(implementation).toContain("await openRemoteHtmlPreview(projectId, path, agentId);");
+    expect(implementation).not.toContain("selectDocuments(");
   });
 });

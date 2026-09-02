@@ -67,6 +67,7 @@ export function RemoteScreen({
   const nativeSessionAccessState = useRef<{ active: boolean } | null>(null);
   const pendingOpen = useRef<{ agentId: string; url: string } | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
+  const [routeCanGoBack, setRouteCanGoBack] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [toolbarCollapsed, setToolbarCollapsed] = useState(true);
@@ -88,11 +89,12 @@ export function RemoteScreen({
       window.__MULTIAGENT_NATIVE_APP__ = true;
       window.__MULTIAGENT_NATIVE_EXTERNAL_PREVIEW__ = true;
       window.__MULTIAGENT_PROFILE_ID__ = ${JSON.stringify(profile.id)};
+      window.__MULTIAGENT_NATIVE_ACTIVE__ = ${JSON.stringify(active)};
       document.documentElement.dataset.nativeApp = "true";
       ${nativeSafeAreaScript}
     }
     true;
-  `, [nativeSafeAreaScript, profile.id, remoteOrigin]);
+  `, [active, nativeSafeAreaScript, profile.id, remoteOrigin]);
 
   const isRemotePage = (url: string) => {
     return isTrustedNativeBridgeUrl(baseUrl, url);
@@ -103,7 +105,7 @@ export function RemoteScreen({
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
-        if (resolveRemoteBackAction(canGoBack) === "web-history") {
+        if (resolveRemoteBackAction(routeCanGoBack ?? canGoBack) === "web-history") {
           webView.current?.goBack();
           return true;
         }
@@ -112,7 +114,7 @@ export function RemoteScreen({
       }
     );
     return () => subscription.remove();
-  }, [active, canGoBack, onReturnToHub]);
+  }, [active, canGoBack, routeCanGoBack, onReturnToHub]);
 
   const dispatchToPage = (eventName: string, detail: unknown) => {
     if (!pageLoaded.current) return false;
@@ -147,6 +149,10 @@ export function RemoteScreen({
   useEffect(() => {
     if (pageLoaded.current) webView.current?.injectJavaScript(nativeSafeAreaScript);
   }, [nativeSafeAreaScript]);
+
+  useEffect(() => {
+    dispatchToPage("multiagent:native-visibility", { active });
+  }, [active]);
 
   useEffect(() => {
     if (!mobileAuthTarget || mobileAuthTarget.profileId !== profile.id) return;
@@ -189,6 +195,10 @@ export function RemoteScreen({
           void Linking.openURL(target.href).catch(() => {});
         }
       } catch {}
+      return;
+    }
+    if (request.type === "multiagent:route-state") {
+      setRouteCanGoBack(request.canGoBack);
       return;
     }
     void stopForegroundMonitor(profile.id, remoteOrigin, request.revoke)
@@ -237,7 +247,7 @@ export function RemoteScreen({
             <Pressable
               style={styles.toolButton}
               onPress={() => {
-                if (canGoBack) webView.current?.goBack();
+                if (routeCanGoBack ?? canGoBack) webView.current?.goBack();
                 else onReturnToHub();
               }}
               accessibilityLabel="뒤로"
@@ -299,12 +309,16 @@ export function RemoteScreen({
           onMessage={handleNativeMessage}
           onLoadStart={() => {
             pageLoaded.current = false;
+            setRouteCanGoBack(null);
             setLoading(true);
             setLoadError("");
           }}
           onLoadEnd={(event) => {
             pageLoaded.current = isRemotePage(event.nativeEvent.url);
             setLoading(false);
+            if (pageLoaded.current) {
+              dispatchToPage("multiagent:native-visibility", { active });
+            }
             if (pageLoaded.current && nativeMonitorState.current) {
               dispatchToPage("multiagent:native-monitor-state", {
                 ...nativeMonitorState.current,

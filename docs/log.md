@@ -2,6 +2,8 @@
 
 ## 2026-09-02
 
+* **Remote UX reliability**: Isolated drafts and queues per session, added atomic same-origin message submission with failure recovery, enabled durable paged chat restoration, opened HTML hyperlinks directly, stabilized session navigation, paused hidden Android profile streams, and added managed Back routing.
+* **Microsoft Store MSIX plan**: Recorded the deferred Partner Center prerequisites, isolated Store build, runtime migration, certification, security, and rollout gates without changing production packaging.
 * **Readable chat timeline**: Documented provider-labelled assistant cards, transcript-ordered tool groups, richer Markdown hierarchy, and explicit latest-message navigation.
 * **Tabbed session properties**: Documented separate basic-information, session-data, and launch-option panels with bounded independent scrolling.
 

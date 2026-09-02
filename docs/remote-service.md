@@ -63,11 +63,24 @@ Authenticated clients can read projected workspace/session state, stream
 terminal output, submit input and attachments, cancel or activate work, create
 or rename sessions, and view supported Codex/Claude chat transcripts. The
 desktop resolves every mutation against its current PTY and lifecycle state.
+Composer text and scheduled messages are isolated by agent ID for the lifetime
+of the page, so changing the selected session does not move a draft or discard
+an accepted queue. Normal chat submission uses one same-origin HTTP operation;
+the desktop then writes the text and the discrete Enter key to the same verified
+PTY. A failed immediate submission leaves the draft and attachments available,
+while an activation timeout keeps its queued message and exposes retry instead
+of silently deleting it.[^web-services][^remote-client][^web-tests]
+
+Remote chat reads from the desktop conversation store with bounded sequence
+cursors. The browser keeps a rendering cache, but that cache is not the source
+of truth: reaching the top requests older stored pages, and an app/WebView
+reload can reconstruct the transcript from SQLite.[^electron-main][^remote-client]
 
 Document endpoints expose bounded project-local Markdown, images, linked assets,
 and isolated HTML preview capabilities. They do not serve arbitrary absolute
-filesystem paths. HTML links may open through the document area or a short-lived
-preview token depending on the client and content type. Root-relative HTML asset
+filesystem paths. A chat or Markdown hyperlink to HTML opens its short-lived
+preview capability directly instead of first navigating through Documents and
+requiring a second launch action. Root-relative HTML asset
 URLs are rebound to the same capability token so they cannot escape into the
 Remote application root. Unreal Automation reports that only export
 `index.html` and `index.json` are rendered by a dependency-free compatibility
@@ -109,10 +122,19 @@ completion notifications without Firebase.[^mobile-manifest][^device-monitor]
 Opening a profile lazily creates one WebView for that PC. The APK keeps an opened
 profile view mounted but hidden when the operator returns to the combined Session
 Hub or switches PCs, preserving page state and that WebView's navigation history
-for the lifetime of the app process. Only the visible profile handles Android
-Back: it traverses WebView history first, then returns to the Session Hub. Views
-remain origin-bound, and deleting a profile destroys its retained view and
-revokes its native access tokens.[^mobile-shell][^mobile-remote-screen]
+for the lifetime of the app process. Hidden profile pages receive a native
+visibility signal and suspend workspace polling, terminal SSE, chat refresh, and
+browser-frame capture until selected again; the native foreground notification
+monitor remains independent. Only the visible profile handles Android Back. Its
+managed Remote route history is traversed first, then control returns to the
+Session Hub without revisiting OAuth redirects. Views remain origin-bound, and
+deleting a profile destroys its retained view and revokes its native access
+tokens.[^mobile-shell][^mobile-remote-screen]
+
+The frequently polled workspace snapshot carries only a bounded terminal
+fallback per agent; full terminal output continues over snapshot/SSE endpoints.
+Session navigation retains a stable project/name order and updates existing rows
+in place so hook status changes do not reorder the operator's tap targets.
 
 Foreground-monitor bearer tokens are individually revocable. Revoking an
 account or changing the configured owner removes its device-monitor access.

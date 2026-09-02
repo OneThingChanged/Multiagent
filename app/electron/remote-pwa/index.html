@@ -338,9 +338,9 @@
             <div class="session-head-actions">
               <button class="small-button session-rename-button" id="renameSessionButton" type="button">이름 변경</button>
               <div class="session-mode" id="sessionMode" role="tablist">
-                <button class="on" data-mode="chat" type="button">💬 채팅</button>
-                <button data-mode="term" type="button">⌗ 터미널</button>
-                <button data-mode="browser" type="button">🌐 브라우저</button>
+                <button class="on" data-mode="chat" type="button" role="tab" aria-controls="chatView" aria-selected="true">💬 채팅</button>
+                <button data-mode="term" type="button" role="tab" aria-controls="outputPanel" aria-selected="false">⌗ 터미널</button>
+                <button data-mode="browser" type="button" role="tab" aria-controls="browserPanel" aria-selected="false">🌐 브라우저</button>
               </div>
               <button class="small-button" id="backToScreenButton" type="button" hidden>Screen으로 돌아가기</button>
             </div>
@@ -363,15 +363,15 @@
               <p id="promptText"></p>
             </section>
 
-            <section class="chat-view" id="chatView" aria-live="polite"></section>
+            <section class="chat-view" id="chatView" role="tabpanel" aria-live="polite"></section>
 
-            <section class="output-panel" id="outputPanel" hidden>
+            <section class="output-panel" id="outputPanel" role="tabpanel" hidden>
               <div class="output-head"><strong>터미널</strong><span class="terminal-live" id="terminalLive" hidden>● LIVE</span><button class="small-button" id="copyOutputButton" type="button">복사</button></div>
               <div class="terminal-mount" id="terminalMount"></div>
               <pre id="outputText" tabindex="0">출력 대기 중…</pre>
             </section>
 
-            <section class="browser-panel" id="browserPanel" hidden>
+            <section class="browser-panel" id="browserPanel" role="tabpanel" hidden>
               <div class="browser-toolbar">
                 <button class="browser-tool-button" id="browserBackButton" type="button" title="뒤로" aria-label="뒤로">←</button>
                 <button class="browser-tool-button" id="browserForwardButton" type="button" title="앞으로" aria-label="앞으로">→</button>

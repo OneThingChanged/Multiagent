@@ -2,7 +2,8 @@ export type NativeBridgeRequest =
   | { type: "multiagent:start-native-monitor"; token: string; cursor: number }
   | { type: "multiagent:register-native-session-access"; token: string }
   | { type: "multiagent:stop-native-monitor"; revoke: boolean }
-  | { type: "multiagent:open-external-preview"; url: string };
+  | { type: "multiagent:open-external-preview"; url: string }
+  | { type: "multiagent:route-state"; canGoBack: boolean };
 
 export function parseNativeBridgeRequest(value: string): NativeBridgeRequest | null {
   try {
@@ -32,6 +33,9 @@ export function parseNativeBridgeRequest(value: string): NativeBridgeRequest | n
       parsed.url.length <= 4096
     ) {
       return { type: parsed.type, url: parsed.url };
+    }
+    if (parsed?.type === "multiagent:route-state" && typeof parsed.canGoBack === "boolean") {
+      return { type: parsed.type, canGoBack: parsed.canGoBack };
     }
     return null;
   } catch {

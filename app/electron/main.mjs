@@ -640,13 +640,33 @@ const sessionProviders = {
     entry.process.write(data);
     return true;
   },
+  async submitPty(id, message) {
+    const agentId = asString(id).trim();
+    const value = asString(message);
+    const syncedAgent = (monitorService?.state?.agents || [])
+      .find((agent) => agent.id === agentId);
+    if (["starting", "recovering"].includes(asString(syncedAgent?.status).toLowerCase())) {
+      return false;
+    }
+    const entry = ptys.get(agentId);
+    if (!entry?.process || !value.trim() || value.length > 8 * 1024) return false;
+    try {
+      entry.process.write(value);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (ptys.get(agentId) !== entry || !entry.process) return false;
+      entry.process.write("\r");
+      return true;
+    } catch {
+      return false;
+    }
+  },
   terminalSnapshot: (id, afterSequence) => terminalSessions.snapshotSince(id, afterSequence),
   subscribeTerminal: (id, listener) => terminalSessions.subscribeData(id, listener),
   terminalSize: (id) => {
     const entry = ptys.get(id);
     return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
   },
-  chatProvider: (id) => chatBlocksForAgent(id),
+  chatProvider: (id, options) => chatBlocksForAgent(id, null, options),
   restartSession: (id) => {
     sendEventToAll("remote:restart-session", { id: asString(id) });
     return ptys.has(asString(id));
@@ -731,7 +751,9 @@ const remoteMobileApkPath = app.isPackaged
 let remoteService;
 remoteService = new RemoteDashboardService({
   baseDir: hookBaseDir,
-  stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 24_000) }),
+  // Remote terminal detail is delivered by snapshot/SSE. Keep the frequently
+  // polled workspace state bounded to a short fallback/preview per session.
+  stateProvider: () => ({ agents: liveOutputForAgents(remoteService.agents, 4_000) }),
   ...sessionProviders,
   mobileApkPath: remoteMobileApkPath,
   requestAccess(login) {

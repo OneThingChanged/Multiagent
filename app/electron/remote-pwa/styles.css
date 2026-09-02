@@ -1017,6 +1017,8 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .composer-ac-desc { color: var(--muted); margin-left: auto; }
 .composer-queue { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; max-height: 140px; overflow-y: auto; }
 .composer-queue-head { color: var(--muted); font-size: 9px; font-weight: 700; }
+.composer-queue-retry { padding: 2px 6px; border: 1px solid rgba(255, 184, 87, 0.42); border-radius: 5px; color: #ffd39a; background: rgba(255, 157, 56, 0.09); font: inherit; cursor: pointer; }
+.composer-queue-retry:hover { background: rgba(255, 157, 56, 0.16); }
 .composer-queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px dashed var(--line); border-radius: 8px; background: rgba(9, 20, 30, 0.6); }
 .composer-queue-text { flex: 1; min-width: 0; font-size: 11px; color: #cfe0ec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-queue-cancel { flex: 0 0 auto; width: 22px; height: 22px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }

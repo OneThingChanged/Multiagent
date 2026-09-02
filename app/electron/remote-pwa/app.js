@@ -193,18 +193,20 @@ const FILTER_LABELS = { all: "전체 세션", active: "활성 세션" };
 
 let remoteState = { agents: [], view: { projects: [], agents: [], groups: [] } };
 const initialUrl = new URL(location.href);
+let routeDepth = Number.isSafeInteger(Number(history.state?.multiagentDepth))
+  ? Math.max(0, Number(history.state.multiagentDepth))
+  : 0;
 let activeFilter = FILTERS.includes(initialUrl.searchParams.get("filter"))
   ? initialUrl.searchParams.get("filter")
   : "all";
-let selection = initialUrl.searchParams.get("usage") === "1"
-  ? { type: "usage", id: null }
-  : initialUrl.searchParams.get("docs")
-  ? { type: "documents", id: initialUrl.searchParams.get("docs") }
-  : initialUrl.searchParams.get("screen")
-  ? { type: "screen", id: initialUrl.searchParams.get("screen") }
-  : initialUrl.searchParams.get("agent")
-    ? { type: "session", id: initialUrl.searchParams.get("agent") }
-    : { type: "monitor", id: null };
+function selectionFromUrl(url) {
+  if (url.searchParams.get("usage") === "1") return { type: "usage", id: null };
+  if (url.searchParams.get("docs")) return { type: "documents", id: url.searchParams.get("docs") };
+  if (url.searchParams.get("screen")) return { type: "screen", id: url.searchParams.get("screen") };
+  if (url.searchParams.get("agent")) return { type: "session", id: url.searchParams.get("agent") };
+  return { type: "monitor", id: null };
+}
+let selection = selectionFromUrl(initialUrl);
 let selectedDocumentPath = initialUrl.searchParams.get("file") || null;
 let documentSidebarOpen = selection.type === "documents" && !selectedDocumentPath;
 let returnScreenId = null;
@@ -214,6 +216,7 @@ let firstSnapshot = true;
 let pollTimer = null;
 let toastTimer = null;
 let screenRenderKey = "";
+let sessionNavigationStructureKey = "";
 let previousActivity = new Map();
 let backgroundPushEnabled = false;
 const leafTabSelection = new Map();
@@ -225,6 +228,12 @@ const documentLists = new Map();
 const documentListLoads = new Map();
 const documentExpandedFolders = new Map();
 const attachmentDrafts = new Map();
+const sessionDrafts = new Map();
+const sessionQueues = new Map();
+const sessionLastSendAt = new Map();
+const sessionQueueErrors = new Map();
+let composerAgentId = null;
+let nativePageActive = window.__MULTIAGENT_NATIVE_ACTIVE__ !== false;
 const remoteBrowser = {
   agentId: "",
   tabs: [],
@@ -516,7 +525,11 @@ function matchesQuery(agent, query) {
 
 function visibleAgents() {
   const query = ui.searchInput.value.trim().toLowerCase();
-  return sortedAgents().filter((agent) => {
+  return allAgents().sort((left, right) => {
+    const projectDifference = projectName(left).localeCompare(projectName(right), "ko");
+    if (projectDifference !== 0) return projectDifference;
+    return text(left.name || left.id).localeCompare(text(right.name || right.id), "ko");
+  }).filter((agent) => {
     const status = statusOf(agent);
     if (activeFilter === "active" && status === "offline") return false;
     if (!["all", "active"].includes(activeFilter) && status !== activeFilter) return false;
@@ -554,7 +567,7 @@ function setDocumentSidebarOpen(open) {
   syncDocumentSidebar();
 }
 
-function updateUrl() {
+function updateUrl({ push = false } = {}) {
   const url = new URL(location.href);
   url.searchParams.delete("agent");
   url.searchParams.delete("screen");
@@ -570,10 +583,21 @@ function updateUrl() {
   }
   if (activeFilter === "all") url.searchParams.delete("filter");
   else url.searchParams.set("filter", activeFilter);
-  history.replaceState(null, "", url);
+  if (push && url.href !== location.href) {
+    routeDepth += 1;
+    history.pushState({ multiagent: true, multiagentDepth: routeDepth }, "", url);
+  } else {
+    history.replaceState({ multiagent: true, multiagentDepth: routeDepth }, "", url);
+  }
+  if (window.ReactNativeWebView?.postMessage) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: "multiagent:route-state",
+      canGoBack: routeDepth > 0,
+    }));
+  }
 }
 
-function setActiveFilter(filter) {
+function setActiveFilter(filter, { updateHistory = true, push = false } = {}) {
   activeFilter = FILTERS.includes(filter) ? filter : "all";
   for (const button of ui.filters.querySelectorAll("[data-filter]")) {
     button.classList.toggle("active", button.dataset.filter === activeFilter);
@@ -581,7 +605,7 @@ function setActiveFilter(filter) {
   for (const card of ui.summaryGrid.querySelectorAll("[data-summary-filter]")) {
     card.classList.toggle("active", card.dataset.summaryFilter === activeFilter);
   }
-  updateUrl();
+  if (updateHistory) updateUrl({ push });
 }
 
 function renderSummary() {
@@ -627,28 +651,46 @@ function renderNavigation() {
 
   const agents = visibleAgents();
   ui.visibleSessionCount.textContent = String(agents.length);
-  const sessionFragment = document.createDocumentFragment();
-  let currentProject = null;
-  for (const agent of agents) {
-    const project = projectName(agent);
-    if (project !== currentProject) {
-      currentProject = project;
-      sessionFragment.appendChild(make("div", "project-label", project));
+  const structureKey = JSON.stringify(agents.map((agent) => [agent.id, projectName(agent)]));
+  if (structureKey !== sessionNavigationStructureKey) {
+    sessionNavigationStructureKey = structureKey;
+    const sessionFragment = document.createDocumentFragment();
+    let currentProject = null;
+    for (const agent of agents) {
+      const project = projectName(agent);
+      if (project !== currentProject) {
+        currentProject = project;
+        sessionFragment.appendChild(make("div", "project-label", project));
+      }
+      const button = make("button", "session-row");
+      button.type = "button";
+      button.dataset.agentId = agent.id;
+      const dot = make("span", "status-dot");
+      dot.setAttribute("aria-hidden", "true");
+      const copy = make("span", "session-copy");
+      copy.append(make("strong", ""), make("small", ""));
+      button.append(dot, copy, make("span", "session-status"));
+      button.addEventListener("click", () => selectSession(agent.id));
+      sessionFragment.appendChild(button);
     }
+    ui.sessionList.replaceChildren(sessionFragment);
+  }
+  const sessionRows = new Map(
+    [...ui.sessionList.querySelectorAll(".session-row")]
+      .map((button) => [button.dataset.agentId, button]),
+  );
+  for (const agent of agents) {
+    const button = sessionRows.get(agent.id);
+    if (!button) continue;
     const status = statusOf(agent);
-    const button = make("button", "session-row");
-    button.type = "button";
     button.dataset.status = status;
     button.classList.toggle("selected", selection.type === "session" && selection.id === agent.id);
-    const dot = make("span", `status-dot ${status}`);
-    dot.setAttribute("aria-hidden", "true");
-    const copy = make("span", "session-copy");
-    copy.append(make("strong", "", text(agent.name || agent.id)), make("small", "", `${toolName(agent)} · ${outputPreview(agent)}`));
-    button.append(dot, copy, make("span", "session-status", STATUS[status].label));
-    button.addEventListener("click", () => selectSession(agent.id));
-    sessionFragment.appendChild(button);
+    const dot = button.querySelector(".status-dot");
+    dot.className = `status-dot ${status}`;
+    button.querySelector(".session-copy strong").textContent = text(agent.name || agent.id);
+    button.querySelector(".session-copy small").textContent = `${toolName(agent)} · ${outputPreview(agent)}`;
+    button.querySelector(".session-status").textContent = STATUS[status].label;
   }
-  ui.sessionList.replaceChildren(sessionFragment);
   ui.emptyState.hidden = agents.length !== 0;
   ui.overviewButton.classList.toggle("selected", selection.type === "monitor");
   ui.documentsButton.classList.toggle("selected", selection.type === "documents");
@@ -1123,7 +1165,9 @@ function renderSession() {
     button.type = "button";
     button.addEventListener("click", () => {
       ui.messageInput.value = option;
+      if (composerAgentId) sessionDrafts.set(composerAgentId, option);
       resizeComposerInput();
+      updateComposerSendState();
       ui.messageInput.focus();
     });
     optionFragment.appendChild(button);
@@ -1446,7 +1490,7 @@ function appendDocumentTree(container, node, projectId, query, depth = 0) {
       documentContentKey = "";
       documentContentError = "";
       renderDocuments();
-      updateUrl();
+      updateUrl({ push: true });
       void loadDocument(projectId, file.path);
       if (isMobile()) setDocumentSidebarOpen(false);
     });
@@ -1671,35 +1715,8 @@ function closeFilePreview() {
 async function openChatHtmlDocument(agentId, projectId, rawPath) {
   const path = cleanChatFilePath(rawPath);
   if (!projectId || !path) return;
-  try {
-    const query = remoteFileQuery(projectId, path, agentId);
-    const response = await fetch(`/api/docs/read?${query}`, { cache: "no-store", credentials: "same-origin" });
-    if (!response.ok) throw new Error(await apiError(response));
-    const result = await response.json();
-    if (result.kind !== "html") throw new Error("HTML 문서가 아닙니다.");
-    const resolvedProjectId = text(result.project?.id) || projectId;
-    const resolvedPath = text(result.path);
-    if (!resolvedPath || !localDocumentProjects().some((project) => project.id === resolvedProjectId)) {
-      throw new Error("Documents에서 열 수 있는 프로젝트를 찾지 못했습니다.");
-    }
-
-    if (!ui.filePreviewOverlay.hidden) closeFilePreview();
-    selectDocuments(resolvedProjectId);
-    await loadDocumentList(resolvedProjectId);
-    selectedDocumentPath = resolvedPath;
-    expandDocumentParents(resolvedProjectId, resolvedPath);
-    documentContent = null;
-    documentContentKey = "";
-    documentContentError = "";
-    documentSidebarOpen = !isMobile();
-    documentListRenderKey = "";
-    renderDocuments();
-    updateUrl();
-    if (isMobile()) setDocumentSidebarOpen(false);
-    void loadDocument(resolvedProjectId, resolvedPath);
-  } catch (error) {
-    showToast(`HTML 문서를 열지 못했습니다: ${error.message || error}`);
-  }
+  if (!ui.filePreviewOverlay.hidden) closeFilePreview();
+  await openRemoteHtmlPreview(projectId, path, agentId);
 }
 
 async function openChatFilePreview(agentId, projectId, rawPath, kind) {
@@ -2492,12 +2509,12 @@ function openSidebar(section) {
 }
 
 function selectMonitor(filter = activeFilter) {
-  setActiveFilter(filter);
+  setActiveFilter(filter, { updateHistory: false });
   selection = defaultWorkspaceSelection();
   returnScreenId = selection.type === "screen" ? selection.id : null;
   mobilePaneId = null;
   screenRenderKey = "";
-  updateUrl();
+  updateUrl({ push: true });
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2515,7 +2532,7 @@ function selectScreen(id) {
   returnScreenId = id;
   mobilePaneId = null;
   screenRenderKey = "";
-  updateUrl();
+  updateUrl({ push: true });
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2713,7 +2730,7 @@ function selectSession(id, fromScreenId = null) {
   selection = { type: "session", id };
   returnScreenId = isMobile() ? null : fromScreenId;
   if (!isMobile() && compactWorkspaceMedia.matches) applyNavCollapsed(true);
-  updateUrl();
+  updateUrl({ push: true });
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2738,7 +2755,7 @@ function selectDocuments(projectId = null) {
     documentContentError = "";
     documentSidebarOpen = true;
   }
-  updateUrl();
+  updateUrl({ push: true });
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2747,7 +2764,7 @@ function selectDocuments(projectId = null) {
 function selectUsage() {
   selection = { type: "usage", id: null };
   returnScreenId = null;
-  updateUrl();
+  updateUrl({ push: true });
   renderNavigation();
   renderSelection();
   closeSidebar();
@@ -2756,18 +2773,26 @@ function selectUsage() {
   }
 }
 
-async function sendInput(agentId, message) {
+async function sendInput(agentId, message, { quiet = false } = {}) {
   const text = message.trim();
   if (!agentId || !text) return false;
-  // Type the text, then send Enter as a SEPARATE write. Claude/Codex TUIs treat
-  // a "text\r" arriving in one chunk as a multi-line paste (newline inserted,
-  // not submitted); a discrete \r a beat later registers as the Enter keypress.
-  if (!(await sendRaw(agentId, text))) return false;
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  if (!(await sendRaw(agentId, "\r"))) return false;
-  if (text === "/clear") clearRemoteChatHistory(agentId);
-  showToast("전송했습니다.");
-  return true;
+  try {
+    const response = await fetch("/api/session/submit", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: agentId, message: text }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (text === "/clear") clearRemoteChatHistory(agentId);
+    setTimeout(() => fetchState({ quiet: true }), 250);
+    if (!quiet) showToast("전송했습니다.");
+    return true;
+  } catch (error) {
+    if (!quiet) showToast(`전송 실패: ${error.message}`);
+    return false;
+  }
 }
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -3056,6 +3081,13 @@ async function cancelSession(agentId) {
       lastChatData = { ...lastChatData, lifecycle: "idle" };
       renderChat(lastChatData);
     }
+    const storedChat = chatHistoryStore.get(agentId);
+    if (storedChat?.data) {
+      chatHistoryStore.set(agentId, {
+        ...storedChat,
+        data: { ...storedChat.data, lifecycle: "idle" },
+      });
+    }
     const cached = screenChatCache.get(agentId);
     if (cached) {
       screenChatCache.set(agentId, {
@@ -3072,21 +3104,48 @@ async function cancelSession(agentId) {
   }
 }
 
-// ---- Message queue ----
-// While the agent is working, composer sends are reserved in a queue and
-// drained one at a time once it's ready for input (with a cooldown so a send
-// doesn't fire during the brief lag before "working" registers). Items can be
-// cancelled before they go out. The queue is tied to the selected agent.
+// ---- Per-session composer and message queues ----
+// Draft text and queued messages belong to their session. Switching screens,
+// documents, profiles, or agents must never move a draft to another terminal
+// or discard work that has already been accepted into a queue.
 const QUEUE_COOLDOWN_MS = 1200;
 const SESSION_ACTIVATION_TIMEOUT_MS = 30_000;
-const messageQueue = [];
-let queueAgentId = null;
-let lastSendAt = 0;
 const sessionActivationDeadlines = new Map();
+let drainingQueues = false;
 
-// Busy only when the hook says "working" AND the transcript's last turn isn't
-// finished — so a stale/stuck "working" hook doesn't trap queued messages.
-const agentBusy = (agent) => statusOf(agent) === "working" && lastChatData?.lifecycle !== "idle";
+function queueForAgent(agentId, { create = true } = {}) {
+  const id = text(agentId);
+  if (!id) return [];
+  if (!sessionQueues.has(id) && create) sessionQueues.set(id, []);
+  return sessionQueues.get(id) || [];
+}
+
+function syncComposerAgent(agent) {
+  const nextId = text(agent?.id) || null;
+  if (composerAgentId === nextId) return;
+  if (composerAgentId) sessionDrafts.set(composerAgentId, ui.messageInput.value);
+  composerAgentId = nextId;
+  ui.messageInput.value = nextId ? (sessionDrafts.get(nextId) || "") : "";
+  resizeComposerInput();
+  refreshComposerAc();
+}
+
+function clearAcceptedComposer(agentId) {
+  sessionDrafts.delete(agentId);
+  if (composerAgentId === agentId) {
+    ui.messageInput.value = "";
+    resizeComposerInput();
+    refreshComposerAc();
+  }
+  const attachments = attachmentDrafts.get(agentId) || [];
+  attachments.forEach((attachment) => URL.revokeObjectURL(attachment.preview));
+  attachmentDrafts.delete(agentId);
+  if (selectedAgent()?.id === agentId) renderComposerAttachments();
+}
+
+// Never inject a queued instruction into a running turn. Cancellation and
+// completion hooks normalize the state back to idle before this queue drains.
+const agentBusy = (agent) => statusOf(agent) === "working";
 const agentInitializing = (agent) => ["recovering", "starting"].includes(statusOf(agent));
 const agentReady = (agent) => !agentBusy(agent) && !agentInitializing(agent) && !["offline", "unreachable"].includes(statusOf(agent));
 
@@ -3094,57 +3153,73 @@ function renderComposerQueue() {
   const el = ui.composerQueue;
   if (!el) return;
   el.replaceChildren();
-  if (!messageQueue.length) { el.hidden = true; return; }
+  const agent = selectedAgent();
+  const queue = queueForAgent(agent?.id, { create: false });
+  if (!agent || !queue.length) { el.hidden = true; return; }
   el.hidden = false;
-  el.appendChild(make("div", "composer-queue-head", `예약 대기열 ${messageQueue.length} · 대기 상태가 되면 순서대로 전송`));
-  messageQueue.forEach((message, index) => {
+  const head = make("div", "composer-queue-head", `예약 대기열 ${queue.length} · 이 세션이 준비되면 순서대로 전송`);
+  const error = sessionQueueErrors.get(agent.id);
+  if (error) {
+    const retry = make("button", "composer-queue-retry", "세션 다시 활성화");
+    retry.type = "button";
+    retry.addEventListener("click", () => { void requestSessionActivation(agent.id, { queuedMessage: true }); });
+    head.append(" · ", retry);
+  }
+  el.appendChild(head);
+  queue.forEach((message, index) => {
     const row = make("div", "composer-queue-item");
     row.appendChild(make("span", "composer-queue-text", message));
     const cancel = make("button", "composer-queue-cancel", "×");
     cancel.type = "button";
     cancel.title = "예약 취소";
-    cancel.addEventListener("click", () => { messageQueue.splice(index, 1); renderComposerQueue(); });
+    cancel.addEventListener("click", () => {
+      queue.splice(index, 1);
+      if (!queue.length) {
+        sessionQueues.delete(agent.id);
+        sessionQueueErrors.delete(agent.id);
+      }
+      renderComposerQueue();
+    });
     row.appendChild(cancel);
     el.appendChild(row);
   });
 }
 
-// Drop the queue when the selection moves to a different session.
-function syncQueueAgent(agent) {
-  if (queueAgentId && agent?.id !== queueAgentId) {
-    sessionActivationDeadlines.delete(queueAgentId);
-    messageQueue.length = 0;
-    queueAgentId = agent?.id ?? null;
-    renderComposerQueue();
+async function drainQueues() {
+  if (drainingQueues || !nativePageActive) return;
+  drainingQueues = true;
+  try {
+    for (const [agentId, queue] of sessionQueues) {
+      if (!queue.length) { sessionQueues.delete(agentId); continue; }
+      const agent = agentMap().get(agentId);
+      if (!agent) continue;
+      const activationDeadline = sessionActivationDeadlines.get(agentId);
+      if (activationDeadline && Date.now() >= activationDeadline) {
+        sessionActivationDeadlines.delete(agentId);
+        sessionQueueErrors.set(agentId, "activation-timeout");
+        if (selectedAgent()?.id === agentId) renderComposerQueue();
+        continue;
+      }
+      if (statusOf(agent) === "offline" || agentInitializing(agent) || agentBusy(agent) || !agentReady(agent)) continue;
+      const lastSendAt = sessionLastSendAt.get(agentId) || 0;
+      if (Date.now() - lastSendAt < QUEUE_COOLDOWN_MS) continue;
+      sessionLastSendAt.set(agentId, Date.now());
+      const sent = await sendInput(agentId, queue[0], { quiet: selectedAgent()?.id !== agentId });
+      if (!sent) {
+        sessionQueueErrors.set(agentId, "send-failed");
+        if (selectedAgent()?.id === agentId) renderComposerQueue();
+        continue;
+      }
+      queue.shift();
+      sessionQueueErrors.delete(agentId);
+      if (activationDeadline) sessionActivationDeadlines.delete(agentId);
+      if (!queue.length) sessionQueues.delete(agentId);
+      if (selectedAgent()?.id === agentId) renderComposerQueue();
+      lastChatFetch = { id: null, at: 0 };
+    }
+  } finally {
+    drainingQueues = false;
   }
-}
-
-async function drainQueue() {
-  if (!messageQueue.length) return;
-  const agent = selectedAgent();
-  if (!agent || agent.id !== queueAgentId) return;
-  const activationDeadline = sessionActivationDeadlines.get(agent.id);
-  if (activationDeadline && Date.now() >= activationDeadline) {
-    sessionActivationDeadlines.delete(agent.id);
-    messageQueue.length = 0;
-    renderComposerQueue();
-    showToast("세션을 활성화하지 못해 예약 메시지를 취소했습니다.");
-    return;
-  }
-  if (statusOf(agent) === "offline") {
-    return;
-  }
-  if (agentInitializing(agent)) return;
-  if (agentBusy(agent) || !agentReady(agent)) return;
-  if (Date.now() - lastSendAt < QUEUE_COOLDOWN_MS) return;
-  const next = messageQueue[0];
-  lastSendAt = Date.now();
-  const sent = await sendInput(agent.id, next);
-  if (!sent) return;
-  messageQueue.shift();
-  if (activationDeadline) sessionActivationDeadlines.delete(agent.id);
-  renderComposerQueue();
-  lastChatFetch = { id: null, at: 0 }; // pull the sent turn into the chat quickly
 }
 
 async function requestSessionActivation(agentId, { queuedMessage = false } = {}) {
@@ -3161,6 +3236,8 @@ async function requestSessionActivation(agentId, { queuedMessage = false } = {})
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     sessionActivationDeadlines.set(agentId, Date.now() + SESSION_ACTIVATION_TIMEOUT_MS);
+    sessionQueueErrors.delete(agentId);
+    if (selectedAgent()?.id === agentId) renderComposerQueue();
     showToast(queuedMessage
       ? "세션 활성화 중 — 준비되면 메시지를 자동 전송합니다."
       : "세션을 활성화하고 있습니다.");
@@ -3205,26 +3282,26 @@ async function sendSelectedMessage() {
   if (inactive && !(await requestSessionActivation(agent.id, { queuedMessage: true }))) {
     return;
   }
-  if (queueAgentId !== agent.id) { messageQueue.length = 0; queueAgentId = agent.id; }
-  ui.messageInput.value = "";
-  resizeComposerInput();
-  attachments.forEach((attachment) => URL.revokeObjectURL(attachment.preview));
-  attachmentDrafts.delete(agent.id);
-  renderComposerAttachments();
+  const queue = queueForAgent(agent.id);
   if (inactive) {
-    messageQueue.push(outgoing);
+    queue.push(outgoing);
+    clearAcceptedComposer(agent.id);
     renderComposerQueue();
     return;
   }
-  const cooled = Date.now() - lastSendAt >= QUEUE_COOLDOWN_MS;
-  if (agentReady(agent) && !agentBusy(agent) && messageQueue.length === 0 && cooled) {
+  const cooled = Date.now() - (sessionLastSendAt.get(agent.id) || 0) >= QUEUE_COOLDOWN_MS;
+  if (agentReady(agent) && !agentBusy(agent) && queue.length === 0 && cooled) {
     ui.sendButton.disabled = true;
-    lastSendAt = Date.now();
-    await sendInput(agent.id, outgoing);
-    lastChatFetch = { id: null, at: 0 };
+    sessionLastSendAt.set(agent.id, Date.now());
+    const sent = await sendInput(agent.id, outgoing);
+    if (sent) {
+      clearAcceptedComposer(agent.id);
+      lastChatFetch = { id: null, at: 0 };
+    }
     updateComposerSendState();
   } else {
-    messageQueue.push(outgoing);
+    queue.push(outgoing);
+    clearAcceptedComposer(agent.id);
     renderComposerQueue();
     showToast("작업 중 — 대기열에 예약했습니다.");
   }
@@ -3529,6 +3606,10 @@ function syncVisualViewport() {
 function syncTerminal() {
   if (!terminalSupported) return;
   const keep = new Set();
+  if (!nativePageActive) {
+    for (const container of [...terminals.keys()]) releaseTerminal(container);
+    return;
+  }
   if (selection.type === "session" && sessionViewMode === "term") {
     const agent = selectedAgent();
     if (agent && ui.terminalMount) {
@@ -3666,12 +3747,13 @@ function scheduleRemoteBrowserFrame(delay = 0) {
     selection.type !== "session"
     || sessionViewMode !== "browser"
     || !remoteBrowser.agentId
+    || !nativePageActive
   ) return;
   remoteBrowser.frameTimer = setTimeout(() => { void loadRemoteBrowserFrame(); }, delay);
 }
 
 async function loadRemoteBrowserFrame() {
-  if (remoteBrowser.frameLoading || selection.type !== "session" || sessionViewMode !== "browser") return;
+  if (!nativePageActive || remoteBrowser.frameLoading || selection.type !== "session" || sessionViewMode !== "browser") return;
   const agentId = remoteBrowser.agentId;
   if (document.hidden) {
     scheduleRemoteBrowserFrame(1_500);
@@ -4003,9 +4085,9 @@ let chatVisible = CHAT_PAGE;
 let lastChatData = null;
 let chatHiddenCount = 0;
 let chatAutoLoading = false;
-// /api/chat intentionally sends a bounded transcript tail. Keep already-seen
-// blocks per session in this page so older turns do not disappear as that tail
-// window advances during a long-running conversation.
+let chatOlderLoading = false;
+// This is a rendering cache only. Durable history lives in Electron's
+// conversation store and older pages are fetched by sequence cursor.
 const chatHistoryStore = new Map();
 const rawChatKeys = new Map();
 const pendingChatClears = new Map();
@@ -4035,6 +4117,24 @@ function mergeChatHistory(previous, incoming) {
   return previous.concat(incoming);
 }
 
+function mergeChatPages(previous, incoming, { prepend = false } = {}) {
+  if (!previous.length) return incoming.slice();
+  if (!incoming.length) return previous.slice();
+  const sequenced = [...previous, ...incoming]
+    .every((block) => Number.isSafeInteger(Number(block?.sequence)));
+  if (sequenced) {
+    const bySequence = new Map();
+    for (const block of (prepend ? [...incoming, ...previous] : [...previous, ...incoming])) {
+      bySequence.set(Number(block.sequence), block);
+    }
+    return [...bySequence.values()]
+      .sort((left, right) => Number(left.sequence) - Number(right.sequence));
+  }
+  return prepend
+    ? mergeChatHistory(incoming, previous)
+    : mergeChatHistory(previous, incoming);
+}
+
 function rawChatKey(blocks) {
   if (!blocks.length) return "0";
   return `${blocks.length}|${chatBlockKey(blocks[0])}|${chatBlockKey(blocks[blocks.length - 1])}`;
@@ -4058,12 +4158,26 @@ function bindChatAutoLoad() {
   if (!el || el.dataset.autoload === "1") return;
   el.dataset.autoload = "1";
   el.addEventListener("scroll", () => {
-    if (chatAutoLoading || chatHiddenCount <= 0 || el.scrollTop >= 80) return;
+    if (chatAutoLoading || el.scrollTop >= 80) return;
     chatAutoLoading = true;
     const prevHeight = el.scrollHeight;
-    chatVisible += CHAT_PAGE * 2;
-    if (lastChatData) renderChat(lastChatData);
-    el.scrollTop += el.scrollHeight - prevHeight;
+    if (chatHiddenCount > 0) {
+      chatVisible += CHAT_PAGE * 2;
+      if (lastChatData) renderChat(lastChatData);
+      el.scrollTop += el.scrollHeight - prevHeight;
+      chatAutoLoading = false;
+      return;
+    }
+    if (lastChatData?.hasOlder && chatAgent) {
+      void fetchChat(chatAgent, {
+        beforeSequence: lastChatData.firstSequence,
+        prepend: true,
+      }).finally(() => {
+        el.scrollTop += el.scrollHeight - prevHeight;
+        chatAutoLoading = false;
+      });
+      return;
+    }
     chatAutoLoading = false;
   });
 }
@@ -4136,6 +4250,21 @@ function renderChat(data) {
         el.scrollTop += el.scrollHeight - prevHeight;
       });
       frag.appendChild(more);
+    } else if (data?.hasOlder) {
+      const more = make(
+        "button",
+        "chat-more",
+        chatOlderLoading ? "이전 대화 불러오는 중…" : "▲ 저장소에서 이전 대화 불러오기",
+      );
+      more.type = "button";
+      more.disabled = chatOlderLoading;
+      more.addEventListener("click", async () => {
+        if (chatOlderLoading || !chatAgent) return;
+        const prevHeight = el.scrollHeight;
+        await fetchChat(chatAgent, { beforeSequence: data.firstSequence, prepend: true });
+        el.scrollTop += el.scrollHeight - prevHeight;
+      });
+      frag.appendChild(more);
     }
     const agent = selectedAgent();
     for (const range of ranges.slice(hidden)) {
@@ -4197,18 +4326,24 @@ function renderChat(data) {
 let lastChatKey = "";
 let lastChatFetch = { id: null, at: 0 };
 let chatAgent = null;
-async function fetchChat(agentId) {
-  if (!agentId) return;
-  if (agentId !== chatAgent) {
+async function fetchChat(agentId, { beforeSequence = null, prepend = false } = {}) {
+  if (!agentId || !nativePageActive) return;
+  if (!prepend && agentId !== chatAgent) {
     chatAgent = agentId;
     chatVisible = CHAT_PAGE; // reset pagination when switching sessions
     lastChatKey = "";
     lastChatData = chatHistoryStore.get(agentId)?.data || null;
     if (lastChatData) renderChat(lastChatData);
   }
+  if (prepend && chatOlderLoading) return;
   const seq = ++chatRequestSeq;
+  if (prepend) chatOlderLoading = true;
   try {
-    const response = await fetch(`/api/chat?id=${encodeURIComponent(agentId)}`, { credentials: "same-origin" });
+    const query = new URLSearchParams({ id: agentId, limit: "400" });
+    if (Number.isSafeInteger(Number(beforeSequence)) && Number(beforeSequence) > 0) {
+      query.set("before", String(beforeSequence));
+    }
+    const response = await fetch(`/api/chat?${query}`, { credentials: "same-origin" });
     let data = await response.json().catch(() => ({ blocks: [] }));
     if (!response.ok) data = { blocks: [], error: true };
     if (seq !== chatRequestSeq) return; // a newer request superseded this one
@@ -4221,8 +4356,8 @@ async function fetchChat(agentId) {
     }
     const incoming = Array.isArray(data?.blocks) ? data.blocks : [];
     const incomingKey = rawChatKey(incoming);
-    const pendingClearKey = pendingChatClears.get(agentId);
-    if (pendingClearKey !== undefined) {
+    const pendingClearKey = prepend ? undefined : pendingChatClears.get(agentId);
+    if (!prepend && pendingClearKey !== undefined) {
       if (incomingKey === pendingClearKey) return;
       pendingChatClears.delete(agentId);
     }
@@ -4233,32 +4368,50 @@ async function fetchChat(agentId) {
     const previous = sessionChanged ? [] : (cached?.data?.blocks || []);
     const blocks = data?.unsupported || data?.error
       ? incoming
-      : mergeChatHistory(previous, incoming);
+      : mergeChatPages(previous, incoming, { prepend });
     if (!data?.unsupported && !data?.error && blocks.length) {
-      data = { ...data, blocks, missing: false };
+      const added = Math.max(0, blocks.length - previous.length);
+      if (prepend) chatVisible += added;
+      data = prepend
+        ? {
+            ...cached?.data,
+            ...data,
+            blocks,
+            missing: false,
+            lifecycle: cached?.data?.lifecycle ?? data.lifecycle,
+          }
+        : { ...data, blocks, missing: false };
       chatHistoryStore.set(agentId, { sessionId: data.sessionId || cached?.sessionId, data });
     } else if (data?.missing && previous.length) {
       data = { ...cached.data, lifecycle: data.lifecycle ?? cached.data.lifecycle };
     }
     const last = blocks[blocks.length - 1];
     // Skip re-render when nothing changed so opened tool/▸ details stay open.
-    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.lifecycle || ""}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}|${data?.error ? 1 : 0}`;
+    const key = `${agentId}|${blocks.length}|${String(last?.text ?? last?.output ?? "").length}|${data?.firstSequence || ""}|${data?.hasOlder ? 1 : 0}|${data?.lifecycle || ""}|${data?.unsupported ? 1 : 0}|${data?.missing ? 1 : 0}|${data?.error ? 1 : 0}`;
     if (key === lastChatKey) return;
     lastChatKey = key;
     renderChat(data);
   } catch {
     // Keep the last rendered conversation on a transient error.
+  } finally {
+    if (prepend) {
+      chatOlderLoading = false;
+      if (lastChatData) renderChat(lastChatData);
+    }
   }
 }
 
 // Show chat or terminal for the session view; refresh the active one.
 function syncSessionView() {
   if (selection.type !== "session") {
+    syncComposerAgent(null);
+    renderComposerQueue();
     stopRemoteBrowser();
     return;
   }
   const agent = selectedAgent();
-  syncQueueAgent(agent);
+  syncComposerAgent(agent);
+  renderComposerQueue();
   renderComposerAttachments();
   const chat = sessionViewMode === "chat";
   const browser = sessionViewMode === "browser";
@@ -4269,7 +4422,9 @@ function syncSessionView() {
   if (ui.composerForm) ui.composerForm.hidden = browser;
   if (ui.sessionMode) {
     for (const button of ui.sessionMode.children) {
-      button.classList.toggle("on", button.dataset.mode === sessionViewMode);
+      const selected = button.dataset.mode === sessionViewMode;
+      button.classList.toggle("on", selected);
+      button.setAttribute("aria-selected", String(selected));
     }
   }
   // Throttle: renderSelection runs on every state poll, but a chat fetch scans
@@ -4448,7 +4603,10 @@ async function fetchState({ quiet = false } = {}) {
 
 function schedulePoll(delay = 1600) {
   if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+  if (!nativePageActive) return;
   pollTimer = setTimeout(async () => {
+    if (!nativePageActive) return;
     await fetchState({ quiet: true });
     schedulePoll(document.hidden ? 5000 : 1600);
   }, delay);
@@ -4728,7 +4886,7 @@ ui.summaryGrid.addEventListener("click", (event) => {
 ui.filters.addEventListener("click", (event) => {
   const button = event.target.closest("[data-filter]");
   if (!button) return;
-  setActiveFilter(button.dataset.filter);
+  setActiveFilter(button.dataset.filter, { push: true });
   renderNavigation();
   if (selection.type === "monitor") renderMonitor();
 });
@@ -4794,6 +4952,10 @@ ui.documentMarkdown.addEventListener("click", (event) => {
     void openChatFilePreview("", selection.id, resolved, targetKind);
     return;
   }
+  if (targetKind === "html") {
+    void openRemoteHtmlPreview(selection.id, resolved);
+    return;
+  }
   const match = (documentLists.get(selection.id)?.documents || [])
     .find((document) => document.path.toLowerCase() === resolved.toLowerCase());
   if (!match) {
@@ -4806,7 +4968,7 @@ ui.documentMarkdown.addEventListener("click", (event) => {
   documentContentKey = "";
   documentContentError = "";
   renderDocuments();
-  updateUrl();
+  updateUrl({ push: true });
   void loadDocument(selection.id, match.path);
   if (isMobile()) setDocumentSidebarOpen(false);
 });
@@ -5017,7 +5179,7 @@ ui.composerForm.addEventListener("dragover", handleComposerImageDragOver);
 ui.composerForm.addEventListener("dragleave", handleComposerImageDragLeave);
 ui.composerForm.addEventListener("drop", handleComposerImageDrop);
 window.addEventListener("dragend", clearComposerDragState);
-setInterval(() => { void drainQueue(); }, 500);
+setInterval(() => { void drainQueues(); }, 500);
 // ---- Slash-command autocomplete (composer) ----
 const SLASH_CLAUDE = [["clear","대화 컨텍스트 지우기"],["compact","대화 요약·압축"],["model","모델 변경"],["review","코드 리뷰"],["init","CLAUDE.md 생성"],["agents","서브에이전트"],["cost","토큰/비용"],["config","설정"],["memory","메모리"],["status","상태"],["resume","세션 재개"],["export","내보내기"],["help","도움말"]];
 const SLASH_CODEX = [["clear","대화 지우기"],["compact","요약·압축"],["model","모델 변경"],["approvals","승인 정책"],["new","새 대화"],["diff","변경 diff"],["status","상태"],["init","AGENTS.md 생성"],["quit","종료"],["help","도움말"]];
@@ -5067,6 +5229,7 @@ function acceptComposerAc(i) {
   ui.messageInput.focus();
 }
 ui.messageInput.addEventListener("input", () => {
+  if (composerAgentId) sessionDrafts.set(composerAgentId, ui.messageInput.value);
   resizeComposerInput();
   refreshComposerAc();
   updateComposerSendState();
@@ -5122,10 +5285,43 @@ addEventListener("beforeinstallprompt", (event) => {
   ui.installButton.hidden = false;
 });
 addEventListener("appinstalled", () => { ui.installButton.hidden = true; showToast("MultiAgent Remote를 설치했습니다."); });
-addEventListener("online", () => { void fetchState(); });
+addEventListener("online", () => { if (nativePageActive) void fetchState(); });
 addEventListener("offline", () => { setConnection("offline", "오프라인"); });
+addEventListener("popstate", (event) => {
+  routeDepth = Number.isSafeInteger(Number(event.state?.multiagentDepth))
+    ? Math.max(0, Number(event.state.multiagentDepth))
+    : Math.max(0, routeDepth - 1);
+  const url = new URL(location.href);
+  const previousDocumentKey = `${selection.type}:${selection.id || ""}:${selectedDocumentPath || ""}`;
+  activeFilter = FILTERS.includes(url.searchParams.get("filter"))
+    ? url.searchParams.get("filter")
+    : "all";
+  selection = selectionFromUrl(url);
+  selectedDocumentPath = selection.type === "documents" ? (url.searchParams.get("file") || null) : null;
+  const nextDocumentKey = `${selection.type}:${selection.id || ""}:${selectedDocumentPath || ""}`;
+  if (previousDocumentKey !== nextDocumentKey) {
+    documentContent = null;
+    documentContentKey = "";
+    documentContentError = "";
+  }
+  setActiveFilter(activeFilter, { updateHistory: false });
+  validateSelection();
+  renderNavigation();
+  renderSelection();
+  if (selection.type === "documents") {
+    void loadDocumentList(selection.id).then(() => {
+      if (selectedDocumentPath) void loadDocument(selection.id, selectedDocumentPath);
+    });
+  }
+  if (window.ReactNativeWebView?.postMessage) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: "multiagent:route-state",
+      canGoBack: routeDepth > 0,
+    }));
+  }
+});
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) {
+  if (!document.hidden && nativePageActive) {
     void fetchState({ quiet: true });
     if (selection.type === "session" && sessionViewMode === "browser") scheduleRemoteBrowserFrame(0);
   }
@@ -5142,6 +5338,24 @@ addEventListener("multiagent:native-session-access-state", (event) => {
 addEventListener("multiagent:native-notification-open", (event) => {
   const agentId = text(event.detail?.agentId);
   if (agentId && agentMap().has(agentId)) selectSession(agentId);
+});
+addEventListener("multiagent:native-visibility", (event) => {
+  const active = event.detail?.active !== false;
+  if (nativePageActive === active) return;
+  nativePageActive = active;
+  document.documentElement.dataset.nativeActive = active ? "true" : "false";
+  if (!active) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    chatRequestSeq += 1;
+    stopRemoteBrowser();
+    syncTerminal();
+    return;
+  }
+  void fetchState({ quiet: true }).finally(() => {
+    renderSelection();
+    schedulePoll(1600);
+  });
 });
 
 // Collapsible sidebar (tablet/desktop) — persisted across sessions.
