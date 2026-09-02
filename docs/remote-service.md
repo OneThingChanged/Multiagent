@@ -22,6 +22,9 @@ sources:
   - id: electron-main
     resource: ../app/electron/main.mjs
     title: "Desktop browser ownership and Remote frame provider"
+  - id: pty-submit
+    resource: ../app/electron/services/pty-submit.mjs
+    title: "Atomic single-line and bracketed multiline PTY submission"
   - id: device-monitor
     resource: ../app/electron/services/remote-device-monitor-service.mjs
     title: "Android foreground-monitor token service"
@@ -67,9 +70,12 @@ Composer text and scheduled messages are isolated by agent ID for the lifetime
 of the page, so changing the selected session does not move a draft or discard
 an accepted queue. Normal chat submission uses one same-origin HTTP operation;
 the desktop then writes the text and the discrete Enter key to the same verified
-PTY. A failed immediate submission leaves the draft and attachments available,
+PTY. Multiline input, including image-tagged messages, is normalized and enclosed
+as a terminal bracketed paste before the separate Enter so Codex and Claude cannot
+consume the submit key while still parsing pasted lines. A failed immediate
+submission leaves the draft and attachments available,
 while an activation timeout keeps its queued message and exposes retry instead
-of silently deleting it.[^web-services][^remote-client][^web-tests]
+of silently deleting it.[^web-services][^remote-client][^web-tests][^pty-submit]
 
 Remote chat reads from the desktop conversation store with bounded sequence
 cursors. The browser keeps a rendering cache, but that cache is not the source
@@ -155,6 +161,7 @@ Operational Dashboard behavior is documented separately in
 [^web-tests]: Remote authentication and endpoint tests
 [^remote-client]: Remote PWA client
 [^electron-main]: Desktop browser ownership and Remote frame provider
+[^pty-submit]: PTY message formatting and ordered submission
 [^device-monitor]: Android foreground-monitor token service
 [^runtime-variant]: Runtime variant restrictions
 [^mobile-manifest]: Android client manifest

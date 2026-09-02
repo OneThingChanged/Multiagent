@@ -35,6 +35,7 @@ import {
 import { ReopenJournal } from "./services/reopen-journal.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import { ConversationStoreManager } from "./services/conversation-store.mjs";
+import { submitPtyMessage } from "./services/pty-submit.mjs";
 import {
   CodexScrollbackFilter,
   PassThroughTerminalFilter,
@@ -649,16 +650,13 @@ const sessionProviders = {
       return false;
     }
     const entry = ptys.get(agentId);
-    if (!entry?.process || !value.trim() || value.length > 8 * 1024) return false;
-    try {
-      entry.process.write(value);
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      if (ptys.get(agentId) !== entry || !entry.process) return false;
-      entry.process.write("\r");
-      return true;
-    } catch {
-      return false;
-    }
+    const ptyProcess = entry?.process;
+    if (!ptyProcess || !value.trim() || value.length > 8 * 1024) return false;
+    return submitPtyMessage({
+      ptyProcess,
+      message: value,
+      isCurrent: () => ptys.get(agentId) === entry && entry.process === ptyProcess,
+    });
   },
   terminalSnapshot: (id, afterSequence) => terminalSessions.snapshotSince(id, afterSequence),
   subscribeTerminal: (id, listener) => terminalSessions.subscribeData(id, listener),
