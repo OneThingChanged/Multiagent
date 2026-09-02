@@ -27,4 +27,5 @@ configuration that supports it.
 
 * [Development and build](development-and-build.md) - Local setup, tests, smoke checks, and desktop/mobile build entry points.
 * [Release playbook](release-playbook.md) - Signing, artifact verification, publication, and updater invariants.
+* [Microsoft Store MSIX delivery plan](microsoft-store-msix-plan.md) - Deferred account, packaging, migration, certification, and rollout steps for complimentary Store signing.
 * [Known limitations](known-limitations.md) - Confirmed constraints and explicitly unverified follow-up items.
