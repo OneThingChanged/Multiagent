@@ -749,8 +749,9 @@ describe("Electron dashboard server", () => {
         cancellations.push(id);
         return id === "agent-1";
       },
-      createSession(payload) {
+      async createSession(payload) {
         creations.push(payload);
+        await Promise.resolve();
         return { id: "agent-created" };
       },
       renameSession(payload) {
@@ -863,7 +864,7 @@ describe("Electron dashboard server", () => {
     expect(inactiveCancel.status).toBe(409);
     expect(blockedCancel.status).toBe(403);
     expect(cancellations).toEqual(["agent-1", "agent-offline"]);
-    expect(created.status).toBe(202);
+    expect(created.status).toBe(201);
     await expect(created.json()).resolves.toEqual({ ok: true, id: "agent-created" });
     expect(creations).toEqual([{
       projectId: "project-a",
@@ -1162,6 +1163,7 @@ describe("Electron dashboard server", () => {
     const submissions = [];
     const chatRequests = [];
     const cancellations = [];
+    const creations = [];
     const service = new LocalDashboardService({
       title: "Monitor",
       defaultPort: 0,
@@ -1173,6 +1175,7 @@ describe("Electron dashboard server", () => {
         view: {
           projects: [{ id: "local-project", name: "Local", folder: root }],
           agents: [],
+          availableTools: [{ id: "codex", label: "Codex", supportsDangerous: true }],
           groups: [],
         },
       }),
@@ -1203,6 +1206,11 @@ describe("Electron dashboard server", () => {
         cancelSession: (id) => {
           cancellations.push(id);
           return id === "agent-9";
+        },
+        createSession: async (payload) => {
+          creations.push(payload);
+          await Promise.resolve();
+          return { id: "local-agent-created" };
         },
       },
     });
@@ -1257,6 +1265,24 @@ describe("Electron dashboard server", () => {
     });
     expect(cancelled.status).toBe(200);
     expect(cancellations).toEqual(["agent-9"]);
+    const created = await fetch(`${status.url}/api/session/create`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({
+        projectId: "local-project",
+        name: "Local Codex",
+        aiToolId: "codex",
+        dangerous: true,
+      }),
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toEqual({ ok: true, id: "local-agent-created" });
+    expect(creations).toEqual([{
+      projectId: "local-project",
+      name: "Local Codex",
+      aiToolId: "codex",
+      dangerous: true,
+    }]);
 
     const lanHost = `192.168.10.25:${new URL(status.url).port}`;
     expect(service.isLocalOrigin({

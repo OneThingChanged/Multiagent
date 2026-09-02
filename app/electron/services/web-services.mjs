@@ -1359,9 +1359,9 @@ export class LocalDashboardService {
             }
             try {
               const payload = remoteCreateSessionPayload(this.snapshot(), await readJson(request));
-              const result = p.createSession?.(payload);
+              const result = await p.createSession?.(payload);
               if (!result) { sendJson(response, 501, { error: "session creation unavailable" }); return; }
-              sendJson(response, 202, { ok: true, ...result });
+              sendJson(response, 201, { ok: true, ...result });
             } catch (error) {
               sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
             }
@@ -2274,9 +2274,9 @@ export class RemoteDashboardService {
               { agents: this.agents, view: this.view },
               await readJson(request),
             );
-            const result = this.createSession(payload);
+            const result = await this.createSession(payload);
             if (!result) { sendJson(response, 501, { error: "session creation unavailable" }); return; }
-            sendJson(response, 202, { ok: true, ...result });
+            sendJson(response, 201, { ok: true, ...result });
           } catch (error) {
             sendJson(response, error?.statusCode || 400, { error: error?.message || "invalid session" });
           }

@@ -16,6 +16,9 @@ sources:
   - id: web-tests
     resource: ../app/electron/services/web-services.test.mjs
     title: "Remote authentication and endpoint tests"
+  - id: session-create-broker
+    resource: ../app/electron/services/remote-session-create-broker.mjs
+    title: "Acknowledged Remote session creation broker"
   - id: remote-client
     resource: ../app/electron/remote-pwa/app.js
     title: "Remote PWA client"
@@ -69,6 +72,12 @@ Authenticated clients can read projected workspace/session state, stream
 terminal output, submit input and attachments, cancel or activate work, create
 or rename sessions, and view supported Codex/Claude chat transcripts. The
 desktop resolves every mutation against its current PTY and lifecycle state.
+Session creation is an acknowledged operation rather than a fire-and-forget
+renderer event. The web request remains pending while the coordinator validates
+the current project/tool catalog and claims ownership for the new agent ID. It
+returns `201 Created` only after the session is inserted; missing coordinators,
+stale projects, disabled tools, ownership failures, and timeouts remain visible
+in the editor as errors.[^web-services][^session-create-broker]
 Composer text and scheduled messages are isolated by agent ID for the lifetime
 of the page, so changing the selected session does not move a draft or discard
 an accepted queue. Normal chat submission uses one same-origin HTTP operation;
@@ -180,6 +189,7 @@ Operational Dashboard behavior is documented separately in
 
 [^web-services]: Dashboard and Remote server
 [^web-tests]: Remote authentication and endpoint tests
+[^session-create-broker]: Acknowledged Remote session creation broker
 [^remote-client]: Remote PWA client
 [^electron-main]: Desktop browser ownership and Remote frame provider
 [^pty-submit]: PTY message formatting and ordered submission

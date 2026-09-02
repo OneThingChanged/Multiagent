@@ -33,6 +33,7 @@ export type RuntimeCommand =
   | "show_native_notification"
   | "resolve_cli_session" | "resolve_cline_session" | "relink_cli_session" | "sync_remote_agents"
   | "sync_remote_view" | "sync_usage_catalog" | "sync_monitor_state"
+  | "complete_remote_session_create"
   | "repair_active_hooks" | "export_diagnostics" | "usage_ingest_now"
   | "usage_rate_limits_get"
   | "usage_config_get" | "usage_config_set" | "usage_server_status"
@@ -299,6 +300,16 @@ export type GitChangesResult = {
 
 export type RuntimeCommandContract = {
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
+  complete_remote_session_create: {
+    args: {
+      requestId: string;
+      id: string;
+      ok: boolean;
+      error?: string;
+      statusCode?: 400 | 404 | 409 | 500 | 503;
+    };
+    result: boolean;
+  };
   document_browser_open: {
     args: { folder: string; relativePath: string; agentId?: string; initialUrl?: string };
     result: { browserId: string };

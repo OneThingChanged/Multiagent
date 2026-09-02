@@ -1173,6 +1173,13 @@ function App() {
         lastSessionId: a.lastSessionId ?? null,
         sshHostId: a.sshHostId ?? null,
       })),
+      availableTools: AI_TOOLS.filter(
+        (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
+      ).map((tool) => ({
+        id: tool.id,
+        label: tool.label,
+        supportsDangerous: Boolean(tool.dangerousFlag),
+      })),
       // Monitor clients only understand agent ids — hide doc tabs.
       groups: groups.flatMap((group) => {
         const layout = stripDocTabs(group.layout);
@@ -1198,6 +1205,7 @@ function App() {
     activePath,
     isCoordinatorWindow,
     runtimeFlags,
+    disabledTools,
   ]);
 
   useEffect(() => {
@@ -2616,14 +2624,16 @@ function App() {
   );
 
   const createAgent = useCallback(
-    (
+    async (
       payload: NewAgentPayload,
       options: { projectId?: string; agentId?: string } = {}
     ) => {
       const project = projectsRef.current.find(
         (candidate) => candidate.id === (options.projectId ?? activeProjectIdRef.current)
       );
-      if (!project) return;
+      if (!project) {
+        return { created: false, error: "세션을 생성할 프로젝트를 찾을 수 없습니다." };
+      }
       const id = options.agentId ?? crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
       const addAgent = () => {
@@ -2652,35 +2662,29 @@ function App() {
       };
       if (!isElectronRuntime()) {
         addAgent();
-        return;
+        return { created: true, id };
       }
-      void invoke<{ claimed: boolean }>("claim_agent_for_window", {
-        agentId: id,
-      })
-        .then(({ claimed }) => {
-          if (claimed) {
-            setOwnedAgentIds((current) => {
-              const next = new Set(current).add(id);
-              ownedAgentIdsRef.current = next;
-              return next;
-            });
-            addAgent();
-          }
-          else {
-            pushToast(
-              "",
-              project.name,
-              "새 세션 소유권을 확보하지 못했습니다."
-            );
-          }
-        })
-        .catch((error) => {
-          pushToast(
-            "",
-            project.name,
-            `새 세션을 만들 수 없습니다: ${String(error)}`
-          );
+      try {
+        const { claimed } = await invoke<{ claimed: boolean }>("claim_agent_for_window", {
+          agentId: id,
         });
+        if (!claimed) {
+          const error = "새 세션 소유권을 확보하지 못했습니다.";
+          pushToast("", project.name, error);
+          return { created: false, error };
+        }
+        setOwnedAgentIds((current) => {
+          const next = new Set(current).add(id);
+          ownedAgentIdsRef.current = next;
+          return next;
+        });
+        addAgent();
+        return { created: true, id };
+      } catch (reason) {
+        const error = `새 세션을 만들 수 없습니다: ${String(reason)}`;
+        pushToast("", project.name, error);
+        return { created: false, error };
+      }
     },
     [applyGroupOp, pushToast]
   );
@@ -3358,6 +3362,7 @@ function App() {
     };
 
     listen<{
+      requestId: string;
       id: string;
       projectId: string;
       name: string;
@@ -3366,6 +3371,16 @@ function App() {
     }>("remote:create-session", (event) => {
       if (cancelled) return;
       const payload = event.payload;
+      if (!payload.requestId || !payload.id) return;
+      const complete = (result: {
+        ok: boolean;
+        error?: string;
+        statusCode?: 400 | 404 | 409 | 500 | 503;
+      }) => invoke("complete_remote_session_create", {
+        requestId: payload.requestId,
+        id: payload.id,
+        ...result,
+      }).catch(() => false);
       const projectExists = projectsRef.current.some(
         (project) => project.id === payload.projectId
       );
@@ -3373,15 +3388,42 @@ function App() {
         (tool) => tool.id === payload.aiToolId
           && (tool.id === "none" || !disabledTools.includes(tool.id))
       );
-      if (!payload.id || !projectExists || !toolAllowed || !payload.name.trim()) return;
-      createAgent(
+      if (!projectExists) {
+        void complete({
+          ok: false,
+          error: "세션을 생성할 프로젝트가 더 이상 존재하지 않습니다.",
+          statusCode: 409,
+        });
+        return;
+      }
+      if (!toolAllowed) {
+        void complete({
+          ok: false,
+          error: "선택한 AI 도구가 비활성화되어 있습니다.",
+          statusCode: 409,
+        });
+        return;
+      }
+      const name = payload.name?.trim();
+      if (!name) {
+        void complete({ ok: false, error: "세션 이름이 비어 있습니다.", statusCode: 400 });
+        return;
+      }
+      void createAgent(
         {
-          name: payload.name.trim(),
+          name,
           aiToolId: payload.aiToolId,
           dangerous: Boolean(payload.dangerous),
         },
         { projectId: payload.projectId, agentId: payload.id }
-      );
+      ).then((result) => complete(result.created
+        ? { ok: true }
+        : { ok: false, error: result.error, statusCode: 409 }
+      )).catch((reason) => complete({
+        ok: false,
+        error: `세션 생성 결과를 처리하지 못했습니다: ${String(reason)}`,
+        statusCode: 500,
+      }));
     }).then(track);
 
     listen<{ id: string; name: string }>("remote:rename-session", (event) => {

@@ -2,6 +2,7 @@
 
 ## 2026-09-02
 
+* **Acknowledged web session creation**: Remote and local Dashboard creation now waits for coordinator validation, agent ownership, and actual insertion before returning success; disabled tools are synchronized into both web surfaces and failures remain actionable in the editor.
 * **Remote conversation UX prototype**: Added single, split, and long-result review states with immediate result visibility, collapsible work logs, a tabbed right sidebar whose session status follows the active pane, non-disruptive event badges, and a mobile overlay drawer.
 * **Reliable image-tagged Remote submission**: Wrapped multiline Remote messages in terminal bracketed-paste markers before sending a discrete Enter, preventing image paths from remaining unsubmitted in Codex or Claude prompts.
 * **Remote UX reliability**: Isolated drafts and queues per session, added atomic same-origin message submission with failure recovery, enabled durable paged chat restoration, opened HTML hyperlinks directly, stabilized session navigation, paused hidden Android profile streams, and added managed Back routing.

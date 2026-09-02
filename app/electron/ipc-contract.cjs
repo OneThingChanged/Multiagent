@@ -89,6 +89,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "sync_remote_view",
   "sync_usage_catalog",
   "sync_monitor_state",
+  "complete_remote_session_create",
   "repair_active_hooks",
   "export_diagnostics",
   "usage_ingest_now",
@@ -237,6 +238,31 @@ function assertInvokeRequest(command, rawArgs) {
         args.agentId.length > 256
       ) {
         throw new TypeError("Electron window agent id must be a non-empty string");
+      }
+      break;
+    case "complete_remote_session_create":
+      for (const key of ["requestId", "id"]) {
+        if (
+          typeof args[key] !== "string" ||
+          !SESSION_STORAGE_ID_RE.test(args[key].trim())
+        ) {
+          throw new TypeError(`Electron remote session ${key} must be a UUID`);
+        }
+      }
+      if (typeof args.ok !== "boolean") {
+        throw new TypeError("Electron remote session result must include an ok flag");
+      }
+      if (
+        args.error !== undefined &&
+        (typeof args.error !== "string" || args.error.length > 1000)
+      ) {
+        throw new TypeError("Electron remote session error must be a string up to 1000 chars");
+      }
+      if (
+        args.statusCode !== undefined &&
+        ![400, 404, 409, 500, 503].includes(args.statusCode)
+      ) {
+        throw new TypeError("Electron remote session status code is invalid");
       }
       break;
     case "document_browser_open":

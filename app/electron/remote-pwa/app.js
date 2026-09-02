@@ -2710,10 +2710,10 @@ async function submitSessionEditor() {
       renderSelection();
     }
     closeSessionEditor();
-    showToast(creating ? "새 세션을 생성하고 있습니다." : "세션 이름을 변경했습니다.");
+    showToast(creating ? "새 세션을 생성했습니다." : "세션 이름을 변경했습니다.");
     if (creating && result.id) {
       if (!(await waitForCreatedSession(result.id))) {
-        showToast("세션 생성 요청은 전달됐지만 아직 목록에 나타나지 않았습니다.");
+        showToast("세션은 생성됐지만 목록 동기화가 지연되고 있습니다. 새로고침해 주세요.");
       }
     } else {
       setTimeout(() => { void fetchState({ quiet: true }); }, 250);

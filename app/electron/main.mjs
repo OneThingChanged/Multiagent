@@ -36,6 +36,7 @@ import { ReopenJournal } from "./services/reopen-journal.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import { ConversationStoreManager } from "./services/conversation-store.mjs";
 import { submitPtyMessage } from "./services/pty-submit.mjs";
+import { RemoteSessionCreateBroker } from "./services/remote-session-create-broker.mjs";
 import {
   CodexScrollbackFilter,
   PassThroughTerminalFilter,
@@ -169,6 +170,7 @@ const COMPANY_DISABLED_COMMANDS = new Set([
   "remote_access_list",
   "remote_access_approve",
   "remote_access_revoke",
+  "complete_remote_session_create",
 ]);
 const preloadContractArguments = [
   `--multiagent-invoke-commands=${ipcContract.INVOKE_COMMANDS.join(",")}`,
@@ -624,6 +626,21 @@ async function browserUsageSummary(refresh = false, historySelection = null) {
   };
 }
 
+function dispatchRemoteSessionCreate(payload) {
+  if (coordinatorWebContentsId === null) return false;
+  const runtime = runtimeByWebContents.get(coordinatorWebContentsId);
+  const coordinator = workspaceWindows.get(coordinatorWebContentsId);
+  if (!runtime?.workspace_window || !runtime.coordinator || !runtime.ready || !coordinator) {
+    return false;
+  }
+  sendEvent(coordinator, "remote:create-session", payload);
+  return true;
+}
+
+const remoteSessionCreateBroker = new RemoteSessionCreateBroker({
+  dispatch: dispatchRemoteSessionCreate,
+});
+
 // Session capabilities shared by every web surface (Remote + local Dashboard):
 // send input, stream the live terminal, read the chat transcript, restart.
 const sessionProviders = {
@@ -669,11 +686,7 @@ const sessionProviders = {
     sendEventToAll("remote:restart-session", { id: asString(id) });
     return ptys.has(asString(id));
   },
-  createSession: (payload) => {
-    const id = randomUUID();
-    sendEventToAll("remote:create-session", { id, ...payload });
-    return { id };
-  },
+  createSession: (payload) => remoteSessionCreateBroker.create(payload),
   renameSession: (payload) => {
     sendEventToAll("remote:rename-session", payload);
     return true;
@@ -714,6 +727,7 @@ function dashboardPwaState() {
     view: {
       projects: s.projects ?? [],
       agents: agents.map((a) => ({ id: a.id, projectId: a.projectId })),
+      availableTools: s.availableTools ?? [],
       groups: s.groups ?? [],
       activeGroupId: s.view?.activeGroupId ?? null,
       activeProjectId: s.view?.activeProjectId ?? null,
@@ -4990,6 +5004,17 @@ async function invokeCommand(event, command, rawArgs) {
     case "sync_monitor_state":
       monitorService.sync(args);
       return null;
+    case "complete_remote_session_create": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (
+        event.sender.id !== coordinatorWebContentsId ||
+        !runtime?.workspace_window ||
+        !runtime.coordinator
+      ) {
+        throw new Error("세션 생성 결과는 coordinator 창에서만 전달할 수 있습니다.");
+      }
+      return remoteSessionCreateBroker.complete(args);
+    }
     case "repair_active_hooks":
       return repairActiveHooks();
     case "export_diagnostics": {
@@ -5158,6 +5183,7 @@ app.on("before-quit", (event) => {
     sessionCatalogTimer = null;
   }
   terminalSessions.closeAll("app-quit");
+  remoteSessionCreateBroker.close();
   void hookService.stop();
   void monitorService.stop();
   void usageDashboard.stop();

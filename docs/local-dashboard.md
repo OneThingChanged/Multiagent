@@ -18,6 +18,9 @@ sources:
   - id: remote-client
     resource: ../app/electron/remote-pwa/app.js
     title: "Shared Dashboard and Remote client"
+  - id: session-create-broker
+    resource: ../app/electron/services/remote-session-create-broker.mjs
+    title: "Acknowledged session creation broker"
 ---
 
 # Local Dashboard
@@ -40,6 +43,10 @@ The Dashboard exposes bounded endpoints for:
 The browser does not own a second terminal. Mutations resolve an agent against
 the Electron-owned PTY and return a conflict when the lifecycle state makes the
 request unsafe.
+The session picker is derived from the coordinator's enabled-tool catalog.
+Creation keeps the HTTP request open until the coordinator has validated the
+current catalog, claimed the new agent ID, and inserted the session; only then
+does the Dashboard return `201 Created`.[^web-services][^session-create-broker]
 
 ## Update behavior
 
@@ -59,3 +66,4 @@ authenticated contract in [MiraControl integration](miracontrol-integration.md).
 [^web-services]: Dashboard and Remote service
 [^web-tests]: Web-service contract tests
 [^remote-client]: Shared Dashboard and Remote client
+[^session-create-broker]: Acknowledged session creation broker
