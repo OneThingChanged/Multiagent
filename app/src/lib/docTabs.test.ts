@@ -7,6 +7,7 @@ import {
   docTabBasename,
   isBrowserTabId,
   isDocTabId,
+  layoutTabIdsForClosedBrowser,
   makeBrowserTabId,
   makeDocTabId,
   parseBrowserTabId,
@@ -61,6 +62,18 @@ describe("doc tab ids", () => {
     expect(isBrowserTabId(id)).toBe(true);
     expect(parseBrowserTabId(id)).toBe("browser-123");
     expect(isBrowserTabId(makeDocTabId("p", "docs/page.html"))).toBe(false);
+  });
+
+  it("returns both the web tab and its source document tab when a browser closes", () => {
+    const sourceTabId = makeDocTabId("project-1", "reports/result.html");
+
+    expect(layoutTabIdsForClosedBrowser("browser-123", sourceTabId)).toEqual([
+      makeBrowserTabId("browser-123"),
+      sourceTabId,
+    ]);
+    expect(layoutTabIdsForClosedBrowser("browser-123", "session-agent")).toEqual([
+      makeBrowserTabId("browser-123"),
+    ]);
   });
 
   it("drops live browser ids when a persisted layout is restored", () => {

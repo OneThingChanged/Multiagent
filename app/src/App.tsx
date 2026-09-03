@@ -57,6 +57,7 @@ import {
 import * as groupOps from "./lib/groupOps";
 import {
   isBrowserTabId,
+  layoutTabIdsForClosedBrowser,
   makeBrowserTabId,
   isDocTabId,
   makeDocTabId,
@@ -3108,9 +3109,17 @@ function App() {
       );
       const closedBrowserId = catalog.closedBrowserId?.trim();
       if (closedBrowserId) {
-        const tabId = makeBrowserTabId(closedBrowserId);
-        documentOwnerByTabRef.current.delete(tabId);
-        applyGroupOp((state) => groupOps.removeAgentFromLayout(state, tabId));
+        const tabIds = layoutTabIdsForClosedBrowser(
+          closedBrowserId,
+          catalog.closedSourceTabId
+        );
+        for (const tabId of tabIds) documentOwnerByTabRef.current.delete(tabId);
+        applyGroupOp((state) =>
+          tabIds.reduce(
+            (next, tabId) => groupOps.removeAgentFromLayout(next, tabId),
+            state
+          )
+        );
       }
     },
     [applyGroupOp]

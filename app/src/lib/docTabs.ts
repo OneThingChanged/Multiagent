@@ -45,6 +45,16 @@ export function parseBrowserTabId(id: string): string | null {
     : null;
 }
 
+export function layoutTabIdsForClosedBrowser(
+  browserId: string,
+  sourceTabId?: string | null
+): string[] {
+  const ids = [makeBrowserTabId(browserId)];
+  const source = sourceTabId?.trim();
+  if (source && isDocTabId(source) && !isBrowserTabId(source)) ids.push(source);
+  return ids;
+}
+
 export function parseDocTabId(id: string): DocTabRef | null {
   if (!isDocTabId(id)) return null;
   const payload = id.slice(DOC_TAB_PREFIX.length);

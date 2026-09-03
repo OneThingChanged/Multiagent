@@ -4690,6 +4690,11 @@ body.files-resizing .files-resizer::after {
   letter-spacing: 0.03em;
 }
 
+.browser-hub-tab-icon.is-html {
+  background: rgba(234, 88, 12, 0.18);
+  color: #fb923c;
+}
+
 .browser-hub-tab-title {
   min-width: 0;
   overflow: hidden;

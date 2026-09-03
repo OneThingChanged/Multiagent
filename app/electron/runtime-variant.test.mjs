@@ -71,16 +71,18 @@ describe("Electron runtime variant", () => {
   });
 
   it("uses product-facing Windows executable and shortcut names", () => {
-    const standardBuild = require("../package.json").build;
+    const packageMetadata = require("../package.json");
+    const standardBuild = packageMetadata.build;
     const companyBuild = require("../electron-builder.company.cjs");
+    const releaseVersion = packageMetadata.multiAgentReleaseVersion;
 
     expect(standardBuild).toMatchObject({
       productName: "MultiAgent",
       executableName: "MultiAgent",
       nsis: {
         shortcutName: "MultiAgent",
-        uninstallDisplayName: "MultiAgent 1.7.0.0",
-        artifactName: "MultiAgent-Setup-1.7.0.0-${arch}.${ext}",
+        uninstallDisplayName: `MultiAgent ${releaseVersion}`,
+        artifactName: `MultiAgent-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
       },
     });
     expect(companyBuild).toMatchObject({
@@ -88,8 +90,8 @@ describe("Electron runtime variant", () => {
       executableName: "MultiAgentCompany",
       nsis: {
         shortcutName: "MultiAgentCompany",
-        uninstallDisplayName: "MultiAgentCompany 1.7.0.0",
-        artifactName: "MultiAgentCompany-Setup-1.7.0.0-${arch}.${ext}",
+        uninstallDisplayName: `MultiAgentCompany ${releaseVersion}`,
+        artifactName: `MultiAgentCompany-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
       },
     });
   });

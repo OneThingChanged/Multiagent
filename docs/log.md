@@ -2,6 +2,9 @@
 
 ## 2026-09-04
 
+* **Release 1.7.1.0**: Synchronized the GitHub live release version for the global Browser Hub, safe native-view switching, HTML browser reuse, matching HTML tab labels, and source-tab closure.
+* **Explicit release scope**: Defined “live deployment” as Git/GitHub-only; Microsoft Store build and Partner Center submission now require a separate request while retaining the matching GitHub product version.
+* **Global Browser Hub lifecycle**: Documented the application-wide browser catalog, session-independent tab access, duplicate HTML preview reuse, and closing the corresponding source web or HTML tab from the Hub.
 * **Unified 1.7.0.0 baseline**: Set the public desktop, GitHub, Android, and Microsoft Store product version to `1.7.0.0`, above both the existing GitHub `0.6.27` release and Store `1.6.26.0` package. npm and Electron Updater use the derived compatibility value `1.7.0`, while all user-facing release identifiers use four components.
 
 ## 2026-09-03

@@ -74,10 +74,15 @@ application-owned browser tabs. It switches the center workspace into a global
 tab strip backed by the main process catalog, including tabs parked on the
 hidden host or associated with another session. Selecting a tab reparents that
 same `WebContentsView` into the current workspace instead of cloning its page or
-profile; `+` creates a shared tab and `×` closes it globally. The integration
-bootstrap's unused `about:blank` tab is omitted until an agent actually claims
-or navigates it. Returning to a session, Screen, project document, or Git view
+profile; `+` creates a shared tab and `×` closes it globally, including the
+corresponding web or HTML document tab in its original session pane. The
+integration bootstrap's unused `about:blank` tab is omitted until an agent
+actually claims or navigates it. Returning to a session, Screen, project document, or Git view
 unmounts the Hub host and hides its native view while preserving page state.[^browser-hub-ui][^sidebar][^electron-main]
+
+Local HTML previews keep the same filename and orange `HTML` badge in the Hub
+that they use in a session pane. Ordinary web pages use the blue `WEB` badge and
+their page title or hostname.[^browser-hub-ui]
 
 HTML document previews are keyed by workspace and project-relative source path.
 Renderer remounts—including React development Strict Mode's repeated effect

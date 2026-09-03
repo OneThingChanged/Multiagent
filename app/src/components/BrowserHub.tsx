@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { docKindForPath } from "../lib/docTabs";
 import { invoke } from "../platform/runtime";
 import type { DocumentBrowserSnapshot } from "../platform/ipcContract";
 import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
@@ -12,7 +13,19 @@ type BrowserHubProps = {
   onCloseBrowser: (browserId: string) => Promise<void>;
 };
 
+export function isHtmlDocumentBrowser(browser: DocumentBrowserSnapshot) {
+  const path = browser.relativePath.trim();
+  return Boolean(
+    path && !/^https?:\/\//i.test(path) && docKindForPath(path) === "html",
+  );
+}
+
 export function browserHubTabTitle(browser: DocumentBrowserSnapshot) {
+  const path = browser.relativePath.trim();
+  if (isHtmlDocumentBrowser(browser)) {
+    return path.split(/[\\/]/).pop() || path;
+  }
+
   const title = browser.title.trim();
   const url = browser.url.trim();
   if (title && title !== "about:blank") {
@@ -33,7 +46,6 @@ export function browserHubTabTitle(browser: DocumentBrowserSnapshot) {
       return url;
     }
   }
-  const path = browser.relativePath.trim();
   if (path) return path.split(/[\\/]/).pop() || path;
   return "새 탭";
 }
@@ -113,6 +125,7 @@ export function BrowserHub({
             ? agentNames.get(browser.agentId) ?? "연결된 세션"
             : null;
           const title = browserHubTabTitle(browser);
+          const isHtmlDocument = isHtmlDocumentBrowser(browser);
           return (
             <div
               key={browser.browserId}
@@ -125,7 +138,12 @@ export function BrowserHub({
                 aria-selected={active}
                 onClick={() => selectBrowser(browser.browserId)}
               >
-                <span className="browser-hub-tab-icon" aria-hidden="true">WEB</span>
+                <span
+                  className={`browser-hub-tab-icon${isHtmlDocument ? " is-html" : ""}`}
+                  aria-hidden="true"
+                >
+                  {isHtmlDocument ? "HTML" : "WEB"}
+                </span>
                 <span className="browser-hub-tab-title">{title}</span>
                 {browser.loading && <span className="browser-hub-tab-loading" aria-label="불러오는 중" />}
                 {agentName && <span className="browser-hub-tab-agent">{agentName}</span>}

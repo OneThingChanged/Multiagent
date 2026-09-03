@@ -199,7 +199,7 @@ let closeSmokeStartedAt = null;
 let workspaceSmokeStarted = false;
 /** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
 const workspaceWindows = new Map();
-/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, reuseKey: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, background: boolean, integrationBootstrap: boolean, rendererHidden: boolean}>} */
+/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, sourceTabId: string | null, reuseKey: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, background: boolean, integrationBootstrap: boolean, rendererHidden: boolean}>} */
 const documentBrowserWindows = new Map();
 const documentBrowserByShellWebContents = new Map();
 /** @type {Map<string, string>} agentId → browser/tab id */
@@ -1550,7 +1550,7 @@ function installDocumentBrowserViewPolicy(record) {
   });
 }
 
-function cleanupDocumentBrowser(record) {
+function cleanupDocumentBrowser(record, { closeSourceTab = false } = {}) {
   if (!record) return;
   documentBrowserWindows.delete(record.id);
   for (const [agentId, browserId] of documentBrowserByAgent) {
@@ -1571,7 +1571,12 @@ function cleanupDocumentBrowser(record) {
     backgroundBrowserPromise = null;
     browserReady = null;
   }
-  publishDocumentBrowserCatalog({ closedBrowserId: record.id });
+  publishDocumentBrowserCatalog({
+    closedBrowserId: record.id,
+    ...(closeSourceTab && record.sourceTabId
+      ? { closedSourceTabId: record.sourceTabId }
+      : {}),
+  });
 }
 
 function parkDocumentBrowser(record) {
@@ -1684,6 +1689,7 @@ function documentBrowserReuseKey(workspaceId, folder, relativePath) {
 async function createDocumentBrowserWindowNow({
   folder = "",
   relativePath = "",
+  sourceTabId = "",
   reuseKey = "",
   parentWindow,
   agentId = null,
@@ -1714,6 +1720,7 @@ async function createDocumentBrowserWindowNow({
         if (duplicate !== record) cleanupDocumentBrowser(duplicate);
       }
       record.reuseKey = reuseKey;
+      if (sourceTabId) record.sourceTabId = sourceTabId;
       record.rendererHidden = true;
       if (!attachDocumentBrowserToWindow(record, parentWindow)) {
         throw new Error("기존 문서 브라우저를 작업창에 다시 연결하지 못했습니다.");
@@ -1769,6 +1776,7 @@ async function createDocumentBrowserWindowNow({
     previewUrl: preview.url,
     folder,
     relativePath: preview.relativePath,
+    sourceTabId: String(sourceTabId || "").trim() || null,
     reuseKey,
     shellWebContentsId: parentWindow.webContents.id,
     bounds: null,
@@ -4704,6 +4712,7 @@ async function invokeCommand(event, command, rawArgs) {
       return createDocumentBrowserWindow({
         folder,
         relativePath,
+        sourceTabId: asString(args.sourceTabId).trim(),
         reuseKey,
         agentId: asString(args.agentId).trim() || null,
         initialUrl: asString(args.initialUrl).trim(),
@@ -4742,7 +4751,7 @@ async function invokeCommand(event, command, rawArgs) {
       if (!record || !isDocumentBrowserCatalogRecord(record)) {
         throw new Error("브라우저 탭을 찾을 수 없습니다.");
       }
-      cleanupDocumentBrowser(record);
+      cleanupDocumentBrowser(record, { closeSourceTab: true });
       return null;
     }
     case "document_browser_ready": {
@@ -4873,7 +4882,7 @@ async function invokeCommand(event, command, rawArgs) {
         asString(args.browserId),
       );
       if (!record || record.id !== asString(args.browserId)) throw new Error("전용 HTML 브라우저를 찾을 수 없습니다.");
-      cleanupDocumentBrowser(record);
+      cleanupDocumentBrowser(record, { closeSourceTab: true });
       return null;
     }
     case "open_store_product": {
@@ -5484,8 +5493,17 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
           (async () => {
             const args = {
               folder: ${JSON.stringify(appRoot)},
-              relativePath: "electron/services/browser-form-fixture.html"
+              relativePath: "electron/services/browser-form-fixture.html",
+              sourceTabId: "doc:electron-smoke:electron/services/browser-form-fixture.html"
             };
+            let resolveClosed;
+            const closedEvent = new Promise((resolve) => { resolveClosed = resolve; });
+            const unlisten = window.multiAgentElectron.onEvent(
+              "document-browser:catalog-updated",
+              (payload) => {
+                if (payload?.closedSourceTabId === args.sourceTabId) resolveClosed(payload);
+              }
+            );
             const first = await window.multiAgentElectron.invoke("document_browser_open", args);
             const second = await window.multiAgentElectron.invoke("document_browser_open", args);
             const catalog = await window.multiAgentElectron.invoke("document_browser_list", {});
@@ -5498,7 +5516,16 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
                 browserId: first.browserId
               });
             }
-            return Boolean(reused);
+            const closed = await Promise.race([
+              closedEvent,
+              new Promise((resolve) => setTimeout(() => resolve(null), 1000))
+            ]);
+            unlisten();
+            return Boolean(
+              reused &&
+              closed?.closedBrowserId === first.browserId &&
+              closed?.closedSourceTabId === args.sourceTabId
+            );
           })()
         `);
         if (!documentBrowserReuseOk) {

@@ -91,6 +91,7 @@ export function DocViewer({
           const result = await invoke<{ browserId: string }>("document_browser_open", {
             folder,
             relativePath,
+            sourceTabId: docId,
             ...(agentId ? { agentId } : {}),
           });
           if (cancelled) return;
@@ -162,6 +163,7 @@ export function DocViewer({
       const result = await invoke<{ browserId: string }>("document_browser_open", {
         folder,
         relativePath,
+        sourceTabId: docId,
         ...(agentId ? { agentId } : {}),
       });
       setEmbeddedBrowser({ browserId: result.browserId, docId });

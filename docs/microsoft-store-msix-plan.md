@@ -8,7 +8,7 @@ tags:
   - msix
   - microsoft-store
 status: draft
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 sources:
   - id: desktop-manifest
     resource: ../app/package.json
@@ -74,6 +74,10 @@ public rollout.[^electron-msix-guide][^store-distribution][^store-visibility]
 The Store build keeps its data and update channel separate from NSIS. Existing
 NSIS releases remain available until the Store channel has passed private-user
 testing and a deliberate public rollout decision is made.
+
+A request to deploy live covers GitHub only. Store packaging and Partner Center
+submission require a separate explicit request, and a later Store submission
+for the same product release retains the exact GitHub four-part version.
 
 ## Submission status — 2026-09-03
 
@@ -285,6 +289,8 @@ before making the Store listing public:
    version. The unified baseline uses desktop compatibility version `1.7.0`
    and the identical public/Store version `1.7.0.0`. This is higher than the
    existing `1.6.26.0` Store package and can use the current product identity.
+   Every later Store submission uses the exact version of its corresponding
+   GitHub product release rather than creating a Store-only version number.
 4. **Channel coexistence:** decide whether NSIS remains a developer, Company,
    or recovery channel, how the website labels each installer, and whether
    simultaneous NSIS and Store installations are supported. Preserve the

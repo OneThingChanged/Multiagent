@@ -179,7 +179,11 @@ describe("Electron IPC contract", () => {
     expect(contract.assertInvokeRequest("document_browser_open", {
       folder: "K:\\AI\\MultiAgent",
       relativePath: "docs/index.html",
-    })).toMatchObject({ relativePath: "docs/index.html" });
+      sourceTabId: "doc:project-1:docs/index.html",
+    })).toMatchObject({
+      relativePath: "docs/index.html",
+      sourceTabId: "doc:project-1:docs/index.html",
+    });
     expect(contract.assertInvokeRequest("document_browser_open", {
       folder: "",
       relativePath: "",
@@ -195,6 +199,12 @@ describe("Electron IPC contract", () => {
       relativePath: "",
       initialUrl: "file:///C:/secret.txt",
     })).toThrow("http or https");
+    expect(() => contract.assertInvokeRequest("document_browser_open", {
+      folder: "",
+      relativePath: "",
+      sourceTabId: "doc:project-1:docs/index.html",
+      initialUrl: "https://www.google.com/",
+    })).toThrow("source tab id");
   });
 
   it("allows only HTTP(S) navigation in the embedded browser", () => {

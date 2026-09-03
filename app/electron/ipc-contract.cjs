@@ -289,6 +289,14 @@ function assertInvokeRequest(command, rawArgs) {
         } else if (args.initialUrl !== undefined && args.initialUrl !== "") {
           assertHttpUrl(args.initialUrl, "document browser initial URL");
         }
+        if (args.sourceTabId !== undefined && (
+          !hasFolder ||
+          typeof args.sourceTabId !== "string" ||
+          !args.sourceTabId.startsWith("doc:") ||
+          args.sourceTabId.length > 8192
+        )) {
+          throw new TypeError("Electron document browser source tab id is invalid");
+        }
       }
       if (args.agentId !== undefined && (
         typeof args.agentId !== "string" ||

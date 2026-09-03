@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DocumentBrowserSnapshot } from "../platform/ipcContract";
-import { BrowserHub, browserHubTabTitle } from "./BrowserHub";
+import {
+  BrowserHub,
+  browserHubTabTitle,
+  isHtmlDocumentBrowser,
+} from "./BrowserHub";
 
 function browser(overrides: Partial<DocumentBrowserSnapshot> = {}): DocumentBrowserSnapshot {
   return {
@@ -21,6 +25,31 @@ describe("BrowserHub", () => {
     expect(browserHubTabTitle(browser({ title: "https://example.com/docs" }))).toBe(
       "example.com"
     );
+  });
+
+  it("uses the original filename and HTML badge for a local document preview", () => {
+    const preview = browser({
+      title: "127.0.0.1",
+      relativePath: "reports/UProject_Git_Storage_Report.html",
+      url: "http://127.0.0.1:64371/preview/token/reports/UProject_Git_Storage_Report.html",
+    });
+
+    expect(isHtmlDocumentBrowser(preview)).toBe(true);
+    expect(browserHubTabTitle(preview)).toBe("UProject_Git_Storage_Report.html");
+
+    const html = renderToStaticMarkup(
+      <BrowserHub
+        browsers={[preview]}
+        selectedBrowserId="browser-a"
+        agentNames={new Map()}
+        onSelectBrowser={() => {}}
+        onCreateBrowser={async () => {}}
+        onCloseBrowser={async () => {}}
+      />
+    );
+
+    expect(html).toContain(">HTML</span>");
+    expect(html).toContain("UProject_Git_Storage_Report.html");
   });
 
   it("renders every shared browser as a top tab with its session", () => {

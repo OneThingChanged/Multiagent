@@ -141,6 +141,7 @@ export type DocumentBrowserSnapshot = {
 export type DocumentBrowserCatalog = {
   tabs: DocumentBrowserSnapshot[];
   closedBrowserId?: string;
+  closedSourceTabId?: string;
 };
 
 export type GitStatusLetter = "M" | "A" | "U" | "D" | "R";
@@ -330,7 +331,13 @@ export type RuntimeCommandContract = {
     result: boolean;
   };
   document_browser_open: {
-    args: { folder: string; relativePath: string; agentId?: string; initialUrl?: string };
+    args: {
+      folder: string;
+      relativePath: string;
+      sourceTabId?: string;
+      agentId?: string;
+      initialUrl?: string;
+    };
     result: { browserId: string };
   };
   document_browser_list: {

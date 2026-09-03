@@ -69,6 +69,18 @@ The Standard desktop build verifies the Android package name, version,
 architectures, APK hash, and certificate fingerprint before copying it into the
 release staging directory. Verification failure stops the build.[^standard-builder]
 
+## Release request scope
+
+In this project, a request to **deploy live** means the Git repository and
+GitHub Release channel only. It does not authorize a Store MSIX build,
+verification, Partner Center upload, or certification submission. Microsoft
+Store delivery starts only after a separate, explicit Store deployment request.
+
+GitHub and Microsoft Store releases that represent the same product release use
+the same four-part `X.Y.Z.0` version. Certification delay may separate their
+publication dates, but it must not produce a different Store version for the
+same release.
+
 ## GitHub release procedure
 
 1. Choose one stable four-part `X.Y.Z.0` product version and synchronize the
@@ -127,11 +139,12 @@ release staging directory. Verification failure stops the build.[^standard-build
 The Store channel is built and submitted separately from GitHub releases. A
 Store release never produces or consumes GitHub updater manifests.
 
-The `1.7.0.0` baseline is higher than the already published `1.6.26.0` package,
-so it can be submitted as an update under the existing Store product identity.
+The `1.7.0.0` baseline is higher than the already published `1.6.26.0` package.
+For subsequent Store updates, use the exact four-part product version already
+chosen for the corresponding GitHub release.
 
-1. Raise the product version so its mapped four-part Store version is higher
-   than the package already in Partner Center.
+1. Confirm that the corresponding GitHub product version is higher than the
+   package already in Partner Center, then retain that exact four-part version.
 2. Build and verify the production MSIX:
 
    ```powershell
@@ -152,9 +165,9 @@ so it can be submitted as an update under the existing Store product identity.
 Electron Updater consumes the YAML manifests and blockmaps produced for each
 variant. Standard and Company identities/channels must never cross.
 The generated updater YAML intentionally carries the derived three-part semver
-(`1.7.0` for product `1.7.0.0`) because Electron Updater rejects four-part
+(`1.7.1` for product `1.7.1.0`) because Electron Updater rejects four-part
 versions. The GitHub release tag, artifact name, app UI, and release metadata
-remain `1.7.0.0`.
+remain `1.7.1.0`.
 
 The Store variant disables Electron Updater and delegates acquisition and
 updates to Microsoft Store. It uses a separate data identity and must be built
