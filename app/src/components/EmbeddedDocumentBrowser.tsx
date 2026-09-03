@@ -234,7 +234,6 @@ export function EmbeddedDocumentBrowser({
           onSubmit={navigate}
           title="주소를 입력하고 Enter로 이동"
         >
-          <span className="document-browser-title">{snapshot.title}</span>
           <input
             className="document-browser-address"
             value={address}

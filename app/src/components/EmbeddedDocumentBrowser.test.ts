@@ -19,4 +19,18 @@ describe("EmbeddedDocumentBrowser visibility lifecycle", () => {
 
     expect(source).toContain("useNativeViewOcclusion(settingsOpen)");
   });
+
+  it("keeps the address field wide by omitting a duplicate toolbar title", () => {
+    const embeddedSource = fs.readFileSync(
+      new URL("./EmbeddedDocumentBrowser.tsx", import.meta.url),
+      "utf8"
+    );
+    const pageSource = fs.readFileSync(
+      new URL("./DocumentBrowserPage.tsx", import.meta.url),
+      "utf8"
+    );
+
+    expect(embeddedSource).not.toContain("document-browser-title");
+    expect(pageSource).not.toContain("document-browser-title");
+  });
 });

@@ -4953,13 +4953,6 @@ body.files-resizing .files-resizer::after {
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.18);
 }
 
-.document-browser-title {
-  flex-shrink: 0;
-  color: #eef3f8;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .document-browser-path {
   min-width: 0;
   color: #8b949e;
