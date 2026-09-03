@@ -2,7 +2,8 @@
   "name": "multiagent-mobile",
   "description": "Native Android client for the MultiAgent Remote service.",
   "private": true,
-  "version": "0.6.27",
+  "version": "1.7.0",
+  "multiAgentReleaseVersion": "1.7.0.0",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -25,7 +26,7 @@
     "android": "expo start --android --port 4430",
     "ios": "expo start --ios --port 4430",
     "web": "expo start --web --port 4430",
-    "test": "node --test tests/remoteUrl.test.mjs tests/notificationBridge.test.mjs tests/profiles.test.mjs tests/profileViews.test.mjs tests/sessionHubData.test.mjs",
+    "test": "node --test tests/remoteUrl.test.mjs tests/notificationBridge.test.mjs tests/profiles.test.mjs tests/profileViews.test.mjs tests/sessionHubData.test.mjs tests/androidVersionConfig.test.mjs",
     "typecheck": "tsc --noEmit",
     "prebuild:android": "expo prebuild --platform android",
     "signing:setup": "node scripts/setup-signing.mjs",

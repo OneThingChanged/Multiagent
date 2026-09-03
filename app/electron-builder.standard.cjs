@@ -1,11 +1,18 @@
 const path = require("node:path");
-const base = require("./package.json").build;
+const packageMetadata = require("./package.json");
+const base = packageMetadata.build;
 const { verifyMobileReleaseApk } = require("./scripts/mobile-release-artifact.cjs");
+const { resolveReleaseVersions } = require("./scripts/release-version.cjs");
 
 const verified = verifyMobileReleaseApk({ quiet: true });
+const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 
 module.exports = {
   ...base,
+  extraMetadata: {
+    ...base.extraMetadata,
+    multiAgentReleaseVersion: releaseVersion,
+  },
   files: [
     ...base.files,
     "!electron/remote-pwa/downloads/**",
@@ -17,4 +24,9 @@ module.exports = {
       to: "mobile/MultiAgent-Mobile.apk",
     },
   ],
+  nsis: {
+    ...base.nsis,
+    artifactName: `MultiAgent-Setup-${releaseVersion}-\${arch}.\${ext}`,
+    uninstallDisplayName: `MultiAgent ${releaseVersion}`,
+  },
 };

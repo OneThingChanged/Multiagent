@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { AttentionItem, AttentionKind } from "../lib/attention";
 
 const KIND_LABEL: Record<AttentionKind, string> = {
@@ -31,6 +32,8 @@ export function AttentionCenter({
   onClearRead: () => void;
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   const [unreadOnly, setUnreadOnly] = useState(false);
   const visible = useMemo(
     () => [...items].reverse().filter((item) => !unreadOnly || !item.read),

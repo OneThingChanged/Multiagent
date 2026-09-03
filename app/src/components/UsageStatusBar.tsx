@@ -6,6 +6,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke, listen } from "../platform/runtime";
 import type { Agent, Project } from "../types";
 import { PortsMonitor } from "./PortsMonitor";
@@ -128,6 +129,8 @@ function ProviderPopover({
   left: number;
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   const planType = provider.limits.find((limit) => limit.planType)?.planType;
   return (
     <div

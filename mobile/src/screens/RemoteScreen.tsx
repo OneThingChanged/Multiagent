@@ -31,6 +31,7 @@ import {
   stopForegroundMonitor,
   type ForegroundMonitorState,
 } from "../lib/foregroundMonitor";
+import { MOBILE_USER_AGENT } from "../lib/appVersion";
 import {
   mobileSessionAccessStatus,
   registerMobileSessionAccess,
@@ -303,7 +304,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.6.27"
+          applicationNameForUserAgent={MOBILE_USER_AGENT}
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}

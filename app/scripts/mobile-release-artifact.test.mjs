@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const require = createRequire(import.meta.url);
 const {
   EXPECTED_PACKAGE,
+  assertExpectedVersionName,
   normalizeFingerprint,
   parsePackageMetadata,
   parseSignerMetadata,
@@ -42,5 +43,11 @@ describe("mobile release artifact guard", () => {
   it("fails closed before packaging when release inputs are absent", () => {
     expect(() => verifyMobileReleaseApk({ apkPath: "", expectedFingerprint: "" }))
       .toThrow("MULTIAGENT_MOBILE_APK_PATH is required");
+  });
+
+  it("rejects an APK from a different desktop release", () => {
+    expect(assertExpectedVersionName("1.0.0.0", "1.0.0.0")).toBe("1.0.0.0");
+    expect(() => assertExpectedVersionName("0.6.28", "1.0.0.0"))
+      .toThrow("does not match desktop release 1.0.0.0");
   });
 });

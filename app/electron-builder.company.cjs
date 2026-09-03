@@ -1,4 +1,7 @@
-const base = require("./package.json").build;
+const packageMetadata = require("./package.json");
+const base = packageMetadata.build;
+const { resolveReleaseVersions } = require("./scripts/release-version.cjs");
+const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 
 module.exports = {
   ...base,
@@ -7,6 +10,7 @@ module.exports = {
   executableName: "MultiAgentCompany",
   extraMetadata: {
     multiAgentVariant: "company",
+    multiAgentReleaseVersion: releaseVersion,
   },
   directories: {
     ...base.directories,
@@ -21,9 +25,9 @@ module.exports = {
   ],
   nsis: {
     ...base.nsis,
-    artifactName: "MultiAgentCompany-Setup-${version}-${arch}.${ext}",
+    artifactName: `MultiAgentCompany-Setup-${releaseVersion}-\${arch}.\${ext}`,
     shortcutName: "MultiAgentCompany",
-    uninstallDisplayName: "MultiAgentCompany ${version}",
+    uninstallDisplayName: `MultiAgentCompany ${releaseVersion}`,
   },
   publish: [
     {

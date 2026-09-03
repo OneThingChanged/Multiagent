@@ -1,12 +1,14 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { VARIANTS } = require("../electron/runtime-variant.cjs");
 
 const REQUIRED_PRODUCTION_FIELDS = Object.freeze([
   "identityName",
   "publisher",
   "publisherDisplayName",
   "displayName",
+  "productId",
 ]);
 
 function xmlEscape(value) {
@@ -22,11 +24,11 @@ function semverToStoreVersion(version) {
   const match = String(version).trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
   if (!match) throw new Error(`지원하지 않는 앱 버전 형식입니다: ${version}`);
   const source = match.slice(1).map(Number);
-  const mapped = [source[0] + 1, source[1], source[2], 0];
+  const mapped = [source[0], source[1], source[2], 0];
   if (mapped.some((part) => !Number.isInteger(part) || part < 0 || part > 65_535)) {
     throw new Error(`Microsoft Store 버전 범위를 벗어났습니다: ${version}`);
   }
-  return mapped.join(".");
+  return validatePackageVersion(mapped.join("."));
 }
 
 function validatePackageVersion(value) {
@@ -93,6 +95,12 @@ function loadStoreIdentity({ appDir, appVersion, development = false, identityFi
     throw new Error(`Store identity JSON을 읽을 수 없습니다: ${error.message}`);
   }
   for (const field of REQUIRED_PRODUCTION_FIELDS) requiredText(raw[field], field);
+  const productId = requiredText(raw.productId, "productId", 64);
+  if (productId !== VARIANTS.store.storeProductId) {
+    throw new Error(
+      `Store productId가 앱 업데이트 대상과 일치하지 않습니다: ${productId}`
+    );
+  }
   return {
     mode: "production",
     identityFile: resolvedIdentityFile,
@@ -104,7 +112,7 @@ function loadStoreIdentity({ appDir, appVersion, development = false, identityFi
       raw.description || "Multi-agent terminal and project workspace",
       "description"
     ),
-    productId: raw.productId ? requiredText(raw.productId, "productId", 64) : null,
+    productId,
     packageVersion: validatePackageVersion(
       raw.packageVersion || semverToStoreVersion(appVersion)
     ),

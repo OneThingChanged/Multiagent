@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 
 export function ProjectFolderModal({
   title,
@@ -13,6 +14,8 @@ export function ProjectFolderModal({
   onCancel: () => void;
   onSave: (name: string) => void;
 }) {
+  useNativeViewOcclusion();
+
   const [name, setName] = useState(defaultName);
   const trimmedName = name.trim();
   const submit = () => {

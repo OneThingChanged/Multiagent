@@ -21,6 +21,7 @@ const {
   renderManifest,
   storeBuildStateDirectory,
 } = require("./store-msix-config.cjs");
+const { resolveReleaseVersions } = require("./release-version.cjs");
 
 if (process.platform !== "win32") {
   throw new Error("Microsoft Store MSIX packages must be built on Windows.");
@@ -28,6 +29,7 @@ if (process.platform !== "win32") {
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
+const { releaseVersion } = resolveReleaseVersions(packageJson);
 const development = process.argv.includes("--dev");
 const identityArgIndex = process.argv.indexOf("--identity-file");
 const identityFile = identityArgIndex >= 0 ? process.argv[identityArgIndex + 1] : null;
@@ -37,6 +39,11 @@ const identity = loadStoreIdentity({
   development,
   identityFile,
 });
+if (identity.packageVersion !== releaseVersion) {
+  throw new Error(
+    `Store package version ${identity.packageVersion} does not match product release ${releaseVersion}.`,
+  );
+}
 
 const outputDir = join(appDir, "electron-dist", "store");
 const packagedDir = join(outputDir, "win-unpacked");

@@ -29,6 +29,12 @@ export async function openUrl(url: string) {
   await bridge.invoke("open_external_url", { url });
 }
 
+export async function openStoreProduct() {
+  const bridge = electronBridge();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  await bridge.invoke("open_store_product");
+}
+
 export async function writeClipboardText(text: string) {
   const bridge = electronBridge();
   if (bridge) {

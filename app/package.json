@@ -3,7 +3,8 @@
   "description": "MultiAgent desktop terminal workspace",
   "author": "MultiAgent",
   "private": true,
-  "version": "0.6.27",
+  "version": "1.7.0",
+  "multiAgentReleaseVersion": "1.7.0.0",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -32,6 +33,9 @@
     "electron:install:store:dev": "pwsh -NoLogo -NoProfile -File scripts/install-electron-store-dev.ps1",
     "electron:wack:store:dev": "pwsh -NoLogo -NoProfile -File scripts/test-electron-store-wack.ps1",
     "electron:dist:all": "node scripts/build-electron-all.mjs",
+    "release:build:github": "node scripts/build-electron-standard.mjs",
+    "release:build:store": "node scripts/build-electron-store.mjs",
+    "release:verify:store": "node scripts/verify-electron-store-msix.mjs",
     "release:build:all": "node scripts/build-electron-all.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -97,9 +101,9 @@
       ]
     },
     "nsis": {
-      "artifactName": "MultiAgent-Setup-${version}-${arch}.${ext}",
+      "artifactName": "MultiAgent-Setup-1.7.0.0-${arch}.${ext}",
       "shortcutName": "MultiAgent",
-      "uninstallDisplayName": "MultiAgent ${version}",
+      "uninstallDisplayName": "MultiAgent 1.7.0.0",
       "include": "electron/installer.nsh"
     },
     "publish": [

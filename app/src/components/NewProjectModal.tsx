@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { openDialog } from "../platform/plugins";
 import {
   AI_TOOLS,
@@ -21,6 +22,8 @@ export function NewProjectModal({
   disabledTools?: string[];
   projectFolders?: ProjectFolder[];
 }) {
+  useNativeViewOcclusion();
+
   const visibleTools = AI_TOOLS.filter(
     (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
   );

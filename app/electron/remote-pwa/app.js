@@ -144,6 +144,7 @@ const ui = {
   outputPanel: $("#outputPanel"),
   terminalMount: $("#terminalMount"),
   terminalLive: $("#terminalLive"),
+  terminalFollowButton: $("#terminalFollowButton"),
   copyOutputButton: $("#copyOutputButton"),
   browserPanel: $("#browserPanel"),
   browserBackButton: $("#browserBackButton"),
@@ -3274,6 +3275,7 @@ async function sendSelectedMessage() {
   if (!agent || attachments.some((attachment) => attachment.uploading)) return;
   const outgoing = attachmentMessage(message, attachments);
   if (!outgoing) return;
+  followAgentTerminal(agent.id);
   const inactive = statusOf(agent) === "offline";
   if (inactive && sessionViewMode !== "chat") {
     showToast("비활성 세션에는 채팅 모드에서만 메시지를 보낼 수 있습니다.");
@@ -3316,7 +3318,9 @@ async function sendSelectedMessage() {
 const terminalSupported = typeof window.Terminal === "function";
 const mobileMedia = window.matchMedia("(max-width: 800px)");
 const isMobile = () => mobileMedia.matches;
-// container element -> { term, stream, agentId }
+// container element -> { term, stream, agentId, followOutput, unseenOutput,
+// connectionState }. Composer submissions do not pass through xterm's own
+// keyboard path, so follow state is managed explicitly here.
 const terminals = new Map();
 
 // Show the live terminal when xterm is available; otherwise keep the plain text
@@ -3408,6 +3412,63 @@ function urlAtEvent(term, event) {
   return null;
 }
 
+function terminalAtBottom(instance) {
+  const buffer = instance?.term?.buffer?.active;
+  return Boolean(buffer) && buffer.viewportY >= buffer.baseY;
+}
+
+function updateMainTerminalChrome() {
+  const instance = terminals.get(ui.terminalMount);
+  const visible = Boolean(instance?.agentId);
+  if (ui.terminalLive) {
+    ui.terminalLive.hidden = !visible;
+    if (visible) {
+      const states = {
+        connecting: ["● 연결 중", "connecting"],
+        live: ["● LIVE", "live"],
+        reconnecting: ["● 재연결", "reconnecting"],
+        ended: ["● 종료", "ended"],
+        disconnected: ["● 연결 끊김", "disconnected"],
+      };
+      const [label, className] = states[instance.connectionState] || states.connecting;
+      ui.terminalLive.textContent = label;
+      ui.terminalLive.className = `terminal-live ${className}`;
+    }
+  }
+  if (ui.terminalFollowButton) {
+    ui.terminalFollowButton.hidden = !visible || !instance.unseenOutput;
+  }
+}
+
+function followTerminalOutput(instance) {
+  if (!instance?.term) return;
+  instance.followOutput = true;
+  instance.unseenOutput = false;
+  try { instance.term.scrollToBottom(); } catch { /* terminal disposed */ }
+  updateMainTerminalChrome();
+}
+
+function followAgentTerminal(agentId) {
+  for (const instance of terminals.values()) {
+    if (instance.agentId === agentId) followTerminalOutput(instance);
+  }
+}
+
+function writeTerminalOutput(instance, data, { reset = false } = {}) {
+  if (!data) {
+    if (reset) followTerminalOutput(instance);
+    return;
+  }
+  const shouldFollow = reset || instance.followOutput || terminalAtBottom(instance);
+  if (!shouldFollow) {
+    instance.unseenOutput = true;
+    updateMainTerminalChrome();
+  }
+  instance.term.write(data, () => {
+    if (shouldFollow) followTerminalOutput(instance);
+  });
+}
+
 function buildTerminal(container, fontSize) {
   const term = new window.Terminal({
     cursorBlink: true,
@@ -3425,12 +3486,25 @@ function buildTerminal(container, fontSize) {
     term,
     stream: null,
     agentId: null,
+    followOutput: true,
+    unseenOutput: false,
+    connectionState: "disconnected",
     disposeTouchScroll: null,
   };
+  term.onScroll(() => {
+    if (terminalAtBottom(instance)) {
+      instance.followOutput = true;
+      instance.unseenOutput = false;
+    } else {
+      instance.followOutput = false;
+    }
+    updateMainTerminalChrome();
+  });
   term.onData((data) => {
     if (!instance.agentId) return;
     const agent = agentMap().get(instance.agentId);
     if (!agent || ["offline", "recovering", "starting"].includes(statusOf(agent))) return;
+    followTerminalOutput(instance);
     void sendRaw(instance.agentId, data);
   });
   instance.disposeTouchScroll =
@@ -3472,6 +3546,9 @@ function buildTerminal(container, fontSize) {
 function closeStream(instance) {
   if (instance.stream) { instance.stream.close(); instance.stream = null; }
   instance.agentId = null;
+  instance.connectionState = "disconnected";
+  instance.unseenOutput = false;
+  updateMainTerminalChrome();
 }
 
 function attachTerminal(container, agentId, fontSize = 13) {
@@ -3482,8 +3559,24 @@ function attachTerminal(container, agentId, fontSize = 13) {
   }
   closeStream(instance);
   instance.agentId = agentId;
+  instance.connectionState = "connecting";
+  instance.followOutput = true;
+  instance.unseenOutput = false;
   const stream = new EventSource(`/api/stream?id=${encodeURIComponent(agentId)}`);
   instance.stream = stream;
+  updateMainTerminalChrome();
+  stream.onopen = () => {
+    if (instance.stream !== stream) return;
+    instance.connectionState = "live";
+    updateMainTerminalChrome();
+  };
+  stream.onerror = () => {
+    if (instance.stream !== stream) return;
+    instance.connectionState = stream.readyState === EventSource.CLOSED
+      ? "disconnected"
+      : "reconnecting";
+    updateMainTerminalChrome();
+  };
   stream.addEventListener("reset", (event) => {
     if (instance.stream !== stream) return;
     const payload = JSON.parse(event.data);
@@ -3491,17 +3584,19 @@ function attachTerminal(container, agentId, fontSize = 13) {
     if (payload.cols && payload.rows) {
       try { instance.term.resize(payload.cols, payload.rows); } catch { /* keep default size */ }
     }
-    if (payload.data) instance.term.write(payload.data);
+    writeTerminalOutput(instance, payload.data, { reset: true });
     requestAnimationFrame(() => refitTerminal(instance, container));
   });
   stream.onmessage = (event) => {
     if (instance.stream !== stream) return;
     const payload = JSON.parse(event.data);
-    if (payload.data) instance.term.write(payload.data);
+    writeTerminalOutput(instance, payload.data);
   };
   stream.addEventListener("exit", () => {
     if (instance.stream !== stream) return;
-    instance.term.write("\r\n\x1b[2m— 세션이 종료되었습니다 —\x1b[0m\r\n");
+    instance.connectionState = "ended";
+    writeTerminalOutput(instance, "\r\n\x1b[2m— 세션이 종료되었습니다 —\x1b[0m\r\n");
+    updateMainTerminalChrome();
   });
   // EventSource auto-reconnects on transient errors; the server replays a fresh
   // reset on each new connection, so the terminal re-syncs without extra code.
@@ -3616,7 +3711,7 @@ function syncTerminal() {
       attachTerminal(ui.terminalMount, agent.id);
       keep.add(ui.terminalMount);
     }
-    if (ui.terminalLive) ui.terminalLive.hidden = !agent;
+    updateMainTerminalChrome();
   } else if (selection.type === "screen") {
     for (const mount of ui.screenLayout.querySelectorAll("[data-terminal-mount]")) {
       if (isMobile() && !mount.closest(".screen-leaf")?.classList.contains("mobile-pane-active")) {
@@ -5266,6 +5361,9 @@ ui.copyOutputButton.addEventListener("click", async () => {
     await navigator.clipboard.writeText(content);
     showToast("터미널 내용을 복사했습니다.");
   } catch { showToast("복사하지 못했습니다."); }
+});
+ui.terminalFollowButton?.addEventListener("click", () => {
+  followTerminalOutput(terminals.get(ui.terminalMount));
 });
 ui.notifyButton.addEventListener("click", enableNotifications);
 ui.installButton.addEventListener("click", installPwa);

@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { APP_VERSION } from "../lib/appVersion";
 import type { RemoteProfile } from "../lib/profiles";
 
 type Props = {
@@ -160,7 +161,7 @@ export function ConnectionScreen({
             </Text>
           </View>
 
-          <Text style={styles.version}>Mobile 0.6.27</Text>
+          <Text style={styles.version}>Mobile {APP_VERSION}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

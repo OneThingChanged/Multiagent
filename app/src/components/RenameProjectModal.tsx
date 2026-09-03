@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 
 export function RenameProjectModal({
   currentName,
@@ -9,6 +10,8 @@ export function RenameProjectModal({
   onCancel: () => void;
   onRename: (name: string) => void;
 }) {
+  useNativeViewOcclusion();
+
   const [name, setName] = useState(currentName);
   const canSubmit = name.trim().length > 0;
 

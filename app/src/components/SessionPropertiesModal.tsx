@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { Agent, Project } from "../types";
 import { toolForId } from "../types";
@@ -67,6 +68,8 @@ export function SessionPropertiesModal({
   disabledTools?: string[];
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

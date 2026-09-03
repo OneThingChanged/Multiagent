@@ -1202,7 +1202,14 @@ describe("Electron dashboard server", () => {
         terminalSnapshot: () => null,
         subscribeTerminal: () => null,
         terminalSize: () => null,
-        restartSession: () => true,
+        restartSession: async (id) => {
+          if (id === "agent-missing") {
+            const error = new Error("session not found");
+            error.statusCode = 404;
+            throw error;
+          }
+          return { id, active: true, restarted: true };
+        },
         cancelSession: (id) => {
           cancellations.push(id);
           return id === "agent-9";
@@ -1265,6 +1272,25 @@ describe("Electron dashboard server", () => {
     });
     expect(cancelled.status).toBe(200);
     expect(cancellations).toEqual(["agent-9"]);
+    const restarted = await fetch(`${status.url}/api/session/restart`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-offline" }),
+    });
+    expect(restarted.status).toBe(200);
+    await expect(restarted.json()).resolves.toEqual({
+      ok: true,
+      id: "agent-offline",
+      active: true,
+      restarted: true,
+    });
+    const missingRestart = await fetch(`${status.url}/api/session/restart`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: status.url },
+      body: JSON.stringify({ id: "agent-missing" }),
+    });
+    expect(missingRestart.status).toBe(404);
+    await expect(missingRestart.json()).resolves.toEqual({ error: "session not found" });
     const created = await fetch(`${status.url}/api/session/create`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: status.url },

@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 import {
   check,
   openDialog,
+  openStoreProduct,
   openUrl,
   relaunch,
   writeClipboardText,
@@ -12,6 +14,7 @@ import { APP_THEMES } from "../lib/appTheme";
 import type { AppThemeId } from "../lib/appTheme";
 import {
   APP_VERSION,
+  formatProductVersion,
   IS_COMPANY_BUILD,
   RELEASES_URL,
 } from "../lib/appInfo";
@@ -59,6 +62,11 @@ type InstallState =
   | { status: "idle" }
   | { status: "downloading"; downloaded: number; total: number | null }
   | { status: "installing" }
+  | { status: "error"; message: string };
+
+type StoreLaunchState =
+  | { status: "idle" }
+  | { status: "opening" }
   | { status: "error"; message: string };
 
 type RemoteStatus = {
@@ -402,6 +410,8 @@ export function SettingsModal({
   updateProvider: "github" | "microsoft-store";
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   const [tab, setTab] = useState<SettingsCategory>("general");
   const [search, setSearch] = useState("");
   const [diffTool, setDiffTool] = useState<string>(() => loadDiffToolCommand());
@@ -436,6 +446,7 @@ export function SettingsModal({
     status: "idle",
   });
   const [install, setInstall] = useState<InstallState>({ status: "idle" });
+  const [storeLaunch, setStoreLaunch] = useState<StoreLaunchState>({ status: "idle" });
   const [sound, setSound] = useState<NotificationSoundConfig>(() =>
     loadNotificationSound()
   );
@@ -936,6 +947,24 @@ export function SettingsModal({
     openUrl(RELEASES_URL).catch((error) => {
       console.error("Failed to open release page", error);
     });
+  };
+
+  const handleOpenStoreProduct = async () => {
+    setStoreLaunch({ status: "opening" });
+    try {
+      await openStoreProduct();
+      setStoreLaunch({ status: "idle" });
+    } catch (error) {
+      setStoreLaunch({
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "Microsoft Store를 열 수 없습니다.",
+      });
+    }
   };
 
   const handleCheckForUpdates = async () => {
@@ -2078,14 +2107,15 @@ export function SettingsModal({
               <div className="app-about-row">
                 <span className="app-about-label">Latest</span>
                 <span className="app-about-value">
-                  v{updateCheck.update.version}
+                  v{formatProductVersion(updateCheck.update.version)}
                 </span>
               </div>
             )}
             <div
               className={`app-update-message ${
                 updateCheck.status === "error" ||
-                install.status === "error"
+                install.status === "error" ||
+                storeLaunch.status === "error"
                   ? "app-update-error"
                   : ""
               }`}
@@ -2098,8 +2128,10 @@ export function SettingsModal({
                 "Installing. The app will restart shortly."}
               {install.status === "error" &&
                 `Update install failed: ${install.message}`}
-              {updateProvider === "microsoft-store" &&
-                "업데이트는 Microsoft Store와 Windows에서 자동으로 관리됩니다."}
+              {updateProvider === "microsoft-store" && storeLaunch.status === "error" &&
+                `Microsoft Store 열기 실패: ${storeLaunch.message}`}
+              {updateProvider === "microsoft-store" && storeLaunch.status !== "error" &&
+                "업데이트는 Microsoft Store에서 자동으로 관리됩니다. 새 버전을 직접 확인하려면 Store 제품 페이지를 여세요."}
               {updateProvider !== "microsoft-store" && install.status === "idle" &&
                 updateCheck.status === "idle" &&
                 "Click Check to see if a new release is available."}
@@ -2116,6 +2148,19 @@ export function SettingsModal({
                 updateCheck.status === "error" &&
                 `Update check failed: ${updateCheck.message}`}
             </div>
+            {updateProvider === "microsoft-store" && (
+              <div className="app-update-actions">
+                <button
+                  className="btn-primary app-update-btn"
+                  onClick={handleOpenStoreProduct}
+                  disabled={storeLaunch.status === "opening"}
+                >
+                  {storeLaunch.status === "opening"
+                    ? "Microsoft Store 여는 중..."
+                    : "Microsoft Store에서 업데이트 확인"}
+                </button>
+              </div>
+            )}
             {updateProvider !== "microsoft-store" && <div className="app-update-actions">
               <button
                 className="btn-secondary app-update-btn"

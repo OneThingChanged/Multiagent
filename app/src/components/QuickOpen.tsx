@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { rankQuickOpenItems, type QuickOpenItem } from "../lib/quickOpen";
 
 const KIND_LABEL: Record<QuickOpenItem["kind"], string> = {
@@ -20,6 +21,8 @@ export function QuickOpen({
   onSelect: (item: QuickOpenItem) => void;
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);

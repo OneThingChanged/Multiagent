@@ -69,10 +69,14 @@ The Standard desktop build verifies the Android package name, version,
 architectures, APK hash, and certificate fingerprint before copying it into the
 release staging directory. Verification failure stops the build.[^standard-builder]
 
-## Release procedure
+## GitHub release procedure
 
-1. Choose one stable `X.Y.Z` version and synchronize the desktop/mobile version
-   fields and any public release metadata that intentionally tracks it.
+1. Choose one stable four-part `X.Y.Z.0` product version and synchronize the
+   desktop/mobile version fields and public release metadata. npm and Electron
+   Updater use the derived `X.Y.Z` compatibility value, while the app UI,
+   installer filename, GitHub tag, Android `versionName`, and MSIX use the exact
+   four-part value. The Standard builder rejects a signed APK whose
+   `versionName` differs from the product version.
 2. Run source checks:
 
    ```powershell
@@ -83,12 +87,16 @@ release staging directory. Verification failure stops the build.[^standard-build
    ```
 
 3. Build and verify the signed Android APK from `mobile/`; confirm its package,
-   version, architectures, hash, and certificate before desktop packaging.[^mobile-builder]
-4. Build both installers:
+   version, architectures, hash, and certificate before desktop packaging. The
+   APK builder synchronizes the ignored native Gradle version fields from the
+   tracked `mobile/app.json` release metadata before compiling.[^mobile-builder]
+4. Build the GitHub release artifacts. This command builds the Standard channel;
+   Company remains available through its existing explicit build command:
 
    ```powershell
    cd "K:\AI\MultiAgent\app"
-   npm run electron:dist:all
+   npm run release:build:github
+   npm run electron:dist:company
    ```
 
 5. Run packaged verification:
@@ -109,19 +117,49 @@ release staging directory. Verification failure stops the build.[^standard-build
 
 6. Inspect `app/electron-dist/` and the Company/mobile subdirectories. Reject
    stale files from another version before uploading.
-7. Commit the source/version change, create tag `vX.Y.Z`, push the branch and
+7. Commit the source/version change, create tag `vX.Y.Z.0`, push the branch and
    tag, then publish the GitHub release as Latest with the complete artifact set.
 8. Download the published artifacts through their public URLs and verify hashes,
    signatures, manifests, installer version, updater visibility, and APK download.
+
+## Microsoft Store release procedure
+
+The Store channel is built and submitted separately from GitHub releases. A
+Store release never produces or consumes GitHub updater manifests.
+
+The `1.7.0.0` baseline is higher than the already published `1.6.26.0` package,
+so it can be submitted as an update under the existing Store product identity.
+
+1. Raise the product version so its mapped four-part Store version is higher
+   than the package already in Partner Center.
+2. Build and verify the production MSIX:
+
+   ```powershell
+   cd "K:\AI\MultiAgent\app"
+   npm run release:build:store
+   npm run release:verify:store
+   ```
+
+3. Run WACK against the generated production package and retain its report.
+4. Start a Partner Center update submission, upload only the verified MSIX, and
+   submit it for certification.
+5. After publication, install the private-audience update through Microsoft
+   Store and verify version, retained data, terminal/browser/Remote behavior,
+   and that the GitHub updater was never invoked.
 
 ## Updater rules
 
 Electron Updater consumes the YAML manifests and blockmaps produced for each
 variant. Standard and Company identities/channels must never cross.
+The generated updater YAML intentionally carries the derived three-part semver
+(`1.7.0` for product `1.7.0.0`) because Electron Updater rejects four-part
+versions. The GitHub release tag, artifact name, app UI, and release metadata
+remain `1.7.0.0`.
 
 The Store variant disables Electron Updater and delegates acquisition and
 updates to Microsoft Store. It uses a separate data identity and must be built
-from the exact Partner Center identity file.[^store-builder]
+from the exact Partner Center identity file. Its settings page opens the Store
+product page for manual checks while Windows continues to manage delivery.[^store-builder]
 
 Do not publish a manifest before its binary exists at the referenced URL. Do
 not mark a partial release Latest. A release is complete only after installation

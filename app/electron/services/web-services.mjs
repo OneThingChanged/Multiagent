@@ -1137,6 +1137,29 @@ function sendRemoteAttachmentError(response, error) {
   sendJson(response, status, { error: error?.message || "이미지를 첨부하지 못했습니다." });
 }
 
+async function respondToSessionRestart(response, restartSession, id) {
+  if (typeof restartSession !== "function") {
+    sendJson(response, 501, { error: "session activation unavailable" });
+    return;
+  }
+  try {
+    const result = await restartSession(id);
+    if (result === false || result === null) {
+      sendJson(response, 409, { error: "session could not be activated" });
+      return;
+    }
+    sendJson(response, 200, {
+      ok: true,
+      ...(result && typeof result === "object" ? result : {}),
+    });
+  } catch (error) {
+    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    sendJson(response, status, {
+      error: error?.message || "session could not be activated",
+    });
+  }
+}
+
 async function listen(server, desiredPort, host = "127.0.0.1") {
   const candidates = desiredPort > 0
     ? Array.from({ length: 50 }, (_, index) => desiredPort + index)
@@ -1335,8 +1358,7 @@ export class LocalDashboardService {
             const body = await readJson(request);
             const id = String(body.id || "").trim();
             if (!id) { sendJson(response, 400, { error: "invalid session id" }); return; }
-            p.restartSession?.(id);
-            sendJson(response, 200, { ok: true });
+            await respondToSessionRestart(response, p.restartSession, id);
             return;
           }
           if (request.method === "POST" && url.pathname === "/api/session/cancel") {
@@ -2234,8 +2256,7 @@ export class RemoteDashboardService {
             sendJson(response, 400, { error: "invalid session id" });
             return;
           }
-          this.restartSession?.(id);
-          sendJson(response, 200, { ok: true });
+          await respondToSessionRestart(response, this.restartSession, id);
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/session/cancel") {

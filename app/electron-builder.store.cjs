@@ -1,4 +1,7 @@
-const base = require("./package.json").build;
+const packageMetadata = require("./package.json");
+const base = packageMetadata.build;
+const { resolveReleaseVersions } = require("./scripts/release-version.cjs");
+const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 
 module.exports = {
   ...base,
@@ -7,6 +10,7 @@ module.exports = {
   executableName: "MultiAgent",
   extraMetadata: {
     multiAgentVariant: "store",
+    multiAgentReleaseVersion: releaseVersion,
   },
   directories: {
     ...base.directories,

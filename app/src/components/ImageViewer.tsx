@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { acquireNativeViewOcclusion } from "../lib/nativeViewOcclusion";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 
 function fileName(path: string) {
@@ -19,7 +19,7 @@ export function ImageViewer({
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => acquireNativeViewOcclusion(), []);
+  useNativeViewOcclusion();
 
   useEffect(() => {
     let cancelled = false;

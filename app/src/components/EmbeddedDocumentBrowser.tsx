@@ -95,7 +95,7 @@ export function EmbeddedDocumentBrowser({
     }).catch(() => {});
   }, [browserId, browserVisible]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     void invoke("document_browser_visibility", {
       browserId,
       visible: browserVisible,

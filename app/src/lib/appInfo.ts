@@ -14,9 +14,14 @@ export const RELEASES_URL = `${REPOSITORY_URL}/releases`;
 export const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 
 function parseVersion(version: string) {
-  const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/i);
+  const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$/i);
   if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+  return [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4] || 0)] as const;
+}
+
+export function formatProductVersion(version: string) {
+  const parsed = parseVersion(version);
+  return parsed ? parsed.join(".") : version;
 }
 
 export function compareVersions(a: string, b: string) {
@@ -24,7 +29,7 @@ export function compareVersions(a: string, b: string) {
   const right = parseVersion(b);
   if (!left || !right) return 0;
 
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 4; i += 1) {
     if (left[i] > right[i]) return 1;
     if (left[i] < right[i]) return -1;
   }

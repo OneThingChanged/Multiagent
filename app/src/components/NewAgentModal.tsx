@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { AI_TOOLS, toolForId } from "../types";
 import type { NewAgentPayload, Project } from "../types";
 import { folderTail } from "../lib/path";
@@ -20,6 +21,8 @@ export function NewAgentModal({
   onCreate: (payload: NewAgentPayload) => void;
   disabledTools?: string[];
 }) {
+  useNativeViewOcclusion();
+
   // Only tools enabled in Settings → Agents ("none" always available).
   const visibleTools = AI_TOOLS.filter(
     (t) => t.id === "none" || !disabledTools.includes(t.id)

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { synchronizeAndroidVersion } from "./android-version-config.mjs";
 import { loadSigningEnvironment } from "./signing-config.mjs";
 
 loadSigningEnvironment();
@@ -28,6 +29,15 @@ if (!allowDebugSigning) {
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const android = path.join(root, "android");
+try {
+  const synchronized = synchronizeAndroidVersion(root);
+  console.log(
+    `[mobile-release] Android version ${synchronized.versionName} (${synchronized.versionCode})${synchronized.changed ? " synchronized" : " verified"}.`,
+  );
+} catch (error) {
+  console.error(`[mobile-release] ${error.message}`);
+  process.exit(2);
+}
 const windows = process.platform === "win32";
 const command = windows ? "gradlew.bat" : "./gradlew";
 const result = spawnSync(

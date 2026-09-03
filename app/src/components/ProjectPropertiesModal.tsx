@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { Agent, Project } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 import { SessionStorageList } from "./SessionStorageList";
@@ -23,6 +24,8 @@ export function ProjectPropertiesModal({
   onSessionDeleted?: (aiToolId: string, sessionId: string) => void;
   onClose: () => void;
 }) {
+  useNativeViewOcclusion();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

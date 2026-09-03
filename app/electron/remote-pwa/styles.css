@@ -1004,6 +1004,9 @@ html[data-native-app="true"] .android-download-button { display: none !important
 .output-head { display: flex; align-items: center; justify-content: space-between; min-height: 41px; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 10px; }
 .output-panel > pre { min-height: 310px; max-height: 54vh; margin: 0; padding: 13px; overflow: auto; color: #b9c9d5; background: #050d14; font: 11px/1.5 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .terminal-live { margin-left: auto; margin-right: 10px; color: var(--green); font-size: 9px; font-weight: 800; letter-spacing: 0.4px; }
+.terminal-live.connecting, .terminal-live.reconnecting { color: var(--amber); }
+.terminal-live.ended, .terminal-live.disconnected { color: var(--muted); }
+.terminal-follow-button { margin-right: 7px; border-color: rgba(80, 223, 208, 0.38); color: var(--cyan); background: rgba(80, 223, 208, 0.09); }
 .terminal-mount { margin: 0; padding: 8px; border-radius: 10px; background: #050d14; overflow: hidden; }
 .terminal-mount .xterm, .screen-terminal-mount .xterm { padding: 0; }
 .screen-terminal-mount { min-height: 0; overflow: hidden; border-radius: 8px; background: #050d14; }

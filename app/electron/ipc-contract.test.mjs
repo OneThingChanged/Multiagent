@@ -16,8 +16,17 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("conversation_storage_set");
     expect(contract.INVOKE_COMMANDS).toContain("conversation_record_user_message");
     expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_create");
+    expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_activation");
+    expect(contract.INVOKE_COMMANDS).toContain("open_store_product");
     expect(contract.DELIVERED_EVENTS).toContain("remote:create-session");
     expect(contract.DELIVERED_EVENTS).toContain("remote:rename-session");
+  });
+
+  it("exposes a dedicated Store product command without broadening URL schemes", () => {
+    expect(contract.assertInvokeRequest("open_store_product", {})).toEqual({});
+    expect(() => contract.assertInvokeRequest("open_external_url", {
+      url: "ms-windows-store://pdp/?ProductId=9NVBSGNRTPLR",
+    })).toThrow("http or https");
   });
 
   it("validates acknowledged remote session creation results", () => {
@@ -30,6 +39,23 @@ describe("Electron IPC contract", () => {
     ).toMatchObject({ ok: true });
     expect(() =>
       contract.assertInvokeRequest("complete_remote_session_create", {
+        requestId: "not-a-uuid",
+        id: "22222222-2222-4222-8222-222222222222",
+        ok: false,
+      })
+    ).toThrow(/requestId/);
+  });
+
+  it("validates acknowledged remote session activation results", () => {
+    expect(
+      contract.assertInvokeRequest("complete_remote_session_activation", {
+        requestId: "11111111-1111-4111-8111-111111111111",
+        id: "22222222-2222-4222-8222-222222222222",
+        ok: true,
+      })
+    ).toMatchObject({ ok: true });
+    expect(() =>
+      contract.assertInvokeRequest("complete_remote_session_activation", {
         requestId: "not-a-uuid",
         id: "22222222-2222-4222-8222-222222222222",
         ok: false,

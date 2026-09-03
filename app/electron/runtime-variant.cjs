@@ -7,6 +7,7 @@ const VARIANTS = Object.freeze({
     updaterChannel: "latest",
     remoteEnabled: true,
     updateProvider: "github",
+    storeProductId: null,
   }),
   company: Object.freeze({
     id: "company",
@@ -16,6 +17,7 @@ const VARIANTS = Object.freeze({
     updaterChannel: "latest-company",
     remoteEnabled: false,
     updateProvider: "github",
+    storeProductId: null,
   }),
   store: Object.freeze({
     id: "store",
@@ -26,6 +28,7 @@ const VARIANTS = Object.freeze({
     updaterChannel: null,
     remoteEnabled: true,
     updateProvider: "microsoft-store",
+    storeProductId: "9NVBSGNRTPLR",
   }),
 });
 

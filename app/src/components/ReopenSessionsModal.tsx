@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 
 export function ReopenSessionsModal({
   count,
@@ -9,6 +10,8 @@ export function ReopenSessionsModal({
   onYes: () => void;
   onNo: () => void;
 }) {
+  useNativeViewOcclusion();
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Enter") {

@@ -5,7 +5,7 @@ export type RuntimeCommand =
   | "show_main_window" | "open_new_app_window" | "get_detached_agents"
   | "get_agent_window_usage" | "claim_agent_for_window" | "set_desktop_pet_enabled"
   | "update_desktop_pet" | "desktop_pet_snapshot" | "reset_desktop_pet_position"
-  | "show_open_dialog" | "open_external_url" | "open_local_path"
+  | "show_open_dialog" | "open_external_url" | "open_store_product" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
   | "document_browser_open" | "document_browser_ready" | "document_browser_bounds"
   | "document_browser_visibility"
@@ -33,7 +33,7 @@ export type RuntimeCommand =
   | "show_native_notification"
   | "resolve_cli_session" | "resolve_cline_session" | "relink_cli_session" | "sync_remote_agents"
   | "sync_remote_view" | "sync_usage_catalog" | "sync_monitor_state"
-  | "complete_remote_session_create"
+  | "complete_remote_session_create" | "complete_remote_session_activation"
   | "repair_active_hooks" | "export_diagnostics" | "usage_ingest_now"
   | "usage_rate_limits_get"
   | "usage_config_get" | "usage_config_set" | "usage_server_status"
@@ -299,8 +299,19 @@ export type GitChangesResult = {
 };
 
 export type RuntimeCommandContract = {
+  open_store_product: { args: Record<string, never>; result: null };
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
   complete_remote_session_create: {
+    args: {
+      requestId: string;
+      id: string;
+      ok: boolean;
+      error?: string;
+      statusCode?: 400 | 404 | 409 | 500 | 503;
+    };
+    result: boolean;
+  };
+  complete_remote_session_activation: {
     args: {
       requestId: string;
       id: string;

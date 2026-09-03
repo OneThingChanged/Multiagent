@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 import type { Agent, Project } from "../types";
 import type { PortEntry, PortsResult } from "../platform/ipcContract";
@@ -33,6 +34,8 @@ export function PortsMonitor({
   const [refreshing, setRefreshing] = useState(false);
   const [externalOpen, setExternalOpen] = useState(false);
   const [opError, setOpError] = useState<string | null>(null);
+  useNativeViewOcclusion(open);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const projectsRef = useRef(projects);
   useEffect(() => {

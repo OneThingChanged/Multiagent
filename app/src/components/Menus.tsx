@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type {
   ContextMenuState,
   ProjectFolderContextMenuState,
@@ -10,6 +11,8 @@ import type {
 // Keep a context menu fully inside the viewport: after it renders, measure it
 // and shift left/up so it doesn't get clipped at the right/bottom edges.
 function useClampedMenuPosition(x: number, y: number) {
+  useNativeViewOcclusion();
+
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   useLayoutEffect(() => {

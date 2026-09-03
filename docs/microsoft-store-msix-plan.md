@@ -52,6 +52,12 @@ sources:
   - id: action-center
     resource: https://learn.microsoft.com/en-us/partner-center/action-center/action-center-overview
     title: "Microsoft Partner Center Action Center"
+  - id: store-package-updates
+    resource: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/package-updates-from-store
+    title: "Download and install package updates from the Store"
+  - id: msix-package-updates
+    resource: https://learn.microsoft.com/en-us/windows/msix/app-package-updates
+    title: "MSIX app package update behavior"
 ---
 
 # Microsoft Store MSIX delivery and certification record
@@ -240,8 +246,11 @@ If the status becomes inconsistent again, check the following in order:
 
 ### Before a public rollout
 
-- Complete private-audience installation and update testing on supported
-  Windows desktop systems.
+- The certified private-audience package has been installed successfully on a
+  supported Windows desktop system. Complete one higher-version Store update
+  test before public rollout.
+- The Store update-control UX is decided below. Public rollout must not proceed
+  while the remaining versioning, sequencing, and policy tests are unresolved.
 - Decide between public discoverability and direct-link-only acquisition, then
   update Pricing and availability accordingly. A public-audience decision
   should be treated as a deliberate rollout gate, not a certification step.
@@ -251,6 +260,54 @@ If the status becomes inconsistent again, check the following in order:
   developer, Company, or recovery channel if that remains useful.
 - Update the public README, release playbook, known limitations, and support
   instructions only after the private test is successful.
+
+## Public rollout decision gate — Store updates
+
+The Store build already rejects the GitHub `electron-updater` workflow and
+declares Microsoft Store as its update provider. That implementation boundary
+must remain: a Store-installed MSIX is updated by Windows/Microsoft Store,
+whereas Standard and Company NSIS installations continue to use their existing
+GitHub updater channels.[^runtime-variant][^electron-main][^store-distribution]
+
+The update-channel boundary is now fixed. The remaining items must be completed
+before making the Store listing public:
+
+1. **Update control UX — decided:** Store builds replace GitHub update controls
+   with a Microsoft Store-managed status and a dedicated button that opens the
+   product page for Store product `9NVBSGNRTPLR`. Standard/Company builds retain
+   their GitHub check, install, and release controls.
+2. **Optional in-app Store check:** decide whether ordinary Store background
+   updates are sufficient or whether a later native bridge should use the
+   Windows Store package-update APIs to check and request installation from
+   inside MultiAgent.[^store-package-updates]
+3. **Version mapping:** keep the four-part MSIX package version strictly higher
+   for every Partner Center submission and record its mapping to the product
+   version. The unified baseline uses desktop compatibility version `1.7.0`
+   and the identical public/Store version `1.7.0.0`. This is higher than the
+   existing `1.6.26.0` Store package and can use the current product identity.
+4. **Channel coexistence:** decide whether NSIS remains a developer, Company,
+   or recovery channel, how the website labels each installer, and whether
+   simultaneous NSIS and Store installations are supported. Preserve the
+   intentionally separate updater and data identities unless an explicit,
+   tested migration is implemented.
+5. **Update policy edge cases:** test private-audience upgrades when Store
+   automatic updates are enabled, disabled by the user, restricted by
+   organization policy, delayed, offline, or interrupted. Verify that the app
+   remains usable and presents an actionable version/update status.
+6. **Release sequencing:** define when a GitHub release and its corresponding
+   Store submission are considered equivalent, how certification delay is
+   communicated, and which channel receives urgent fixes first. Do not promise
+   simultaneous availability when Partner Center certification is still
+   pending.
+7. **Private upgrade evidence:** install the certified private package, submit
+   one higher-version private update, and confirm that Windows replaces the
+   package without invoking `electron-updater`, losing Store data, or breaking
+   terminal, browser, Remote, and session workflows. MSIX update delivery may
+   use block-level differential transfer, so verify behavior rather than
+   assuming a full reinstall.[^msix-package-updates]
+
+The initial public Store rollout remains blocked until these decisions and the
+private higher-version upgrade test are recorded in this document.
 
 ## Release gates
 
@@ -262,11 +319,17 @@ If the status becomes inconsistent again, check the following in order:
 - Pricing, properties, age ratings, package, and Korean/English listing data.
 - Store screenshot and package logo assets.
 - `runFullTrust` justification and certification notes.
+- Microsoft Store certification and private-audience publication.
+- Private-audience installation of Store package `1.6.26.0`.
+- Store-specific update status and product-page action, isolated from the
+  GitHub updater controls.
 
 ### Pending
 
-- Partner Center certification result.
-- Private-audience install/update validation.
+- Private-audience higher-version update validation.
+- Final version mapping, channel-coexistence, release-sequencing, and
+  policy-edge-case decisions.
+- One successful private-audience higher-version Store upgrade.
 - Public discoverability/direct-link decision and public rollout documentation.
 
 The Store path is not considered a general-public release until the pending
@@ -287,3 +350,5 @@ certification and private testing.
 [^capability-declarations]: [Microsoft app capability declarations](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations)
 [^submission-options]: [Microsoft Store submission options](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options)
 [^action-center]: [Microsoft Partner Center Action Center](https://learn.microsoft.com/en-us/partner-center/action-center/action-center-overview)
+[^store-package-updates]: [Microsoft Store package update APIs](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/package-updates-from-store)
+[^msix-package-updates]: [MSIX app package update behavior](https://learn.microsoft.com/en-us/windows/msix/app-package-updates)

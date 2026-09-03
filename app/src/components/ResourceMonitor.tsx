@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 import type { Agent, Project } from "../types";
 import type {
@@ -50,6 +51,8 @@ export function ResourceMonitor({
   const [usage, setUsage] = useState<ResourceUsageResult | null>(null);
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  useNativeViewOcclusion(open);
+
   const rootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {

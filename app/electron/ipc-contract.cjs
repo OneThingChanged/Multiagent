@@ -20,6 +20,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "reset_desktop_pet_position",
   "show_open_dialog",
   "open_external_url",
+  "open_store_product",
   "open_local_path",
   "open_folder_path",
   "reveal_local_path",
@@ -90,6 +91,7 @@ const INVOKE_COMMANDS = Object.freeze([
   "sync_usage_catalog",
   "sync_monitor_state",
   "complete_remote_session_create",
+  "complete_remote_session_activation",
   "repair_active_hooks",
   "export_diagnostics",
   "usage_ingest_now",
@@ -241,6 +243,7 @@ function assertInvokeRequest(command, rawArgs) {
       }
       break;
     case "complete_remote_session_create":
+    case "complete_remote_session_activation":
       for (const key of ["requestId", "id"]) {
         if (
           typeof args[key] !== "string" ||
@@ -327,6 +330,9 @@ function assertInvokeRequest(command, rawArgs) {
       if (typeof args.visible !== "boolean") {
         throw new TypeError("Electron document browser visibility flag must be boolean");
       }
+      break;
+    case "open_external_url":
+      assertHttpUrl(args.url, "external URL");
       break;
     case "document_browser_navigate":
       if (

@@ -6,7 +6,32 @@ import { join } from "node:path";
 
 const require = createRequire(import.meta.url);
 const { verifyMobileReleaseApk } = require("./mobile-release-artifact.cjs");
+const { resolveReleaseVersions } = require("./release-version.cjs");
 const appDir = fileURLToPath(new URL("..", import.meta.url));
+const packageJson = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
+const { releaseVersion, updaterVersion } = resolveReleaseVersions(packageJson);
+const mobileDir = join(appDir, "..", "mobile");
+const mobilePackageJson = JSON.parse(readFileSync(join(mobileDir, "package.json"), "utf8"));
+const mobileAppConfig = JSON.parse(readFileSync(join(mobileDir, "app.json"), "utf8"));
+for (const [label, version] of [
+  ["mobile/package.json", mobilePackageJson.version],
+]) {
+  if (version !== updaterVersion) {
+    throw new Error(
+      `${label} version ${version || "unknown"} does not match updater version ${updaterVersion}.`
+    );
+  }
+}
+for (const [label, version] of [
+  ["mobile/package.json release", mobilePackageJson.multiAgentReleaseVersion],
+  ["mobile/app.json", mobileAppConfig.expo?.version],
+]) {
+  if (version !== releaseVersion) {
+    throw new Error(
+      `${label} version ${version || "unknown"} does not match product release ${releaseVersion}.`
+    );
+  }
+}
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const builder = process.platform === "win32"
   ? join(appDir, "node_modules", ".bin", "electron-builder.cmd")
@@ -36,7 +61,7 @@ function run(command, args) {
 
 let verified;
 try {
-  verified = verifyMobileReleaseApk();
+  verified = verifyMobileReleaseApk({ expectedVersionName: releaseVersion });
 } catch (error) {
   console.error(`[mobile-release] ${error.message}`);
   process.exit(2);
@@ -63,6 +88,18 @@ writeFileSync(
     apkSha256: verified.artifactSha256,
     certificateSha256: verified.certificateSha256,
     certificateDn: verified.certificateDn,
+  }, null, 2)}\n`,
+  "utf8",
+);
+writeFileSync(
+  join(appDir, "electron-dist", "github-release.metadata.json"),
+  `${JSON.stringify({
+    releaseVersion,
+    tagName: `v${releaseVersion}`,
+    updaterVersion,
+    installer: `MultiAgent-Setup-${releaseVersion}-x64.exe`,
+    updaterMetadata: "latest.yml",
+    mobileApk: "mobile/MultiAgent-Mobile.apk",
   }, null, 2)}\n`,
   "utf8",
 );

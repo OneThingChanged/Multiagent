@@ -1,7 +1,14 @@
 # OKF Update Log
 
+## 2026-09-04
+
+* **Unified 1.7.0.0 baseline**: Set the public desktop, GitHub, Android, and Microsoft Store product version to `1.7.0.0`, above both the existing GitHub `0.6.27` release and Store `1.6.26.0` package. npm and Electron Updater use the derived compatibility value `1.7.0`, while all user-facing release identifiers use four components.
+
 ## 2026-09-03
 
+* **Separated GitHub and Store updates**: Added explicit release commands for each channel and replaced Store builds' GitHub update controls with a Microsoft Store-managed state and product-page update action.
+* **Private Store installation**: Confirmed that the certified `1.6.26.0` private-audience package installs and runs from Microsoft Store without an unknown-publisher warning.
+* **Remaining Store rollout gate**: Public rollout stays blocked until version mapping, NSIS coexistence, policy edge cases, release sequencing, and a private higher-version upgrade are verified.
 * **Release 0.6.27**: Synchronized the desktop and Android release versions for the state-aware embedded-browser form automation release.
 * **Microsoft Store certification submission**: Recorded the validated `1.6.26.0` private-audience MSIX, completed Partner Center sections, `runFullTrust` rationale, in-certification status, and pass/failure follow-up checklists.
 * **State-aware browser form automation**: Added semantic form snapshots, stable targeting, idempotent checkbox/radio/select operations, bounded postcondition waits, framework-compatible events, double-layer value redaction, and a real Electron fixture smoke.

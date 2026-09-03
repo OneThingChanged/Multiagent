@@ -3253,11 +3253,30 @@ function App() {
   // a default size; when the user later opens it, PaneSlot reattaches the same
   // entry and resizes (it skips re-spawning because entry.spawned is already set).
   const spawnAgentInBackground = useCallback(
-    async (agentId: string, options: { recovering?: boolean } = {}) => {
+    async (
+      agentId: string,
+      options: { recovering?: boolean; verifyActive?: boolean } = {}
+    ) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
-      if (!agent) return;
+      if (!agent) {
+        return { ok: false, error: "세션을 찾을 수 없습니다.", statusCode: 404 as const };
+      }
       let entry = termsRef.current.get(agentId);
-      if (entry?.spawned) return; // already running
+      if (entry?.spawned && entry.spawnPromise) {
+        try {
+          const result = await entry.spawnPromise;
+          return result.cancelled
+            ? { ok: false, error: "세션 활성화가 취소되었습니다.", statusCode: 409 as const }
+            : { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `세션을 활성화하지 못했습니다: ${String(error)}`,
+            statusCode: 500 as const,
+          };
+        }
+      }
+      if (entry?.spawned && !options.verifyActive) return { ok: true }; // already running
       if (!entry) {
         entry = createEntry(
           agentId,
@@ -3334,13 +3353,24 @@ function App() {
             entry.spawned = false;
             clearAgentStartupReadyTimer(agentId);
             setAgentStatus(agentId, "idle");
+            return {
+              ok: false,
+              error: "세션 활성화가 취소되었습니다.",
+              statusCode: 409 as const,
+            };
           }
         }
+        return { ok: true };
       } catch (err) {
         clearAgentStartupReadyTimer(agentId);
         entry.spawnPromise = null;
         entry.term.write(`\r\n\x1b[31mspawn failed: ${err}\x1b[0m\r\n`);
         setAgentStatus(agentId, "exited");
+        return {
+          ok: false,
+          error: `세션을 활성화하지 못했습니다: ${String(err)}`,
+          statusCode: 500 as const,
+        };
       }
     },
     [
@@ -3354,26 +3384,8 @@ function App() {
     ]
   );
 
-  // Remote "restart session" (비활성 → 다시 시작): the mobile/site client asks
-  // the desktop to respawn an offline session by id, reusing the same spawn path.
-  useEffect(() => {
-    if (!remoteEnabled) return;
-    let cancelled = false;
-    let unlisten = () => {};
-    listen<{ id: string }>("remote:restart-session", (event) => {
-      if (!cancelled && event.payload?.id) void spawnAgentInBackground(event.payload.id);
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-    return () => {
-      cancelled = true;
-      unlisten();
-    };
-  }, [remoteEnabled, spawnAgentInBackground]);
-
   // Remote session management is handled only by the coordinator renderer so
-  // multiple workspace windows cannot create or rename the same session twice.
+  // multiple workspace windows cannot activate, create, or rename a session twice.
   useEffect(() => {
     if (!remoteEnabled || !isCoordinatorWindow) return;
     let cancelled = false;
@@ -3382,6 +3394,36 @@ function App() {
       if (cancelled) unlisten();
       else unlisteners.push(unlisten);
     };
+
+    listen<{ requestId: string; id: string }>("remote:restart-session", (event) => {
+      if (cancelled) return;
+      const payload = event.payload;
+      if (!payload.requestId || !payload.id) return;
+      const complete = (result: {
+        ok: boolean;
+        error?: string;
+        statusCode?: 400 | 404 | 409 | 500 | 503;
+      }) => invoke("complete_remote_session_activation", {
+        requestId: payload.requestId,
+        id: payload.id,
+        ...result,
+      }).catch(() => false);
+      if (!agentsRef.current.some((agent) => agent.id === payload.id)) {
+        void complete({
+          ok: false,
+          error: "세션을 찾을 수 없습니다.",
+          statusCode: 404,
+        });
+        return;
+      }
+      void spawnAgentInBackground(payload.id, { verifyActive: true })
+        .then(complete)
+        .catch((reason) => complete({
+          ok: false,
+          error: `세션 활성화 결과를 처리하지 못했습니다: ${String(reason)}`,
+          statusCode: 500,
+        }));
+    }).then(track);
 
     listen<{
       requestId: string;
@@ -3460,7 +3502,14 @@ function App() {
       cancelled = true;
       for (const unlisten of unlisteners) unlisten();
     };
-  }, [createAgent, disabledTools, isCoordinatorWindow, remoteEnabled, renameAgent]);
+  }, [
+    createAgent,
+    disabledTools,
+    isCoordinatorWindow,
+    remoteEnabled,
+    renameAgent,
+    spawnAgentInBackground,
+  ]);
 
   // Startup reopen prompt answers.
   const confirmReopen = useCallback(() => {

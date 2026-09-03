@@ -15,6 +15,7 @@ describe("Electron runtime variant", () => {
       updaterChannel: "latest",
       remoteEnabled: true,
       updateProvider: "github",
+      storeProductId: null,
     });
   });
 
@@ -27,6 +28,7 @@ describe("Electron runtime variant", () => {
       updaterChannel: "latest-company",
       remoteEnabled: false,
       updateProvider: "github",
+      storeProductId: null,
     });
   });
 
@@ -40,6 +42,7 @@ describe("Electron runtime variant", () => {
       updaterChannel: null,
       remoteEnabled: true,
       updateProvider: "microsoft-store",
+      storeProductId: "9NVBSGNRTPLR",
     });
   });
 
@@ -76,8 +79,8 @@ describe("Electron runtime variant", () => {
       executableName: "MultiAgent",
       nsis: {
         shortcutName: "MultiAgent",
-        uninstallDisplayName: "MultiAgent ${version}",
-        artifactName: "MultiAgent-Setup-${version}-${arch}.${ext}",
+        uninstallDisplayName: "MultiAgent 1.7.0.0",
+        artifactName: "MultiAgent-Setup-1.7.0.0-${arch}.${ext}",
       },
     });
     expect(companyBuild).toMatchObject({
@@ -85,9 +88,16 @@ describe("Electron runtime variant", () => {
       executableName: "MultiAgentCompany",
       nsis: {
         shortcutName: "MultiAgentCompany",
-        uninstallDisplayName: "MultiAgentCompany ${version}",
-        artifactName: "MultiAgentCompany-Setup-${version}-${arch}.${ext}",
+        uninstallDisplayName: "MultiAgentCompany 1.7.0.0",
+        artifactName: "MultiAgentCompany-Setup-1.7.0.0-${arch}.${ext}",
       },
     });
+  });
+
+  it("keeps GitHub and Microsoft Store release commands explicit and separate", () => {
+    const scripts = require("../package.json").scripts;
+    expect(scripts["release:build:github"]).toContain("build-electron-standard.mjs");
+    expect(scripts["release:build:store"]).toContain("build-electron-store.mjs");
+    expect(scripts["release:verify:store"]).toContain("verify-electron-store-msix.mjs");
   });
 });

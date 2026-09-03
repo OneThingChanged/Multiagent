@@ -37,6 +37,7 @@ import { SessionService } from "./services/session-service.mjs";
 import { ConversationStoreManager } from "./services/conversation-store.mjs";
 import { submitPtyMessage } from "./services/pty-submit.mjs";
 import { RemoteSessionCreateBroker } from "./services/remote-session-create-broker.mjs";
+import { RemoteSessionActivationBroker } from "./services/remote-session-activation-broker.mjs";
 import {
   CodexScrollbackFilter,
   PassThroughTerminalFilter,
@@ -85,14 +86,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.cjs");
 const browserAnnotationPreloadPath = path.join(__dirname, "browser-annotation-preload.cjs");
-const packageVariant = (() => {
+const packageMetadata = (() => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"))
-      .multiAgentVariant;
+    return JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"));
   } catch {
-    return null;
+    return {};
   }
 })();
+const packageVariant = packageMetadata.multiAgentVariant ?? null;
+const productVersion = packageMetadata.multiAgentReleaseVersion || app.getVersion();
 const runtimeVariant = runtimeVariantModule.resolveRuntimeVariant({
   environmentVariant: process.env.MULTIAGENT_BUILD_VARIANT,
   packageVariant,
@@ -174,6 +176,7 @@ const COMPANY_DISABLED_COMMANDS = new Set([
   "remote_access_approve",
   "remote_access_revoke",
   "complete_remote_session_create",
+  "complete_remote_session_activation",
 ]);
 const preloadContractArguments = [
   `--multiagent-invoke-commands=${ipcContract.INVOKE_COMMANDS.join(",")}`,
@@ -547,7 +550,7 @@ function miraControlSnapshot() {
       miraControlProviderSessionId(
         catalog.agents.find((agent) => agent.id === agentId) ?? { id: agentId }
       ),
-    appVersion: app.getVersion(),
+    appVersion: productVersion,
     variant: runtimeVariant.id,
   });
 }
@@ -650,6 +653,22 @@ const remoteSessionCreateBroker = new RemoteSessionCreateBroker({
   dispatch: dispatchRemoteSessionCreate,
 });
 
+function dispatchRemoteSessionActivation(payload) {
+  if (coordinatorWebContentsId === null) return false;
+  const runtime = runtimeByWebContents.get(coordinatorWebContentsId);
+  const coordinator = workspaceWindows.get(coordinatorWebContentsId);
+  if (!runtime?.workspace_window || !runtime.coordinator || !runtime.ready || !coordinator) {
+    return false;
+  }
+  sendEvent(coordinator, "remote:restart-session", payload);
+  return true;
+}
+
+const remoteSessionActivationBroker = new RemoteSessionActivationBroker({
+  dispatch: dispatchRemoteSessionActivation,
+  isActive: (id) => ptys.has(id),
+});
+
 // Session capabilities shared by every web surface (Remote + local Dashboard):
 // send input, stream the live terminal, read the chat transcript, restart.
 const sessionProviders = {
@@ -691,10 +710,7 @@ const sessionProviders = {
     return entry?.process ? { cols: entry.process.cols, rows: entry.process.rows } : null;
   },
   chatProvider: (id, options) => chatBlocksForAgent(id, null, options),
-  restartSession: (id) => {
-    sendEventToAll("remote:restart-session", { id: asString(id) });
-    return ptys.has(asString(id));
-  },
+  restartSession: (id) => remoteSessionActivationBroker.activate(asString(id)),
   createSession: (payload) => remoteSessionCreateBroker.create(payload),
   renameSession: (payload) => {
     sendEventToAll("remote:rename-session", payload);
@@ -845,7 +861,7 @@ const diagnosticsService = new DiagnosticsService({
   baseDir: hookBaseDir,
   appInfoProvider: () => ({
     name: app.getName(),
-    version: app.getVersion(),
+    version: productVersion,
     variant: runtimeVariant.id,
     packaged: app.isPackaged,
     renderer: devUrl ? "development" : "production",
@@ -4713,6 +4729,16 @@ async function invokeCommand(event, command, rawArgs) {
       cleanupDocumentBrowser(record);
       return null;
     }
+    case "open_store_product": {
+      const productId = runtimeVariant.storeProductId;
+      if (!isStoreBuild || !/^[A-Z0-9]{12}$/.test(productId ?? "")) {
+        throw new Error("Microsoft Store 제품 페이지는 Store 빌드에서만 열 수 있습니다.");
+      }
+      await shell.openExternal(
+        `ms-windows-store://pdp/?ProductId=${encodeURIComponent(productId)}`,
+      );
+      return null;
+    }
     case "open_external_url":
       {
         const target = new URL(asString(args.url));
@@ -5000,6 +5026,17 @@ async function invokeCommand(event, command, rawArgs) {
       }
       return remoteSessionCreateBroker.complete(args);
     }
+    case "complete_remote_session_activation": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (
+        event.sender.id !== coordinatorWebContentsId ||
+        !runtime?.workspace_window ||
+        !runtime.coordinator
+      ) {
+        throw new Error("세션 활성화 결과는 coordinator 창에서만 전달할 수 있습니다.");
+      }
+      return remoteSessionActivationBroker.complete(args);
+    }
     case "repair_active_hooks":
       return repairActiveHooks();
     case "export_diagnostics": {
@@ -5169,6 +5206,7 @@ app.on("before-quit", (event) => {
   }
   terminalSessions.closeAll("app-quit");
   remoteSessionCreateBroker.close();
+  remoteSessionActivationBroker.close();
   void hookService.stop();
   void monitorService.stop();
   void usageDashboard.stop();
@@ -5188,7 +5226,7 @@ app.on("activate", () => {
 });
 
 console.log(
-  `[electron] boot ${app.getVersion()} variant=${runtimeVariant.id} devUrl=${devUrl ?? "production"}`
+  `[electron] boot ${productVersion} variant=${runtimeVariant.id} devUrl=${devUrl ?? "production"}`
 );
 if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
   console.log("[electron] ready");

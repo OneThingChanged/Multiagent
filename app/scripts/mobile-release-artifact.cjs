@@ -33,6 +33,17 @@ function parsePackageMetadata(output) {
   };
 }
 
+function assertExpectedVersionName(actual, expected) {
+  const actualVersion = String(actual || "").trim();
+  const expectedVersion = String(expected || "").trim();
+  if (expectedVersion && actualVersion !== expectedVersion) {
+    throw new Error(
+      `Android APK versionName ${actualVersion || "unknown"} does not match desktop release ${expectedVersion}.`
+    );
+  }
+  return actualVersion;
+}
+
 function readAndroidSdkFromLocalProperties() {
   const properties = path.resolve(__dirname, "..", "..", "mobile", "android", "local.properties");
   if (!fs.statSync(properties, { throwIfNoEntry: false })?.isFile()) return "";
@@ -138,6 +149,7 @@ function verifyMobileReleaseApk(options = {}) {
   if (!manifest.architectures.includes("arm64-v8a")) {
     throw new Error("Release APK must include the arm64-v8a architecture.");
   }
+  assertExpectedVersionName(manifest.versionName, options.expectedVersionName);
 
   const artifactSha256 = crypto.createHash("sha256").update(fs.readFileSync(apkPath)).digest("hex");
   const verified = {
@@ -156,6 +168,7 @@ function verifyMobileReleaseApk(options = {}) {
 
 module.exports = {
   EXPECTED_PACKAGE,
+  assertExpectedVersionName,
   normalizeFingerprint,
   parsePackageMetadata,
   parseSignerMetadata,

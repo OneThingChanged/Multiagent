@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 
 type KeyState = "loading" | "ready" | "none" | "generating";
@@ -6,6 +7,8 @@ type KeyState = "loading" | "ready" | "none" | "generating";
 const PLACEHOLDER_KEY = "<여기에 위에서 복사한 공개키>";
 
 export function SshSetupGuide({ onClose }: { onClose: () => void }) {
+  useNativeViewOcclusion();
+
   const [pubKey, setPubKey] = useState<string | null>(null);
   const [keyState, setKeyState] = useState<KeyState>("loading");
   const [copied, setCopied] = useState<string | null>(null);
