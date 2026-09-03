@@ -104,6 +104,18 @@ export function EmbeddedDocumentBrowser({
     }).catch(() => {});
   }, [browserId, browserVisible, syncBounds]);
 
+  useLayoutEffect(() => {
+    // Screen changes unmount the current PaneSlot without closing its browser
+    // tab. Keep the native view alive for a later return, but never leave its
+    // last visible state covering the newly selected Screen.
+    return () => {
+      void invoke("document_browser_visibility", {
+        browserId,
+        visible: false,
+      }).catch(() => {});
+    };
+  }, [browserId]);
+
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
