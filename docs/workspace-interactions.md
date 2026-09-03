@@ -63,6 +63,11 @@ deletion is a separate confirmed action from the session context menu. Project
 creation can create an initial session using the tool and dangerous-mode choice
 made in the creation flow.[^app-shell]
 
+New Codex sessions default both the documentation/Markdown worker and the HTML
+worker to Codex Luna with max reasoning. The creation dialog keeps these
+choices editable, including explicitly disabling both workers; launch-only
+worker settings take effect when the PTY starts.[^app-shell]
+
 Before permanent deletion opens its native confirmation dialog, MultiAgent
 commits removal of context-menu and drag backdrops. Whether confirmation is
 cancelled or deletion finishes, transient interaction state is cleared again

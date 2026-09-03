@@ -3,6 +3,7 @@ import { AI_TOOLS, toolForId } from "../types";
 import type { NewAgentPayload, Project } from "../types";
 import { folderTail } from "../lib/path";
 import { defaultAiToolId } from "../lib/projectCreation";
+import { defaultSessionWorkerSettings } from "../lib/sessionWorkers";
 import { SessionWorkerFields } from "./SessionWorkerFields";
 import type { SessionWorkerSettings } from "../types";
 
@@ -30,7 +31,7 @@ export function NewAgentModal({
   const [dangerous, setDangerous] = useState(false);
   const [workerSettings, setWorkerSettings] = useState<
     SessionWorkerSettings | undefined
-  >();
+  >(() => defaultSessionWorkerSettings("codex"));
   const selectedTool = toolForId(aiToolId);
   const supportsDangerous = !!selectedTool.dangerousFlag;
 

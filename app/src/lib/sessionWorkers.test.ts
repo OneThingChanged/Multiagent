@@ -2,12 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   addSessionWorkerArgs,
   availableSessionWorkerOptions,
+  defaultSessionWorkerSettings,
   normalizeSessionWorkerSettings,
   sessionWorkerDeveloperInstructions,
   updateSessionWorkerSetting,
 } from "./sessionWorkers";
 
 describe("session worker availability", () => {
+  it("defaults both Codex content workers to Luna max", () => {
+    expect(defaultSessionWorkerSettings("codex")).toEqual({
+      documents: "codex-luna-max",
+      html: "codex-luna-max",
+    });
+    expect(defaultSessionWorkerSettings("claude")).toBeUndefined();
+  });
+
   it("only exposes providers enabled in Settings", () => {
     expect(availableSessionWorkerOptions([]).map((item) => item.id)).toEqual([
       "codex-luna-max",

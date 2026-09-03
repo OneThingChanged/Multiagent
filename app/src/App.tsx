@@ -77,7 +77,10 @@ import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound, loadNotificationSound, shouldSilenceOsNotification } from "./lib/notificationSound";
 import { buildSpawnArgs } from "./lib/spawn";
-import { normalizeSessionWorkerSettings } from "./lib/sessionWorkers";
+import {
+  defaultSessionWorkerSettings,
+  normalizeSessionWorkerSettings,
+} from "./lib/sessionWorkers";
 import {
   AGENT_ACTIVITY_STALE_AFTER_MS,
   applyAgentHookEvent,
@@ -2649,6 +2652,10 @@ function App() {
       }
       const id = options.agentId ?? crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
+      const hasExplicitWorkerSettings = Object.prototype.hasOwnProperty.call(
+        payload,
+        "workerSettings"
+      );
       const addAgent = () => {
         setAgents((prev) => [
           ...prev,
@@ -2662,7 +2669,9 @@ function App() {
             dangerous: payload.dangerous && !!tool.dangerousFlag,
             workerSettings:
               tool.id === "codex"
-                ? normalizeSessionWorkerSettings(payload.workerSettings)
+                ? hasExplicitWorkerSettings
+                  ? normalizeSessionWorkerSettings(payload.workerSettings)
+                  : defaultSessionWorkerSettings(tool.id)
                 : undefined,
             status: "starting",
             runtimeStatus: "starting",

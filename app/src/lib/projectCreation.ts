@@ -5,6 +5,7 @@ import {
   type NewProjectPayload,
   type Project,
 } from "../types";
+import { defaultSessionWorkerSettings } from "./sessionWorkers";
 
 export function defaultAiToolId(disabledTools: readonly string[]): string {
   return (
@@ -46,6 +47,7 @@ export function buildNewProjectWithFirstAgent(
     aiToolId: tool.id,
     aiLabel: tool.label,
     dangerous: payload.dangerous && !!tool.dangerousFlag,
+    workerSettings: defaultSessionWorkerSettings(tool.id),
     status: "starting",
     runtimeStatus: "starting",
     createdAt: now,

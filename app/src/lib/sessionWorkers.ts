@@ -22,6 +22,16 @@ export const SESSION_WORKER_OPTIONS: readonly SessionWorkerOption[] = [
   },
 ];
 
+export function defaultSessionWorkerSettings(
+  aiToolId: string
+): SessionWorkerSettings | undefined {
+  if (aiToolId !== "codex") return undefined;
+  return {
+    documents: "codex-luna-max",
+    html: "codex-luna-max",
+  };
+}
+
 const VALID_PRESETS = new Set<SessionWorkerPreset>(
   SESSION_WORKER_OPTIONS.map((option) => option.id)
 );
