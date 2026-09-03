@@ -79,6 +79,13 @@ bootstrap's unused `about:blank` tab is omitted until an agent actually claims
 or navigates it. Returning to a session, Screen, project document, or Git view
 unmounts the Hub host and hides its native view while preserving page state.[^browser-hub-ui][^sidebar][^electron-main]
 
+HTML document previews are keyed by workspace and project-relative source path.
+Renderer remounts—including React development Strict Mode's repeated effect
+cycle and a round trip through the Browser Hub—reattach the existing native
+view. They do not create another catalog tab. When a pre-keyed legacy renderer
+has already leaked identical preview views, the next document open preserves
+the currently attached view and destroys the duplicates.[^browser-ui][^electron-main]
+
 Electron native browser views render above normal React layers. When the image
 viewer or Settings opens, it acquires a shared native-view blocker; every
 embedded browser temporarily hides its `WebContentsView` and restores only the

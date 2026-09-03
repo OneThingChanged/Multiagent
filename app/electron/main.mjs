@@ -199,7 +199,7 @@ let closeSmokeStartedAt = null;
 let workspaceSmokeStarted = false;
 /** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
 const workspaceWindows = new Map();
-/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, background: boolean, integrationBootstrap: boolean, rendererHidden: boolean}>} */
+/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, reuseKey: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, background: boolean, integrationBootstrap: boolean, rendererHidden: boolean}>} */
 const documentBrowserWindows = new Map();
 const documentBrowserByShellWebContents = new Map();
 /** @type {Map<string, string>} agentId → browser/tab id */
@@ -1672,9 +1672,19 @@ async function refreshDocumentBrowserPreview(record) {
   publishDocumentBrowser(record);
 }
 
+function documentBrowserSourceKey(folder, relativePath) {
+  return `${String(folder).trim().toLowerCase()}\0${String(relativePath).trim().replace(/\\/g, "/").toLowerCase()}`;
+}
+
+function documentBrowserReuseKey(workspaceId, folder, relativePath) {
+  if (!folder || !relativePath) return "";
+  return `${String(workspaceId)}\0${documentBrowserSourceKey(folder, relativePath)}`;
+}
+
 async function createDocumentBrowserWindowNow({
   folder = "",
   relativePath = "",
+  reuseKey = "",
   parentWindow,
   agentId = null,
   initialUrl = "",
@@ -1682,6 +1692,47 @@ async function createDocumentBrowserWindowNow({
 }) {
   if (!parentWindow || parentWindow.isDestroyed()) {
     throw new Error("브라우저를 연결할 작업창을 찾을 수 없습니다.");
+  }
+  if (reuseKey) {
+    const legacySourceKey = documentBrowserSourceKey(folder, relativePath);
+    const candidates = [...documentBrowserWindows.values()].filter((candidate) => {
+      if (candidate.view.webContents.isDestroyed() || candidate.integrationBootstrap) return false;
+      if (candidate.reuseKey === reuseKey) return true;
+      if (candidate.reuseKey || candidate.shellWebContentsId !== parentWindow.webContents.id) {
+        return false;
+      }
+      const candidateSourceKey = documentBrowserSourceKey(
+        candidate.folder,
+        candidate.relativePath,
+      );
+      return candidateSourceKey === legacySourceKey;
+    });
+    if (candidates.length > 0) {
+      const mappedId = documentBrowserByShellWebContents.get(parentWindow.webContents.id);
+      const record = candidates.find((candidate) => candidate.id === mappedId) ?? candidates.at(-1);
+      for (const duplicate of candidates) {
+        if (duplicate !== record) cleanupDocumentBrowser(duplicate);
+      }
+      record.reuseKey = reuseKey;
+      record.rendererHidden = true;
+      if (!attachDocumentBrowserToWindow(record, parentWindow)) {
+        throw new Error("기존 문서 브라우저를 작업창에 다시 연결하지 못했습니다.");
+      }
+      if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+      const normalizedAgentId = String(agentId || "").trim();
+      if (normalizedAgentId) {
+        if (
+          record.agentId &&
+          documentBrowserByAgent.get(record.agentId) === record.id
+        ) {
+          documentBrowserByAgent.delete(record.agentId);
+        }
+        record.agentId = normalizedAgentId;
+        documentBrowserByAgent.set(normalizedAgentId, record.id);
+      }
+      publishDocumentBrowserCatalog();
+      return { browserId: record.id };
+    }
   }
   // Keep the native views as browser tabs instead of destroying the previous
   // one. Only the newly activated tab is visible; a renderer can reattach an
@@ -1718,6 +1769,7 @@ async function createDocumentBrowserWindowNow({
     previewUrl: preview.url,
     folder,
     relativePath: preview.relativePath,
+    reuseKey,
     shellWebContentsId: parentWindow.webContents.id,
     bounds: null,
     agentId: agentId ? String(agentId) : null,
@@ -4645,9 +4697,14 @@ async function invokeCommand(event, command, rawArgs) {
       if (!runtime?.workspace_window) {
         throw new Error("작업창에서만 전용 HTML 브라우저를 열 수 있습니다.");
       }
+      const folder = asString(args.folder);
+      const relativePath = asString(args.relativePath);
+      const workspaceId = runtime.workspace_window_id || String(event.sender.id);
+      const reuseKey = documentBrowserReuseKey(workspaceId, folder, relativePath);
       return createDocumentBrowserWindow({
-        folder: asString(args.folder),
-        relativePath: asString(args.relativePath),
+        folder,
+        relativePath,
+        reuseKey,
         agentId: asString(args.agentId).trim() || null,
         initialUrl: asString(args.initialUrl).trim(),
         parentWindow: eventSenderWindow(event),
@@ -5423,6 +5480,31 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
           throw new Error("Browser Hub bridge validation failed");
         }
         console.log("[electron-smoke] MULTIAGENT_BROWSER_HUB_BRIDGE_OK");
+        const documentBrowserReuseOk = await initialWindow.webContents.executeJavaScript(`
+          (async () => {
+            const args = {
+              folder: ${JSON.stringify(appRoot)},
+              relativePath: "electron/services/browser-form-fixture.html"
+            };
+            const first = await window.multiAgentElectron.invoke("document_browser_open", args);
+            const second = await window.multiAgentElectron.invoke("document_browser_open", args);
+            const catalog = await window.multiAgentElectron.invoke("document_browser_list", {});
+            const matches = catalog?.tabs?.filter(
+              (candidate) => candidate.relativePath === args.relativePath
+            ) ?? [];
+            const reused = first?.browserId && first.browserId === second?.browserId && matches.length === 1;
+            if (first?.browserId) {
+              await window.multiAgentElectron.invoke("document_browser_hub_close", {
+                browserId: first.browserId
+              });
+            }
+            return Boolean(reused);
+          })()
+        `);
+        if (!documentBrowserReuseOk) {
+          throw new Error("Document browser reuse validation failed");
+        }
+        console.log("[electron-smoke] MULTIAGENT_DOCUMENT_BROWSER_REUSE_OK");
         await initialWindow.webContents.executeJavaScript(`
           new Promise(async (resolve, reject) => {
             const id = ${JSON.stringify(id)};
