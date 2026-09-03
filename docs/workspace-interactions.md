@@ -58,6 +58,14 @@ The left sidebar organizes project folders, projects, configured sessions, and
 Screens. Search, active-only filtering, and folder/project collapse change what
 is visible; they do not delete or activate sessions.[^sidebar]
 
+A fixed Browser Hub entry sits above the project tree and reports the global
+browser count. Opening it preserves the active Screen layout but replaces the
+center surface with tabs for every application-owned browser, including parked
+background tabs. Selecting a session or Screen, or opening a project document
+or Git history, returns the center surface to the preserved session layout.
+Browser creation and closure in the Hub update every workspace window through
+the main-process browser catalog.[^app-shell][^sidebar]
+
 Removing a session from the sidebar deactivates its live PTY. Permanent session
 deletion is a separate confirmed action from the session context menu. Project
 creation can create an initial session using the tool and dangerous-mode choice

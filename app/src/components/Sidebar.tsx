@@ -127,6 +127,9 @@ export function Sidebar({
   detachedAgentIds,
   unreadCompletedAgentIds,
   dragState,
+  browserHubActive = false,
+  browserCount = 0,
+  onOpenBrowserHub,
   onSelectProject,
   onSelect,
   onSelectScreen,
@@ -156,6 +159,9 @@ export function Sidebar({
   detachedAgentIds: Set<string>;
   unreadCompletedAgentIds: Set<string>;
   dragState: DragState | null;
+  browserHubActive?: boolean;
+  browserCount?: number;
+  onOpenBrowserHub?: () => void;
   onSelectProject: (id: string) => void;
   onSelect: (id: string) => void;
   onSelectScreen: (groupId: string, agentId: string) => void;
@@ -1117,6 +1123,20 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="project-tree">
+        {!sessionPickerMode && onOpenBrowserHub && (
+          <div className="browser-hub-sidebar-slot">
+            <button
+              className={`browser-hub-sidebar-btn${browserHubActive ? " is-active" : ""}`}
+              onClick={onOpenBrowserHub}
+              aria-pressed={browserHubActive}
+              title="이 프로그램에서 열려 있는 모든 브라우저 보기"
+            >
+              <span className="browser-hub-sidebar-icon" aria-hidden="true">WEB</span>
+              <span className="browser-hub-sidebar-label">브라우저 모아보기</span>
+              <span className="browser-hub-sidebar-count">{browserCount}</span>
+            </button>
+          </div>
+        )}
         <div className="sidebar-section-heading">
           <div className="sidebar-section-title">
             {sessionPickerMode ? "Projects · 세션 선택" : "Projects"}

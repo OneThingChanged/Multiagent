@@ -13,4 +13,10 @@ describe("EmbeddedDocumentBrowser visibility lifecycle", () => {
       /return \(\) => \{[\s\S]*?document_browser_visibility[\s\S]*?browserId,[\s\S]*?visible: false,[\s\S]*?\};/
     );
   });
+
+  it("occludes native browser views while Settings is open", () => {
+    const source = fs.readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("useNativeViewOcclusion(settingsOpen)");
+  });
 });

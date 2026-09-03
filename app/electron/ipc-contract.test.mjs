@@ -18,8 +18,13 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_create");
     expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_activation");
     expect(contract.INVOKE_COMMANDS).toContain("open_store_product");
+    expect(contract.INVOKE_COMMANDS).toContain("document_browser_list");
+    expect(contract.INVOKE_COMMANDS).toContain("document_browser_attach");
+    expect(contract.INVOKE_COMMANDS).toContain("document_browser_hub_close");
     expect(contract.DELIVERED_EVENTS).toContain("remote:create-session");
     expect(contract.DELIVERED_EVENTS).toContain("remote:rename-session");
+    expect(contract.DELIVERED_EVENTS).toContain("document-browser:catalog-updated");
+    expect(contract.DELIVERED_EVENTS).toContain("document-browser:show-tab");
   });
 
   it("exposes a dedicated Store product command without broadening URL schemes", () => {
@@ -155,6 +160,19 @@ describe("Electron IPC contract", () => {
       browserId: "browser",
       visible: "false",
     })).toThrow("visibility flag");
+  });
+
+  it("validates browser hub catalog commands", () => {
+    expect(contract.assertInvokeRequest("document_browser_list", {})).toEqual({});
+    expect(contract.assertInvokeRequest("document_browser_attach", {
+      browserId: "browser-a",
+    })).toMatchObject({ browserId: "browser-a" });
+    expect(contract.assertInvokeRequest("document_browser_hub_close", {
+      browserId: "browser-a",
+    })).toMatchObject({ browserId: "browser-a" });
+    expect(() => contract.assertInvokeRequest("document_browser_attach", {
+      browserId: "",
+    })).toThrow("browser id");
   });
 
   it("supports document previews and standalone HTTP(S) browser tabs", () => {

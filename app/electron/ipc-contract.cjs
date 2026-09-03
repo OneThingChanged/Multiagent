@@ -26,6 +26,9 @@ const INVOKE_COMMANDS = Object.freeze([
   "reveal_local_path",
   "list_markdown_files",
   "document_browser_open",
+  "document_browser_list",
+  "document_browser_attach",
+  "document_browser_hub_close",
   "document_browser_ready",
   "document_browser_bounds",
   "document_browser_visibility",
@@ -153,6 +156,8 @@ const DELIVERED_EVENTS = Object.freeze([
   "sessions-reattached",
   "workspace:coordinator-changed",
   "document-browser:update",
+  "document-browser:catalog-updated",
+  "document-browser:show-tab",
 ]);
 
 const EMITTED_EVENTS = Object.freeze([
@@ -306,6 +311,8 @@ function assertInvokeRequest(command, rawArgs) {
       assertPositiveInteger(args.width, "document browser width");
       assertPositiveInteger(args.height, "document browser height");
       break;
+    case "document_browser_attach":
+    case "document_browser_hub_close":
     case "document_browser_ready":
     case "document_browser_back":
     case "document_browser_forward":

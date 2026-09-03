@@ -27,6 +27,12 @@ sources:
   - id: browser-tabs-ui
     resource: ../app/src/components/PaneSlot.tsx
     title: "Pane browser tabs and reveal UI"
+  - id: browser-hub-ui
+    resource: ../app/src/components/BrowserHub.tsx
+    title: "Application-wide browser tab hub"
+  - id: sidebar
+    resource: ../app/src/components/Sidebar.tsx
+    title: "Global browser hub entry"
   - id: annotation-preload
     resource: ../app/electron/browser-annotation-preload.cjs
     title: "Isolated annotation preload"
@@ -63,11 +69,21 @@ pane movement or layout reconciliation does not own the native view lifetime;
 only explicitly closing the browser tab destroys that view. This prevents a
 visible tab shell from outliving its Electron `WebContentsView`.[^browser-ui][^browser-tabs-ui][^electron-main]
 
+The fixed Browser Hub entry at the top of the left sidebar shows the number of
+application-owned browser tabs. It switches the center workspace into a global
+tab strip backed by the main process catalog, including tabs parked on the
+hidden host or associated with another session. Selecting a tab reparents that
+same `WebContentsView` into the current workspace instead of cloning its page or
+profile; `+` creates a shared tab and `×` closes it globally. The integration
+bootstrap's unused `about:blank` tab is omitted until an agent actually claims
+or navigates it. Returning to a session, Screen, project document, or Git view
+unmounts the Hub host and hides its native view while preserving page state.[^browser-hub-ui][^sidebar][^electron-main]
+
 Electron native browser views render above normal React layers. When the image
-viewer opens, it acquires a shared native-view blocker; every embedded browser
-temporarily hides its `WebContentsView` and restores only the active tab after
-the viewer closes. Main-process visibility state also prevents a delayed bounds
-update from exposing a blocked browser again.[^image-viewer][^native-view-occlusion][^electron-main]
+viewer or Settings opens, it acquires a shared native-view blocker; every
+embedded browser temporarily hides its `WebContentsView` and restores only the
+active tab after the overlay closes. Main-process visibility state also
+prevents a delayed bounds update from exposing a blocked browser again.[^image-viewer][^native-view-occlusion][^electron-main]
 
 ## Managed MCP connection
 
@@ -182,6 +198,8 @@ configuration changes because MCP clients load configuration at startup.
 [^browser-form-smoke]: Fixture-driven Electron browser form smoke
 [^browser-ui]: Embedded browser toolbar and selection UI
 [^browser-tabs-ui]: Pane browser tabs and reveal UI
+[^browser-hub-ui]: Application-wide browser tab hub
+[^sidebar]: Global browser hub entry
 [^annotation-preload]: Isolated annotation preload
 [^preview-service]: Project-scoped HTML preview service
 [^electron-main]: Native browser ownership and integration routes

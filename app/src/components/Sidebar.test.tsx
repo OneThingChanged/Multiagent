@@ -14,6 +14,7 @@ function renderSidebar(
     sessionPickerMode?: boolean;
     detachedLabel?: string;
     projectFolders?: ProjectFolder[];
+    browserHub?: boolean;
   } = {}
 ) {
   return renderToStaticMarkup(
@@ -29,6 +30,9 @@ function renderSidebar(
       detachedAgentIds={options.detachedAgentIds ?? new Set()}
       unreadCompletedAgentIds={options.unreadCompletedAgentIds ?? new Set()}
       dragState={null}
+      browserHubActive={options.browserHub}
+      browserCount={options.browserHub ? 2 : 0}
+      onOpenBrowserHub={options.browserHub ? () => {} : undefined}
       onSelectProject={() => {}}
       onSelect={() => {}}
       onSelectScreen={() => {}}
@@ -87,6 +91,14 @@ describe("Sidebar", () => {
 
     expect(html).toContain("Empty Project");
     expect(html).toContain("프로젝트 행의 + 버튼으로 세션을 시작하세요");
+  });
+
+  it("places the global browser hub above the project section", () => {
+    const html = renderSidebar([], [], [], null, { browserHub: true });
+
+    expect(html).toContain("브라우저 모아보기");
+    expect(html).toContain("browser-hub-sidebar-count\">2");
+    expect(html.indexOf("브라우저 모아보기")).toBeLessThan(html.indexOf("Projects"));
   });
 
   it("shows split groups above projects as colored screens", () => {

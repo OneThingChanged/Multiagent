@@ -7,7 +7,8 @@ export type RuntimeCommand =
   | "update_desktop_pet" | "desktop_pet_snapshot" | "reset_desktop_pet_position"
   | "show_open_dialog" | "open_external_url" | "open_store_product" | "open_local_path"
   | "open_folder_path" | "reveal_local_path" | "list_markdown_files"
-  | "document_browser_open" | "document_browser_ready" | "document_browser_bounds"
+  | "document_browser_open" | "document_browser_list" | "document_browser_attach"
+  | "document_browser_hub_close" | "document_browser_ready" | "document_browser_bounds"
   | "document_browser_visibility"
   | "document_browser_back" | "document_browser_forward"
   | "document_browser_reload" | "document_browser_navigate" | "document_browser_open_external"
@@ -59,6 +60,7 @@ export type RuntimeEventName =
   | "native-notification:clicked" | "update:progress"
   | "session-detached" | "sessions-reattached"
   | "workspace:coordinator-changed" | "document-browser:update"
+  | "document-browser:catalog-updated"
   | "document-browser:show-tab";
 
 export type RuntimeEmittedEventName =
@@ -133,6 +135,12 @@ export type DocumentBrowserSnapshot = {
   inspectionMode?: boolean;
   inspectionSendToSession?: boolean;
   error?: string;
+  background?: boolean;
+};
+
+export type DocumentBrowserCatalog = {
+  tabs: DocumentBrowserSnapshot[];
+  closedBrowserId?: string;
 };
 
 export type GitStatusLetter = "M" | "A" | "U" | "D" | "R";
@@ -325,6 +333,15 @@ export type RuntimeCommandContract = {
     args: { folder: string; relativePath: string; agentId?: string; initialUrl?: string };
     result: { browserId: string };
   };
+  document_browser_list: {
+    args: Record<string, never>;
+    result: DocumentBrowserCatalog;
+  };
+  document_browser_attach: {
+    args: { browserId: string };
+    result: DocumentBrowserSnapshot;
+  };
+  document_browser_hub_close: { args: { browserId: string }; result: null };
   document_browser_ready: {
     args: { browserId: string };
     result: DocumentBrowserSnapshot;

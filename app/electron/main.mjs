@@ -199,7 +199,7 @@ let closeSmokeStartedAt = null;
 let workspaceSmokeStarted = false;
 /** @type {Map<number, BrowserWindow>} webContents.id → equal workspace window */
 const workspaceWindows = new Map();
-/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, rendererHidden: boolean}>} */
+/** @type {Map<string, {id: string, win: BrowserWindow, view: import('electron').WebContentsView, token: string, previewUrl: string, folder: string, relativePath: string, shellWebContentsId: number, bounds: {x: number, y: number, width: number, height: number} | null, agentId: string | null, hoveredElement: object | null, selectedElement: object | null, lastAnnotation: object | null, lastAnnotationDelivery: object | null, inspectionMode: boolean, inspectionSendToSession: boolean, persistent: boolean, background: boolean, integrationBootstrap: boolean, rendererHidden: boolean}>} */
 const documentBrowserWindows = new Map();
 const documentBrowserByShellWebContents = new Map();
 /** @type {Map<string, string>} agentId → browser/tab id */
@@ -1220,6 +1220,52 @@ function publishDocumentBrowser(record, extra = {}) {
   if (snapshot) sendEvent(record.win, "document-browser:update", snapshot);
 }
 
+function isDocumentBrowserCatalogRecord(record) {
+  if (!record || record.view.webContents.isDestroyed()) return false;
+  if (!record.integrationBootstrap) return true;
+  const url = record.view.webContents.getURL() || record.previewUrl;
+  return Boolean(record.agentId) || Boolean(url && url !== "about:blank");
+}
+
+function documentBrowserCatalogSnapshots() {
+  return [...documentBrowserWindows.values()]
+    .filter(isDocumentBrowserCatalogRecord)
+    .map((record) => {
+      const snapshot = documentBrowserSnapshot(record);
+      if (!snapshot) return null;
+      return {
+        browserId: snapshot.browserId,
+        tabId: snapshot.tabId,
+        agentId: snapshot.agentId,
+        profileId: snapshot.profileId,
+        title: snapshot.title,
+        relativePath: isHttpUrl(snapshot.relativePath)
+          ? sanitizeBrowserUrl(snapshot.relativePath)
+          : snapshot.relativePath,
+        url: sanitizeBrowserUrl(snapshot.url),
+        canGoBack: snapshot.canGoBack,
+        canGoForward: snapshot.canGoForward,
+        loading: snapshot.loading,
+        background: record.background === true,
+      };
+    })
+    .filter(Boolean);
+}
+
+function publishDocumentBrowserCatalog(extra = {}) {
+  const payload = { tabs: documentBrowserCatalogSnapshots(), ...extra };
+  for (const win of workspaceWindows.values()) {
+    if (!win.isDestroyed()) {
+      sendEvent(win, "document-browser:catalog-updated", payload);
+    }
+  }
+}
+
+function publishDocumentBrowserNavigation(record, extra = {}) {
+  publishDocumentBrowser(record, extra);
+  publishDocumentBrowserCatalog();
+}
+
 function browserRecordForAgent(agentId, browserId = "") {
   const id = String(browserId || "").trim();
   if (id) {
@@ -1453,10 +1499,11 @@ function installDocumentBrowserViewPolicy(record) {
     record.selectedElement = null;
     publishDocumentBrowser(record);
   });
-  contents.on("did-start-loading", () => publishDocumentBrowser(record, { loading: true }));
-  contents.on("did-stop-loading", () => publishDocumentBrowser(record, { loading: false }));
-  contents.on("did-navigate", () => publishDocumentBrowser(record));
-  contents.on("did-navigate-in-page", () => publishDocumentBrowser(record));
+  contents.on("did-start-loading", () => publishDocumentBrowserNavigation(record, { loading: true }));
+  contents.on("did-stop-loading", () => publishDocumentBrowserNavigation(record, { loading: false }));
+  contents.on("did-navigate", () => publishDocumentBrowserNavigation(record));
+  contents.on("did-navigate-in-page", () => publishDocumentBrowserNavigation(record));
+  contents.on("page-title-updated", () => publishDocumentBrowserNavigation(record));
   contents.on("ipc-message", (_event, channel, payload) => {
     if (channel === "multiagent:browser-hover") {
       if (!record.inspectionMode) return;
@@ -1481,7 +1528,7 @@ function installDocumentBrowserViewPolicy(record) {
   });
   contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // aborted by a later navigation
-    publishDocumentBrowser(record, {
+    publishDocumentBrowserNavigation(record, {
       loading: false,
       error: `${errorDescription || "HTML을 불러오지 못했습니다."} (${errorCode})`,
       url: validatedURL || record.previewUrl,
@@ -1524,6 +1571,7 @@ function cleanupDocumentBrowser(record) {
     backgroundBrowserPromise = null;
     browserReady = null;
   }
+  publishDocumentBrowserCatalog({ closedBrowserId: record.id });
 }
 
 function parkDocumentBrowser(record) {
@@ -1550,6 +1598,7 @@ function parkDocumentBrowser(record) {
   record.bounds = null;
   record.background = true;
   if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+  publishDocumentBrowserCatalog();
   return true;
 }
 
@@ -1562,6 +1611,7 @@ function attachDocumentBrowserToWindow(record, targetWindow) {
       if (typeof record.view.setVisible === "function") record.view.setVisible(false);
     }
     record.background = false;
+    publishDocumentBrowserCatalog();
     return true;
   }
   const previousWindow = record.win;
@@ -1584,6 +1634,7 @@ function attachDocumentBrowserToWindow(record, targetWindow) {
   record.background = false;
   record.view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
   if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+  publishDocumentBrowserCatalog();
   return true;
 }
 
@@ -1603,6 +1654,7 @@ function showBrowserIntegrationTab(record, agentId) {
     agentId: String(agentId || "").trim() || null,
     url: sanitizeBrowserUrl(record.view.webContents.getURL() || record.previewUrl),
   });
+  publishDocumentBrowserCatalog();
 }
 
 async function refreshDocumentBrowserPreview(record) {
@@ -1677,6 +1729,7 @@ async function createDocumentBrowserWindowNow({
     inspectionSendToSession: false,
     persistent: true,
     background: Boolean(background),
+    integrationBootstrap: Boolean(background),
     rendererHidden: false,
   };
   documentBrowserWindows.set(browserId, record);
@@ -1708,6 +1761,7 @@ async function createDocumentBrowserWindowNow({
     activateDocumentBrowser(record, record.agentId || "");
     publishDocumentBrowser(record);
   }
+  publishDocumentBrowserCatalog();
   return { browserId };
 }
 
@@ -1760,6 +1814,7 @@ async function browserRecordForIntegration(agentId, body = {}, { create = true }
     if (normalizedAgentId) {
       record.agentId = normalizedAgentId;
       documentBrowserByAgent.set(normalizedAgentId, record.id);
+      publishDocumentBrowserCatalog();
     }
     return record;
   }
@@ -4598,6 +4653,41 @@ async function invokeCommand(event, command, rawArgs) {
         parentWindow: eventSenderWindow(event),
       });
     }
+    case "document_browser_list": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (!runtime?.workspace_window) {
+        throw new Error("작업창에서만 브라우저 목록을 볼 수 있습니다.");
+      }
+      return { tabs: documentBrowserCatalogSnapshots() };
+    }
+    case "document_browser_attach": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (!runtime?.workspace_window) {
+        throw new Error("작업창에서만 브라우저 탭을 연결할 수 있습니다.");
+      }
+      const record = documentBrowserWindows.get(asString(args.browserId));
+      if (!record || !isDocumentBrowserCatalogRecord(record)) {
+        throw new Error("브라우저 탭을 찾을 수 없습니다.");
+      }
+      record.rendererHidden = true;
+      if (!attachDocumentBrowserToWindow(record, eventSenderWindow(event))) {
+        throw new Error("브라우저 탭을 현재 작업창에 연결하지 못했습니다.");
+      }
+      if (typeof record.view.setVisible === "function") record.view.setVisible(false);
+      return documentBrowserSnapshot(record);
+    }
+    case "document_browser_hub_close": {
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (!runtime?.workspace_window) {
+        throw new Error("작업창에서만 브라우저 탭을 닫을 수 있습니다.");
+      }
+      const record = documentBrowserWindows.get(asString(args.browserId));
+      if (!record || !isDocumentBrowserCatalogRecord(record)) {
+        throw new Error("브라우저 탭을 찾을 수 없습니다.");
+      }
+      cleanupDocumentBrowser(record);
+      return null;
+    }
     case "document_browser_ready": {
       const record = documentBrowserRecordForSender(
         event.sender.id,
@@ -5318,6 +5408,21 @@ if (singleInstanceLockAcquired) void app.whenReady().then(async () => {
           throw new Error("Remote browser frame validation failed");
         }
         console.log("[electron-smoke] MULTIAGENT_REMOTE_BROWSER_BRIDGE_OK");
+        const browserHubBridgeOk = await initialWindow.webContents.executeJavaScript(`
+          (async () => {
+            const catalog = await window.multiAgentElectron.invoke("document_browser_list", {});
+            const tab = catalog?.tabs?.find((candidate) => candidate.browserId === ${JSON.stringify(browserTabId)});
+            if (!tab) return false;
+            const attached = await window.multiAgentElectron.invoke("document_browser_attach", {
+              browserId: tab.browserId
+            });
+            return attached?.browserId === tab.browserId;
+          })()
+        `);
+        if (!browserHubBridgeOk) {
+          throw new Error("Browser Hub bridge validation failed");
+        }
+        console.log("[electron-smoke] MULTIAGENT_BROWSER_HUB_BRIDGE_OK");
         await initialWindow.webContents.executeJavaScript(`
           new Promise(async (resolve, reject) => {
             const id = ${JSON.stringify(id)};

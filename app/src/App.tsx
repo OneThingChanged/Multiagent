@@ -106,6 +106,7 @@ import {
 } from "./lib/attention";
 import { useAttentionState } from "./hooks/useAttentionState";
 import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
+import { useNativeViewOcclusion } from "./hooks/useNativeViewOcclusion";
 import { scheduleActiveTerminalFocus } from "./lib/workspaceFocus";
 import type { QuickOpenItem } from "./lib/quickOpen";
 import {
@@ -123,6 +124,8 @@ import {
 } from "./platform/storageMigration";
 import { isElectronRuntime } from "./platform/electronBridge";
 import type {
+  DocumentBrowserCatalog,
+  DocumentBrowserSnapshot,
   SpawnTerminalResult,
   TerminalDataPayload,
   TerminalReplay,
@@ -181,6 +184,7 @@ import { ProjectFolderModal } from "./components/ProjectFolderModal";
 import { QuickOpen } from "./components/QuickOpen";
 import { AttentionCenter } from "./components/AttentionCenter";
 import { UsageStatusBar } from "./components/UsageStatusBar";
+import { BrowserHub } from "./components/BrowserHub";
 
 const LS_FILES_WIDTH = "multiagent.filesWidth.v1";
 const LS_FILES_OPEN = "multiagent.filesOpen.v1";
@@ -616,6 +620,11 @@ function App() {
   const [activePath, setActivePath] = useState<Path | null>(
     pendingReopen || !workspace.resumeLive ? null : boot.activePath
   );
+  const [workspaceMode, setWorkspaceMode] = useState<"sessions" | "browser-hub">(
+    "sessions"
+  );
+  const [browserCatalog, setBrowserCatalog] = useState<DocumentBrowserSnapshot[]>([]);
+  const [browserHubSelectedId, setBrowserHubSelectedId] = useState<string | null>(null);
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -624,6 +633,7 @@ function App() {
   const [filesOpen, setFilesOpen] = useState(loadFilesOpen);
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useNativeViewOcclusion(settingsOpen);
   const [appTheme, setAppTheme] = useState<AppThemeId>(loadAppTheme);
   const [alwaysOnTop, setAlwaysOnTop] = useState(loadAlwaysOnTop);
   const [desktopPetEnabled, setDesktopPetEnabled] = useState(
@@ -2126,6 +2136,7 @@ function App() {
   const activateAgentProject = useCallback((agentId: string) => {
     const agent = agentsRef.current.find((candidate) => candidate.id === agentId);
     if (!agent) return null;
+    setWorkspaceMode("sessions");
     setActiveProjectId(agent.projectId);
     setProjects((prev) =>
       prev.map((project) =>
@@ -2236,6 +2247,7 @@ function App() {
   // session — sessions open only when a session row is clicked. The sidebar
   // toggles expand/collapse separately.
   const selectProject = useCallback((projectId: string) => {
+    setWorkspaceMode("sessions");
     setActiveProjectId(projectId);
     setProjects((prev) =>
       prev.map((project) =>
@@ -2973,6 +2985,7 @@ function App() {
   // active Screen, otherwise openAsTab moves it here from any other group.
   const openDocTab = useCallback(
     (projectId: string, relativePath: string, ownerAgentId?: string | null) => {
+      setWorkspaceMode("sessions");
       const docId = makeDocTabId(projectId, relativePath);
       if (ownerAgentId) documentOwnerByTabRef.current.set(docId, ownerAgentId);
       applyGroupOp((s) => {
@@ -3004,6 +3017,7 @@ function App() {
       relativePath?: string | null,
       repositoryPath?: string | null
     ) => {
+      setWorkspaceMode("sessions");
       const gitId = makeGitHistoryTabId(
         projectId,
         relativePath ?? null,
@@ -3082,6 +3096,70 @@ function App() {
     },
     [applyGroupOp]
   );
+
+  const applyBrowserCatalog = useCallback(
+    (catalog: DocumentBrowserCatalog) => {
+      const tabs = Array.isArray(catalog.tabs) ? catalog.tabs : [];
+      setBrowserCatalog(tabs);
+      setBrowserHubSelectedId((current) =>
+        current && tabs.some((browser) => browser.browserId === current)
+          ? current
+          : tabs[0]?.browserId ?? null
+      );
+      const closedBrowserId = catalog.closedBrowserId?.trim();
+      if (closedBrowserId) {
+        const tabId = makeBrowserTabId(closedBrowserId);
+        documentOwnerByTabRef.current.delete(tabId);
+        applyGroupOp((state) => groupOps.removeAgentFromLayout(state, tabId));
+      }
+    },
+    [applyGroupOp]
+  );
+
+  useEffect(() => {
+    if (!isElectronRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void (async () => {
+      try {
+        const remove = await listen<DocumentBrowserCatalog>(
+          "document-browser:catalog-updated",
+          (event) => {
+            if (!disposed) applyBrowserCatalog(event.payload);
+          }
+        );
+        if (disposed) {
+          remove();
+          return;
+        }
+        unlisten = remove;
+        const catalog = await invoke<DocumentBrowserCatalog>("document_browser_list", {});
+        if (!disposed) applyBrowserCatalog(catalog);
+      } catch {
+        // Browser integration is desktop-only and may still be starting while
+        // the renderer mounts. Later catalog events will populate the hub.
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [applyBrowserCatalog]);
+
+  const createBrowserFromHub = useCallback(async () => {
+    const result = await invoke<{ browserId: string }>("document_browser_open", {
+      folder: "",
+      relativePath: "",
+      initialUrl: "https://www.google.com/",
+    });
+    setBrowserHubSelectedId(result.browserId);
+    const catalog = await invoke<DocumentBrowserCatalog>("document_browser_list", {});
+    applyBrowserCatalog(catalog);
+  }, [applyBrowserCatalog]);
+
+  const closeBrowserFromHub = useCallback(async (browserId: string) => {
+    await invoke("document_browser_hub_close", { browserId });
+  }, []);
 
   const openBrowserTab = useCallback(
     async (path: Path, ownerAgentId: string | null) => {
@@ -3771,6 +3849,11 @@ function App() {
     return leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
   }, [activeGroupLayout, activePath]);
 
+  const browserAgentNames = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent.name])),
+    [agents]
+  );
+
   // Every workspace window shows the same catalog. Sessions owned by another
   // peer stay visible but unavailable.
   const sidebarAgents = agents;
@@ -3874,6 +3957,11 @@ function App() {
         detachedAgentIds={sidebarUnavailableAgentIds}
         unreadCompletedAgentIds={unreadCompletionAgentIds}
         dragState={dragState}
+        browserHubActive={workspaceMode === "browser-hub"}
+        browserCount={browserCatalog.length}
+        onOpenBrowserHub={
+          isElectronRuntime() ? () => setWorkspaceMode("browser-hub") : undefined
+        }
         onSelectProject={selectProject}
         onSelect={requestSelectAgent}
         onSelectScreen={selectScreen}
@@ -3894,37 +3982,48 @@ function App() {
         sessionPickerMode={false}
         detachedLabel="사용 중"
       />
-      <TerminalArea
-        agents={agents}
-        projects={projects}
-        theme={appTheme}
-        layout={activeGroupLayout}
-        sessionPins={activeGroup?.sessionPins ?? null}
-        activePath={activePath}
-        dragState={dragState}
-        dropTarget={dropTarget}
-        termsRef={termsRef}
-        setAgentStatus={setAgentStatus}
-        setAgentSessionId={setAgentSessionId}
-        setActivePath={setActivePathForPane}
-        onCloseTab={closeTab}
-        onSelectTab={setActiveTabInPane}
-        onResizeAt={resizeAt}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDropTargetChange={setDropTarget}
-        onDrop={performDrop}
-        onDropToEmpty={requestSelectAgent}
-        onTabContextMenu={onPaneTabContextMenu}
-        chatModeAgents={chatModeAgents}
-        onToggleChat={toggleChatMode}
-        getDocumentOwner={getDocumentOwner}
-        onOpenBrowser={openBrowserTab}
-        onOpenMarkdownPath={handleOpenMarkdownPath}
-        onOpenImagePath={handleOpenImagePath}
-        onOpenFolderPath={handleOpenFolderPath}
-        onOpenTerminalPath={handleOpenTerminalPath}
-      />
+      {workspaceMode === "browser-hub" ? (
+        <BrowserHub
+          browsers={browserCatalog}
+          selectedBrowserId={browserHubSelectedId}
+          agentNames={browserAgentNames}
+          onSelectBrowser={setBrowserHubSelectedId}
+          onCreateBrowser={createBrowserFromHub}
+          onCloseBrowser={closeBrowserFromHub}
+        />
+      ) : (
+        <TerminalArea
+          agents={agents}
+          projects={projects}
+          theme={appTheme}
+          layout={activeGroupLayout}
+          sessionPins={activeGroup?.sessionPins ?? null}
+          activePath={activePath}
+          dragState={dragState}
+          dropTarget={dropTarget}
+          termsRef={termsRef}
+          setAgentStatus={setAgentStatus}
+          setAgentSessionId={setAgentSessionId}
+          setActivePath={setActivePathForPane}
+          onCloseTab={closeTab}
+          onSelectTab={setActiveTabInPane}
+          onResizeAt={resizeAt}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDropTargetChange={setDropTarget}
+          onDrop={performDrop}
+          onDropToEmpty={requestSelectAgent}
+          onTabContextMenu={onPaneTabContextMenu}
+          chatModeAgents={chatModeAgents}
+          onToggleChat={toggleChatMode}
+          getDocumentOwner={getDocumentOwner}
+          onOpenBrowser={openBrowserTab}
+          onOpenMarkdownPath={handleOpenMarkdownPath}
+          onOpenImagePath={handleOpenImagePath}
+          onOpenFolderPath={handleOpenFolderPath}
+          onOpenTerminalPath={handleOpenTerminalPath}
+        />
+      )}
       {filesOpen && (
         <aside className="files-shell" style={{ width: filesWidth + 7 }}>
           <div
