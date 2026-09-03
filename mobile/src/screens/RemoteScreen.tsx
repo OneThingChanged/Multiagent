@@ -303,7 +303,7 @@ export function RemoteScreen({
           allowsInlineMediaPlayback
           allowsBackForwardNavigationGestures
           mixedContentMode="never"
-          applicationNameForUserAgent="MultiAgentMobile/0.3.5"
+          applicationNameForUserAgent="MultiAgentMobile/0.6.27"
           onShouldStartLoadWithRequest={shouldStart}
           onNavigationStateChange={navigationChanged}
           onMessage={handleNativeMessage}

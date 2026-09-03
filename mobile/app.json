@@ -2,7 +2,7 @@
   "expo": {
     "name": "MultiAgent Mobile",
     "slug": "multiagent-mobile",
-    "version": "0.3.5",
+    "version": "0.6.27",
     "scheme": "multiagent",
     "orientation": "default",
     "icon": "./assets/icon.png",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.onethingchanged.multiagent.mobile",
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "backgroundColor": "#06101A",
         "foregroundImage": "./assets/android-icon-foreground.png",

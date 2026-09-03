@@ -2,6 +2,9 @@
 
 ## 2026-09-03
 
+* **Release 0.6.27**: Synchronized the desktop and Android release versions for the state-aware embedded-browser form automation release.
+* **Microsoft Store certification submission**: Recorded the validated `1.6.26.0` private-audience MSIX, completed Partner Center sections, `runFullTrust` rationale, in-certification status, and pass/failure follow-up checklists.
+* **State-aware browser form automation**: Added semantic form snapshots, stable targeting, idempotent checkbox/radio/select operations, bounded postcondition waits, framework-compatible events, double-layer value redaction, and a real Electron fixture smoke.
 * **Stable embedded browser lifetime**: Moved native `WebContentsView` destruction from transient React component unmounts to explicit browser-tab closure, preventing pane moves and layout reconciliation from leaving a visible but blank browser tab.
 
 ## 2026-09-02

@@ -1,7 +1,7 @@
 ---
 type: Interface
 title: Embedded browser MCP
-description: "Always-on shared browser tabs, managed MCP startup, fixed automation tools, element annotations, and security boundaries."
+description: "Always-on shared browser tabs, managed MCP startup, state-aware form automation, element annotations, and security boundaries."
 tags:
   - browser
   - mcp
@@ -15,6 +15,12 @@ sources:
   - id: browser-context
     resource: ../app/electron/services/browser-context.mjs
     title: "Snapshot and annotation sanitization"
+  - id: browser-form-automation
+    resource: ../app/electron/services/browser-form-automation.mjs
+    title: "Semantic form targeting and verified browser actions"
+  - id: browser-form-smoke
+    resource: ../app/scripts/electron-browser-form-smoke.mjs
+    title: "Fixture-driven Electron browser form smoke"
   - id: browser-ui
     resource: ../app/src/components/EmbeddedDocumentBrowser.tsx
     title: "Embedded browser toolbar and selection UI"
@@ -83,10 +89,41 @@ The fixed tools are:
 * `browser_tabs`, `browser_open`, and `browser_navigate`;
 * `browser_snapshot` and `browser_screenshot`;
 * `browser_click` and `browser_type`;
+* `browser_get_control` and `browser_form_state`;
+* `browser_set_checked`, `browser_select_option`, and `browser_clear`;
+* `browser_scroll_into_view` and `browser_wait_for`;
 * `browser_back`, `browser_forward`, and `browser_reload`;
 * `browser_attach_annotation`.[^browser-server]
 
 Arbitrary page JavaScript is intentionally not exposed as a tool.
+
+## State-aware form automation
+
+Browser snapshots include a bounded semantic descriptor for each form control:
+stable `targetId`, accessible role/name/label context, safe value state,
+checkbox/radio selection, native select options, visibility, disabled/readonly
+state, required state, and validation results. Password, credential-like, and
+file values are redacted before leaving the browser evaluator and are filtered
+again by the main-process sanitizer.[^browser-form-automation][^browser-context]
+
+New form actions prefer the semantic `targetId` returned by a snapshot while
+retaining CSS selectors for compatibility. Duplicate semantic matches fail
+with an ambiguity result instead of silently selecting the first node.
+Checkbox, radio, and switch updates are idempotent; native and common ARIA
+combobox/listbox selections are verified after framework render turns. Text
+fields can be cleared explicitly, and bounded waits can follow visibility,
+enabled, checked, selected, validity, text, URL, or navigation-complete state.
+
+All mutating actions return sanitized before/after state and a postcondition.
+Native value setters and bubbling input/change events preserve compatibility
+with React, Angular, Vue, and ordinary HTML controls. A local Electron fixture
+smoke covers native controls, DOM replacement, an ARIA combobox, wait behavior,
+and password/file redaction.[^browser-form-smoke]
+
+File chooser automation remains deliberately unavailable; Store listing or
+other uploads still require an explicit user file selection. Password controls
+and credential-like values cannot be typed, read, waited on by value, or
+returned in action results.
 
 An agent MCP action that opens, navigates, clicks, types, reloads, or moves
 through browser history also attaches the target browser ID to that agent's
@@ -141,6 +178,8 @@ configuration changes because MCP clients load configuration at startup.
 
 [^browser-server]: Managed browser MCP server
 [^browser-context]: Snapshot and annotation sanitization
+[^browser-form-automation]: Semantic form targeting and verified browser actions
+[^browser-form-smoke]: Fixture-driven Electron browser form smoke
 [^browser-ui]: Embedded browser toolbar and selection UI
 [^browser-tabs-ui]: Pane browser tabs and reveal UI
 [^annotation-preload]: Isolated annotation preload

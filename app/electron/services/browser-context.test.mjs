@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildBrowserAnnotation,
   normalizeBrowserCaptureRect,
+  sanitizeBrowserActionResult,
+  sanitizeBrowserControl,
   sanitizeBrowserUrl,
   sanitizeBrowserSnapshot,
   sanitizeElementDescriptor,
@@ -77,5 +79,69 @@ describe("browser context sanitization", () => {
     });
     expect(annotation).toMatchObject({ browserId: "browser-1", tabId: "browser-1", agentId: "agent-1" });
     expect(annotation.screenshotPath).toContain("annotation.png");
+  });
+
+  it("preserves useful form state while redacting password and file values", () => {
+    const safe = sanitizeBrowserControl({
+      targetId: "c-safe",
+      tag: "select",
+      role: "combobox",
+      label: "Country",
+      valueState: "text",
+      value: "KR",
+      options: [{ index: 0, label: "Korea", value: "KR", valueState: "text", selected: true }],
+      visible: true,
+      enabled: true,
+      validity: { valid: true },
+    });
+    expect(safe).toMatchObject({
+      targetId: "c-safe",
+      role: "combobox",
+      value: "KR",
+      visible: true,
+      options: [{ label: "Korea", value: "KR", selected: true }],
+      validity: { valid: true },
+    });
+
+    const password = sanitizeBrowserControl({
+      tag: "input",
+      type: "text",
+      name: "api_token",
+      valueState: "text",
+      value: "do-not-return",
+      valueLength: 13,
+      validity: { valid: false, message: "do-not-return is invalid" },
+    });
+    expect(password).toMatchObject({ valueState: "redacted", value: "", valueLength: 0 });
+    expect(password.validity.message).toBe("");
+
+    const file = sanitizeBrowserControl({
+      tag: "input",
+      type: "file",
+      valueState: "file",
+      value: "C:\\private\\secret.png",
+    });
+    expect(file).toMatchObject({ valueState: "file", value: "", valueLength: 0 });
+  });
+
+  it("sanitizes before and after state returned by form actions", () => {
+    const result = sanitizeBrowserActionResult({
+      ok: false,
+      error: "verification_failed",
+      action: "set_checked",
+      before: { tag: "input", type: "checkbox", checked: false },
+      after: { tag: "input", type: "checkbox", checked: true },
+      url: "https://example.com/form?access_token=secret",
+      postcondition: { satisfied: false, ignored: "raw" },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: "verification_failed",
+      before: { checked: false },
+      after: { checked: true },
+      postcondition: { satisfied: false },
+    });
+    expect(result.url).toContain("access_token=%5Bredacted%5D");
+    expect(result).not.toHaveProperty("ignored");
   });
 });

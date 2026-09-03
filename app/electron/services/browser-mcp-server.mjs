@@ -8,6 +8,22 @@ const token = String(process.env.MULTIAGENT_TOKEN || "").trim();
 const agentId = String(process.env.MULTIAGENT_AGENT_ID || "").trim();
 const baseUrl = port ? `http://127.0.0.1:${port}/integration/v1/browser/${encodeURIComponent(agentId)}` : "";
 
+const targetSchema = {
+  type: "object",
+  description: "A semantic target from browser_snapshot. Prefer targetId; selector is a legacy fallback.",
+  properties: {
+    targetId: { type: "string" },
+    selector: { type: "string" },
+    id: { type: "string" },
+    testId: { type: "string" },
+    name: { type: "string" },
+    label: { type: "string" },
+    role: { type: "string" },
+    formId: { type: "string" },
+  },
+  additionalProperties: false,
+};
+
 const tools = [
   {
     name: "browser_tabs",
@@ -43,6 +59,70 @@ const tools = [
     name: "browser_type",
     description: "Type into a non-password form control using a CSS selector.",
     inputSchema: { type: "object", properties: { tabId: { type: "string" }, selector: { type: "string" }, text: { type: "string" } }, required: ["selector", "text"], additionalProperties: false },
+  },
+  {
+    name: "browser_get_control",
+    description: "Read the current sanitized state of one browser form control. Prefer a targetId from browser_snapshot.",
+    inputSchema: { type: "object", properties: { tabId: { type: "string" }, target: targetSchema, selector: { type: "string" } }, anyOf: [{ required: ["target"] }, { required: ["selector"] }], additionalProperties: false },
+  },
+  {
+    name: "browser_form_state",
+    description: "Read sanitized controls and validation state for the page or one form/fieldset scope.",
+    inputSchema: { type: "object", properties: { tabId: { type: "string" }, scopeSelector: { type: "string" } }, additionalProperties: false },
+  },
+  {
+    name: "browser_set_checked",
+    description: "Idempotently set a checkbox, radio, or ARIA switch to the requested checked state and verify it.",
+    inputSchema: { type: "object", properties: { tabId: { type: "string" }, target: targetSchema, selector: { type: "string" }, checked: { type: "boolean" } }, required: ["checked"], anyOf: [{ required: ["target"] }, { required: ["selector"] }], additionalProperties: false },
+  },
+  {
+    name: "browser_select_option",
+    description: "Select and verify one native select or visible ARIA combobox/listbox option by label, safe value, or index.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "string" },
+        target: targetSchema,
+        selector: { type: "string" },
+        option: {
+          type: "object",
+          properties: { label: { type: "string" }, value: { type: "string" }, index: { type: "integer", minimum: 0 } },
+          additionalProperties: false,
+        },
+        optionLabel: { type: "string" },
+        optionValue: { type: "string" },
+        optionIndex: { type: "integer", minimum: 0 },
+      },
+      anyOf: [{ required: ["target"] }, { required: ["selector"] }],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_clear",
+    description: "Clear and verify a non-sensitive text input, textarea, or contenteditable control.",
+    inputSchema: { type: "object", properties: { tabId: { type: "string" }, target: targetSchema, selector: { type: "string" } }, anyOf: [{ required: ["target"] }, { required: ["selector"] }], additionalProperties: false },
+  },
+  {
+    name: "browser_scroll_into_view",
+    description: "Scroll a form control into the browser viewport and return its updated sanitized state.",
+    inputSchema: { type: "object", properties: { tabId: { type: "string" }, target: targetSchema, selector: { type: "string" } }, anyOf: [{ required: ["target"] }, { required: ["selector"] }], additionalProperties: false },
+  },
+  {
+    name: "browser_wait_for",
+    description: "Wait for a bounded control, URL, or navigation condition and return the final sanitized state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "string" },
+        target: targetSchema,
+        selector: { type: "string" },
+        condition: { type: "string", enum: ["visible", "hidden", "enabled", "disabled", "checked", "selected", "valid", "text", "valueState", "url", "navigationComplete"] },
+        expected: { oneOf: [{ type: "string" }, { type: "boolean" }] },
+        timeoutMs: { type: "integer", minimum: 100, maximum: 30000 },
+      },
+      required: ["condition"],
+      additionalProperties: false,
+    },
   },
   {
     name: "browser_back",
@@ -107,6 +187,13 @@ async function callTool(name, args) {
     case "browser_screenshot": return callBrowser("screenshot", body);
     case "browser_click": return callBrowser("click", body);
     case "browser_type": return callBrowser("type", body);
+    case "browser_get_control": return callBrowser("get-control", body);
+    case "browser_form_state": return callBrowser("form-state", body);
+    case "browser_set_checked": return callBrowser("set-checked", body);
+    case "browser_select_option": return callBrowser("select-option", body);
+    case "browser_clear": return callBrowser("clear", body);
+    case "browser_scroll_into_view": return callBrowser("scroll-into-view", body);
+    case "browser_wait_for": return callBrowser("wait-for", body);
     case "browser_back": return callBrowser("back", body);
     case "browser_forward": return callBrowser("forward", body);
     case "browser_reload": return callBrowser("reload", body);

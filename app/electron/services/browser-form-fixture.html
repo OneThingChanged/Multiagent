@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MultiAgent browser form fixture</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; }
+    form { display: grid; gap: 12px; max-width: 520px; }
+    [role="listbox"] { border: 1px solid #888; padding: 4px; }
+    [role="option"] { padding: 4px; }
+    [role="option"][aria-selected="true"] { background: #acf; }
+  </style>
+</head>
+<body>
+  <form id="fixture-form" aria-label="Automation fixture">
+    <label for="display-name">Display name</label>
+    <input id="display-name" name="displayName" value="before" required>
+
+    <label><input id="enabled-feature" type="checkbox"> Enable feature</label>
+    <label><input id="mode-a" type="radio" name="mode" value="a"> Mode A</label>
+    <label><input id="mode-b" type="radio" name="mode" value="b"> Mode B</label>
+
+    <label for="country">Country</label>
+    <select id="country" name="country">
+      <option value="kr">Korea</option>
+      <option value="us">United States</option>
+      <option value="disabled" disabled>Disabled</option>
+    </select>
+
+    <label for="password">Password</label>
+    <input id="password" type="password" value="never-expose">
+    <label for="upload">Upload</label>
+    <input id="upload" type="file">
+
+    <button id="rerender" type="button">Replace display field</button>
+    <button class="duplicate" type="button">Duplicate action</button>
+    <button class="duplicate" type="button">Duplicate action</button>
+    <div id="custom-combobox" role="combobox" tabindex="0" aria-label="Color" aria-expanded="false">Red</div>
+    <div id="color-options" role="listbox" hidden>
+      <div role="option" aria-selected="true">Red</div>
+      <div role="option" aria-selected="false">Blue</div>
+    </div>
+  </form>
+  <script>
+    document.getElementById("rerender").addEventListener("click", () => {
+      const old = document.getElementById("display-name");
+      const replacement = old.cloneNode(true);
+      replacement.value = old.value;
+      old.replaceWith(replacement);
+    });
+    const combo = document.getElementById("custom-combobox");
+    const listbox = document.getElementById("color-options");
+    combo.addEventListener("click", () => {
+      const open = listbox.hidden;
+      listbox.hidden = !open;
+      combo.setAttribute("aria-expanded", String(open));
+    });
+    listbox.addEventListener("click", (event) => {
+      const option = event.target.closest("[role=option]");
+      if (!option) return;
+      for (const entry of listbox.querySelectorAll("[role=option]")) {
+        entry.setAttribute("aria-selected", String(entry === option));
+      }
+      combo.textContent = option.textContent;
+      combo.setAttribute("aria-expanded", "false");
+      listbox.hidden = true;
+    });
+  </script>
+</body>
+</html>

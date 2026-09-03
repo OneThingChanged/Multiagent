@@ -69,10 +69,12 @@ import { DocumentPreviewService } from "./services/document-preview-service.mjs"
 import {
   buildBrowserAnnotation,
   normalizeBrowserCaptureRect,
+  sanitizeBrowserActionResult,
   sanitizeBrowserUrl,
   sanitizeBrowserSnapshot,
   sanitizeElementDescriptor,
 } from "./services/browser-context.mjs";
+import { browserFormRuntimeExpression } from "./services/browser-form-automation.mjs";
 import { isGitRepository, runGit } from "./services/git-command.mjs";
 import {
   buildWindowSessionUsage,
@@ -1247,44 +1249,18 @@ function activateDocumentBrowser(record, agentId = "") {
 
 async function executeBrowserSnapshot(record) {
   if (!record || record.view.webContents.isDestroyed()) throw new Error("브라우저 탭을 찾을 수 없습니다.");
-  const raw = await record.view.webContents.executeJavaScript(`(() => {
-    const selectorFor = (element) => {
-      if (!(element instanceof Element)) return "";
-      if (element.id && /^[A-Za-z][\\w-]{0,120}$/.test(element.id)) return "#" + CSS.escape(element.id);
-      const parts = [];
-      let current = element;
-      for (let depth = 0; current && current.nodeType === Node.ELEMENT_NODE && depth < 5; depth += 1) {
-        let part = current.tagName.toLowerCase();
-        const classes = [...current.classList]
-          .filter((name) => /^[A-Za-z_][\\w-]{0,80}$/.test(name))
-          .slice(0, 2);
-        if (classes.length) part += "." + classes.map((name) => CSS.escape(name)).join(".");
-        const parent = current.parentElement;
-        if (parent) {
-          const sameTag = [...parent.children].filter((child) => child.tagName === current.tagName);
-          if (sameTag.length > 1) part += ":nth-of-type(" + (sameTag.indexOf(current) + 1) + ")";
-        }
-        parts.unshift(part);
-        current = parent;
-      }
-      return parts.join(" > ");
-    };
+  const [page, form] = await Promise.all([
+    record.view.webContents.executeJavaScript(`(() => {
     const text = (document.body?.innerText || document.documentElement?.innerText || "").slice(0, 24000);
     const links = [...document.querySelectorAll("a[href]")].slice(0, 100).map((node) => ({
       text: (node.innerText || node.textContent || "").trim().slice(0, 300),
       href: node.href || "",
     }));
-    const controls = [...document.querySelectorAll("button, input, textarea, select, [role=button], [contenteditable=true]")].slice(0, 100).map((node) => ({
-      tag: node.tagName || "",
-      type: node.getAttribute("type") || "",
-      text: (node.innerText || node.getAttribute("placeholder") || node.getAttribute("aria-label") || "").trim().slice(0, 300),
-      ariaLabel: node.getAttribute("aria-label") || "",
-      selector: selectorFor(node),
-      disabled: Boolean(node.disabled),
-    }));
-    return { url: location.href, title: document.title, text, links, controls };
-  })()`, true);
-  return sanitizeBrowserSnapshot(raw);
+    return { url: location.href, title: document.title, text, links };
+  })()`, true),
+    record.view.webContents.executeJavaScript(browserFormRuntimeExpression("snapshot"), true),
+  ]);
+  return sanitizeBrowserSnapshot({ ...page, ...form });
 }
 
 async function saveBrowserScreenshot(record, rect = null, viewport = null) {
@@ -1783,53 +1759,20 @@ async function browserRecordForIntegration(agentId, body = {}, { create = true }
 }
 
 async function browserClick(record, selector) {
-  const value = String(selector || "").trim();
-  if (!value || value.length > 512) throw new Error("CSS selector가 올바르지 않습니다.");
-  const safeSelector = JSON.stringify(value);
-  return record.view.webContents.executeJavaScript(`(() => {
-    let node;
-    try { node = document.querySelector(${safeSelector}); } catch { return { ok: false, error: "invalid selector" }; }
-    if (!node) return { ok: false, error: "element not found" };
-    const type = String(node.getAttribute("type") || "").toLowerCase();
-    const autocomplete = String(node.getAttribute("autocomplete") || "").toLowerCase();
-    if (type === "password" || autocomplete.includes("password")) return { ok: false, error: "password controls are blocked" };
-    if (type === "file") return { ok: false, error: "file chooser controls are blocked" };
-    if (node.disabled) return { ok: false, error: "element is disabled" };
-    node.click();
-    return { ok: true, tag: node.tagName || "" };
-  })()`, true);
+  return executeBrowserFormAction(record, "click", { selector });
 }
 
 async function browserType(record, selector, text) {
-  const value = String(selector || "").trim();
-  const input = String(text ?? "");
-  if (!value || value.length > 512) throw new Error("CSS selector가 올바르지 않습니다.");
-  if (!input || input.length > 8_000 || input.includes("\0")) throw new Error("입력 텍스트가 올바르지 않습니다.");
-  const safeSelector = JSON.stringify(value);
-  const safeInput = JSON.stringify(input);
-  return record.view.webContents.executeJavaScript(`(() => {
-    let node;
-    try { node = document.querySelector(${safeSelector}); } catch { return { ok: false, error: "invalid selector" }; }
-    if (!node) return { ok: false, error: "element not found" };
-    const type = String(node.getAttribute("type") || "").toLowerCase();
-    const autocomplete = String(node.getAttribute("autocomplete") || "").toLowerCase();
-    if (type === "password" || autocomplete.includes("password")) return { ok: false, error: "password controls are blocked" };
-    if (type === "file") return { ok: false, error: "file chooser controls are blocked" };
-    if (node.disabled) return { ok: false, error: "element is disabled" };
-    if (node instanceof HTMLElement && node.isContentEditable) {
-      node.focus();
-      node.textContent = ${safeInput};
-    } else if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
-      const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-      if (setter) setter.call(node, ${safeInput}); else node.value = ${safeInput};
-    } else {
-      return { ok: false, error: "element is not a text control" };
-    }
-    node.dispatchEvent(new Event("input", { bubbles: true }));
-    node.dispatchEvent(new Event("change", { bubbles: true }));
-    return { ok: true };
-  })()`, true);
+  return executeBrowserFormAction(record, "type", { selector, text });
+}
+
+async function executeBrowserFormAction(record, method, body = {}) {
+  if (!record || record.view.webContents.isDestroyed()) throw new Error("브라우저 탭을 찾을 수 없습니다.");
+  const raw = await record.view.webContents.executeJavaScript(
+    browserFormRuntimeExpression(method, body),
+    true,
+  );
+  return sanitizeBrowserActionResult(raw) || { ok: false, error: "invalid_browser_result" };
 }
 
 async function browserIntegrationStatus(agentId) {
@@ -1893,6 +1836,28 @@ async function handleBrowserIntegration({ agentId, action, body = {}, reveal = t
     case "type": {
       const result = await browserType(record, body.selector, body.text);
       if (result?.ok === false) return { ok: false, httpStatus: 409, error: result.error };
+      return { ok: true, result, tab: browserIntegrationTabSnapshot(record) };
+    }
+    case "get-control":
+    case "form-state":
+    case "set-checked":
+    case "select-option":
+    case "clear":
+    case "scroll-into-view":
+    case "wait-for": {
+      const method = {
+        "get-control": "getControl",
+        "form-state": "formState",
+        "set-checked": "setChecked",
+        "select-option": "selectOption",
+        clear: "clear",
+        "scroll-into-view": "scrollIntoView",
+        "wait-for": "waitFor",
+      }[action];
+      const result = await executeBrowserFormAction(record, method, body);
+      if (result?.ok === false) {
+        return { ok: false, httpStatus: result.error === "wait_timeout" ? 408 : 409, error: result.error, result };
+      }
       return { ok: true, result, tab: browserIntegrationTabSnapshot(record) };
     }
     case "screenshot": {

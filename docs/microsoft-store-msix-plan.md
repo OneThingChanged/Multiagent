@@ -1,13 +1,14 @@
 ---
 type: Implementation Plan
-title: Microsoft Store MSIX delivery plan
-description: "Implemented Store-isolated MSIX channel and the remaining Partner Center certification and rollout gates."
+title: Microsoft Store MSIX delivery and certification record
+description: "Implemented and submitted MultiAgent's private-audience MSIX package; Partner Center certification is in progress as of 2026-09-03."
 tags:
   - release
   - windows
   - msix
   - microsoft-store
 status: draft
+last_updated: 2026-09-03
 sources:
   - id: desktop-manifest
     resource: ../app/package.json
@@ -42,169 +43,235 @@ sources:
   - id: store-visibility
     resource: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/visibility-options
     title: "Microsoft Store audience and discoverability options"
+  - id: capability-declarations
+    resource: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations
+    title: "Microsoft app capability declarations"
+  - id: submission-options
+    resource: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options
+    title: "Microsoft Store submission options"
+  - id: action-center
+    resource: https://learn.microsoft.com/en-us/partner-center/action-center/action-center-overview
+    title: "Microsoft Partner Center Action Center"
 ---
 
-# Microsoft Store MSIX delivery plan
+# Microsoft Store MSIX delivery and certification record
 
-## Goal and current decision
+## Goal and release decision
 
-Add a Store-managed Windows distribution channel for MultiAgent. Microsoft
-hosts and signs the submitted MSIX, users install it from the Microsoft Store
-or its web installer, and Store-managed updates replace `electron-updater` for
-that build. Existing Standard and Company NSIS releases remain unchanged until
-the Store path has passed private-audience testing.[^electron-msix-guide][^store-distribution]
+MultiAgent has a Store-managed Windows distribution channel in addition to the
+existing Standard and Company NSIS releases. Microsoft will sign and deliver
+the submitted MSIX after certification; Store-managed updates are separate
+from `electron-updater`. The first Store release is restricted to a private
+audience so installation and migration behavior can be validated before any
+public rollout.[^electron-msix-guide][^store-distribution][^store-visibility]
 
-The isolated Store variant, manifest, x64 MSIX builder, development certificate,
-content verifier, packaged runtime smokes, and administrator-only WACK/install
-commands are implemented. On 2026-09-02 the development package
-`1.6.25.0` was built and signed, its manifest/hash/content checks passed, and
-the packaged Store runtime passed bridge, Dashboard, close, workspace, and
-security smokes.[^store-builder][^store-verifier]
+The Store build keeps its data and update channel separate from NSIS. Existing
+NSIS releases remain available until the Store channel has passed private-user
+testing and a deliberate public rollout decision is made.
 
-Production packaging and certification are intentionally fail-closed until
-Partner Center issues the exact product identity. The build does not accept the
-development identity for upload, and this non-administrator session could not
-install the development certificate into `LocalMachine\TrustedPeople` or run
-WACK. Those are the two remaining local verification actions before upload.
+## Submission status — 2026-09-03
 
-## Account prerequisite
+| Item | Current value |
+| --- | --- |
+| Store product | MultiAgent |
+| Store product ID | `9NVBSGNRTPLR` |
+| Submitted package | `app/electron-dist/store/MultiAgent-Store-Release-1.6.26.0-x64.msix` |
+| Package version / architecture | `1.6.26.0` / `x64` |
+| Package size | Approximately 150.3 MiB |
+| Windows App Certification Kit | Passed |
+| Partner Center package validation | Passed |
+| Audience | Private audience |
+| Submission | `In certification` |
+| Progress | Submission and Pre-processing complete; Certification pending |
+| Publishing behavior | Automatic after certification passes, limited to the configured private audience |
 
-Complete these steps in Partner Center before the production manifest is
-finalized:
+The package was uploaded to the first Partner Center submission after the
+product identity, listing, privacy, age-rating, package, and capability fields
+were prepared. Do not cancel the certification while this status is pending.
 
-1. Create the appropriate Individual or Company developer account.
-2. Reserve the product name. Try `MultiAgent`, but accept a distinct Store name
-   if the reservation is unavailable.
-3. Record the non-secret product identity fields exactly as issued:
-   `Package/Identity/Name`, `Publisher`, `PublisherDisplayName`, and Package
-   Family Name.
-4. Decide whether the first submission is Private audience, direct-link only,
-   or publicly searchable. Start with Private audience for certification and
-   migration testing.[^store-visibility]
-5. Prepare the privacy-policy URL, support URL, Store description, screenshots,
-   age rating answers, and tester Microsoft accounts.
+## Completed implementation and Partner Center work
 
-Do not commit account credentials, verification documents, tokens, passwords,
-or local certificate files. Store identity strings are public metadata after
-publication, but this project will still load them from an ignored local
-configuration file so personal or organization-specific values are not added
-to Git by accident.
+### Store build and runtime
 
-## Phase 1: isolated Store build — implemented
+The following implementation work is complete:
 
-1. Add a `store` runtime/build variant alongside `standard` and `company`.
-2. Add `electron:dist:store:dev` for a placeholder development identity and
-   `electron:dist:store` that fails closed unless all Partner Center identity
-   fields are provided.
-3. Reuse the production Electron layout, then package it as an unsigned x64
-   `.msix`. An unsigned production MSIX is intentional because the Store signs
-   it after certification.[^electron-msix-guide]
-4. Add a manifest with the exact Partner Center identity, desktop target,
-   `Windows.FullTrustApplication`, and `runFullTrust`. Explain in the submission
-   that MultiAgent is a local terminal and agent workspace that launches
-   user-selected CLI tools and accesses user-selected project folders.
-5. Keep Store-only configuration and generated packages out of the Standard and
-   Company builders. Generated MSIX files remain ignored release artifacts.
+1. A `store` runtime/build variant exists alongside `standard` and `company`.
+2. `electron:dist:store:dev` supports a development identity, while the
+   production Store build fails closed unless the Partner Center identity is
+   supplied.
+3. The Store package is x64-only and excludes the Android APK.
+4. The Store variant uses separate `userData` and LocalAppData roots and does
+   not use the GitHub `electron-updater` channel. Store updates are managed by
+   Windows.
+5. The package keeps the existing terminal/PTY, hooks, Git, browser, Remote,
+   document, session, and project workflows needed by the desktop app.
+6. The Store variant does not download `cloudflared.exe`; it uses an existing
+   executable from the Store data directory or `PATH`, with an installation
+   instruction when none is available.
+7. Store-only identity configuration and generated packages remain excluded
+   from Git. No credentials, verification documents, tokens, passwords, or
+   private certificate keys are tracked.
 
-## Phase 2: Store runtime behavior — implemented baseline
+The local development package and release package were checked with the Store
+builder/verifier, and the submitted release artifact passed WACK and Partner
+Center package validation.[^store-builder][^store-verifier]
 
-1. Disable GitHub `electron-updater` checks, downloads, and install controls in
-   the Store variant. Display that updates are managed by Microsoft Store.
-2. The Store package uses separate `userData` and LocalAppData roots. Its local
-   servers already probe subsequent loopback ports when a Standard instance owns
-   a default port, so state and listener ownership do not cross variants.
-3. The first Store release deliberately keeps Standard data separate. Automatic
-   migration is not part of the current baseline; users must validate the Store
-   channel before any later opt-in import workflow is introduced.
-4. Verify that external Codex and Claude processes can still read the hook/MCP
-   configuration and exchange data with the full-trust packaged process.
-5. Exclude the Android APK from the Store package. The Remote download surface
-   should use the separately published, release-signed APK.
-6. The Store variant never downloads `cloudflared.exe`. It uses an existing
-   executable from the Store data directory or `PATH`, otherwise returns an
-   installation instruction. Standard retains its current download behavior.
-   This keeps dynamically acquired executable code out of the Store channel.
-   [^store-policy][^electron-main]
+### Partner Center sections completed
 
-## Phase 3: local package verification
+The first private-audience submission has these sections marked complete:
 
-1. Generate a development-only self-signed certificate outside the repository
-   and create a locally signed MSIX. Installation requires an elevated shell so
-   the public certificate can be added to `LocalMachine\TrustedPeople`; the
-   private key remains in the creating user's certificate store.
-2. Install and launch the package without uninstalling the production NSIS
-   version. Do not run both variants simultaneously during port and hook tests.
-3. Verify cold start, project selection, PTY creation, Codex/Claude discovery,
-   hooks, cancellation, session resume, conversation history, embedded browser,
-   browser MCP, Remote service, document preview, usage indexing, TTS, tray
-   behavior, and clean shutdown.
-4. Verify upgrade-in-place with a higher four-part MSIX version and confirm that
-   app data survives the update.
-5. Run the Windows App Certification Kit and inspect the packaged manifest and
-   PE/native-module architecture. Remove the local test package and certificate
-   after verification.
+- Pricing and availability — free product, private audience.
+- Properties — Developer tools / Utilities, privacy policy, website/support
+  links, and the applicable generative-AI declaration.
+- Age ratings — questionnaire completed.
+- Packages — the `1.6.26.0` x64 MSIX validated.
+- Store listings — Korean and English listings completed, with the Store
+  screenshot uploaded for each listing.
+- Submission options — certification notes, automatic publishing choice, and
+  the restricted-capability justification entered.
 
-## Phase 4: Partner Center submission
+The Store listing screenshot is retained at:
 
-1. Rebuild the unsigned MSIX with the exact reserved identity and release
-   version; never upload the placeholder development identity.
-2. Upload the MSIX and complete the listing, privacy, support, capability
-   justification, and certification notes.
-3. Publish to Private audience first. Give testers the authenticated Store link
-   and collect installation, startup, Remote, and update results.
-4. Address certification findings in the Store variant without weakening the
-   security or behavior of the existing NSIS variants.
-5. After acceptance, choose either public search or direct-link-only
-   availability. A public audience cannot later be changed back to Private
-   audience.[^store-visibility]
+`app/store/listing/screenshots/multiagent-store-primary.png`
 
-## Phase 5: release integration
+The listing asset is a 1672×941 PNG and is within the Store screenshot size
+limit. Store-logo assets are included in the package; optional Store poster and
+box-art uploads are not required for the current submission.
 
-1. Add the Microsoft Store badge or Web Installer action to the Remote download
-   page. The website must point to the Store acquisition path, not directly to
-   an unsigned MSIX.
-2. Keep Store and NSIS update channels explicit: Store packages update through
-   Windows; NSIS packages continue to use their GitHub manifests.
-3. Decide after a stable Store release whether new public users should receive
-   only the Store build while NSIS remains a developer, Company, or recovery
-   channel.
-4. Update the release playbook, development guide, known limitations, and
-   public README only after the Store artifact and certification path exist.
+The certification notes explain that the core local workspace, project,
+session, terminal, file, Git, browser, and process features do not require
+credentials. Optional Remote sign-in is not required for certification of the
+core application.
 
-## Acceptance criteria
+## `runFullTrust` capability decision
 
-The Store path is ready when all of the following are true:
+`runFullTrust` is the sole restricted capability in the Store manifest:
 
-* a tester can acquire MultiAgent through Microsoft Store without an unknown
-  publisher or SmartScreen download warning;
-* Microsoft Store can install an update without invoking `electron-updater`;
-* existing NSIS data is migrated or deliberately kept separate without session
-  or conversation mixing;
-* terminal, hook, browser MCP, Remote, and document workflows pass in the
-  installed MSIX;
-* Store and NSIS instances cannot corrupt shared state or compete for the same
-  ports;
-* no account credential, certificate private key, verification document,
-  personal address, or secret Store configuration is tracked by Git; and
-* the Windows App Certification Kit and Partner Center certification both pass.
+```xml
+<rescap:Capability Name="runFullTrust" />
+```
 
-## Production handoff checklist
+The application is declared as a packaged classic Electron app with
+`uap10:RuntimeBehavior="packagedClassicApp"` and
+`uap10:TrustLevel="mediumIL"`. This capability is required for MultiAgent to
+launch user-selected Win32 command-line tools, terminal/PTY child processes,
+Git commands, and development utilities; exchange standard input/output;
+monitor processes and local ports; and access files in project folders selected
+by the user.[^capability-declarations]
 
-1. Reserve the product in Partner Center and copy
-   `Package/Identity/Name`, `Publisher`, `PublisherDisplayName`, and the Store
-   product ID into ignored `app/store/store-identity.local.json` using
-   `app/store/store-identity.example.json` as the template.
-2. In an administrator PowerShell, run `npm run electron:install:store:dev` and
-   `npm run electron:wack:store:dev` from `app/`.
-3. Run `npm run electron:dist:store`; it produces the unsigned, exact-identity
-   MSIX that Partner Center will sign after certification.
-4. Upload through a Private audience submission first and provide the
-   `runFullTrust` justification: MultiAgent is a local terminal/agent workspace
-   that launches user-selected CLI tools and reads user-selected project paths.
+`runFullTrust` does not mean administrator elevation. The package does not
+declare `allowElevation`, does not request administrator approval, and does not
+install drivers or Windows services. The explanation above was entered in
+Partner Center's restricted-capability justification field for certification
+review.[^submission-options]
 
-Do not use the NSIS installer-submission route for this goal: it still requires
-a publicly trusted code-signing certificate, while the MSIX route receives
-complimentary Store signing.
+The amber package-acceptance message about `runFullTrust` is a review notice,
+not a certification rejection. Removing this capability would break the
+desktop process and terminal model, so it should remain unless Microsoft
+specifically rejects the workflow and provides an alternative requirement.
+
+## Submission options and transient `Incomplete` behavior
+
+During preparation, Partner Center briefly continued to display
+`Submission options: Incomplete` even though the publishing choice and
+`runFullTrust` explanation were visible and had been saved. The exact backend
+cause was not established, so this document does not attribute it to a specific
+account or browser defect. The submission subsequently entered `In
+certification`, which confirms that the required pre-submission gate was
+accepted for this package.
+
+Use the following distinction when reviewing future submissions:
+
+- An amber restricted-capability warning means that Microsoft will review the
+  declared capability and its explanation.
+- A red validation error, duplicate package error, missing required field, or
+  failed package validation is an actual submission blocker.
+- A stale `Incomplete` badge should be reloaded and rechecked after saving. If
+  the submission still refuses to start, capture the page and contact Partner
+  Center support rather than removing a capability that the app needs.
+
+If the status becomes inconsistent again, check the following in order:
+
+1. Open the submission options page, confirm the justification text and
+   publishing choice, save at the bottom, and wait for the overview to refresh.
+2. Refresh the Partner Center session and inspect the submission's validation
+   details and Action Center notifications.
+3. In Action Center, open **My preferences** and confirm that the account's
+   notification email is present and verified. This is a troubleshooting check,
+   not a confirmed explanation for the earlier badge behavior.[^action-center]
+4. If the problem persists, open Partner Center support and provide the Store
+   product ID, submission ID, package filename/version, visible validation
+   message, and a screenshot. Never include passwords, tokens, private keys, or
+   account recovery information.
+
+## Follow-up checklist
+
+### While certification is pending
+
+- Monitor the Partner Center status and the verified notification email.
+- Keep the submitted package and its source commit unchanged for traceability.
+- Do not cancel certification or replace the package unless Partner Center
+  reports a concrete error or requests a new submission.
+
+### If certification passes
+
+1. Confirm that the submission advances to Publishing and that the product is
+   still restricted to the intended private audience.
+2. Acquire the restricted Store link with an authorized test account and test
+   install, first launch, project selection, session creation/resume,
+   conversation history, terminal/PTY, hooks, Git, browser MCP, Remote,
+   document preview, TTS, usage indexing, update, and clean shutdown.
+3. Verify that Store updates replace the package without invoking
+   `electron-updater`, and verify that NSIS and Store data remain separated.
+4. Save the certification result and private-test findings in the release
+   record before changing the public website or download instructions.
+
+### If certification fails or Microsoft requests information
+
+1. Read the certification report and identify the exact failing test, package
+   rule, or missing reviewer information.
+2. Supply the requested explanation through Partner Center, or make a focused
+   Store-variant fix. Keep the `runFullTrust` rationale aligned with the actual
+   user-initiated terminal and project workflows.
+3. Rebuild with a higher four-part version, rerun the verifier and WACK, and
+   upload the replacement package to a new submission.
+4. Do not weaken the Standard/Company channels or remove required capabilities
+   without a concrete Microsoft requirement.
+
+### Before a public rollout
+
+- Complete private-audience installation and update testing on supported
+  Windows desktop systems.
+- Decide between public discoverability and direct-link-only acquisition, then
+  update Pricing and availability accordingly. A public-audience decision
+  should be treated as a deliberate rollout gate, not a certification step.
+- Update the Remote download page to point users to the Store acquisition path;
+  do not distribute an unsigned MSIX directly.
+- Keep the Store and NSIS update channels clearly labeled and retain NSIS as a
+  developer, Company, or recovery channel if that remains useful.
+- Update the public README, release playbook, known limitations, and support
+  instructions only after the private test is successful.
+
+## Release gates
+
+### Complete
+
+- Isolated Store runtime and x64 MSIX builder.
+- Partner Center product identity and private-audience submission.
+- WACK and Partner Center package validation.
+- Pricing, properties, age ratings, package, and Korean/English listing data.
+- Store screenshot and package logo assets.
+- `runFullTrust` justification and certification notes.
+
+### Pending
+
+- Partner Center certification result.
+- Private-audience install/update validation.
+- Public discoverability/direct-link decision and public rollout documentation.
+
+The Store path is not considered a general-public release until the pending
+gates above are complete. The existing NSIS release remains the fallback during
+certification and private testing.
 
 [^desktop-manifest]: Current Electron build and NSIS publication configuration
 [^runtime-variant]: Standard and Company runtime identities
@@ -213,7 +280,10 @@ complimentary Store signing.
 [^store-config]: Store package contents and x64 filtering
 [^store-manifest]: Packaged classic app manifest
 [^store-verifier]: Store package integrity and content verifier
-[^electron-msix-guide]: Microsoft Electron MSIX packaging guide
-[^store-distribution]: Microsoft Store Win32 distribution options
-[^store-policy]: Microsoft Store policies
-[^store-visibility]: Microsoft Store audience and discoverability options
+[^electron-msix-guide]: [Microsoft Electron MSIX packaging guide](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/guides/electron-packaging)
+[^store-distribution]: [Microsoft Store Win32 distribution options](https://learn.microsoft.com/en-us/windows/apps/distribute-through-store/how-to-distribute-your-win32-app-through-microsoft-store)
+[^store-policy]: [Microsoft Store policies](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies)
+[^store-visibility]: [Microsoft Store audience and discoverability options](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/visibility-options)
+[^capability-declarations]: [Microsoft app capability declarations](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations)
+[^submission-options]: [Microsoft Store submission options](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options)
+[^action-center]: [Microsoft Partner Center Action Center](https://learn.microsoft.com/en-us/partner-center/action-center/action-center-overview)

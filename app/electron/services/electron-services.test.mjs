@@ -188,6 +188,62 @@ describe("browser MCP stdio bridge", () => {
       child.kill();
     }
   });
+
+  it("publishes state-aware browser form tools", async () => {
+    const scriptPath = path.resolve("electron", "services", "browser-mcp-server.mjs");
+    const child = spawn(process.execPath, [
+      "-e",
+      "import(require('node:url').pathToFileURL(process.env.MULTIAGENT_MCP_SCRIPT))",
+    ], {
+      cwd: path.resolve("."),
+      env: {
+        ...process.env,
+        MULTIAGENT_AGENT_ID: "agent-tools",
+        MULTIAGENT_PORT: "1",
+        MULTIAGENT_TOKEN: "test-token",
+        MULTIAGENT_MCP_SCRIPT: scriptPath,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    try {
+      const response = await new Promise((resolve, reject) => {
+        let stdout = "";
+        let stderr = "";
+        const timeout = setTimeout(() => reject(new Error(`MCP tools/list timeout: ${stderr}`)), 5_000);
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk) => { stderr += chunk; });
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+          const lines = stdout.split(/\r?\n/).filter(Boolean);
+          for (const line of lines) {
+            let message;
+            try { message = JSON.parse(line); } catch { continue; }
+            if (message.id !== 2) continue;
+            clearTimeout(timeout);
+            resolve(message);
+            return;
+          }
+        });
+        child.once("error", reject);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`);
+      });
+      const names = response.result.tools.map((tool) => tool.name);
+      expect(names).toEqual(expect.arrayContaining([
+        "browser_get_control",
+        "browser_form_state",
+        "browser_set_checked",
+        "browser_select_option",
+        "browser_clear",
+        "browser_scroll_into_view",
+        "browser_wait_for",
+      ]));
+    } finally {
+      child.stdin.end();
+      child.kill();
+    }
+  });
 });
 
 describe("Electron hook runtime", () => {

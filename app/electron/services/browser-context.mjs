@@ -1,8 +1,10 @@
 const MAX_TEXT = 2_000;
 const MAX_HTML = 12_000;
 const MAX_LINKS = 80;
-const MAX_CONTROLS = 80;
+const MAX_CONTROLS = 200;
+const MAX_OPTIONS = 100;
 const SENSITIVE_URL_PART = /(?:token|access[_-]?token|refresh[_-]?token|secret|password|passwd|authorization|auth|session|session[_-]?id|code|key|signature|sig|nonce|credential|jwt|assertion|ticket)/i;
+const SENSITIVE_CONTROL_PART = /(?:password|passwd|passcode|secret|token|credential|authorization|authenticity|one[-_ ]?time|otp|api[-_ ]?key|private[-_ ]?key|card[-_ ]?(?:number|security)|cvv|cvc)/i;
 
 function stringValue(value, max = MAX_TEXT) {
   if (value === null || value === undefined) return "";
@@ -106,6 +108,128 @@ export function normalizeBrowserCaptureRect(rect, viewport = {}) {
   };
 }
 
+function nullableBoolean(value) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function sanitizeBrowserValidity(value, sensitive = false) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    valid: Boolean(value.valid),
+    valueMissing: Boolean(value.valueMissing),
+    typeMismatch: Boolean(value.typeMismatch),
+    patternMismatch: Boolean(value.patternMismatch),
+    tooLong: Boolean(value.tooLong),
+    tooShort: Boolean(value.tooShort),
+    rangeUnderflow: Boolean(value.rangeUnderflow),
+    rangeOverflow: Boolean(value.rangeOverflow),
+    stepMismatch: Boolean(value.stepMismatch),
+    customError: Boolean(value.customError),
+    message: sensitive ? "" : stringValue(value.message, 500),
+    describedError: sensitive ? "" : stringValue(value.describedError, 500),
+  };
+}
+
+export function sanitizeBrowserControl(value) {
+  if (!value || typeof value !== "object") return null;
+  const type = stringValue(value.type, 80).toLowerCase();
+  const tag = stringValue(value.tag, 80).toLowerCase();
+  const role = stringValue(value.role, 80).toLowerCase();
+  const label = stringValue(value.label, 300);
+  const name = stringValue(value.name, 160);
+  const ariaLabel = stringValue(value.ariaLabel, 300);
+  const placeholder = stringValue(value.placeholder, 300);
+  const hint = [type, name, label, ariaLabel, placeholder, value?.locator?.id, value?.locator?.testId].join(" ");
+  const fileControl = type === "file" || value.valueState === "file";
+  const sensitive = fileControl || type === "password" || value.valueState === "redacted" || SENSITIVE_CONTROL_PART.test(hint);
+  const rawValue = sensitive ? "" : stringValue(value.value, 500);
+  const options = Array.isArray(value.options)
+    ? value.options.slice(0, MAX_OPTIONS).map((option, index) => {
+        const optionSensitive = sensitive || option?.valueState === "redacted" || SENSITIVE_CONTROL_PART.test(String(option?.value || ""));
+        return {
+          index: Number.isInteger(option?.index) ? option.index : index,
+          label: stringValue(option?.label, 300),
+          selected: Boolean(option?.selected),
+          disabled: Boolean(option?.disabled),
+          valueState: optionSensitive ? "redacted" : option?.valueState === "empty" ? "empty" : "text",
+          value: optionSensitive ? "" : stringValue(option?.value, 300),
+        };
+      })
+    : [];
+  const locator = value.locator && typeof value.locator === "object"
+    ? {
+        id: stringValue(value.locator.id, 160),
+        testId: stringValue(value.locator.testId, 160),
+        name: stringValue(value.locator.name, 160),
+        label: stringValue(value.locator.label, 300),
+        role: stringValue(value.locator.role, 80).toLowerCase(),
+        formId: stringValue(value.locator.formId, 160),
+      }
+    : {};
+  return {
+    targetId: stringValue(value.targetId, 128),
+    locator,
+    tag,
+    type,
+    role,
+    name,
+    label,
+    ariaLabel,
+    placeholder,
+    text: stringValue(value.text, 300),
+    selector: stringValue(value.selector, 500),
+    visible: Boolean(value.visible),
+    inViewport: Boolean(value.inViewport),
+    enabled: Boolean(value.enabled),
+    disabled: Boolean(value.disabled),
+    readonly: Boolean(value.readonly),
+    required: Boolean(value.required),
+    checked: nullableBoolean(value.checked),
+    indeterminate: nullableBoolean(value.indeterminate),
+    selected: nullableBoolean(value.selected),
+    multiple: Boolean(value.multiple),
+    valueState: fileControl ? "file" : sensitive ? "redacted" : value.valueState === "empty" || !rawValue ? "empty" : "text",
+    value: rawValue,
+    valueLength: sensitive ? 0 : Math.max(0, Math.min(Number(value.valueLength) || rawValue.length, 100_000_000)),
+    options,
+    validity: sanitizeBrowserValidity(value.validity, sensitive),
+    formId: stringValue(value.formId, 160),
+    formLabel: stringValue(value.formLabel, 300),
+    fieldsetLabel: stringValue(value.fieldsetLabel, 300),
+  };
+}
+
+export function sanitizeBrowserActionResult(value) {
+  if (!value || typeof value !== "object") return null;
+  const result = {
+    ok: value.ok !== false,
+    action: stringValue(value.action, 80),
+    error: stringValue(value.error, 160),
+    changed: typeof value.changed === "boolean" ? value.changed : undefined,
+    skipped: typeof value.skipped === "boolean" ? value.skipped : undefined,
+    satisfied: typeof value.satisfied === "boolean" ? value.satisfied : undefined,
+    condition: stringValue(value.condition, 80),
+    elapsedMs: Number.isFinite(value.elapsedMs) ? Math.max(0, Math.round(value.elapsedMs)) : undefined,
+    url: value.url ? sanitizeBrowserUrl(value.url) : undefined,
+    before: sanitizeBrowserControl(value.before),
+    after: sanitizeBrowserControl(value.after),
+    control: sanitizeBrowserControl(value.control),
+    candidates: Array.isArray(value.candidates)
+      ? value.candidates.slice(0, 10).map(sanitizeBrowserControl).filter(Boolean)
+      : undefined,
+    controls: Array.isArray(value.controls)
+      ? value.controls.slice(0, MAX_CONTROLS).map(sanitizeBrowserControl).filter(Boolean)
+      : undefined,
+    count: Number.isFinite(value.count) ? Math.max(0, Math.round(value.count)) : undefined,
+    invalidCount: Number.isFinite(value.invalidCount) ? Math.max(0, Math.round(value.invalidCount)) : undefined,
+    truncated: typeof value.truncated === "boolean" ? value.truncated : undefined,
+    postcondition: value.postcondition && typeof value.postcondition === "object"
+      ? { satisfied: Boolean(value.postcondition.satisfied) }
+      : undefined,
+  };
+  return Object.fromEntries(Object.entries(result).filter(([, entry]) => entry !== undefined && entry !== "" && entry !== null));
+}
+
 export function sanitizeBrowserSnapshot(value) {
   if (!value || typeof value !== "object") return null;
   const links = Array.isArray(value.links)
@@ -115,14 +239,7 @@ export function sanitizeBrowserSnapshot(value) {
       }))
     : [];
   const controls = Array.isArray(value.controls)
-    ? value.controls.slice(0, MAX_CONTROLS).map((control) => ({
-        tag: stringValue(control?.tag, 80).toLowerCase(),
-        type: stringValue(control?.type, 80).toLowerCase(),
-        text: stringValue(control?.text, 300),
-        ariaLabel: stringValue(control?.ariaLabel, 300),
-        selector: stringValue(control?.selector, 500),
-        disabled: Boolean(control?.disabled),
-      }))
+    ? value.controls.slice(0, MAX_CONTROLS).map(sanitizeBrowserControl).filter(Boolean)
     : [];
   return {
     url: sanitizeBrowserUrl(value.url),
@@ -130,6 +247,8 @@ export function sanitizeBrowserSnapshot(value) {
     text: stringValue(value.text, 20_000),
     links,
     controls,
+    controlCount: Number.isFinite(value.controlCount) ? Math.max(0, Math.round(value.controlCount)) : controls.length,
+    truncated: Boolean(value.truncated || Number(value.controlCount) > controls.length),
   };
 }
 

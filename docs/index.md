@@ -22,10 +22,11 @@ configuration that supports it.
 * [Remote service](remote-service.md) - External Remote/PWA/Android access, authentication boundary, and conversation UX prototype.
 * [Usage accounting](usage-accounting.md) - Local token indexing, historical aggregation, and account limits.
 * [Embedded browser MCP](embedded-browser-mcp.md) - Always-on shared browser tabs, managed MCP startup, annotations, and isolation rules.
+* [Embedded browser form automation plan](browser-form-automation-plan.md) - Implemented state-aware targeting and safe form controls, with remaining hardening and rollout tests.
 
 ## Delivery and maintenance
 
 * [Development and build](development-and-build.md) - Local setup, tests, smoke checks, and desktop/mobile build entry points.
 * [Release playbook](release-playbook.md) - Signing, artifact verification, publication, and updater invariants.
-* [Microsoft Store MSIX delivery plan](microsoft-store-msix-plan.md) - Implemented MSIX pipeline, local verification evidence, and remaining Partner Center certification gates.
+* [Microsoft Store MSIX delivery and certification record](microsoft-store-msix-plan.md) - Submitted private-audience MSIX, validation evidence, certification status, and follow-up gates.
 * [Known limitations](known-limitations.md) - Confirmed constraints and explicitly unverified follow-up items.
