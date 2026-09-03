@@ -1,0 +1,3 @@
+[submodule "MultiagentSite"]
+	path = MultiagentSite
+	url = https://github.com/OneThingChanged/MultiagentSite.git
