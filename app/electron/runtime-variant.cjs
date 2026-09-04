@@ -6,7 +6,7 @@ const VARIANTS = Object.freeze({
     localDataDirectory: "com.jintae.multiagent",
     updaterChannel: "latest",
     remoteEnabled: true,
-    updateProvider: "github",
+    updateProvider: "local-developer",
     storeProductId: null,
   }),
   company: Object.freeze({

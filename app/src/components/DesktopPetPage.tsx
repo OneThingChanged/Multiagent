@@ -9,6 +9,7 @@ import {
   saveDesktopPetEnabled,
   type DesktopPetUpdate,
 } from "../lib/desktopPet";
+import { useAppLanguage } from "../lib/appLanguage";
 import "./DesktopPetPage.css";
 
 const IDLE: DesktopPetUpdate = {
@@ -24,6 +25,7 @@ const IDLE: DesktopPetUpdate = {
 };
 
 export function DesktopPetPage() {
+  const { text } = useAppLanguage();
   const [update, setUpdate] = useState(IDLE);
   const [bubbleVisible, setBubbleVisible] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
@@ -140,7 +142,7 @@ export function DesktopPetPage() {
     <div
       className={`desktop-pet-shell ${celebrating ? "desktop-pet-celebrate" : ""}`}
       data-status={update.status}
-      title="MultiAgent 열기"
+      title={text("MultiAgent 열기", "Open MultiAgent")}
       onClick={activate}
       onContextMenu={openContextMenu}
     >
@@ -149,7 +151,7 @@ export function DesktopPetPage() {
           {update.title || "MultiAgent"}
         </div>
         <div className="desktop-pet-bubble-body">
-          {update.body || "작업이 끝났어요"}
+          {update.body || text("작업이 끝났어요", "Work completed")}
         </div>
       </div>
 
@@ -159,7 +161,7 @@ export function DesktopPetPage() {
           onClick={(event) => event.stopPropagation()}
         >
           <div className="desktop-pet-work-title">
-            작업 중 {update.workingItems.length} · 완료 {update.completedCount}
+            {text("작업 중", "Working")} {update.workingItems.length} · {text("완료", "Completed")} {update.completedCount}
           </div>
           <div className="desktop-pet-work-list">
             {update.workingItems.map((item) => (
@@ -173,14 +175,14 @@ export function DesktopPetPage() {
                   {item.projectName} / {item.agentName}
                 </span>
                 <span className="desktop-pet-work-question">
-                  {item.question || "질문 정보 없음"}
+                  {item.question || text("질문 정보 없음", "No question details")}
                 </span>
                 <span className="desktop-pet-work-tool">
                   {item.tool}
                   {item.workStatus === "waiting"
-                    ? " · 대기"
+                    ? text(" · 대기", " · waiting")
                     : item.workStatus === "blocked"
-                      ? " · 확인"
+                      ? text(" · 확인", " · needs review")
                       : ""}
                 </span>
               </button>
@@ -206,7 +208,7 @@ export function DesktopPetPage() {
               <div
                 className="desktop-pet-badge desktop-pet-work-badge"
                 onClick={toggleWorkPanel}
-                title={`작업 중 ${update.workingCount}개 · 내용 보기`}
+                title={text(`작업 중 ${update.workingCount}개 · 내용 보기`, `${update.workingCount} working · view details`)}
               >
                 …{update.workingCount}
               </div>
@@ -214,7 +216,7 @@ export function DesktopPetPage() {
             {update.completedCount > 0 && (
               <div
                 className="desktop-pet-badge desktop-pet-complete-badge"
-                title={`완료 ${update.completedCount}개`}
+                title={text(`완료 ${update.completedCount}개`, `${update.completedCount} completed`)}
               >
                 ✓{update.completedCount}
               </div>
@@ -225,7 +227,7 @@ export function DesktopPetPage() {
 
       <div
         className="desktop-pet-drag"
-        title="끌어서 이동"
+        title={text("끌어서 이동", "Drag to move")}
         onClick={(event) => event.stopPropagation()}
       >
         •••

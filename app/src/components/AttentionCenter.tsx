@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { AttentionItem, AttentionKind } from "../lib/attention";
+import { useAppLanguage, type ResolvedAppLanguage } from "../lib/appLanguage";
 
 const KIND_LABEL: Record<AttentionKind, string> = {
   waiting: "응답 대기",
@@ -8,15 +9,21 @@ const KIND_LABEL: Record<AttentionKind, string> = {
   completed: "완료",
   stale: "상태 확인",
 };
+const KIND_LABEL_EN: Record<AttentionKind, string> = {
+  waiting: "Waiting for response",
+  blocked: "Needs attention",
+  completed: "Completed",
+  stale: "Check status",
+};
 
-function relativeTime(timestamp: number) {
+function relativeTime(timestamp: number, language: ResolvedAppLanguage) {
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return "방금";
+  if (seconds < 60) return language === "ko" ? "방금" : "Just now";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 60) return language === "ko" ? `${minutes}분 전` : `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
+  if (hours < 24) return language === "ko" ? `${hours}시간 전` : `${hours}h ago`;
+  return language === "ko" ? `${Math.floor(hours / 24)}일 전` : `${Math.floor(hours / 24)}d ago`;
 }
 
 export function AttentionCenter({
@@ -33,6 +40,7 @@ export function AttentionCenter({
   onClose: () => void;
 }) {
   useNativeViewOcclusion();
+  const { language, text } = useAppLanguage();
 
   const [unreadOnly, setUnreadOnly] = useState(false);
   const visible = useMemo(
@@ -53,22 +61,22 @@ export function AttentionCenter({
         <header className="attention-header">
           <div>
             <h2 id="attention-title">Attention Center</h2>
-            <p>확인할 항목 {unreadCount}개</p>
+            <p>{text(`확인할 항목 ${unreadCount}개`, `${unreadCount} item${unreadCount === 1 ? "" : "s"} to review`)}</p>
           </div>
-          <button className="app-icon-btn" onClick={onClose} title="닫기">×</button>
+          <button className="app-icon-btn" onClick={onClose} title={text("닫기", "Close")}>×</button>
         </header>
         <div className="attention-toolbar">
           <button
             className={!unreadOnly ? "attention-filter-active" : ""}
             onClick={() => setUnreadOnly(false)}
-          >전체 {items.length}</button>
+          >{text(`전체 ${items.length}`, `All ${items.length}`)}</button>
           <button
             className={unreadOnly ? "attention-filter-active" : ""}
             onClick={() => setUnreadOnly(true)}
-          >읽지 않음 {unreadCount}</button>
+          >{text(`읽지 않음 ${unreadCount}`, `Unread ${unreadCount}`)}</button>
           <span />
-          <button onClick={onMarkAllRead} disabled={unreadCount === 0}>모두 읽음</button>
-          <button onClick={onClearRead} disabled={!items.some((item) => item.read)}>읽은 항목 삭제</button>
+          <button onClick={onMarkAllRead} disabled={unreadCount === 0}>{text("모두 읽음", "Mark all read")}</button>
+          <button onClick={onClearRead} disabled={!items.some((item) => item.read)}>{text("읽은 항목 삭제", "Clear read")}</button>
         </div>
         <div className="attention-list">
           {visible.map((item) => (
@@ -78,19 +86,21 @@ export function AttentionCenter({
               onClick={() => onSelect(item)}
             >
               <span className={`attention-kind attention-kind-${item.kind}`}>
-                {KIND_LABEL[item.kind]}
+                {language === "ko" ? KIND_LABEL[item.kind] : KIND_LABEL_EN[item.kind]}
               </span>
               <span className="attention-copy">
                 <strong>{item.title}</strong>
                 <span>{item.body}</span>
-                <small>{relativeTime(item.createdAt)}</small>
+                <small>{relativeTime(item.createdAt, language)}</small>
               </span>
-              {!item.read && <span className="attention-unread-dot" aria-label="읽지 않음" />}
+              {!item.read && <span className="attention-unread-dot" aria-label={text("읽지 않음", "Unread")} />}
             </button>
           ))}
           {visible.length === 0 && (
             <div className="attention-empty">
-              {unreadOnly ? "읽지 않은 항목이 없습니다." : "아직 확인할 항목이 없습니다."}
+              {unreadOnly
+                ? text("읽지 않은 항목이 없습니다.", "There are no unread items.")
+                : text("아직 확인할 항목이 없습니다.", "There are no items to review yet.")}
             </div>
           )}
         </div>

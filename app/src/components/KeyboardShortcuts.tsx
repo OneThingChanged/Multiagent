@@ -7,6 +7,7 @@ import {
   type CommandId,
   type CommandShortcuts,
 } from "../lib/commandRegistry";
+import { useAppLanguage } from "../lib/appLanguage";
 
 export function KeyboardShortcuts({
   shortcuts,
@@ -15,6 +16,7 @@ export function KeyboardShortcuts({
   shortcuts: CommandShortcuts;
   onChange: (shortcuts: CommandShortcuts) => void;
 }) {
+  const { language, text } = useAppLanguage();
   const [recording, setRecording] = useState<CommandId | null>(null);
   const conflicts = useMemo(() => conflictingShortcutIds(shortcuts), [shortcuts]);
 
@@ -23,8 +25,8 @@ export function KeyboardShortcuts({
       {COMMAND_DEFINITIONS.map((command) => (
         <div className="shortcut-row" key={command.id}>
           <span className="shortcut-copy">
-            <strong>{command.title}</strong>
-            <small>{command.description}</small>
+            <strong>{language === "ko" ? command.title : command.titleEn}</strong>
+            <small>{language === "ko" ? command.description : command.descriptionEn}</small>
           </span>
           <button
             type="button"
@@ -51,17 +53,17 @@ export function KeyboardShortcuts({
             }}
           >
             {recording === command.id
-              ? "키를 누르세요"
-              : shortcuts[command.id] || "지정 안 함"}
+              ? text("키를 누르세요", "Press keys")
+              : shortcuts[command.id] || text("지정 안 함", "Not assigned")}
           </button>
         </div>
       ))}
       {conflicts.size > 0 && (
-        <div className="shortcut-warning">같은 단축키가 중복되었습니다. 먼저 등록된 명령이 실행됩니다.</div>
+        <div className="shortcut-warning">{text("같은 단축키가 중복되었습니다. 먼저 등록된 명령이 실행됩니다.", "The same shortcut is assigned more than once. The first registered command will run.")}</div>
       )}
       <div className="app-update-actions">
         <button className="btn-secondary app-update-btn" onClick={() => onChange(defaultCommandShortcuts())}>
-          기본값 복원
+          {text("기본값 복원", "Restore defaults")}
         </button>
       </div>
     </div>

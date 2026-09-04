@@ -128,6 +128,10 @@ const INVOKE_COMMANDS = Object.freeze([
   "generate_ssh_key",
   "check_for_update",
   "download_and_install_update",
+  "get_developer_update_settings",
+  "set_developer_update_directory",
+  "check_for_developer_update",
+  "install_developer_update",
   "storage_snapshot_get",
   "persist_storage_snapshot",
   "reopen_state_get",
@@ -651,6 +655,9 @@ function assertInvokeRequest(command, rawArgs) {
           throw new TypeError("Electron titlebar overlay colors must be hex strings");
         }
       }
+      break;
+    case "set_developer_update_directory":
+      assertPathString(args.directory, "developer update directory");
       break;
   }
   return args;

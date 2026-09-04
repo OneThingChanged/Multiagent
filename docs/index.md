@@ -28,5 +28,6 @@ configuration that supports it.
 
 * [Development and build](development-and-build.md) - Local setup, tests, smoke checks, and desktop/mobile build entry points.
 * [Release playbook](release-playbook.md) - Signing, artifact verification, publication, and updater invariants.
-* [Microsoft Store MSIX delivery and certification record](microsoft-store-msix-plan.md) - Submitted private-audience MSIX, validation evidence, certification status, Store update-strategy decision, and follow-up gates.
+* [Microsoft Store 배포 운영 가이드](microsoft-store-release-guide.md) - Store MSIX 빌드, WACK, Partner Center 제출, 공개, 인증 대응 및 업데이트 절차.
+* [Microsoft Store MSIX delivery and certification record](microsoft-store-msix-plan.md) - Private pilot and public-update implementation history, validation evidence, certification status, and rollout decisions.
 * [Known limitations](known-limitations.md) - Confirmed constraints and explicitly unverified follow-up items.

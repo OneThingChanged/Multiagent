@@ -64,6 +64,7 @@ import {
 import { UsageService } from "./services/usage-service.mjs";
 import { DiagnosticsService } from "./services/diagnostics-service.mjs";
 import { UpdaterLifecycle } from "./services/updater-lifecycle.mjs";
+import { LocalDeveloperUpdateService } from "./services/local-developer-update.mjs";
 import { cleanupLegacyElectronShortcuts } from "./services/windows-shortcut-cleanup.mjs";
 import { discoverGitSubmodules } from "./services/git-submodules.mjs";
 import { DocumentPreviewService } from "./services/document-preview-service.mjs";
@@ -820,10 +821,18 @@ const tunnelService = new TunnelService({
 const { autoUpdater } = electronUpdater;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
-if (!isStoreBuild) autoUpdater.channel = runtimeVariant.updaterChannel;
+if (runtimeVariant.updateProvider === "github") {
+  autoUpdater.channel = runtimeVariant.updaterChannel;
+}
 const electronTestUpdateFeed =
   "https://github.com/OneThingChanged/Multiagent/releases/download/electron-test/";
 let updateDownloaded = false;
+let pendingLocalInstaller = null;
+const localDeveloperUpdateService = new LocalDeveloperUpdateService({
+  configPath: path.join(app.getPath("userData"), "developer-update.json"),
+  currentVersion: productVersion,
+  environmentDirectory: process.env.MULTIAGENT_DEVELOPER_UPDATE_DIR ?? "",
+});
 const updaterLifecycle = new UpdaterLifecycle({
   baseDir: hookBaseDir,
   onInstallTimeout() {
@@ -831,7 +840,7 @@ const updaterLifecycle = new UpdaterLifecycle({
     app.exit(0);
   },
 });
-if (!isStoreBuild) {
+if (runtimeVariant.updateProvider === "github") {
   autoUpdater.on("error", (error) => {
     updaterLifecycle.record("updater-error", error);
   });
@@ -881,8 +890,12 @@ const diagnosticsService = new DiagnosticsService({
 });
 
 async function checkForElectronUpdate() {
-  if (isStoreBuild) {
-    throw new Error("Microsoft Store 빌드는 Windows Store에서 업데이트를 관리합니다.");
+  if (runtimeVariant.updateProvider !== "github") {
+    throw new Error(
+      isStoreBuild
+        ? "Microsoft Store 빌드는 Windows Store에서 업데이트를 관리합니다."
+        : "Standard 빌드는 지정한 로컬 출력 폴더에서 업데이트합니다."
+    );
   }
   if (!app.isPackaged && !process.env.MULTIAGENT_UPDATE_FEED_URL) return null;
   updaterLifecycle.record("check-started");
@@ -918,8 +931,12 @@ async function checkForElectronUpdate() {
 }
 
 async function downloadElectronUpdate() {
-  if (isStoreBuild) {
-    throw new Error("Microsoft Store 빌드는 앱 내부에서 업데이트를 설치할 수 없습니다.");
+  if (runtimeVariant.updateProvider !== "github") {
+    throw new Error(
+      isStoreBuild
+        ? "Microsoft Store 빌드는 앱 내부에서 업데이트를 설치할 수 없습니다."
+        : "Standard 빌드는 지정한 로컬 출력 폴더의 설치 파일을 사용합니다."
+    );
   }
   updaterLifecycle.record("download-started");
   let lastTransferred = 0;
@@ -2515,6 +2532,39 @@ function closeEverything() {
 }
 
 function completeCloseAction(action, trigger) {
+  if (action === "install-local-update") {
+    if (runtimeVariant.id !== "standard") {
+      throw new Error("로컬 개발자 업데이트는 Standard 빌드에서만 사용할 수 있습니다.");
+    }
+    const prepared = pendingLocalInstaller;
+    pendingLocalInstaller = null;
+    if (
+      !prepared ||
+      !localDeveloperUpdateService.validatePreparedInstaller(
+        prepared.update,
+        prepared.directory
+      )
+    ) {
+      throw new Error("업데이트 설치 파일이 변경되었거나 더 이상 존재하지 않습니다.");
+    }
+    updaterLifecycle.record("local-install-requested", {
+      trigger,
+      version: prepared.update.version,
+    });
+    try {
+      const installer = spawn(prepared.update.path, [], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      });
+      installer.unref();
+    } catch (error) {
+      updaterLifecycle.record("local-install-launch-failed", error);
+      throw error;
+    }
+    closeEverything();
+    return;
+  }
   if (action === "install-update") {
     if (isStoreBuild) {
       throw new Error("Microsoft Store 빌드는 Windows Store에서 업데이트를 설치합니다.");
@@ -5288,6 +5338,38 @@ async function invokeCommand(event, command, rawArgs) {
       return checkForElectronUpdate();
     case "download_and_install_update":
       return downloadElectronUpdate();
+    case "get_developer_update_settings":
+      if (runtimeVariant.id !== "standard") {
+        throw new Error("로컬 개발자 업데이트는 Standard 빌드에서만 사용할 수 있습니다.");
+      }
+      return localDeveloperUpdateService.settings();
+    case "set_developer_update_directory":
+      if (runtimeVariant.id !== "standard") {
+        throw new Error("로컬 개발자 업데이트는 Standard 빌드에서만 사용할 수 있습니다.");
+      }
+      return localDeveloperUpdateService.setDirectory(asString(args.directory));
+    case "check_for_developer_update":
+      if (runtimeVariant.id !== "standard") {
+        throw new Error("로컬 개발자 업데이트는 Standard 빌드에서만 사용할 수 있습니다.");
+      }
+      return localDeveloperUpdateService.check();
+    case "install_developer_update": {
+      if (runtimeVariant.id !== "standard") {
+        throw new Error("로컬 개발자 업데이트는 Standard 빌드에서만 사용할 수 있습니다.");
+      }
+      const result = await localDeveloperUpdateService.check();
+      if (!result.directory) throw new Error("먼저 개발자 빌드 출력 폴더를 지정하세요.");
+      if (!result.update) throw new Error("현재 버전보다 새로운 설치 파일이 없습니다.");
+      pendingLocalInstaller = {
+        directory: result.directory,
+        update: result.update,
+      };
+      if (!requestGracefulClose("install-local-update")) {
+        pendingLocalInstaller = null;
+        throw new Error("앱 종료 준비를 시작하지 못했습니다.");
+      }
+      return { version: result.update.version };
+    }
     case "relaunch":
       if (updateDownloaded) {
         requestGracefulClose("install-update");

@@ -13,6 +13,20 @@ export type Update = {
   ): Promise<void>;
 };
 
+export type DeveloperUpdate = {
+  version: string;
+  path: string;
+  size: number;
+  modifiedAt: string;
+};
+
+export type DeveloperUpdateStatus = {
+  directory: string | null;
+  source: "configured" | "environment" | "none";
+  currentVersion: string;
+  update: DeveloperUpdate | null;
+};
+
 export async function openDialog(options: {
   directory?: boolean;
   multiple?: boolean;
@@ -72,6 +86,36 @@ export async function check(): Promise<Update | null> {
       }
     },
   };
+}
+
+export async function getDeveloperUpdateSettings() {
+  const bridge = electronBridge();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.invoke<{
+    directory: string | null;
+    source: "configured" | "environment" | "none";
+  }>("get_developer_update_settings");
+}
+
+export async function setDeveloperUpdateDirectory(directory: string) {
+  const bridge = electronBridge();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.invoke<{
+    directory: string | null;
+    source: "configured" | "environment" | "none";
+  }>("set_developer_update_directory", { directory });
+}
+
+export async function checkDeveloperUpdate(): Promise<DeveloperUpdateStatus> {
+  const bridge = electronBridge();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.invoke<DeveloperUpdateStatus>("check_for_developer_update");
+}
+
+export async function installDeveloperUpdate() {
+  const bridge = electronBridge();
+  if (!bridge) throw new Error("Electron bridge is unavailable");
+  return bridge.invoke<{ version: string }>("install_developer_update");
 }
 
 export async function relaunch() {

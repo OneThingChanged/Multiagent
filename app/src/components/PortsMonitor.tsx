@@ -3,6 +3,7 @@ import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 import type { Agent, Project } from "../types";
 import type { PortEntry, PortsResult } from "../platform/ipcContract";
+import { useAppLanguage } from "../lib/appLanguage";
 
 // Orca-style Ports monitor: the status-bar segment shows the workspace port
 // count; the popover groups listening TCP ports by project, with an
@@ -29,6 +30,7 @@ export function PortsMonitor({
   onSelectProject: (projectId: string) => void;
   onRefreshUsage?: () => void | Promise<void>;
 }) {
+  const { text } = useAppLanguage();
   const [result, setResult] = useState<PortsResult | null>(null);
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -106,8 +108,8 @@ export function PortsMonitor({
           key,
           projectId,
           name: projectId
-            ? projectById.get(projectId)?.name ?? "삭제된 프로젝트"
-            : "기타 세션",
+            ? projectById.get(projectId)?.name ?? text("삭제된 프로젝트", "Deleted project")
+            : text("기타 세션", "Other sessions"),
           ports: [],
         };
         byProject.set(key, group);
@@ -124,7 +126,7 @@ export function PortsMonitor({
       externalPorts: external,
       workspaceCount: ports.length - external.length,
     };
-  }, [agents, projects, result]);
+  }, [agents, projects, result, text]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -172,14 +174,14 @@ export function PortsMonitor({
       <span className="port-actions">
         <button
           type="button"
-          title="브라우저에서 열기"
+          title={text("브라우저에서 열기", "Open in browser")}
           onClick={() => openInBrowser(entry)}
         >
           ↗
         </button>
         <button
           type="button"
-          title="주소 복사"
+          title={text("주소 복사", "Copy address")}
           onClick={() => copyAddress(entry)}
         >
           ⧉
@@ -188,7 +190,7 @@ export function PortsMonitor({
           <button
             type="button"
             className="port-action-danger"
-            title="프로세스 종료"
+            title={text("프로세스 종료", "Stop process")}
             onClick={() => void stopProcess(entry)}
           >
             ✕
@@ -204,7 +206,7 @@ export function PortsMonitor({
         type="button"
         className={`resource-status ${open ? "resource-status-open" : ""}`}
         onClick={() => setOpen((value) => !value)}
-        title={`Ports — workspace ${workspaceCount}개 · external ${externalPorts.length}개`}
+        title={text(`Ports — workspace ${workspaceCount}개 · external ${externalPorts.length}개`, `Ports — ${workspaceCount} workspace · ${externalPorts.length} external`)}
       >
         <span className="resource-status-icon">🔌</span>
         <span>{workspaceCount}</span>
@@ -221,17 +223,17 @@ export function PortsMonitor({
               disabled={refreshing}
               onClick={() => void refresh()}
             >
-              {refreshing ? "갱신 중" : "새로고침"}
+              {refreshing ? text("갱신 중", "Refreshing") : text("새로고침", "Refresh")}
             </button>
           </div>
           {opError && <div className="ports-op-error">{opError}</div>}
           <div className="resource-popover-body">
             {result && !result.sampled && (
-              <div className="resource-empty">포트 정보를 수집하지 못했습니다.</div>
+              <div className="resource-empty">{text("포트 정보를 수집하지 못했습니다.", "Could not collect port information.")}</div>
             )}
             {result?.sampled && groups.length === 0 && (
               <div className="resource-empty">
-                프로젝트에 연결된 열린 포트가 없습니다.
+                {text("프로젝트에 연결된 열린 포트가 없습니다.", "No open ports are associated with a project.")}
               </div>
             )}
             {groups.map((group) => (
@@ -242,7 +244,7 @@ export function PortsMonitor({
                     <button
                       type="button"
                       className="port-group-goto"
-                      title="프로젝트로 이동"
+                      title={text("프로젝트로 이동", "Go to project")}
                       onClick={() => {
                         onSelectProject(group.projectId!);
                         setOpen(false);
@@ -273,7 +275,7 @@ export function PortsMonitor({
                   (externalPorts.length > 0 ? (
                     externalPorts.map((entry) => portRow(entry, true))
                   ) : (
-                    <div className="resource-empty">외부 포트가 없습니다.</div>
+                    <div className="resource-empty">{text("외부 포트가 없습니다.", "No external ports.")}</div>
                   ))}
               </div>
             )}

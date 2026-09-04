@@ -3,6 +3,7 @@ import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { Agent, Project } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 import { SessionStorageList } from "./SessionStorageList";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -25,6 +26,7 @@ export function ProjectPropertiesModal({
   onClose: () => void;
 }) {
   useNativeViewOcclusion();
+  const { text } = useAppLanguage();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,26 +49,26 @@ export function ProjectPropertiesModal({
 
   const sshHost = project.sshHostId ? findSshHost(project.sshHostId) : null;
   const rows: { label: string; value: string; mono?: boolean }[] = [
-    { label: "이름", value: project.name },
+    { label: text("이름", "Name"), value: project.name },
     ...(sshHost
       ? [
           {
-            label: "원격 호스트",
+            label: text("원격 호스트", "Remote host"),
             value: sshHostSummary(sshHost),
             mono: true,
           },
           {
-            label: "원격 폴더",
+            label: text("원격 폴더", "Remote folder"),
             value: project.remoteFolder || "—",
             mono: true,
           },
         ]
-      : [{ label: "폴더", value: project.folder || "—", mono: true }]),
-    { label: "세션 수", value: String(projectAgents.length) },
-    { label: "활성 세션", value: String(activeCount) },
-    { label: "생성 시각", value: formatDate(project.createdAt), mono: true },
+      : [{ label: text("폴더", "Folder"), value: project.folder || "—", mono: true }]),
+    { label: text("세션 수", "Sessions"), value: String(projectAgents.length) },
+    { label: text("활성 세션", "Active sessions"), value: String(activeCount) },
+    { label: text("생성 시각", "Created"), value: formatDate(project.createdAt), mono: true },
     {
-      label: "마지막 열람",
+      label: text("마지막 열람", "Last opened"),
       value: formatDate(project.lastOpenedAt),
       mono: true,
     },
@@ -82,7 +84,7 @@ export function ProjectPropertiesModal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="app-settings-header">
-          <h2 className="modal-title">프로젝트 속성</h2>
+          <h2 className="modal-title">{text("프로젝트 속성", "Project properties")}</h2>
           <button className="app-icon-btn" onClick={onClose} title="Close">
             ×
           </button>
@@ -110,7 +112,7 @@ export function ProjectPropertiesModal({
         />
         <div className="modal-actions">
           <button className="btn-primary" onClick={onClose}>
-            닫기
+            {text("닫기", "Close")}
           </button>
         </div>
       </div>

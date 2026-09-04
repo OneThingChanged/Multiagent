@@ -22,6 +22,9 @@ sources:
   - id: company-builder
     resource: ../app/scripts/build-electron-company.mjs
     title: "Company desktop build"
+  - id: local-developer-updater
+    resource: ../app/electron/services/local-developer-update.mjs
+    title: "Standard local developer update discovery"
   - id: store-builder
     resource: ../app/scripts/build-electron-store.mjs
     title: "Microsoft Store MSIX build"
@@ -103,6 +106,23 @@ uses a distinct identity and excludes the APK.[^standard-builder][^company-build
 Build output is under `app/electron-dist/`. It is generated material and must
 not be treated as source documentation.
 
+### Standard developer updates
+
+The installed Standard build does not need a GitHub release for routine
+developer updates. In **Settings → About → Update**, select the local
+`app/electron-dist/` directory once, then use **Check latest build**. The main
+process scans only that directory for exact
+`MultiAgent-Setup-X.Y.Z.0-x64.exe` names, selects the highest version newer than
+the running product version, saves active sessions, and launches that validated
+installer.[^local-developer-updater]
+
+Create a new Standard installer with `npm run electron:dist`, then use the
+installed app's update button. Do not select the Store subdirectory or an MSIX;
+Store builds remain Microsoft Store-managed. The optional
+`MULTIAGENT_DEVELOPER_UPDATE_DIR` environment variable can lock the folder for
+an automated developer environment; when present, the Settings picker is
+disabled.
+
 ### Microsoft Store package
 
 The development path uses a placeholder identity and a self-signed certificate
@@ -151,6 +171,7 @@ profile/authentication model is documented in [Remote service](remote-service.md
 [^dev-runner]: Electron development runner
 [^standard-builder]: Standard desktop build
 [^company-builder]: Company desktop build
+[^local-developer-updater]: Standard local developer update discovery
 [^store-builder]: Microsoft Store MSIX build
 [^store-verifier]: Microsoft Store MSIX verifier
 [^mobile-manifest]: Android scripts

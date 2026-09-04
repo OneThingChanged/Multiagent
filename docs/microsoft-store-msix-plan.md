@@ -1,7 +1,7 @@
 ---
 type: Implementation Plan
 title: Microsoft Store MSIX delivery and certification record
-description: "Implemented and submitted MultiAgent's private-audience MSIX package; Partner Center certification is in progress as of 2026-09-03."
+description: "Records the certified private pilot, the 1.7.0.0 public submission, and the planned 1.7.2.0 language-settings replacement."
 tags:
   - release
   - windows
@@ -67,19 +67,48 @@ sources:
 MultiAgent has a Store-managed Windows distribution channel in addition to the
 existing Standard and Company NSIS releases. Microsoft will sign and deliver
 the submitted MSIX after certification; Store-managed updates are separate
-from `electron-updater`. The first Store release is restricted to a private
-audience so installation and migration behavior can be validated before any
-public rollout.[^electron-msix-guide][^store-distribution][^store-visibility]
+from `electron-updater`. The first Store release was restricted to a private
+audience so installation behavior could be validated before public rollout.
+That `1.6.26.0` package was certified and installed successfully. Certification
+of the proposed free, worldwide, discoverable `1.7.0.0` update was cancelled;
+the same submission is back in draft for replacement by `1.7.2.0` after its
+remaining local gate.[^electron-msix-guide][^store-distribution][^store-visibility]
 
 The Store build keeps its data and update channel separate from NSIS. Existing
-NSIS releases remain available until the Store channel has passed private-user
-testing and a deliberate public rollout decision is made.
+NSIS releases remain available while Store certification and publication occur.
 
 A request to deploy live covers GitHub only. Store packaging and Partner Center
 submission require a separate explicit request, and a later Store submission
-for the same product release retains the exact GitHub four-part version.
+for the same product release retains the exact GitHub four-part version. The
+step-by-step process now lives in the
+[Microsoft Store release guide](microsoft-store-release-guide.md).
 
-## Submission status — 2026-09-03
+## Public update status — 2026-09-04
+
+| Item | Current value |
+| --- | --- |
+| Store product ID | `9NVBSGNRTPLR` |
+| Submitted package | `app/electron-dist/store/MultiAgent-Store-Release-1.7.0.0-x64.msix` |
+| Package version / architecture | `1.7.0.0` / `x64` |
+| Partner Center submission | Submission 3 / `1152921505701807824` |
+| Package validation | Passed |
+| Audience / visibility | Public audience / discoverable |
+| Markets / price | Worldwide / free |
+| Status | `Update in draft` (certification cancelled) |
+| Publishing behavior | Automatic as soon as certification passes |
+
+The source version is now `1.7.2.0` and includes a persistent System default,
+Korean, and English application-language setting. The user decided to cancel
+Submission 3 and replace it with this higher package version before public
+rollout. The `1.7.2.0` production MSIX was built on 2026-09-04 and passed the
+Store verifier plus packaged runtime and lifecycle smokes. Its size is
+157,629,333 bytes and SHA-256 is
+`6b953c3bb6e1d97c824a7af702a5d79f21eb1953b680437fd0752a5a9439119b`.
+WACK was blocked because the current shell was not elevated. Cancellation is
+confirmed in Partner Center; an administrator-run WACK result, replacement
+upload, completed submission options, and certification remain pending.
+
+## Initial private submission — 2026-09-03
 
 | Item | Current value |
 | --- | --- |
@@ -216,7 +245,7 @@ If the status becomes inconsistent again, check the following in order:
 
 ## Follow-up checklist
 
-### While certification is pending
+### While the public update certification is pending
 
 - Monitor the Partner Center status and the verified notification email.
 - Keep the submitted package and its source commit unchanged for traceability.
@@ -226,9 +255,9 @@ If the status becomes inconsistent again, check the following in order:
 ### If certification passes
 
 1. Confirm that the submission advances to Publishing and that the product is
-   still restricted to the intended private audience.
-2. Acquire the restricted Store link with an authorized test account and test
-   install, first launch, project selection, session creation/resume,
+   publicly discoverable at the intended free price.
+2. Acquire the update from Microsoft Store and test install/upgrade, first
+   launch, project selection, session creation/resume,
    conversation history, terminal/PTY, hooks, Git, browser MCP, Remote,
    document preview, TTS, usage indexing, update, and clean shutdown.
 3. Verify that Store updates replace the package without invoking
@@ -248,72 +277,70 @@ If the status becomes inconsistent again, check the following in order:
 4. Do not weaken the Standard/Company channels or remove required capabilities
    without a concrete Microsoft requirement.
 
-### Before a public rollout
+### Public rollout configuration
 
-- The certified private-audience package has been installed successfully on a
-  supported Windows desktop system. Complete one higher-version Store update
-  test before public rollout.
-- The Store update-control UX is decided below. Public rollout must not proceed
-  while the remaining versioning, sequencing, and policy tests are unresolved.
-- Decide between public discoverability and direct-link-only acquisition, then
-  update Pricing and availability accordingly. A public-audience decision
-  should be treated as a deliberate rollout gate, not a certification step.
+- The certified private-audience `1.6.26.0` package was installed successfully
+  on a supported Windows desktop system.
+- The public update uses public audience, worldwide availability, free pricing,
+  Store discoverability, and automatic publication after certification.
+- `1.7.0.0` is the first higher-version Store update and remains unverified as
+  an installed update until certification and publishing complete.
 - Update the Remote download page to point users to the Store acquisition path;
   do not distribute an unsigned MSIX directly.
 - Keep the Store and NSIS update channels clearly labeled and retain NSIS as a
   developer, Company, or recovery channel if that remains useful.
-- Update the public README, release playbook, known limitations, and support
-  instructions only after the private test is successful.
+- After the public update publishes, synchronize the public README, download
+  instructions, known limitations, and support guidance with its actual status.
 
-## Public rollout decision gate — Store updates
+## Public rollout decisions and post-publication verification
 
 The Store build already rejects the GitHub `electron-updater` workflow and
 declares Microsoft Store as its update provider. That implementation boundary
 must remain: a Store-installed MSIX is updated by Windows/Microsoft Store,
-whereas Standard and Company NSIS installations continue to use their existing
-GitHub updater channels.[^runtime-variant][^electron-main][^store-distribution]
+whereas Standard NSIS installations use a configured local developer-output
+folder and Company retains its private GitHub updater.[^runtime-variant][^electron-main][^store-distribution]
 
-The update-channel boundary is now fixed. The remaining items must be completed
-before making the Store listing public:
+The update-channel boundary and initial public configuration are fixed. Items
+marked as pending below are post-publication verification or later enhancements:
 
 1. **Update control UX — decided:** Store builds replace GitHub update controls
    with a Microsoft Store-managed status and a dedicated button that opens the
-   product page for Store product `9NVBSGNRTPLR`. Standard/Company builds retain
-   their GitHub check, install, and release controls.
-2. **Optional in-app Store check:** decide whether ordinary Store background
-   updates are sufficient or whether a later native bridge should use the
-   Windows Store package-update APIs to check and request installation from
-   inside MultiAgent.[^store-package-updates]
-3. **Version mapping:** keep the four-part MSIX package version strictly higher
+   product page for Store product `9NVBSGNRTPLR`. Standard uses its local output
+   folder controls; Company retains GitHub check, install, and release controls.
+2. **Optional in-app Store check — deferred:** ordinary Store updates and the
+   product-page button are sufficient for the initial public release. A later
+   native bridge may use the Windows Store package-update APIs to check and
+   request installation inside MultiAgent.[^store-package-updates]
+3. **Version mapping — decided:** keep the four-part MSIX package version strictly higher
    for every Partner Center submission and record its mapping to the product
    version. The unified baseline uses desktop compatibility version `1.7.0`
    and the identical public/Store version `1.7.0.0`. This is higher than the
    existing `1.6.26.0` Store package and can use the current product identity.
    Every later Store submission uses the exact version of its corresponding
-   GitHub product release rather than creating a Store-only version number.
-4. **Channel coexistence:** decide whether NSIS remains a developer, Company,
-   or recovery channel, how the website labels each installer, and whether
-   simultaneous NSIS and Store installations are supported. Preserve the
-   intentionally separate updater and data identities unless an explicit,
-   tested migration is implemented.
-5. **Update policy edge cases:** test private-audience upgrades when Store
+   product build rather than creating a Store-only version number.
+4. **Channel coexistence — decided:** Standard NSIS uses a local developer
+   output folder, Company remains a private GitHub channel, and Store remains
+   Microsoft-managed. Preserve separate updater and data
+   identities unless an explicit, tested migration is implemented. Simultaneous
+   installation behavior still requires a focused compatibility test.
+5. **Update policy edge cases — pending:** test public updates when Store
    automatic updates are enabled, disabled by the user, restricted by
    organization policy, delayed, offline, or interrupted. Verify that the app
    remains usable and presents an actionable version/update status.
-6. **Release sequencing:** define when a GitHub release and its corresponding
-   Store submission are considered equivalent, how certification delay is
-   communicated, and which channel receives urgent fixes first. Do not promise
-   simultaneous availability when Partner Center certification is still
-   pending.
-7. **Private upgrade evidence:** install the certified private package, submit
-   one higher-version private update, and confirm that Windows replaces the
-   package without invoking `electron-updater`, losing Store data, or breaking
-   terminal, browser, Remote, and session workflows. MSIX update delivery may
-   use block-level differential transfer, so verify behavior rather than
-   assuming a full reinstall.[^msix-package-updates]
+6. **Release sequencing — decided:** GitHub and Store use the same product
+   version, but certification can make their publication dates differ. Record
+   the version actually available in each channel and do not promise
+   simultaneous availability.
+7. **Public upgrade evidence — pending:** after `1.7.0.0` publishes, confirm
+   that Windows replaces the private package without invoking
+   `electron-updater`, losing Store data, or breaking terminal, browser,
+   Remote, and session workflows. MSIX update delivery may use block-level
+   differential transfer, so verify behavior rather than assuming a full
+   reinstall.[^msix-package-updates]
 
-The initial public Store rollout remains blocked until these decisions and the
-private higher-version upgrade test are recorded in this document.
+The initial public Store rollout was cancelled before publication. Submission 3
+remains a draft until the `1.7.2.0` replacement passes WACK, is uploaded, and is
+submitted under a separate Store deployment request.
 
 ## Release gates
 
@@ -329,18 +356,22 @@ private higher-version upgrade test are recorded in this document.
 - Private-audience installation of Store package `1.6.26.0`.
 - Store-specific update status and product-page action, isolated from the
   GitHub updater controls.
+- Public audience, worldwide free pricing, Store discoverability, and automatic
+  post-certification publishing configured for `1.7.0.0`.
+- Submission 3 certification cancellation confirmed; the draft is reusable.
 
 ### Pending
 
-- Private-audience higher-version update validation.
-- Final version mapping, channel-coexistence, release-sequencing, and
-  policy-edge-case decisions.
-- One successful private-audience higher-version Store upgrade.
-- Public discoverability/direct-link decision and public rollout documentation.
+- Administrator WACK for the `1.7.2.0` replacement package.
+- Partner Center upload, metadata refresh, certification, and publishing of the
+  `1.7.2.0` public update.
+- One successful Store upgrade from `1.6.26.0` to the public higher version.
+- Post-publication verification of version, data retention, update UX, and core
+  terminal/browser/Remote workflows.
 
-The Store path is not considered a general-public release until the pending
-gates above are complete. The existing NSIS release remains the fallback during
-certification and private testing.
+The Store path is not considered a completed general-public release until the
+pending gates above are complete. Standard remains available as a local
+developer build during certification.
 
 [^desktop-manifest]: Current Electron build and NSIS publication configuration
 [^runtime-variant]: Standard and Company runtime identities

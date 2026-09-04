@@ -8,6 +8,7 @@ import type { AppThemeId } from "../lib/appTheme";
 import type { TextFileResult } from "../platform/ipcContract";
 import { docKindForPath, parseDocTabId, type DocKind } from "../lib/docTabs";
 import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function joinFolderPath(folder: string, relativePath: string) {
   return `${folder.replace(/[\\/]+$/, "")}/${relativePath}`;
@@ -55,6 +56,7 @@ export function DocViewer({
   theme: AppThemeId;
   agentId?: string | null;
 }) {
+  const { text } = useAppLanguage();
   const ref = parseDocTabId(docId);
   const folder = project?.folder ?? "";
   const relativePath = ref?.relativePath ?? "";
@@ -66,13 +68,13 @@ export function DocViewer({
   } | null>(null);
   useEffect(() => {
     if (!relativePath) {
-      setState({ phase: "error", message: "잘못된 문서 탭입니다." });
+      setState({ phase: "error", message: text("잘못된 문서 탭입니다.", "This document tab is invalid.") });
       return;
     }
     if (!folder) {
       setState({
         phase: "error",
-        message: "프로젝트 폴더를 찾을 수 없습니다. (프로젝트가 삭제되었을 수 있음)",
+        message: text("프로젝트 폴더를 찾을 수 없습니다. (프로젝트가 삭제되었을 수 있음)", "The project folder could not be found. The project may have been deleted."),
       });
       return;
     }
@@ -145,7 +147,7 @@ export function DocViewer({
     return () => {
       cancelled = true;
     };
-  }, [docId, folder, relativePath, reloadKey, agentId]);
+  }, [docId, folder, relativePath, reloadKey, agentId, text]);
 
   const fullPath = folder && relativePath
     ? joinFolderPath(folder, relativePath)
@@ -185,7 +187,7 @@ export function DocViewer({
             <button
               className="docs-tool-btn"
               onClick={() => setReloadKey((v) => v + 1)}
-              title="다시 읽기"
+              title={text("다시 읽기", "Reload")}
             >
               Refresh
             </button>
@@ -193,7 +195,7 @@ export function DocViewer({
               className="docs-tool-btn"
               onClick={openLocal}
               disabled={!fullPath}
-              title="OS 기본 앱으로 열기"
+              title={text("OS 기본 앱으로 열기", "Open with default app")}
             >
               Open
             </button>
@@ -201,7 +203,7 @@ export function DocViewer({
               className="docs-tool-btn"
               onClick={revealLocal}
               disabled={!fullPath}
-              title="탐색기에서 보기"
+              title={text("탐색기에서 보기", "Reveal in File Explorer")}
             >
               Reveal
             </button>
@@ -231,14 +233,16 @@ export function DocViewer({
         {state.phase === "html" && !browserOpenForThisDocument && (
           <div className="doc-html-launch">
             <div className="doc-html-launch-icon">HTML</div>
-            <div className="doc-html-launch-title">전용 브라우저에서 문서 열기</div>
+            <div className="doc-html-launch-title">{text("전용 브라우저에서 문서 열기", "Open document in the dedicated browser")}</div>
             <div className="doc-html-launch-copy">
-              상대경로 CSS, JavaScript, 이미지, 폰트와 미디어를 원본 경로 그대로 불러옵니다.
-              프로젝트 폴더 밖의 파일과 Electron 권한은 차단됩니다.
+              {text(
+                "상대경로 CSS, JavaScript, 이미지, 폰트와 미디어를 원본 경로 그대로 불러옵니다. 프로젝트 폴더 밖의 파일과 Electron 권한은 차단됩니다.",
+                "Loads relative CSS, JavaScript, images, fonts, and media from their original paths. Files outside the project folder and Electron privileges are blocked.",
+              )}
             </div>
             <div className="doc-fallback-actions">
               <button className="docs-tool-btn docs-tool-btn-primary" onClick={openBrowser}>
-                전용 브라우저로 열기
+                {text("전용 브라우저로 열기", "Open dedicated browser")}
               </button>
             </div>
           </div>
@@ -266,15 +270,15 @@ export function DocViewer({
           <div className="doc-fallback">
             <div className="doc-fallback-title">
               {state.reason === "too_large"
-                ? `파일이 너무 큽니다 (${Math.round((state.size ?? 0) / 1024)} KB)`
-                : "미리볼 수 없는 파일입니다"}
+                ? text(`파일이 너무 큽니다 (${Math.round((state.size ?? 0) / 1024)} KB)`, `The file is too large (${Math.round((state.size ?? 0) / 1024)} KB)`)
+                : text("미리볼 수 없는 파일입니다", "This file cannot be previewed")}
             </div>
             <div className="doc-fallback-actions">
               <button className="docs-tool-btn" onClick={openLocal}>
-                OS로 열기
+                {text("OS로 열기", "Open with OS")}
               </button>
               <button className="docs-tool-btn" onClick={revealLocal}>
-                탐색기에서 보기
+                {text("탐색기에서 보기", "Reveal in File Explorer")}
               </button>
             </div>
           </div>
@@ -293,7 +297,7 @@ export function DocViewer({
               </button>
               {fullPath && (
                 <button className="docs-tool-btn" onClick={revealLocal}>
-                  탐색기에서 보기
+                  {text("탐색기에서 보기", "Reveal in File Explorer")}
                 </button>
               )}
             </div>

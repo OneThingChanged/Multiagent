@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { invoke, listen } from "../platform/runtime";
 import type { DocumentBrowserSnapshot, RuntimeCommand } from "../platform/ipcContract";
+import { useAppLanguage } from "../lib/appLanguage";
 
 type BrowserSnapshot = DocumentBrowserSnapshot;
 
@@ -23,6 +24,7 @@ export function isDocumentBrowserPage() {
 }
 
 export function DocumentBrowserPage() {
+  const { text } = useAppLanguage();
   const { browserId, documentPath } = browserQuery();
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>({
     browserId,
@@ -92,7 +94,7 @@ export function DocumentBrowserPage() {
             className="document-browser-btn"
             disabled={!snapshot.canGoBack}
             onClick={() => command("document_browser_back")}
-            title="뒤로가기"
+            title={text("뒤로가기", "Back")}
           >
             ←
           </button>
@@ -100,14 +102,14 @@ export function DocumentBrowserPage() {
             className="document-browser-btn"
             disabled={!snapshot.canGoForward}
             onClick={() => command("document_browser_forward")}
-            title="앞으로가기"
+            title={text("앞으로가기", "Forward")}
           >
             →
           </button>
           <button
             className="document-browser-btn"
             onClick={() => command("document_browser_reload")}
-            title="새로고침"
+            title={text("새로고침", "Reload")}
           >
             ↻
           </button>
@@ -115,19 +117,19 @@ export function DocumentBrowserPage() {
         <form
           className="document-browser-location document-browser-address-form"
           onSubmit={navigate}
-          title="주소를 입력하고 Enter로 이동"
+          title={text("주소를 입력하고 Enter로 이동", "Enter an address and press Enter")}
         >
           <input
             className="document-browser-address"
             value={address}
             onChange={(event) => setAddress(event.currentTarget.value)}
             onFocus={(event) => event.currentTarget.select()}
-            aria-label="브라우저 주소"
+            aria-label={text("브라우저 주소", "Browser address")}
             spellCheck={false}
             autoCapitalize="none"
             autoCorrect="off"
           />
-          {snapshot.loading && <span className="document-browser-status-inline">불러오는 중…</span>}
+          {snapshot.loading && <span className="document-browser-status-inline">{text("불러오는 중…", "Loading…")}</span>}
           {!snapshot.loading && snapshot.error && (
             <span className="document-browser-status-inline document-browser-error">
               {snapshot.error}
@@ -138,16 +140,16 @@ export function DocumentBrowserPage() {
           <button
             className="document-browser-btn"
             onClick={() => command("document_browser_open_external")}
-            title="기본 브라우저로 열기"
+            title={text("기본 브라우저로 열기", "Open in default browser")}
           >
-            기본 브라우저
+            {text("기본 브라우저", "Default browser")}
           </button>
           <button
             className="document-browser-btn document-browser-close"
             onClick={() => command("document_browser_close")}
-            title="닫기"
+            title={text("닫기", "Close")}
           >
-            닫기
+            {text("닫기", "Close")}
           </button>
         </div>
       </header>

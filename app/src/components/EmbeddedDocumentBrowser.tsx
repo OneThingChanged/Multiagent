@@ -5,6 +5,7 @@ import {
 } from "../lib/nativeViewOcclusion";
 import { invoke, listen } from "../platform/runtime";
 import type { DocumentBrowserSnapshot, RuntimeCommand } from "../platform/ipcContract";
+import { useAppLanguage } from "../lib/appLanguage";
 
 type EmbeddedDocumentBrowserProps = {
   browserId: string;
@@ -54,6 +55,7 @@ export function EmbeddedDocumentBrowser({
   documentPath,
   active = true,
 }: EmbeddedDocumentBrowserProps) {
+  const { text } = useAppLanguage();
   const hostRef = useRef<HTMLDivElement>(null);
   const [snapshot, setSnapshot] = useState<DocumentBrowserSnapshot>({
     browserId,
@@ -190,15 +192,15 @@ export function EmbeddedDocumentBrowser({
   };
 
   const pointedElement = asElementPreview(snapshot.selectedElement || snapshot.hoveredElement);
-  const elementName = pointedElement?.label || pointedElement?.selector || pointedElement?.tag || "요소";
+  const elementName = pointedElement?.label || pointedElement?.selector || pointedElement?.tag || text("요소", "element");
   const elementSize = pointedElement?.rect
     ? `${Math.round(pointedElement.rect.width || 0)} × ${Math.round(pointedElement.rect.height || 0)}`
     : "";
   const delivery = asDeliveryPreview(snapshot.annotationDelivery);
   const deliveryLabel = delivery
     ? delivery.ok
-      ? delivery.target === "clipboard" ? "클립보드 복사 완료" : "세션 전송 완료"
-      : `${delivery.target === "clipboard" ? "클립보드 복사 실패" : "세션 전송 실패"}: ${delivery.error || "알 수 없는 오류"}`
+      ? delivery.target === "clipboard" ? text("클립보드 복사 완료", "Copied to clipboard") : text("세션 전송 완료", "Sent to session")
+      : `${delivery.target === "clipboard" ? text("클립보드 복사 실패", "Clipboard copy failed") : text("세션 전송 실패", "Send to session failed")}: ${delivery.error || text("알 수 없는 오류", "Unknown error")}`
     : "";
 
   return (
@@ -209,7 +211,7 @@ export function EmbeddedDocumentBrowser({
             className="document-browser-btn"
             disabled={!snapshot.canGoBack}
             onClick={() => command("document_browser_back")}
-            title="뒤로가기"
+            title={text("뒤로가기", "Back")}
           >
             ←
           </button>
@@ -217,14 +219,14 @@ export function EmbeddedDocumentBrowser({
             className="document-browser-btn"
             disabled={!snapshot.canGoForward}
             onClick={() => command("document_browser_forward")}
-            title="앞으로가기"
+            title={text("앞으로가기", "Forward")}
           >
             →
           </button>
           <button
             className="document-browser-btn"
             onClick={() => command("document_browser_reload")}
-            title="새로고침"
+            title={text("새로고침", "Reload")}
           >
             ↻
           </button>
@@ -232,19 +234,19 @@ export function EmbeddedDocumentBrowser({
         <form
           className="document-browser-location document-browser-address-form"
           onSubmit={navigate}
-          title="주소를 입력하고 Enter로 이동"
+          title={text("주소를 입력하고 Enter로 이동", "Enter an address and press Enter")}
         >
           <input
             className="document-browser-address"
             value={address}
             onChange={(event) => setAddress(event.currentTarget.value)}
             onFocus={(event) => event.currentTarget.select()}
-            aria-label="브라우저 주소"
+            aria-label={text("브라우저 주소", "Browser address")}
             spellCheck={false}
             autoCapitalize="none"
             autoCorrect="off"
           />
-          {snapshot.loading && <span className="document-browser-status-inline">불러오는 중…</span>}
+          {snapshot.loading && <span className="document-browser-status-inline">{text("불러오는 중…", "Loading…")}</span>}
           {!snapshot.loading && snapshot.error && (
             <span className="document-browser-status-inline document-browser-error">
               {snapshot.error}
@@ -255,26 +257,26 @@ export function EmbeddedDocumentBrowser({
           <button
             className={`document-browser-btn${snapshot.inspectionMode && !snapshot.inspectionSendToSession ? " is-active" : ""}`}
             onClick={() => toggleInspection(false)}
-            title="DevTools처럼 요소 경계를 표시하고 클릭한 영역을 캡처"
+            title={text("DevTools처럼 요소 경계를 표시하고 클릭한 영역을 캡처", "Show element boundaries like DevTools and capture the clicked area")}
           >
-            {snapshot.inspectionMode && !snapshot.inspectionSendToSession ? "선택 취소" : "영역 선택"}
+            {snapshot.inspectionMode && !snapshot.inspectionSendToSession ? text("선택 취소", "Cancel selection") : text("영역 선택", "Select area")}
           </button>
           <button
             className={`document-browser-btn${snapshot.inspectionMode && snapshot.inspectionSendToSession ? " is-active" : ""}`}
             onClick={() => toggleInspection(true)}
             disabled={!snapshot.agentId}
             title={snapshot.agentId
-              ? "요소를 가리켜 확인한 뒤 클릭하면 이미지·JSON·HTML 문맥을 현재 세션에 전송"
-              : "이 문서 탭에 연결된 세션이 없습니다. 터미널의 문서 링크에서 다시 열어 주세요."}
+              ? text("요소를 가리켜 확인한 뒤 클릭하면 이미지·JSON·HTML 문맥을 현재 세션에 전송", "Hover to inspect an element, then click to send image, JSON, and HTML context to the current session")
+              : text("이 문서 탭에 연결된 세션이 없습니다. 터미널의 문서 링크에서 다시 열어 주세요.", "No session is connected to this document tab. Reopen it from the document link in a terminal.")}
           >
-            {snapshot.inspectionMode && snapshot.inspectionSendToSession ? "전송 취소" : "선택 후 전송"}
+            {snapshot.inspectionMode && snapshot.inspectionSendToSession ? text("전송 취소", "Cancel send") : text("선택 후 전송", "Select and send")}
           </button>
           <button
             className="document-browser-btn"
             onClick={() => command("document_browser_open_external")}
-            title="기본 브라우저로 열기"
+            title={text("기본 브라우저로 열기", "Open in default browser")}
           >
-            기본 브라우저
+            {text("기본 브라우저", "Default browser")}
           </button>
         </div>
       </header>
@@ -282,22 +284,25 @@ export function EmbeddedDocumentBrowser({
         <div className="document-browser-annotation-bar">
           <span>
             {snapshot.inspectionMode
-              ? `요소 선택 모드 · ${elementName}${elementSize ? ` · ${elementSize}` : ""} · 클릭하여 ${snapshot.inspectionSendToSession ? "세션에 전송" : "캡처"} · Esc 취소`
+              ? text(
+                  `요소 선택 모드 · ${elementName}${elementSize ? ` · ${elementSize}` : ""} · 클릭하여 ${snapshot.inspectionSendToSession ? "세션에 전송" : "캡처"} · Esc 취소`,
+                  `Element selection · ${elementName}${elementSize ? ` · ${elementSize}` : ""} · click to ${snapshot.inspectionSendToSession ? "send to session" : "capture"} · Esc to cancel`,
+                )
               : Boolean(snapshot.selectedElement)
-                ? `선택됨 · ${elementName}${elementSize ? ` · ${elementSize}` : ""}`
-                : "가리킨 영역"}
-            {snapshot.annotation ? " · 캡처됨" : ""}
+                ? text(`선택됨 · ${elementName}${elementSize ? ` · ${elementSize}` : ""}`, `Selected · ${elementName}${elementSize ? ` · ${elementSize}` : ""}`)
+                : text("가리킨 영역", "Hovered area")}
+            {snapshot.annotation ? text(" · 캡처됨", " · captured") : ""}
             {deliveryLabel ? ` · ${deliveryLabel}` : ""}
           </span>
           {Boolean(snapshot.annotation) && (
             <details>
-              <summary>JSON/HTML 문맥 보기</summary>
+              <summary>{text("JSON/HTML 문맥 보기", "View JSON/HTML context")}</summary>
               <pre>{String(JSON.stringify(snapshot.annotation, null, 2))}</pre>
             </details>
           )}
         </div>
       )}
-      <div ref={hostRef} className="embedded-document-browser-host" aria-label="HTML 문서 브라우저" />
+      <div ref={hostRef} className="embedded-document-browser-host" aria-label={text("HTML 문서 브라우저", "HTML document browser")} />
     </div>
   );
 }

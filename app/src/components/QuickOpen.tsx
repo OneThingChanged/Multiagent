@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { rankQuickOpenItems, type QuickOpenItem } from "../lib/quickOpen";
+import { useAppLanguage } from "../lib/appLanguage";
 
 const KIND_LABEL: Record<QuickOpenItem["kind"], string> = {
   project: "PROJECT",
@@ -22,6 +23,7 @@ export function QuickOpen({
   onClose: () => void;
 }) {
   useNativeViewOcclusion();
+  const { text } = useAppLanguage();
 
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -66,15 +68,15 @@ export function QuickOpen({
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="프로젝트, 세션, Screen, 문서 또는 명령 검색"
-            aria-label="Quick Open 검색"
+            placeholder={text("프로젝트, 세션, Screen, 문서 또는 명령 검색", "Search projects, sessions, screens, documents, or commands")}
+            aria-label={text("Quick Open 검색", "Search Quick Open")}
           />
           <kbd>Esc</kbd>
         </div>
         <div className="quick-open-hints">
-          <span><b>&gt;</b> 명령</span><span><b>@</b> 세션</span>
-          <span><b>#</b> Screen</span><span><b>/</b> 문서</span>
-          {loadingDocuments && <span className="quick-open-loading">문서 검색 중…</span>}
+          <span><b>&gt;</b> {text("명령", "commands")}</span><span><b>@</b> {text("세션", "sessions")}</span>
+          <span><b>#</b> Screen</span><span><b>/</b> {text("문서", "documents")}</span>
+          {loadingDocuments && <span className="quick-open-loading">{text("문서 검색 중…", "Searching documents…")}</span>}
         </div>
         <div className="quick-open-results" role="listbox">
           {results.map((item, index) => (
@@ -98,7 +100,7 @@ export function QuickOpen({
             </button>
           ))}
           {results.length === 0 && (
-            <div className="quick-open-empty">일치하는 항목이 없습니다.</div>
+            <div className="quick-open-empty">{text("일치하는 항목이 없습니다.", "No matching items.")}</div>
           )}
         </div>
       </section>

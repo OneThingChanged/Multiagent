@@ -18,6 +18,8 @@ describe("Electron IPC contract", () => {
     expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_create");
     expect(contract.INVOKE_COMMANDS).toContain("complete_remote_session_activation");
     expect(contract.INVOKE_COMMANDS).toContain("open_store_product");
+    expect(contract.INVOKE_COMMANDS).toContain("check_for_developer_update");
+    expect(contract.INVOKE_COMMANDS).toContain("install_developer_update");
     expect(contract.INVOKE_COMMANDS).toContain("document_browser_list");
     expect(contract.INVOKE_COMMANDS).toContain("document_browser_attach");
     expect(contract.INVOKE_COMMANDS).toContain("document_browser_hub_close");
@@ -25,6 +27,15 @@ describe("Electron IPC contract", () => {
     expect(contract.DELIVERED_EVENTS).toContain("remote:rename-session");
     expect(contract.DELIVERED_EVENTS).toContain("document-browser:catalog-updated");
     expect(contract.DELIVERED_EVENTS).toContain("document-browser:show-tab");
+  });
+
+  it("validates the developer update output directory", () => {
+    expect(contract.assertInvokeRequest("set_developer_update_directory", {
+      directory: "K:\\AI\\MultiAgent\\app\\electron-dist",
+    })).toMatchObject({ directory: "K:\\AI\\MultiAgent\\app\\electron-dist" });
+    expect(() => contract.assertInvokeRequest("set_developer_update_directory", {
+      directory: "",
+    })).toThrow("developer update directory");
   });
 
   it("exposes a dedicated Store product command without broadening URL schemes", () => {

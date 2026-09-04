@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-[![Version](https://img.shields.io/badge/version-1.7.1.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.7.2.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -55,7 +55,7 @@ Instead of juggling a pile of terminal windows, you register each project once, 
 - **Quick Open** (`Ctrl+K`) — projects, sessions, Screens, docs, and commands in one search
 - **Attention Center** — unread waiting/blocked/completed items that jump to the session
 - Customizable keyboard shortcuts, four themes (Soft / GitHub / Warm / Light), multi-window, always-on-top
-- **Auto-updates** from GitHub Releases with SHA-512 manifest integrity checks
+- Separate updates by build: Standard developer installs scan a chosen local output folder, Company uses its private GitHub channel, and Store installs are updated by Microsoft Store
 
 ## Supported Agents
 
@@ -112,7 +112,7 @@ source-tree or debug APK. Company packaging remains APK-free.
 | **standard** | `com.jintae.multiagent.electron` | ✅ included |
 | **company** | `com.jintae.multiagent.company.electron` | ❌ removed (UI and backend) |
 
-Both variants share the same code and version; only the identifier, updater channel, and remote features differ. Release verification and update-manifest procedures are documented in [docs/release-playbook.md](docs/release-playbook.md).
+The variants share the same code and product version while keeping identifiers, data, updater channels, and Remote availability separate. Release verification and update procedures are documented in [docs/release-playbook.md](docs/release-playbook.md).
 
 ## Project Structure
 

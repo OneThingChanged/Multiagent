@@ -46,7 +46,9 @@ export type RuntimeCommand =
   | "start_monitor_server" | "stop_monitor_server" | "ssh_password_set"
   | "ssh_password_clear" | "ssh_password_has" | "ssh_test"
   | "get_ssh_public_key" | "generate_ssh_key" | "check_for_update"
-  | "download_and_install_update" | "storage_snapshot_get"
+  | "download_and_install_update" | "get_developer_update_settings"
+  | "set_developer_update_directory" | "check_for_developer_update"
+  | "install_developer_update" | "storage_snapshot_get"
   | "persist_storage_snapshot"
   | "reopen_state_get" | "reopen_state_clear" | "relaunch";
 
@@ -309,6 +311,32 @@ export type GitChangesResult = {
 
 export type RuntimeCommandContract = {
   open_store_product: { args: Record<string, never>; result: null };
+  get_developer_update_settings: {
+    args: Record<string, never>;
+    result: { directory: string | null; source: "configured" | "environment" | "none" };
+  };
+  set_developer_update_directory: {
+    args: { directory: string };
+    result: { directory: string | null; source: "configured" | "environment" | "none" };
+  };
+  check_for_developer_update: {
+    args: Record<string, never>;
+    result: {
+      directory: string | null;
+      source: "configured" | "environment" | "none";
+      currentVersion: string;
+      update: {
+        version: string;
+        path: string;
+        size: number;
+        modifiedAt: string;
+      } | null;
+    };
+  };
+  install_developer_update: {
+    args: Record<string, never>;
+    result: { version: string };
+  };
   spawn_pty: { args: SpawnTerminalArgs; result: SpawnTerminalResult };
   complete_remote_session_create: {
     args: {

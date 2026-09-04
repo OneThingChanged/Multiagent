@@ -8,6 +8,7 @@ import {
   type ProjectFolder,
 } from "../types";
 import { loadSshHosts } from "../lib/sshHosts";
+import { useAppLanguage } from "../lib/appLanguage";
 
 export function NewProjectModal({
   defaultName,
@@ -23,6 +24,7 @@ export function NewProjectModal({
   projectFolders?: ProjectFolder[];
 }) {
   useNativeViewOcclusion();
+  const { text } = useAppLanguage();
 
   const visibleTools = AI_TOOLS.filter(
     (tool) => tool.id === "none" || !disabledTools.includes(tool.id)
@@ -127,7 +129,7 @@ export function NewProjectModal({
             ))}
           </select>
           <span className="check-hint">
-            프로젝트를 만들면 선택한 도구로 Session 1이 바로 시작됩니다.
+            {text("프로젝트를 만들면 선택한 도구로 Session 1이 바로 시작됩니다.", "Creating the project starts Session 1 with the selected tool.")}
           </span>
         </label>
 
@@ -141,7 +143,7 @@ export function NewProjectModal({
             <span>
               <span className="check-label">Dangerous mode</span>
               <span className="check-hint">
-                {selectedTool.dangerousFlag} — 권한 확인을 생략합니다.
+                {text(`${selectedTool.dangerousFlag} — 권한 확인을 생략합니다.`, `${selectedTool.dangerousFlag} — skips permission prompts.`)}
               </span>
             </span>
           </label>
@@ -199,7 +201,7 @@ export function NewProjectModal({
                 </select>
               ) : (
                 <span className="check-hint">
-                  Settings → SSH Hosts에서 먼저 호스트를 등록하세요.
+                  {text("Settings → SSH Hosts에서 먼저 호스트를 등록하세요.", "Register a host in Settings → SSH Hosts first.")}
                 </span>
               )}
             </label>
@@ -220,12 +222,12 @@ export function NewProjectModal({
 
         {availableProjectFolders.length > 0 && (
           <label className="field">
-            <span className="field-label">사이드바 폴더</span>
+            <span className="field-label">{text("사이드바 폴더", "Sidebar folder")}</span>
             <select
               value={projectFolderId}
               onChange={(event) => setProjectFolderId(event.target.value)}
             >
-              <option value="">미분류</option>
+              <option value="">{text("미분류", "Uncategorized")}</option>
               {availableProjectFolders.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}

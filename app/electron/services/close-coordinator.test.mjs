@@ -17,6 +17,16 @@ describe("CloseCoordinator", () => {
     expect(onComplete).toHaveBeenCalledWith("install-update", "renderer");
   });
 
+  it("supports a validated local installer close action", () => {
+    const onComplete = vi.fn();
+    const coordinator = new CloseCoordinator({ onRequest: vi.fn(), onComplete });
+
+    coordinator.request("install-local-update");
+    coordinator.confirm();
+
+    expect(onComplete).toHaveBeenCalledWith("install-local-update", "renderer");
+  });
+
   it("upgrades a pending quit to the safer higher-priority action", () => {
     const onRequest = vi.fn();
     const onComplete = vi.fn();

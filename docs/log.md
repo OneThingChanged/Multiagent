@@ -2,6 +2,10 @@
 
 ## 2026-09-04
 
+* **Local Standard developer updates**: Separated Standard from GitHub updates, added a persisted output-folder picker and strict highest-version `MultiAgent-Setup-X.Y.Z.0-x64.exe` discovery, and routed installation through the session-saving close handshake. `1.7.2.0` is the final Standard GitHub transition release; later Standard builds are installed directly from local output while Store remains Microsoft-managed and Company retains its private GitHub updater.
+* **Application language and Store replacement candidate**: Added persistent System default, Korean, and English UI language selection, synchronized the desktop/mobile/Store candidate to `1.7.2.0`, built and verified the production MSIX, and passed Store packaged runtime/lifecycle smokes. Submission 3 cancellation is confirmed and the draft is reusable; WACK, replacement upload, and resubmission remain pending.
+* **Public support boundary**: Recorded Microsoft Store as the only public distribution channel, moved public Q&A and privacy endpoints to `MultiagentSite`, and retained private GitHub releases as owner-only/internal delivery.
+* **Microsoft Store operations guide**: Added the Store-only build, verification, WACK, Partner Center, public-release, `runFullTrust`, troubleshooting, certification, and update runbook; recorded Submission 3 for public `1.7.0.0` as in certification.
 * **Release 1.7.1.0**: Synchronized the GitHub live release version for the global Browser Hub, safe native-view switching, HTML browser reuse, matching HTML tab labels, and source-tab closure.
 * **Explicit release scope**: Defined “live deployment” as Git/GitHub-only; Microsoft Store build and Partner Center submission now require a separate request while retaining the matching GitHub product version.
 * **Global Browser Hub lifecycle**: Documented the application-wide browser catalog, session-independent tab access, duplicate HTML preview reuse, and closing the corresponding source web or HTML tab from the Hub.

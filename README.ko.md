@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-[![Version](https://img.shields.io/badge/version-1.7.1.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.7.2.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
@@ -55,7 +55,7 @@
 - **Quick Open** (`Ctrl+K`) — 프로젝트·세션·Screen·문서·명령 통합 검색
 - **Attention Center** — 읽지 않은 대기/차단/완료 항목을 모아 보고 클릭 시 해당 세션으로 이동
 - 커스터마이즈 가능한 단축키, 4종 테마(Soft / GitHub / Warm / Light), 멀티 윈도우, 항상 위
-- SHA-512 manifest 무결성 검사를 사용하는 GitHub Releases 기반 **자동 업데이트**
+- 빌드별 업데이트 분리: Standard 개발자 설치본은 지정한 로컬 출력 폴더, Company는 비공개 GitHub 채널, Store 설치본은 Microsoft Store 사용
 
 ## 지원 에이전트
 
@@ -108,7 +108,7 @@ Electron 인스톨러, blockmap, 업데이터 manifest는 `app/electron-dist/`�
 | **standard** | `com.jintae.multiagent.electron` | ✅ 포함 |
 | **company** | `com.jintae.multiagent.company.electron` | ❌ 제외 (UI와 백엔드 모두) |
 
-두 variant는 같은 코드·같은 버전을 쓰고, 식별자·업데이트 채널·원격 기능만 다릅니다. 서명 릴리즈와 업데이트 manifest 절차는 [docs/release-playbook.md](docs/release-playbook.md)를 참고하세요.
+각 variant는 같은 코드·제품 버전을 쓰되 식별자·데이터·업데이트 채널·Remote 제공 여부를 분리합니다. 릴리스 검증과 업데이트 절차는 [docs/release-playbook.md](docs/release-playbook.md)를 참고하세요.
 
 ## 프로젝트 구조
 

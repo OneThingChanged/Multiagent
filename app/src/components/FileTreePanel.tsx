@@ -21,6 +21,7 @@ import type {
   GitSubmoduleEntry,
 } from "../platform/ipcContract";
 import { loadDiffToolCommand } from "../lib/diffTool";
+import { useAppLanguage } from "../lib/appLanguage";
 
 // Orca-style lazy file explorer: one list_directory call per expanded folder,
 // cached in dirCache (key "" = project root). Expanded state persists per
@@ -216,11 +217,11 @@ function fileIconClass(name: string) {
 // Sidebar file-type filter categories.
 type FileKind = "md" | "image" | "code" | "html";
 
-const FILE_KINDS: { id: FileKind; label: string; title: string }[] = [
-  { id: "md", label: "MD", title: "마크다운" },
-  { id: "image", label: "이미지", title: "이미지" },
-  { id: "code", label: "코드", title: "코드" },
-  { id: "html", label: "HTML", title: "HTML" },
+const FILE_KINDS: { id: FileKind; label: string; labelEn: string; title: string; titleEn: string }[] = [
+  { id: "md", label: "MD", labelEn: "MD", title: "마크다운", titleEn: "Markdown" },
+  { id: "image", label: "이미지", labelEn: "Image", title: "이미지", titleEn: "Images" },
+  { id: "code", label: "코드", labelEn: "Code", title: "코드", titleEn: "Code" },
+  { id: "html", label: "HTML", labelEn: "HTML", title: "HTML", titleEn: "HTML" },
 ];
 
 export function fileKindOf(name: string): FileKind | null {
@@ -372,6 +373,7 @@ export function FileTreePanel({
   ) => void;
   onClose: () => void;
 }) {
+  const { language, text } = useAppLanguage();
   // ---- Shown project: follows the active project unless pinned ----
   const initialPin = useRef(loadPinState());
   const [pinned, setPinned] = useState(initialPin.current.pinned);
@@ -1282,7 +1284,7 @@ export function FileTreePanel({
                 </button>
               ))}
               {projects.length === 0 && (
-                <div className="file-tree-dropdown-empty">프로젝트가 없습니다</div>
+                <div className="file-tree-dropdown-empty">{text("프로젝트가 없습니다", "No projects")}</div>
               )}
             </div>
           )}
@@ -1292,13 +1294,13 @@ export function FileTreePanel({
           onClick={togglePin}
           title={
             pinned
-              ? `${shownProject?.name ?? ""}에 고정됨 — 클릭하여 해제`
-              : "트리를 이 프로젝트에 고정"
+              ? text(`${shownProject?.name ?? ""}에 고정됨 — 클릭하여 해제`, `Pinned to ${shownProject?.name ?? ""} — click to unpin`)
+              : text("트리를 이 프로젝트에 고정", "Pin the tree to this project")
           }
         >
           📌
         </button>
-        <button className="docs-icon-btn" onClick={onClose} title="닫기">
+        <button className="docs-icon-btn" onClick={onClose} title={text("닫기", "Close")}>
           ×
         </button>
       </div>
@@ -1310,11 +1312,11 @@ export function FileTreePanel({
             value={scopePath}
             onChange={(event) => selectScope(event.target.value)}
             disabled={submodulesLoading}
-            title="파일 트리와 Source Control에 표시할 저장소"
+            title={text("파일 트리와 Source Control에 표시할 저장소", "Repository shown in the file tree and Source Control")}
           >
             <option value="">
               {submodulesLoading
-                ? "서브모듈 확인 중…"
+                ? text("서브모듈 확인 중…", "Checking submodules…")
                 : `Main · ${shownProject?.name ?? "Project"}`}
             </option>
             {submodules.length > 0 && (
@@ -1326,7 +1328,7 @@ export function FileTreePanel({
                     disabled={!entry.initialized}
                   >
                     {entry.relative_path}
-                    {entry.initialized ? "" : " (초기화 안 됨)"}
+                    {entry.initialized ? "" : text(" (초기화 안 됨)", " (not initialized)")}
                   </option>
                 ))}
               </optgroup>
@@ -1365,11 +1367,13 @@ export function FileTreePanel({
                   on ? " file-tree-kind-chip-on" : ""
                 }`}
                 onClick={() => toggleKind(kind.id)}
-                title={on ? `${kind.title} 필터 해제` : `${kind.title}만 보기`}
+                title={on
+                  ? text(`${kind.title} 필터 해제`, `Clear ${kind.titleEn} filter`)
+                  : text(`${kind.title}만 보기`, `Show ${kind.titleEn} only`)}
                 aria-pressed={on}
               >
                 <span className="file-tree-kind-dot" />
-                <span className="file-tree-kind-label">{kind.label}</span>
+                <span className="file-tree-kind-label">{language === "ko" ? kind.label : kind.labelEn}</span>
               </button>
             );
           })}
@@ -1378,7 +1382,7 @@ export function FileTreePanel({
               type="button"
               className="file-tree-kind-clear"
               onClick={() => setKindFilter(new Set())}
-              title="필터 모두 해제"
+              title={text("필터 모두 해제", "Clear all filters")}
             >
               ×
             </button>
@@ -1392,7 +1396,7 @@ export function FileTreePanel({
           <button
             className="docs-icon-btn"
             onClick={() => void expandAll()}
-            title="모두 펼치기"
+            title={text("모두 펼치기", "Expand all")}
             disabled={!folder || expandingAll}
           >
             ⊞
@@ -1400,7 +1404,7 @@ export function FileTreePanel({
           <button
             className="docs-icon-btn"
             onClick={collapseAll}
-            title="모두 접기"
+            title={text("모두 접기", "Collapse all")}
             disabled={!folder}
           >
             ⊟
@@ -1408,7 +1412,7 @@ export function FileTreePanel({
           <button
             className="docs-icon-btn"
             onClick={refresh}
-            title="새로고침"
+            title={text("새로고침", "Refresh")}
             disabled={!folder || rootLoading}
           >
             ⟳
@@ -1448,13 +1452,13 @@ export function FileTreePanel({
         }}
       >
         {!shownProject && (
-          <div className="docs-empty">프로젝트를 선택하면 파일을 볼 수 있습니다.</div>
+          <div className="docs-empty">{text("프로젝트를 선택하면 파일을 볼 수 있습니다.", "Select a project to view its files.")}</div>
         )}
         {shownProject && !folder && (
           <div className="docs-empty">
             {shownProject.sshHostId
-              ? "SSH 프로젝트는 파일 트리를 지원하지 않습니다."
-              : "선택된 프로젝트에 폴더가 없습니다."}
+              ? text("SSH 프로젝트는 파일 트리를 지원하지 않습니다.", "The file tree does not support SSH projects.")
+              : text("선택된 프로젝트에 폴더가 없습니다.", "The selected project has no folder.")}
           </div>
         )}
         {folder && error && (
@@ -1479,13 +1483,13 @@ export function FileTreePanel({
             {!kindFilterLoading && visibleRows.length === 0 && !rootLoading && (
               <div className="docs-empty">
                 {kindFiltering
-                  ? "선택한 형식의 파일이 없습니다."
-                  : "파일이 없습니다."}
+                  ? text("선택한 형식의 파일이 없습니다.", "No files match the selected types.")
+                  : text("파일이 없습니다.", "No files.")}
               </div>
             )}
             {!kindFilterLoading && kindFilterResult?.truncated && (
               <div className="file-tree-truncated">
-                폴더가 많아 확인하지 못한 경로는 그대로 표시합니다.
+                {text("폴더가 많아 확인하지 못한 경로는 그대로 표시합니다.", "Paths that could not be checked because there are many folders remain visible.")}
               </div>
             )}
           </div>
@@ -1519,11 +1523,11 @@ export function FileTreePanel({
                 </button>
               ))}
             {!filterLoading && filterResult && filterResult.entries.length === 0 && (
-              <div className="docs-empty">일치하는 파일이 없습니다.</div>
+              <div className="docs-empty">{text("일치하는 파일이 없습니다.", "No matching files.")}</div>
             )}
             {!filterLoading && filterResult?.truncated && (
               <div className="file-tree-truncated">
-                결과가 많아 일부만 표시합니다.
+                {text("결과가 많아 일부만 표시합니다.", "Only some results are shown because there are many matches.")}
               </div>
             )}
           </div>
@@ -1599,6 +1603,7 @@ function SourceControlView({
   onMutated: () => void;
   onError: (err: unknown) => void;
 }) {
+  const { text } = useAppLanguage();
   const [changes, setChanges] = useState<GitChangesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1698,9 +1703,14 @@ function SourceControlView({
   const discard = (paths: string[]) => {
     if (paths.length === 0) return;
     const label =
-      paths.length === 1 ? `"${baseName(paths[0])}"의` : `${paths.length}개 파일의`;
+      paths.length === 1
+        ? text(`"${baseName(paths[0])}"의`, `changes to "${baseName(paths[0])}"`)
+        : text(`${paths.length}개 파일의`, `changes to ${paths.length} files`);
     const ok = window.confirm(
-      `${label} 변경을 되돌립니다.\n미추적 파일은 휴지통으로, 나머지는 마지막 커밋 상태로 복원됩니다.\n이 동작은 git으로 되돌릴 수 없습니다.`
+      text(
+        `${label} 변경을 되돌립니다.\n미추적 파일은 휴지통으로, 나머지는 마지막 커밋 상태로 복원됩니다.\n이 동작은 git으로 되돌릴 수 없습니다.`,
+        `Discard ${label}?\nUntracked files will be moved to the Recycle Bin, and other files will be restored to the last commit.\nGit cannot undo this action.`,
+      ),
     );
     if (!ok) return;
     void runGitOp(async () => {
@@ -1713,7 +1723,12 @@ function SourceControlView({
     const command = loadDiffToolCommand().trim();
     if (!command) {
       onError(
-        new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.")
+        new Error(
+          text(
+            "설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.",
+            "Choose an external diff tool in Settings → Version Control first.",
+          ),
+        ),
       );
       return;
     }
@@ -1745,7 +1760,7 @@ function SourceControlView({
   const commitFile = (relativePath: string) => {
     const msg = message.trim();
     if (!msg) {
-      onError(new Error("커밋 메시지를 먼저 입력하세요."));
+      onError(new Error(text("커밋 메시지를 먼저 입력하세요.", "Enter a commit message first.")));
       return;
     }
     void runGitOp(async () => {
@@ -1784,7 +1799,12 @@ function SourceControlView({
     const command = loadDiffToolCommand().trim();
     if (!command) {
       onError(
-        new Error("설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.")
+        new Error(
+          text(
+            "설정 → Version Control에서 외부 diff 프로그램을 먼저 지정하세요.",
+            "Choose an external diff tool in Settings → Version Control first.",
+          ),
+        ),
       );
       return;
     }
@@ -1839,8 +1859,8 @@ function SourceControlView({
       <div className="file-tree-body">
         <div className="docs-empty">
           {sshProject
-            ? "SSH 프로젝트는 Source Control을 지원하지 않습니다."
-            : "프로젝트를 선택하면 변경사항을 볼 수 있습니다."}
+            ? text("SSH 프로젝트는 Source Control을 지원하지 않습니다.", "Source Control is not available for SSH projects.")
+            : text("프로젝트를 선택하면 변경사항을 볼 수 있습니다.", "Select a project to view its changes.")}
         </div>
       </div>
     );
@@ -1855,7 +1875,7 @@ function SourceControlView({
   if (!changes.is_repo) {
     return (
       <div className="file-tree-body">
-        <div className="docs-empty">git 저장소가 아닙니다.</div>
+        <div className="docs-empty">{text("git 저장소가 아닙니다.", "This is not a Git repository.")}</div>
       </div>
     );
   }
@@ -1918,9 +1938,10 @@ function SourceControlView({
         setHistory(null);
         setCtx({ x: event.clientX, y: event.clientY, entry, staged });
       }}
-      title={`${entry.relative_path}\n(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: ${
-        doubleClickDiff ? "외부 diff" : "열기"
-      } · 우클릭: 메뉴)`}
+      title={`${entry.relative_path}\n${text(
+        `(클릭: 선택 · Shift+클릭: 범위 선택 · 더블클릭: ${doubleClickDiff ? "외부 diff" : "열기"} · 우클릭: 메뉴)`,
+        `(Click: select · Shift+click: range · Double-click: ${doubleClickDiff ? "external diff" : "open"} · Right-click: menu)`,
+      )}`}
     >
       <input
         type="checkbox"
@@ -1943,7 +1964,7 @@ function SourceControlView({
       </span>
       <span
         className="scm-act scm-act-diff"
-        title="외부 diff 프로그램으로 비교"
+        title={text("외부 diff 프로그램으로 비교", "Compare with external diff tool")}
         onClick={(event) => {
           event.stopPropagation();
           openDiff(entry.relative_path, staged);
@@ -1953,7 +1974,7 @@ function SourceControlView({
       </span>
       <span
         className="scm-act scm-act-discard"
-        title="변경 되돌리기 (Discard)"
+        title={text("변경 되돌리기 (Discard)", "Discard changes")}
         onClick={(event) => {
           event.stopPropagation();
           discard([entry.relative_path]);
@@ -1985,7 +2006,7 @@ function SourceControlView({
           className="scm-branch"
           onClick={toggleBranchMenu}
           disabled={busy || sshProject}
-          title="브랜치 전환"
+          title={text("브랜치 전환", "Switch branch")}
         >
           ⎇ {changes.branch || "(no branch)"} <span className="scm-branch-caret">▾</span>
         </button>
@@ -1997,7 +2018,7 @@ function SourceControlView({
           type="button"
           onClick={() => void load()}
           disabled={loading || busy}
-          title="Git 상태 새로고침"
+          title={text("Git 상태 새로고침", "Refresh Git status")}
         >
           ⟳
         </button>
@@ -2010,7 +2031,7 @@ function SourceControlView({
         {branchOpen && (
           <div className="scm-branch-menu">
             {branchList === null && (
-              <div className="scm-branch-empty">불러오는 중…</div>
+              <div className="scm-branch-empty">{text("불러오는 중…", "Loading…")}</div>
             )}
             {branchList?.branches.map((name) => (
               <button
@@ -2027,7 +2048,7 @@ function SourceControlView({
               </button>
             ))}
             {branchList && branchList.branches.length === 0 && (
-              <div className="scm-branch-empty">브랜치 없음</div>
+              <div className="scm-branch-empty">{text("브랜치 없음", "No branches")}</div>
             )}
           </div>
         )}
@@ -2035,7 +2056,7 @@ function SourceControlView({
       <div className="scm-msg">
         <textarea
           value={message}
-          placeholder="Message (커밋 메시지)"
+          placeholder={text("Message (커밋 메시지)", "Commit message")}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -2063,8 +2084,8 @@ function SourceControlView({
           disabled={!canCommit}
           title={
             commitAll
-              ? "스테이징된 항목이 없어 전체 변경을 커밋합니다 (Ctrl+Enter)"
-              : "스테이징된 항목만 커밋합니다 (Ctrl+Enter)"
+              ? text("스테이징된 항목이 없어 전체 변경을 커밋합니다 (Ctrl+Enter)", "No staged items; commit all changes (Ctrl+Enter)")
+              : text("스테이징된 항목만 커밋합니다 (Ctrl+Enter)", "Commit staged items only (Ctrl+Enter)")
           }
         >
           {commitAll
@@ -2076,7 +2097,9 @@ function SourceControlView({
       </div>
       <div className={`scm-selbar${selectedPaths.length === 0 ? " scm-selbar-empty" : ""}`}>
         <span className="scm-selbar-count">
-          {selectedPaths.length > 0 ? `${selectedPaths.length}개 선택` : "선택 없음"}
+          {selectedPaths.length > 0
+            ? text(`${selectedPaths.length}개 선택`, `${selectedPaths.length} selected`)
+            : text("선택 없음", "None selected")}
         </span>
         <button
           onClick={() => stage(selectedPaths)}
@@ -2101,7 +2124,7 @@ function SourceControlView({
           className="scm-selbar-clear"
           onClick={() => setSelected(new Set())}
           disabled={selectedPaths.length === 0}
-          title="선택 해제"
+          title={text("선택 해제", "Clear selection")}
         >
           ×
         </button>
@@ -2112,7 +2135,7 @@ function SourceControlView({
           {changes.staged.length > 0 && (
             <span
               className="scm-section-act"
-              title="모두 언스테이지"
+              title={text("모두 언스테이지", "Unstage all")}
               onClick={() =>
                 unstage(changes.staged.map((entry) => entry.relative_path))
               }
@@ -2124,7 +2147,7 @@ function SourceControlView({
         <div className="scm-list">
           {changes.staged.map((entry) => changeRow(entry, true))}
           {changes.staged.length === 0 && (
-            <div className="scm-empty">스테이징된 변경 없음</div>
+            <div className="scm-empty">{text("스테이징된 변경 없음", "No staged changes")}</div>
           )}
         </div>
         <div className="scm-section">
@@ -2133,7 +2156,7 @@ function SourceControlView({
         <div className="scm-list">
           {changes.unstaged.map((entry) => changeRow(entry, false))}
           {changes.unstaged.length === 0 && (
-            <div className="scm-empty">변경 없음</div>
+            <div className="scm-empty">{text("변경 없음", "No changes")}</div>
           )}
         </div>
         <div className="scm-commits">
@@ -2143,8 +2166,8 @@ function SourceControlView({
               type="button"
               className="scm-section-act"
               onClick={() => onOpenHistory(null)}
-              title="전체 커밋 히스토리 자세히 보기"
-              aria-label="커밋 히스토리 자세히 보기"
+              title={text("전체 커밋 히스토리 자세히 보기", "View full commit history")}
+              aria-label={text("커밋 히스토리 자세히 보기", "View commit history")}
             >
               🔍
             </button>
@@ -2170,13 +2193,13 @@ function SourceControlView({
           onContextMenu={(event) => event.preventDefault()}
         >
           <button onClick={() => { onOpenFile(ctx.entry.relative_path); setCtx(null); }}>
-            열기
+            {text("열기", "Open")}
           </button>
           <button onClick={() => { onOpenHistory(ctx.entry.relative_path); setCtx(null); }}>
-            이 경로 히스토리
+            {text("이 경로 히스토리", "Path history")}
           </button>
           <button onClick={() => { openDiff(ctx.entry.relative_path, ctx.staged); setCtx(null); }}>
-            Diff (외부 프로그램)
+            {text("Diff (외부 프로그램)", "Diff (external tool)")}
           </button>
           <button onClick={() => {
             invoke("reveal_local_path", {
@@ -2184,7 +2207,7 @@ function SourceControlView({
             }).catch(() => {});
             setCtx(null);
           }}>
-            탐색기에서 보기
+            {text("탐색기에서 보기", "Reveal in File Explorer")}
           </button>
           <hr />
           <button
@@ -2197,13 +2220,13 @@ function SourceControlView({
             {ctx.staged ? "Unstage" : "Stage"}
           </button>
           <button onClick={() => { commitFile(ctx.entry.relative_path); setCtx(null); }}>
-            커밋 (이 파일만)
+            {text("커밋 (이 파일만)", "Commit this file")}
           </button>
           <button
             className="file-tree-ctx-danger"
             onClick={() => { discard([ctx.entry.relative_path]); setCtx(null); }}
           >
-            Discard (변경 되돌리기)
+            {text("Discard (변경 되돌리기)", "Discard changes")}
           </button>
           <hr />
           <button onClick={() => void openHistory(ctx.entry, { x: ctx.x, y: ctx.y })}>
@@ -2222,19 +2245,19 @@ function SourceControlView({
           onContextMenu={(event) => event.preventDefault()}
         >
           <div className="scm-history-head">
-            이력 · {baseName(history.entry.relative_path)}
+            {text("이력", "History")} · {baseName(history.entry.relative_path)}
           </div>
           {history.commits === null && (
-            <div className="scm-history-empty">불러오는 중…</div>
+            <div className="scm-history-empty">{text("불러오는 중…", "Loading…")}</div>
           )}
           {history.commits?.length === 0 && (
-            <div className="scm-history-empty">커밋 이력 없음</div>
+            <div className="scm-history-empty">{text("커밋 이력 없음", "No commit history")}</div>
           )}
           {history.commits?.map((commitEntry) => (
             <button
               key={commitEntry.hash}
               className="scm-history-item"
-              title={`${commitEntry.subject}\n${commitEntry.author} · ${commitEntry.date}\n(클릭: 이 시점과 외부 diff)`}
+              title={`${commitEntry.subject}\n${commitEntry.author} · ${commitEntry.date}\n${text("(클릭: 이 시점과 외부 diff)", "(Click: compare this revision with an external diff tool)")}`}
               onClick={() => diffCommit(history.entry, commitEntry.hash)}
             >
               <span className="scm-history-hash">{commitEntry.hash.slice(0, 7)}</span>
@@ -2339,6 +2362,7 @@ function FileTreeContextMenu({
   onNewDir: (parent: string) => void;
   onOpenHistory: (entry: FileTreeEntry) => void;
 }) {
+  const { text } = useAppLanguage();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x: state.x, y: state.y });
 
@@ -2381,41 +2405,41 @@ function FileTreeContextMenu({
     >
       {!entry && (
         <>
-          {item("새 파일", () => onNewFile(""))}
-          {item("새 폴더", () => onNewDir(""))}
+          {item(text("새 파일", "New file"), () => onNewFile(""))}
+          {item(text("새 폴더", "New folder"), () => onNewDir(""))}
         </>
       )}
       {entry && entry.isDir && (
         <>
-          {item("새 파일", () => onNewFile(entry.relativePath))}
-          {item("새 폴더", () => onNewDir(entry.relativePath))}
+          {item(text("새 파일", "New file"), () => onNewFile(entry.relativePath))}
+          {item(text("새 폴더", "New folder"), () => onNewDir(entry.relativePath))}
           <hr />
-          {item("경로 복사", () => onCopyPath(entry))}
-          {item("상대 경로 복사", () => onCopyRelative(entry))}
+          {item(text("경로 복사", "Copy path"), () => onCopyPath(entry))}
+          {item(text("상대 경로 복사", "Copy relative path"), () => onCopyRelative(entry))}
           <hr />
-          {item("탐색기에서 보기", () => onReveal(entry))}
+          {item(text("탐색기에서 보기", "Reveal in File Explorer"), () => onReveal(entry))}
           <hr />
-          {item("이 경로 히스토리", () => onOpenHistory(entry))}
+          {item(text("이 경로 히스토리", "Path history"), () => onOpenHistory(entry))}
           <hr />
-          {item("이름 변경", () => onRename(entry))}
-          {item("삭제 (휴지통)", () => onDelete(entry), { danger: true })}
+          {item(text("이름 변경", "Rename"), () => onRename(entry))}
+          {item(text("삭제 (휴지통)", "Delete (Recycle Bin)"), () => onDelete(entry), { danger: true })}
         </>
       )}
       {entry && !entry.isDir && (
         <>
-          {item("열기 (문서 탭)", () => onOpenDoc(entry))}
-          {item("OS 기본 앱으로 열기", () => onOpenOs(entry))}
+          {item(text("열기 (문서 탭)", "Open in document tab"), () => onOpenDoc(entry))}
+          {item(text("OS 기본 앱으로 열기", "Open with default app"), () => onOpenOs(entry))}
           <hr />
-          {item("경로 복사", () => onCopyPath(entry))}
-          {item("상대 경로 복사", () => onCopyRelative(entry))}
-          {item("복제", () => onDuplicate(entry))}
+          {item(text("경로 복사", "Copy path"), () => onCopyPath(entry))}
+          {item(text("상대 경로 복사", "Copy relative path"), () => onCopyRelative(entry))}
+          {item(text("복제", "Duplicate"), () => onDuplicate(entry))}
           <hr />
-          {item("탐색기에서 보기", () => onReveal(entry))}
+          {item(text("탐색기에서 보기", "Reveal in File Explorer"), () => onReveal(entry))}
           <hr />
-          {item("이 경로 히스토리", () => onOpenHistory(entry))}
+          {item(text("이 경로 히스토리", "Path history"), () => onOpenHistory(entry))}
           <hr />
-          {item("이름 변경", () => onRename(entry))}
-          {item("삭제 (휴지통)", () => onDelete(entry), { danger: true })}
+          {item(text("이름 변경", "Rename"), () => onRename(entry))}
+          {item(text("삭제 (휴지통)", "Delete (Recycle Bin)"), () => onDelete(entry), { danger: true })}
         </>
       )}
     </div>

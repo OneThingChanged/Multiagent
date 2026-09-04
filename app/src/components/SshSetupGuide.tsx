@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
+import { useAppLanguage } from "../lib/appLanguage";
 
 type KeyState = "loading" | "ready" | "none" | "generating";
 
 const PLACEHOLDER_KEY = "<여기에 위에서 복사한 공개키>";
 
 export function SshSetupGuide({ onClose }: { onClose: () => void }) {
+  const { language, text } = useAppLanguage();
   useNativeViewOcclusion();
 
   const [pubKey, setPubKey] = useState<string | null>(null);
@@ -68,14 +70,14 @@ Write-Host "done"`;
 echo "${key}" >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys`;
 
-  const Code = ({ id, text }: { id: string; text: string }) => (
+  const Code = ({ id, text: value }: { id: string; text: string }) => (
     <div className="ssh-guide-code">
-      <pre>{text}</pre>
+      <pre>{value}</pre>
       <button
         className="btn-secondary ssh-guide-copy"
-        onClick={() => copy(text, id)}
+        onClick={() => copy(value, id)}
       >
-        {copied === id ? "복사됨" : "복사"}
+        {copied === id ? text("복사됨", "Copied") : text("복사", "Copy")}
       </button>
     </div>
   );
@@ -89,7 +91,7 @@ chmod 600 ~/.ssh/authorized_keys`;
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="app-settings-header">
-          <h2 className="modal-title">SSH 원격 연결 — 사용 방법</h2>
+          <h2 className="modal-title">{text("SSH 원격 연결 — 사용 방법", "SSH remote connection — How to use")}</h2>
           <button className="app-icon-btn" onClick={onClose} title="Close">
             ×
           </button>
@@ -97,14 +99,19 @@ chmod 600 ~/.ssh/authorized_keys`;
 
         <div className="ssh-guide-body">
           <p className="ssh-guide-intro">
-            다른 컴퓨터에 SSH로 접속해 그 머신에서 터미널/Claude·Codex를 실행합니다.
-            <b> 이 PC = 접속하는 쪽(클라이언트)</b>,{" "}
-            <b>대상 = 접속당하는 쪽(서버)</b>. 아래 순서대로 한 번만 준비하면 됩니다.
+            {language === "ko" ? <>
+              다른 컴퓨터에 SSH로 접속해 그 머신에서 터미널/Claude·Codex를 실행합니다.
+              <b> 이 PC = 접속하는 쪽(클라이언트)</b>,{" "}
+              <b>대상 = 접속당하는 쪽(서버)</b>. 아래 순서대로 한 번만 준비하면 됩니다.
+            </> : <>
+              Connect to another computer over SSH and run terminals, Claude, or Codex there.
+              <b> This PC is the client</b>, and <b>the target is the server</b>. Complete these steps once.
+            </>}
           </p>
 
           <div className="ssh-guide-step">
-            <div className="ssh-guide-step-title">1. 대상 컴퓨터에 SSH 서버 켜기</div>
-            <div className="ssh-guide-note">대상이 Windows면 (관리자 PowerShell):</div>
+            <div className="ssh-guide-step-title">{text("1. 대상 컴퓨터에 SSH 서버 켜기", "1. Enable an SSH server on the target computer")}</div>
+            <div className="ssh-guide-note">{text("대상이 Windows면 (관리자 PowerShell):", "For a Windows target (Administrator PowerShell):")}</div>
             <Code
               id="win-server"
               text={`Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
@@ -112,7 +119,7 @@ Start-Service sshd
 Set-Service -Name sshd -StartupType Automatic
 New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22`}
             />
-            <div className="ssh-guide-note">대상이 Linux면:</div>
+            <div className="ssh-guide-note">{text("대상이 Linux면:", "For a Linux target:")}</div>
             <Code
               id="linux-server"
               text={`sudo apt install -y openssh-server
@@ -122,22 +129,22 @@ sudo systemctl enable --now ssh`}
 
           <div className="ssh-guide-step">
             <div className="ssh-guide-step-title">
-              2. 이 PC의 공개키를 대상에 등록 (비밀번호 없이 접속)
+              {text("2. 이 PC의 공개키를 대상에 등록 (비밀번호 없이 접속)", "2. Register this PC's public key on the target (passwordless sign-in)")}
             </div>
-            <div className="ssh-guide-note">이 PC의 SSH 공개키:</div>
+            <div className="ssh-guide-note">{text("이 PC의 SSH 공개키:", "This PC's SSH public key:")}</div>
             {keyState === "loading" && (
-              <div className="ssh-guide-keybox">불러오는 중…</div>
+              <div className="ssh-guide-keybox">{text("불러오는 중…", "Loading…")}</div>
             )}
             {keyState === "none" && (
               <div className="ssh-guide-keybox">
-                <span>아직 키가 없습니다.</span>
+                <span>{text("아직 키가 없습니다.", "No key exists yet.")}</span>
                 <button className="btn-primary" onClick={generate}>
-                  키 생성
+                  {text("키 생성", "Generate key")}
                 </button>
               </div>
             )}
             {keyState === "generating" && (
-              <div className="ssh-guide-keybox">키 생성 중…</div>
+              <div className="ssh-guide-keybox">{text("키 생성 중…", "Generating key…")}</div>
             )}
             {keyState === "ready" && pubKey && (
               <div className="ssh-guide-code">
@@ -146,22 +153,22 @@ sudo systemctl enable --now ssh`}
                   className="btn-secondary ssh-guide-copy"
                   onClick={() => copy(pubKey, "pubkey")}
                 >
-                  {copied === "pubkey" ? "복사됨" : "복사"}
+                  {copied === "pubkey" ? text("복사됨", "Copied") : text("복사", "Copy")}
                 </button>
               </div>
             )}
             <div className="ssh-guide-note">
-              대상이 Windows면 그 컴퓨터(관리자 PowerShell)에서:
+              {text("대상이 Windows면 그 컴퓨터(관리자 PowerShell)에서:", "For a Windows target, run this on that computer in Administrator PowerShell:")}
             </div>
             <Code id="win-key" text={winAuthorizedKeys} />
-            <div className="ssh-guide-note">대상이 Linux면 그 컴퓨터에서:</div>
+            <div className="ssh-guide-note">{text("대상이 Linux면 그 컴퓨터에서:", "For a Linux target, run this on that computer:")}</div>
             <Code id="linux-key" text={linuxAuthorizedKeys} />
           </div>
 
           <div className="ssh-guide-step">
-            <div className="ssh-guide-step-title">3. 접속 정보 확인</div>
+            <div className="ssh-guide-step-title">{text("3. 접속 정보 확인", "3. Check connection information")}</div>
             <div className="ssh-guide-note">
-              대상 컴퓨터에서 아래를 실행해 User / IP / OS를 확인 (아래 폼에 입력):
+              {text("대상 컴퓨터에서 아래를 실행해 User / IP / OS를 확인 (아래 폼에 입력):", "Run the following on the target to find its User, IP, and OS, then enter them in the form below:")}
             </div>
             <div className="ssh-guide-note">Windows:</div>
             <Code
@@ -177,59 +184,62 @@ sudo systemctl enable --now ssh`}
           </div>
 
           <div className="ssh-guide-step">
-            <div className="ssh-guide-step-title">4. 이 화면(SSH Hosts)에 호스트 추가</div>
+            <div className="ssh-guide-step-title">{text("4. 이 화면(SSH Hosts)에 호스트 추가", "4. Add the host on this SSH Hosts screen")}</div>
             <ul className="ssh-guide-list">
               <li>
-                <b>Label</b>: 알아볼 별칭 (예: 작업서버)
+                <b>Label</b>: {text("알아볼 별칭 (예: 작업서버)", "a recognizable name (for example, Work server)")}
               </li>
               <li>
-                <b>Remote OS</b>: 대상이 Windows면 Windows, 아니면 Linux / macOS
+                <b>Remote OS</b>: {text("대상이 Windows면 Windows, 아니면 Linux / macOS", "choose Windows for a Windows target, otherwise Linux / macOS")}
               </li>
               <li>
-                Windows 대상은 <b>Use .cmd shims for npm CLIs</b>를 켜둡니다. PowerShell
-                실행 정책이 <span className="ssh-guide-mono">codex.ps1</span>/
-                <span className="ssh-guide-mono">claude.ps1</span>을 막아도{" "}
-                <span className="ssh-guide-mono">codex.cmd</span>/
-                <span className="ssh-guide-mono">claude.cmd</span>로 실행됩니다.
+                {language === "ko" ? <>Windows 대상은 <b>Use .cmd shims for npm CLIs</b>를 켜둡니다. PowerShell
+                  실행 정책이 <span className="ssh-guide-mono">codex.ps1</span>/
+                  <span className="ssh-guide-mono">claude.ps1</span>을 막아도{" "}
+                  <span className="ssh-guide-mono">codex.cmd</span>/
+                  <span className="ssh-guide-mono">claude.cmd</span>로 실행됩니다.</> : <>
+                  For Windows targets, keep <b>Use .cmd shims for npm CLIs</b> enabled. This uses
+                  <span className="ssh-guide-mono"> codex.cmd</span>/<span className="ssh-guide-mono">claude.cmd</span>
+                  even when PowerShell execution policy blocks the .ps1 shims.
+                </>}
               </li>
               <li>
-                <b>User</b> / <b>Host</b>: 3번에서 확인한 값 / <b>Port</b>: 보통 22
+                <b>User</b> / <b>Host</b>: {text("3번에서 확인한 값", "the values from step 3")} / <b>Port</b>: {text("보통 22", "usually 22")}
               </li>
               <li>
-                <b>Identity file</b>·<b>Extra ssh options</b>: 비워두기
+                <b>Identity file</b> · <b>Extra ssh options</b>: {text("비워두기", "leave blank")}
               </li>
               <li>
-                <b>Test connection</b> → "연결 성공" 뜨면 <b>Add</b>
+                <b>Test connection</b> → {text("\"연결 성공\" 뜨면", "when the connection succeeds, choose")} <b>Add</b>
               </li>
             </ul>
           </div>
 
           <div className="ssh-guide-step">
-            <div className="ssh-guide-step-title">5. 원격 프로젝트 만들기</div>
+            <div className="ssh-guide-step-title">{text("5. 원격 프로젝트 만들기", "5. Create a remote project")}</div>
             <ul className="ssh-guide-list">
               <li>
-                사이드바 <b>PROJECTS +</b> → "<b>Run on remote host (SSH)</b>" 체크
+                {text("사이드바에서", "In the sidebar, choose")} <b>PROJECTS +</b> → <b>Run on remote host (SSH)</b>
               </li>
               <li>
-                방금 만든 <b>SSH host</b> 선택 + <b>Remote folder</b> 입력 (예:
-                Windows <span className="ssh-guide-mono">C:\\Users\\이름</span>, Linux{" "}
-                <span className="ssh-guide-mono">/home/이름</span>)
+                {text("방금 만든", "Select the")} <b>SSH host</b> {text("선택 +", "you just created and enter a")} <b>Remote folder</b> {text("입력 (예:", "(for example:")}
+                Windows <span className="ssh-guide-mono">C:\\Users\\{text("이름", "name")}</span>, Linux{" "}
+                <span className="ssh-guide-mono">/home/{text("이름", "name")}</span>)
               </li>
               <li>
-                그 프로젝트에서 새 세션(Claude Code 등) 생성 → 원격에서 실행됩니다
+                {text("그 프로젝트에서 새 세션(Claude Code 등) 생성 → 원격에서 실행됩니다", "Create a new session (Claude Code, etc.) in that project; it will run on the remote computer")}
               </li>
             </ul>
           </div>
 
           <p className="ssh-guide-foot">
-            참고: Windows 키 인증 원격 세션은 working/done 상태표시와 세션 resume을
-            지원합니다. 비밀번호 인증과 POSIX 원격은 터미널 실행 중심으로 동작합니다.
+            {text("참고: Windows 키 인증 원격 세션은 working/done 상태표시와 세션 resume을 지원합니다. 비밀번호 인증과 POSIX 원격은 터미널 실행 중심으로 동작합니다.", "Note: Windows remote sessions using key authentication support working/done status and session resume. Password authentication and POSIX remotes focus on terminal execution.")}
           </p>
         </div>
 
         <div className="modal-actions">
           <button className="btn-primary" onClick={onClose}>
-            닫기
+            {text("닫기", "Close")}
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { toolForId } from "../types";
 import { findSshHost, sshHostSummary } from "../lib/sshHosts";
 import { SessionWorkerFields } from "./SessionWorkerFields";
 import { SessionStorageList } from "./SessionStorageList";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function formatDate(ms: number | undefined) {
   if (!ms) return "—";
@@ -69,6 +70,7 @@ export function SessionPropertiesModal({
   onClose: () => void;
 }) {
   useNativeViewOcclusion();
+  const { language, text } = useAppLanguage();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -85,10 +87,10 @@ export function SessionPropertiesModal({
   const supportsOptions =
     supportsDangerous || supportsAltScreen || supportsWorkers;
   const tabs: SessionPropertiesTab[] = [
-    { id: "overview", label: "기본 정보" },
-    { id: "storage", label: "세션 데이터" },
+    { id: "overview", label: text("기본 정보", "Overview") },
+    { id: "storage", label: text("세션 데이터", "Session data") },
     ...(supportsOptions
-      ? ([{ id: "options", label: "실행 옵션" }] satisfies SessionPropertiesTab[])
+      ? ([{ id: "options", label: text("실행 옵션", "Launch options") }] satisfies SessionPropertiesTab[])
       : []),
   ];
   const [activeTab, setActiveTab] =
@@ -102,44 +104,44 @@ export function SessionPropertiesModal({
   // (Phase 2 reverse-tunnel hooks); POSIX remotes are not supported yet.
   const sessionIdSupported = !sshHost || sshHost.remoteOs === "windows";
   const rows: { label: string; value: string; mono?: boolean }[] = [
-    { label: "이름", value: agent.name },
-    { label: "프로젝트", value: project?.name ?? "—" },
-    { label: "도구", value: tool.label },
-    { label: "상태", value: STATUS_LABEL[agent.status] ?? agent.status },
+    { label: text("이름", "Name"), value: agent.name },
+    { label: text("프로젝트", "Project"), value: project?.name ?? "—" },
+    { label: text("도구", "Tool"), value: tool.label },
+    { label: text("상태", "Status"), value: language === "ko" ? STATUS_LABEL[agent.status] ?? agent.status : agent.status },
     ...(agent.activity
       ? [
           {
-            label: "작업 상태",
-            value: STATUS_LABEL[agent.activity.workStatus] ?? agent.activity.workStatus,
+            label: text("작업 상태", "Work status"),
+            value: language === "ko" ? STATUS_LABEL[agent.activity.workStatus] ?? agent.activity.workStatus : agent.activity.workStatus,
           },
           {
-            label: "최근 Hook",
+            label: text("최근 Hook", "Latest hook"),
             value: agent.activity.hookEventName ?? "—",
             mono: true,
           },
         ]
       : []),
     {
-      label: "원격 호스트",
-      value: sshHost ? sshHostSummary(sshHost) : "로컬",
+      label: text("원격 호스트", "Remote host"),
+      value: sshHost ? sshHostSummary(sshHost) : text("로컬", "Local"),
       mono: !!sshHost,
     },
     ...(sshHost
-      ? [{ label: "원격 폴더", value: remoteFolder || "—", mono: true }]
+      ? [{ label: text("원격 폴더", "Remote folder"), value: remoteFolder || "—", mono: true }]
       : []),
     {
-      label: "세션 ID",
+      label: text("세션 ID", "Session ID"),
       value: sessionIdSupported
-        ? agent.lastSessionId ?? "(아직 없음)"
-        : "(원격 미지원)",
+        ? agent.lastSessionId ?? text("(아직 없음)", "(not available yet)")
+        : text("(원격 미지원)", "(not supported remotely)"),
       mono: true,
     },
-    { label: "생성 시각", value: formatDate(agent.createdAt), mono: true },
+    { label: text("생성 시각", "Created"), value: formatDate(agent.createdAt), mono: true },
     ...(sshHost
       ? []
       : [
           {
-            label: "폴더",
+            label: text("폴더", "Folder"),
             value: agent.folder || project?.folder || "—",
             mono: true,
           },
@@ -173,7 +175,7 @@ export function SessionPropertiesModal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="app-settings-header">
-          <h2 className="modal-title">세션 속성</h2>
+          <h2 className="modal-title">{text("세션 속성", "Session properties")}</h2>
           <button className="app-icon-btn" onClick={onClose} title="Close">
             ×
           </button>
@@ -181,7 +183,7 @@ export function SessionPropertiesModal({
         <div
           className="session-props-tabs"
           role="tablist"
-          aria-label="세션 속성 항목"
+          aria-label={text("세션 속성 항목", "Session property sections")}
         >
           {tabs.map((tab, index) => {
             const selected = activeTab === tab.id;
@@ -269,10 +271,10 @@ export function SessionPropertiesModal({
                   />
                   <span className="session-props-toggle-body">
                     <span className="session-props-toggle-title">
-                      Dangerous 모드
+                      {text("Dangerous 모드", "Dangerous mode")}
                     </span>
                     <span className="session-props-toggle-desc">
-                      {tool.dangerousFlag} 플래그로 실행 (권한 확인 생략)
+                      {text(`${tool.dangerousFlag} 플래그로 실행 (권한 확인 생략)`, `Launch with ${tool.dangerousFlag} and skip permission prompts`)}
                     </span>
                   </span>
                 </label>
@@ -290,12 +292,13 @@ export function SessionPropertiesModal({
                   />
                   <span className="session-props-toggle-body">
                     <span className="session-props-toggle-title">
-                      Alt-screen 모드
+                      {text("Alt-screen 모드", "Alt-screen mode")}
                     </span>
                     <span className="session-props-toggle-desc">
-                      켜면 Codex 내부 화면·기록만 사용하는 alternate screen으로
-                      실행됨. 터미널 스크롤백(Ctrl+F 검색·드래그 복사)을
-                      사용하려면 끈 상태(--no-alt-screen)를 유지하세요
+                      {text(
+                        "켜면 Codex 내부 화면·기록만 사용하는 alternate screen으로 실행됩니다. 터미널 스크롤백(Ctrl+F 검색·드래그 복사)을 사용하려면 끈 상태(--no-alt-screen)를 유지하세요.",
+                        "When enabled, Codex uses its internal alternate screen. Keep it disabled (--no-alt-screen) to use terminal scrollback, Ctrl+F search, and drag-to-copy.",
+                      )}
                     </span>
                   </span>
                 </label>
@@ -311,14 +314,14 @@ export function SessionPropertiesModal({
                 />
               )}
               <div className="session-props-toggle-note">
-                변경은 세션을 비활성화한 뒤 다시 열면 적용됩니다
+                {text("변경은 세션을 비활성화한 뒤 다시 열면 적용됩니다", "Changes apply after deactivating and reopening the session")}
               </div>
             </div>
           </div>
         )}
         <div className="modal-actions">
           <button className="btn-primary" onClick={onClose}>
-            닫기
+            {text("닫기", "Close")}
           </button>
         </div>
       </div>

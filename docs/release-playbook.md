@@ -30,6 +30,12 @@ sources:
   - id: mobile-builder
     resource: ../mobile/scripts/build-apk.mjs
     title: "Signed Android build"
+  - id: runtime-variant
+    resource: ../app/electron/runtime-variant.cjs
+    title: "Runtime update-provider separation"
+  - id: local-developer-updater
+    resource: ../app/electron/services/local-developer-update.mjs
+    title: "Standard local developer updater"
 ---
 
 # Release playbook
@@ -39,9 +45,9 @@ publication belong in [Development and build](development-and-build.md).
 
 ## Artifact model
 
-A complete stable release contains:
+A complete versioned build contains:
 
-* Standard Windows x64 NSIS installer, blockmap, and `latest.yml`;
+* Standard Windows x64 NSIS installer for the local developer output channel;
 * Company Windows x64 NSIS installer, blockmap, and its updater manifest;
 * signed Android APK plus non-secret verification metadata for Standard; and
 * after Partner Center enrollment, a separately certified Store x64 MSIX whose
@@ -81,7 +87,21 @@ the same four-part `X.Y.Z.0` version. Certification delay may separate their
 publication dates, but it must not produce a different Store version for the
 same release.
 
-## GitHub release procedure
+The source repository is private. Standard is an owner-only developer build
+updated from a configured local output directory. Company retains its private
+GitHub updater. Microsoft Store is the only public acquisition and update
+channel. The public product site and Q&A live in the separate public
+`MultiagentSite` repository.[^runtime-variant][^local-developer-updater]
+
+## Final Standard GitHub transition release (`1.7.2.0`)
+
+`1.7.2.0` is the last Standard build published to GitHub. Existing Standard
+installs use their former GitHub updater once to acquire this version. Starting
+with `1.7.2.0`, Settings uses the configured local `app/electron-dist/` folder
+for later Standard updates. Do not publish a newer Standard `latest.yml` after
+this transition unless the release policy is explicitly changed.
+
+For this final transition release:
 
 1. Choose one stable four-part `X.Y.Z.0` product version and synchronize the
    desktop/mobile version fields and public release metadata. npm and Electron
@@ -129,7 +149,7 @@ same release.
 
 6. Inspect `app/electron-dist/` and the Company/mobile subdirectories. Reject
    stale files from another version before uploading.
-7. Commit the source/version change, create tag `vX.Y.Z.0`, push the branch and
+7. Commit the source/version change, create tag `v1.7.2.0`, push the branch and
    tag, then publish the GitHub release as Latest with the complete artifact set.
 8. Download the published artifacts through their public URLs and verify hashes,
    signatures, manifests, installer version, updater visibility, and APK download.
@@ -137,14 +157,17 @@ same release.
 ## Microsoft Store release procedure
 
 The Store channel is built and submitted separately from GitHub releases. A
-Store release never produces or consumes GitHub updater manifests.
+Store release never produces or consumes GitHub updater manifests. Detailed
+Partner Center fields, `runFullTrust` text, upload recovery, and certification
+follow-up are in the [Microsoft Store release guide](microsoft-store-release-guide.md).
 
 The `1.7.0.0` baseline is higher than the already published `1.6.26.0` package.
-For subsequent Store updates, use the exact four-part product version already
-chosen for the corresponding GitHub release.
+For subsequent Store updates, use the exact four-part product version chosen
+for the corresponding developer build even when no newer Standard GitHub
+release is created.
 
-1. Confirm that the corresponding GitHub product version is higher than the
-   package already in Partner Center, then retain that exact four-part version.
+1. Confirm that the corresponding product version is higher than the package
+   already in Partner Center, then retain that exact four-part version.
 2. Build and verify the production MSIX:
 
    ```powershell
@@ -156,18 +179,20 @@ chosen for the corresponding GitHub release.
 3. Run WACK against the generated production package and retain its report.
 4. Start a Partner Center update submission, upload only the verified MSIX, and
    submit it for certification.
-5. After publication, install the private-audience update through Microsoft
-   Store and verify version, retained data, terminal/browser/Remote behavior,
-   and that the GitHub updater was never invoked.
+5. After publication, install or update through Microsoft Store and verify the
+   version, retained data, terminal/browser/Remote behavior, and that the
+   GitHub updater was never invoked.
 
 ## Updater rules
 
-Electron Updater consumes the YAML manifests and blockmaps produced for each
-variant. Standard and Company identities/channels must never cross.
-The generated updater YAML intentionally carries the derived three-part semver
-(`1.7.1` for product `1.7.1.0`) because Electron Updater rejects four-part
-versions. The GitHub release tag, artifact name, app UI, and release metadata
-remain `1.7.1.0`.
+Standard, Company, and Store update providers must never cross. Standard uses
+`local-developer`: it scans only the user-selected output directory for an
+exact four-part x64 NSIS filename and never accepts an installer path supplied
+by the renderer. Company continues to use Electron Updater and its private
+GitHub YAML/blockmap channel. The final Standard transition manifest and future
+Company manifests use derived three-part semver (`1.7.2` for product
+`1.7.2.0`) because Electron Updater rejects four-part versions. User-facing
+product versions remain four-part.[^runtime-variant][^local-developer-updater]
 
 The Store variant disables Electron Updater and delegates acquisition and
 updates to Microsoft Store. It uses a separate data identity and must be built
@@ -185,3 +210,5 @@ and update paths have been checked from published assets, not just local output.
 [^store-builder]: Microsoft Store MSIX build
 [^standard-builder]: Standard build and APK verification
 [^mobile-builder]: Signed Android build
+[^runtime-variant]: Runtime update-provider separation
+[^local-developer-updater]: Standard local developer updater

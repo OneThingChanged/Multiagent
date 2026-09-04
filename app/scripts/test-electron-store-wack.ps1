@@ -16,7 +16,12 @@ if (-not (Test-Path -LiteralPath $appCert -PathType Leaf)) {
 $resolvedMetadataPath = (Resolve-Path -LiteralPath $MetadataPath).Path
 $metadata = Get-Content -LiteralPath $resolvedMetadataPath -Raw | ConvertFrom-Json
 $packagePath = Join-Path (Split-Path -Parent $resolvedMetadataPath) $metadata.artifact
-$reportPath = Join-Path (Split-Path -Parent $resolvedMetadataPath) 'wack-report.xml'
+$reportVersion = if ($metadata.packageVersion) { [string]$metadata.packageVersion } else { 'unknown-version' }
+$reportVersion = $reportVersion -replace '[^0-9A-Za-z._-]', '-'
+$reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$reportPath = Join-Path (
+  Split-Path -Parent $resolvedMetadataPath
+) "wack-report-$reportVersion-$reportTimestamp.xml"
 
 & $appCert reset
 if ($LASTEXITCODE -ne 0) { throw "appcert reset failed: $LASTEXITCODE" }

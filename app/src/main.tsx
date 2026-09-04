@@ -10,6 +10,7 @@ import {
   syncReopenStateBeforeRender,
   syncSharedStorageBeforeRender,
 } from "./platform/storageMigration";
+import { AppLanguageProvider } from "./lib/appLanguage";
 
 const desktopPet =
   (window as Window & { __MULTIAGENT_DESKTOP_PET__?: boolean })
@@ -26,7 +27,9 @@ async function render() {
   }
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      {desktopPet ? <DesktopPetPage /> : documentBrowser ? <DocumentBrowserPage /> : <App />}
+      <AppLanguageProvider>
+        {desktopPet ? <DesktopPetPage /> : documentBrowser ? <DocumentBrowserPage /> : <App />}
+      </AppLanguageProvider>
     </React.StrictMode>,
   );
 }
@@ -40,7 +43,9 @@ void render().catch((error: unknown) => {
   const copy = document.createElement("div");
   copy.className = "startup-fallback-copy";
   const title = document.createElement("strong");
-  title.textContent = "MultiAgent를 시작하지 못했습니다";
+  title.textContent = navigator.languages?.some((locale) => /^ko(?:-|$)/i.test(locale))
+    ? "MultiAgent를 시작하지 못했습니다"
+    : "Could not start MultiAgent";
   const detail = document.createElement("span");
   detail.textContent = error instanceof Error ? error.message : String(error);
   copy.append(title, detail);

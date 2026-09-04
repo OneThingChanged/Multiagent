@@ -8,6 +8,7 @@ import type {
   GitLogResult,
 } from "../platform/ipcContract";
 import { parseGitHistoryTabId } from "../lib/gitHistoryTabs";
+import { useAppLanguage } from "../lib/appLanguage";
 
 const PAGE_SIZE = 50;
 
@@ -59,6 +60,7 @@ export function GitHistoryView({
   tabId: string;
   project: Project | null;
 }) {
+  const { text } = useAppLanguage();
   const ref = parseGitHistoryTabId(tabId);
   const folder = scopedFolder(
     project?.folder ?? "",
@@ -94,7 +96,10 @@ export function GitHistoryView({
     async (reset: boolean) => {
       if (!folder) {
         setError(
-          "프로젝트 폴더를 찾을 수 없습니다. (원격/SSH 프로젝트는 히스토리를 지원하지 않습니다)"
+          text(
+            "프로젝트 폴더를 찾을 수 없습니다. (원격/SSH 프로젝트는 히스토리를 지원하지 않습니다)",
+            "The project folder could not be found. History is not available for remote/SSH projects.",
+          ),
         );
         setLoading(false);
         return;
@@ -121,7 +126,7 @@ export function GitHistoryView({
         setLoadingMore(false);
       }
     },
-    [folder, scopePath, search]
+    [folder, scopePath, search, text]
   );
 
   // Reload from the top whenever the scope or search changes; drop any
@@ -168,12 +173,12 @@ export function GitHistoryView({
         );
         setDiff(result.diff);
       } catch {
-        setDiff([{ type: "meta", text: "diff를 불러오지 못했습니다." }]);
+        setDiff([{ type: "meta", text: text("diff를 불러오지 못했습니다.", "Could not load the diff.") }]);
       } finally {
         setDiffLoading(false);
       }
     },
-    [folder]
+    [folder, text]
   );
 
   const scopeLabel = scopePath ? baseName(scopePath) : null;
@@ -193,7 +198,7 @@ export function GitHistoryView({
           className="git-history-search"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="메시지 검색"
+          placeholder={text("메시지 검색", "Search messages")}
           spellCheck={false}
         />
         <button
@@ -202,19 +207,19 @@ export function GitHistoryView({
           disabled={loading}
           onClick={() => void load(true)}
         >
-          새로고침
+          {text("새로고침", "Refresh")}
         </button>
       </div>
 
       <div className="git-history-body">
         <div className="git-history-list">
           {loading ? (
-            <div className="git-history-empty">불러오는 중…</div>
+            <div className="git-history-empty">{text("불러오는 중…", "Loading…")}</div>
           ) : error ? (
             <div className="git-history-empty git-history-error">{error}</div>
           ) : commits.length === 0 ? (
             <div className="git-history-empty">
-              {search ? "검색 결과가 없습니다." : "커밋이 없습니다."}
+              {search ? text("검색 결과가 없습니다.", "No search results.") : text("커밋이 없습니다.", "No commits.")}
             </div>
           ) : (
             <>
@@ -230,7 +235,7 @@ export function GitHistoryView({
                   onClick={() => void selectCommit(commit.hash)}
                 >
                   <span className="git-history-commit-subject">
-                    {commit.subject || "(제목 없음)"}
+                    {commit.subject || text("(제목 없음)", "(no subject)")}
                   </span>
                   <span className="git-history-commit-meta">
                     {commit.refs.length > 0 &&
@@ -252,7 +257,7 @@ export function GitHistoryView({
                   disabled={loadingMore}
                   onClick={() => void load(false)}
                 >
-                  {loadingMore ? "불러오는 중…" : "더 보기"}
+                  {loadingMore ? text("불러오는 중…", "Loading…") : text("더 보기", "Show more")}
                 </button>
               )}
             </>
@@ -262,19 +267,19 @@ export function GitHistoryView({
         <div className="git-history-detail">
           {!selectedHash ? (
             <div className="git-history-empty">
-              커밋을 선택하면 상세 내용이 표시됩니다.
+              {text("커밋을 선택하면 상세 내용이 표시됩니다.", "Select a commit to view its details.")}
             </div>
           ) : detailError ? (
             <div className="git-history-empty git-history-error">
               {detailError}
             </div>
           ) : !detail ? (
-            <div className="git-history-empty">불러오는 중…</div>
+            <div className="git-history-empty">{text("불러오는 중…", "Loading…")}</div>
           ) : (
             <>
               <div className="git-history-detail-head">
                 <div className="git-history-detail-message">
-                  {detail.message || "(메시지 없음)"}
+                  {detail.message || text("(메시지 없음)", "(no message)")}
                 </div>
                 <div className="git-history-detail-meta">
                   <span>{detail.author}</span>
@@ -293,7 +298,7 @@ export function GitHistoryView({
 
               <div className="git-history-files">
                 <div className="git-history-files-heading">
-                  변경된 파일 {detail.files.length}
+                  {text(`변경된 파일 ${detail.files.length}`, `${detail.files.length} changed files`)}
                 </div>
                 {detail.files.map((file) => (
                   <button
@@ -334,12 +339,12 @@ export function GitHistoryView({
               {selectedFile && (
                 <div className="git-history-diff-wrap">
                   {diffLoading ? (
-                    <div className="git-history-empty">diff 불러오는 중…</div>
+                    <div className="git-history-empty">{text("diff 불러오는 중…", "Loading diff…")}</div>
                   ) : diff && diff.length > 0 ? (
                     <DiffLines diff={diff} />
                   ) : (
                     <div className="git-history-empty">
-                      표시할 변경 내용이 없습니다.
+                      {text("표시할 변경 내용이 없습니다.", "There are no changes to display.")}
                     </div>
                   )}
                 </div>

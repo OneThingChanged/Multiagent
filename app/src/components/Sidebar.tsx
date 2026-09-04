@@ -20,6 +20,7 @@ import type {
 import { collectAgentIdsInOrder } from "../lib/layout";
 import { isAgentRuntimeActive } from "../lib/agentActivity";
 import { loadSshHosts, sshHostSummary } from "../lib/sshHosts";
+import { useAppLanguage } from "../lib/appLanguage";
 
 const LS_EXPANDED_PROJECTS = "multiagent.expandedProjects.v1";
 const LS_COLLAPSED_MACHINES = "multiagent.collapsedMachines.v1";
@@ -193,6 +194,9 @@ export function Sidebar({
   sessionPickerMode?: boolean;
   detachedLabel?: string;
 }) {
+  const { text } = useAppLanguage();
+  const localizedDetachedLabel =
+    detachedLabel === "다른 창" ? text("다른 창", "Other window") : detachedLabel;
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => loadExpandedProjects(projects)
   );
@@ -656,8 +660,8 @@ export function Sidebar({
                     a.lastSessionId
                       ? `session ${a.lastSessionId.slice(0, 8)}`
                       : "new session"
-                  } - 더블클릭으로 별명 변경`
-                : `${a.name} - 더블클릭으로 별명 변경`
+                  } - ${text("더블클릭으로 별명 변경", "double-click to rename")}`
+                : `${a.name} - ${text("더블클릭으로 별명 변경", "double-click to rename")}`
             }
           >
             {a.name}
@@ -665,14 +669,14 @@ export function Sidebar({
           {hasUnreadCompletion && (
             <span
               className="agent-completion-dot"
-              title="작업 완료 · 클릭해서 확인"
-              aria-label="읽지 않은 작업 완료"
+              title={text("작업 완료 · 클릭해서 확인", "Work completed · click to review")}
+              aria-label={text("읽지 않은 작업 완료", "Unread completion")}
             />
           )}
           {screen && (
             <span
               className="agent-screen-badge"
-              title={`Screen ${screen.number} 분할 그룹`}
+              title={text(`Screen ${screen.number} 분할 그룹`, `Screen ${screen.number} split group`)}
             >
               S{screen.number}
             </span>
@@ -680,7 +684,7 @@ export function Sidebar({
           {sessionLocked && (
             <span
               className="agent-session-pin"
-              title="이 그룹은 고정된 세션으로 열립니다"
+              title={text("이 그룹은 고정된 세션으로 열립니다", "This group opens with pinned sessions")}
             >
               PIN
             </span>
@@ -688,9 +692,9 @@ export function Sidebar({
           {isDetached && (
             <span
               className="agent-detached-badge"
-              title="다른 창에서 사용 중"
+              title={text("다른 창에서 사용 중", "In use in another window")}
             >
-              {detachedLabel}
+              {localizedDetachedLabel}
             </span>
           )}
           {a.dangerous && (
@@ -708,8 +712,8 @@ export function Sidebar({
                 e.stopPropagation();
                 onDeactivate(a.id);
               }}
-              title="세션 비활성화"
-              aria-label={`${a.name} 세션 비활성화`}
+              title={text("세션 비활성화", "Deactivate session")}
+              aria-label={text(`${a.name} 세션 비활성화`, `Deactivate ${a.name} session`)}
             >
               x
             </button>
@@ -858,7 +862,7 @@ export function Sidebar({
                 e.stopPropagation();
                 onNewSessionForProject(project.id);
               }}
-              title={`${project.name}에 새 세션`}
+              title={text(`${project.name}에 새 세션`, `New session in ${project.name}`)}
             >
               +
             </button>
@@ -882,7 +886,7 @@ export function Sidebar({
             ))}
             {sessionCount === 0 && (
               <li className="empty-hint project-empty-hint">
-                프로젝트 행의 + 버튼으로 세션을 시작하세요
+                {text("프로젝트 행의 + 버튼으로 세션을 시작하세요", "Use the + button on the project row to start a session")}
               </li>
             )}
           </ul>
@@ -921,7 +925,7 @@ export function Sidebar({
       buckets.push({
         key: `uncategorized:${machine.id}`,
         folder: null,
-        name: "미분류",
+        name: text("미분류", "Uncategorized"),
         projects: uncategorized,
       });
     }
@@ -1077,7 +1081,7 @@ export function Sidebar({
             <button
               className="project-folder-caret-btn"
               onClick={() => toggleProjectFolderExpanded(bucket.key)}
-              title={expanded ? "폴더 접기" : "폴더 펼치기"}
+              title={expanded ? text("폴더 접기", "Collapse folder") : text("폴더 펼치기", "Expand folder")}
             >
               {expanded ? "v" : ">"}
             </button>
@@ -1086,8 +1090,8 @@ export function Sidebar({
               onClick={() => toggleProjectFolderExpanded(bucket.key)}
               title={
                 bucket.folder
-                  ? `${bucket.name} · 우클릭으로 관리`
-                  : "폴더에 속하지 않은 프로젝트"
+                  ? text(`${bucket.name} · 우클릭으로 관리`, `${bucket.name} · right-click to manage`)
+                  : text("폴더에 속하지 않은 프로젝트", "Projects not assigned to a folder")
               }
             >
               <span className="project-folder-icon" aria-hidden="true">
@@ -1110,7 +1114,7 @@ export function Sidebar({
               )}
               {bucket.projects.length === 0 && (
                 <div className="empty-hint project-folder-empty-hint">
-                  프로젝트를 여기로 끌어오세요
+                  {text("프로젝트를 여기로 끌어오세요", "Drag projects here")}
                 </div>
               )}
             </div>
@@ -1129,24 +1133,24 @@ export function Sidebar({
               className={`browser-hub-sidebar-btn${browserHubActive ? " is-active" : ""}`}
               onClick={onOpenBrowserHub}
               aria-pressed={browserHubActive}
-              title="이 프로그램에서 열려 있는 모든 브라우저 보기"
+              title={text("이 프로그램에서 열려 있는 모든 브라우저 보기", "View every browser open in this app")}
             >
               <span className="browser-hub-sidebar-icon" aria-hidden="true">WEB</span>
-              <span className="browser-hub-sidebar-label">브라우저 모아보기</span>
+              <span className="browser-hub-sidebar-label">{text("브라우저 모아보기", "Browser hub")}</span>
               <span className="browser-hub-sidebar-count">{browserCount}</span>
             </button>
           </div>
         )}
         <div className="sidebar-section-heading">
           <div className="sidebar-section-title">
-            {sessionPickerMode ? "Projects · 세션 선택" : "Projects"}
+            {sessionPickerMode ? text("Projects · 세션 선택", "Projects · Select session") : "Projects"}
           </div>
           <button
             className={`section-action-btn active-only-btn ${
               activeOnly ? "active-only-on" : ""
             }`}
             onClick={() => setActiveOnly((v) => !v)}
-            title={activeOnly ? "전체 세션 보기" : "활성 세션만 보기"}
+            title={activeOnly ? text("전체 세션 보기", "Show all sessions") : text("활성 세션만 보기", "Show active sessions only")}
             aria-pressed={activeOnly}
           >
             ●
@@ -1154,8 +1158,8 @@ export function Sidebar({
           <button
             className="section-action-btn project-folder-create-btn"
             onClick={() => onNewProjectFolder("local")}
-            title="새 프로젝트 폴더"
-            aria-label="새 프로젝트 폴더"
+            title={text("새 프로젝트 폴더", "New project folder")}
+            aria-label={text("새 프로젝트 폴더", "New project folder")}
           >
             ▣
           </button>
@@ -1171,7 +1175,7 @@ export function Sidebar({
           <input
             className="sidebar-search-input"
             value={searchQuery}
-            placeholder="프로젝트 · 세션 검색"
+            placeholder={text("프로젝트 · 세션 검색", "Search projects and sessions")}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {searchQuery && (
@@ -1215,10 +1219,10 @@ export function Sidebar({
                   <span
                     className="screen-group-direction"
                     title={
-                      screen.direction === "h" ? "좌우 분할" : "상하 분할"
+                      screen.direction === "h" ? text("좌우 분할", "Horizontal split") : text("상하 분할", "Vertical split")
                     }
                     aria-label={
-                      screen.direction === "h" ? "좌우 분할" : "상하 분할"
+                      screen.direction === "h" ? text("좌우 분할", "Horizontal split") : text("상하 분할", "Vertical split")
                     }
                   >
                     {screen.direction === "h" ? "↔" : "↕"}
@@ -1295,8 +1299,8 @@ export function Sidebar({
                           event.stopPropagation();
                           onNewProjectFolder(group.id);
                         }}
-                        title={`${group.label}에 프로젝트 폴더 추가`}
-                        aria-label={`${group.label}에 프로젝트 폴더 추가`}
+                        title={text(`${group.label}에 프로젝트 폴더 추가`, `Add a project folder to ${group.label}`)}
+                        aria-label={text(`${group.label}에 프로젝트 폴더 추가`, `Add a project folder to ${group.label}`)}
                       >
                         +
                       </button>
@@ -1326,10 +1330,13 @@ export function Sidebar({
               type="button"
               className="empty-hint empty-hint-action"
               onClick={() => setActiveOnly(false)}
-              title="전체 세션 보기로 전환"
+              title={text("전체 세션 보기로 전환", "Switch to all sessions")}
             >
-              활성 세션 없음 · 숨겨진 프로젝트 {projects.length}개
-              <span className="empty-hint-cta">클릭해서 전체 보기</span>
+              {text(
+                `활성 세션 없음 · 숨겨진 프로젝트 ${projects.length}개`,
+                `No active sessions · ${projects.length} hidden project${projects.length === 1 ? "" : "s"}`,
+              )}
+              <span className="empty-hint-cta">{text("클릭해서 전체 보기", "Click to show all")}</span>
             </button>
           )}
       </div>

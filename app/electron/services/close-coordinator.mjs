@@ -1,8 +1,14 @@
-const CLOSE_ACTIONS = new Set(["quit", "relaunch", "install-update"]);
+const CLOSE_ACTIONS = new Set([
+  "quit",
+  "relaunch",
+  "install-update",
+  "install-local-update",
+]);
 const CLOSE_ACTION_PRIORITY = {
   quit: 1,
   relaunch: 2,
   "install-update": 3,
+  "install-local-update": 3,
 };
 
 /**

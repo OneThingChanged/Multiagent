@@ -46,10 +46,10 @@ MultiAgent is a developer and productivity tool and is not directed to children 
 
 ## Changes to this policy
 
-This policy may be updated when MultiAgent's data practices change. Material changes will be published in this repository with a revised effective date.
+This policy may be updated when MultiAgent's data practices change. Material changes will be published through the public MultiAgent support site with a revised effective date.
 
 ## Contact
 
 Questions or requests about this policy can be submitted through the project's public issue tracker:
 
-https://github.com/OneThingChanged/Multiagent/issues
+https://github.com/OneThingChanged/MultiagentSite/issues/new/choose

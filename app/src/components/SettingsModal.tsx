@@ -3,11 +3,16 @@ import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
 import {
   check,
+  checkDeveloperUpdate,
+  getDeveloperUpdateSettings,
+  installDeveloperUpdate,
   openDialog,
   openStoreProduct,
   openUrl,
   relaunch,
+  setDeveloperUpdateDirectory,
   writeClipboardText,
+  type DeveloperUpdate,
   type Update,
 } from "../platform/plugins";
 import { APP_THEMES } from "../lib/appTheme";
@@ -34,6 +39,10 @@ import type { CommandShortcuts } from "../lib/commandRegistry";
 import type { SshHost } from "../types";
 import { toolForId } from "../types";
 import type { ConversationStorageStatus } from "../platform/ipcContract";
+import {
+  useAppLanguage,
+  type AppLanguagePreference,
+} from "../lib/appLanguage";
 
 const SOUND_MODES: { id: NotificationSoundMode; label: string }[] = [
   { id: "system", label: "System" },
@@ -67,6 +76,14 @@ type InstallState =
 type StoreLaunchState =
   | { status: "idle" }
   | { status: "opening" }
+  | { status: "error"; message: string };
+
+type DeveloperUpdateState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "current" }
+  | { status: "available"; update: DeveloperUpdate }
+  | { status: "installing"; update: DeveloperUpdate }
   | { status: "error"; message: string };
 
 type RemoteStatus = {
@@ -194,23 +211,36 @@ type NavEntry = {
   id: SettingsCategory;
   group: string;
   label: string;
+  labelKo: string;
   title: string;
+  titleKo: string;
   sub: string;
+  subEn: string;
   keywords: string;
   icon: ReactNode;
 };
 
 const ALL_NAV_ENTRIES: NavEntry[] = [
-  { id: "general", group: "Workspace", label: "General", title: "General", sub: "테마 · 알림음 · 데스크톱 펫", keywords: "theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
-  { id: "agents", group: "Workspace", label: "Agents", title: "Agents", sub: "연결 상황 · 사용량 바 · Qwen 리전", keywords: "agent 에이전트 연결 connection status usage 사용량 bar qwen region 리전 나라 country", icon: <IconActivity /> },
-  { id: "data", group: "Workspace", label: "Data & Sessions", title: "Data & Sessions", sub: "세션별 대화 · 산출물 저장 위치", keywords: "data 데이터 conversation 대화 session 세션 storage 저장소 path 경로 artifact 산출물", icon: <IconDatabase /> },
-  { id: "shortcuts", group: "Workspace", label: "Shortcuts", title: "Shortcuts", sub: "명령별 키보드 단축키", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
-  { id: "hooks", group: "Workspace", label: "Agent Hooks", title: "Agent Hooks", sub: "Codex/Claude Hook 자동 점검·복구", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
-  { id: "dashboard", group: "Services", label: "Dashboard", title: "Dashboard", sub: "로컬 모니터링 서버 · 사용량", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
-  { id: "remote", group: "Services", label: "Remote", title: "Remote", sub: "모바일 PWA · 터널 · 접근 승인", keywords: "remote pwa tunnel cloudflare github oauth 모바일 mobile access", icon: <IconGlobe /> },
-  { id: "vcs", group: "Services", label: "Version Control", title: "Version Control", sub: "외부 diff 프로그램", keywords: "version control git diff 비교 프로그램 tool difftool 소스", icon: <IconBranch /> },
-  { id: "ssh", group: "Services", label: "SSH Hosts", title: "SSH Hosts", sub: "원격 실행 호스트", keywords: "ssh host server 원격", icon: <IconServer /> },
-  { id: "about", group: "Info", label: "About", title: "About", sub: "버전 · 업데이트 · 진단", keywords: "about version 버전 update 업데이트 diagnostics 진단 creator", icon: <IconInfo /> },
+  { id: "general", group: "Workspace", label: "General", labelKo: "일반", title: "General", titleKo: "일반", sub: "언어 · 테마 · 알림음 · 데스크톱 펫", subEn: "Language · theme · notifications · Desktop Pet", keywords: "language 언어 theme 테마 appearance sound 알림음 notification pet 펫", icon: <IconSliders /> },
+  { id: "agents", group: "Workspace", label: "Agents", labelKo: "에이전트", title: "Agents", titleKo: "에이전트", sub: "연결 상황 · 사용량 바 · Qwen 리전", subEn: "Connections · usage bar · Qwen region", keywords: "agent 에이전트 연결 connection status usage 사용량 bar qwen region 리전 나라 country", icon: <IconActivity /> },
+  { id: "data", group: "Workspace", label: "Data & Sessions", labelKo: "데이터 및 세션", title: "Data & Sessions", titleKo: "데이터 및 세션", sub: "세션별 대화 · 산출물 저장 위치", subEn: "Per-session conversations · artifact storage", keywords: "data 데이터 conversation 대화 session 세션 storage 저장소 path 경로 artifact 산출물", icon: <IconDatabase /> },
+  { id: "shortcuts", group: "Workspace", label: "Shortcuts", labelKo: "단축키", title: "Shortcuts", titleKo: "단축키", sub: "명령별 키보드 단축키", subEn: "Keyboard shortcuts by command", keywords: "keyboard 단축키 hotkey shortcut", icon: <IconKeyboard /> },
+  { id: "hooks", group: "Workspace", label: "Agent Hooks", labelKo: "에이전트 훅", title: "Agent Hooks", titleKo: "에이전트 훅", sub: "Codex/Claude Hook 자동 점검·복구", subEn: "Automatic Codex/Claude hook checks and repair", keywords: "agent hook codex claude repair 복구", icon: <IconActivity /> },
+  { id: "dashboard", group: "Services", label: "Dashboard", labelKo: "대시보드", title: "Dashboard", titleKo: "대시보드", sub: "로컬 모니터링 서버 · 사용량", subEn: "Local monitoring server · usage", keywords: "dashboard monitor usage 사용량 port", icon: <IconGrid /> },
+  { id: "remote", group: "Services", label: "Remote", labelKo: "리모트", title: "Remote", titleKo: "리모트", sub: "모바일 PWA · 터널 · 접근 승인", subEn: "Mobile PWA · tunnel · access approval", keywords: "remote pwa tunnel cloudflare github oauth 모바일 mobile access", icon: <IconGlobe /> },
+  { id: "vcs", group: "Services", label: "Version Control", labelKo: "버전 관리", title: "Version Control", titleKo: "버전 관리", sub: "외부 diff 프로그램", subEn: "External diff program", keywords: "version control git diff 비교 프로그램 tool difftool 소스", icon: <IconBranch /> },
+  { id: "ssh", group: "Services", label: "SSH Hosts", labelKo: "SSH 호스트", title: "SSH Hosts", titleKo: "SSH 호스트", sub: "원격 실행 호스트", subEn: "Remote execution hosts", keywords: "ssh host server 원격", icon: <IconServer /> },
+  { id: "about", group: "Info", label: "About", labelKo: "정보", title: "About", titleKo: "정보", sub: "버전 · 업데이트 · 진단", subEn: "Version · updates · diagnostics", keywords: "about version 버전 update 업데이트 diagnostics 진단 creator", icon: <IconInfo /> },
+];
+
+const LANGUAGE_OPTIONS: Array<{
+  id: AppLanguagePreference;
+  ko: string;
+  en: string;
+}> = [
+  { id: "system", ko: "시스템 기본", en: "System default" },
+  { id: "ko", ko: "한국어", en: "Korean" },
+  { id: "en", ko: "영어", en: "English" },
 ];
 const NAV_ENTRIES = ALL_NAV_ENTRIES.filter(
   (entry) => !IS_COMPANY_BUILD || entry.id !== "remote"
@@ -261,6 +291,7 @@ function AgentsSettings({
   showUsageBar: boolean;
   onShowUsageBarChange: (show: boolean) => void;
 }) {
+  const { text } = useAppLanguage();
   const [avail, setAvail] = useState<ToolAvailability | null>(null);
   const [checking, setChecking] = useState(false);
   const refreshAvail = () => {
@@ -286,9 +317,13 @@ function AgentsSettings({
     void invoke<{ ok: boolean; changed: boolean }>("qwen_region_set", { region })
       .then((r) => {
         setQwen((q) => (q ? { ...q, region } : q));
-        setQwenMsg(r.changed ? "변경됨 · 실행 중 Qwen 세션은 재시작해야 적용됩니다" : "이미 해당 리전입니다");
+        setQwenMsg(
+          r.changed
+            ? text("변경됨 · 실행 중 Qwen 세션은 재시작해야 적용됩니다", "Changed · restart active Qwen sessions to apply")
+            : text("이미 해당 리전입니다", "This region is already selected"),
+        );
       })
-      .catch((e) => setQwenMsg(`실패: ${String(e)}`))
+      .catch((e) => setQwenMsg(text(`실패: ${String(e)}`, `Failed: ${String(e)}`)))
       .finally(() => setQwenBusy(false));
   };
 
@@ -296,13 +331,16 @@ function AgentsSettings({
     <div className="app-settings-section">
       <div className="agent-block">
         <div className="agent-row-title-wrap">
-          <div className="agent-row-title">사용 가능한 도구</div>
+        <div className="agent-row-title">{text("사용 가능한 도구", "Available tools")}</div>
           <button type="button" className="agent-refresh" onClick={refreshAvail} disabled={checking}>
-            {checking ? "확인 중…" : "새로고침"}
+            {checking ? text("확인 중…", "Checking…") : text("새로고침", "Refresh")}
           </button>
         </div>
         <div className="agent-row-sub">
-          체크한 도구만 새 세션 만들기 드롭박스에 표시됩니다. (설치 여부는 오른쪽에 표시)
+          {text(
+            "체크한 도구만 새 세션 만들기 드롭박스에 표시됩니다. (설치 여부는 오른쪽에 표시)",
+            "Only selected tools appear when creating a session. Installation status is shown on the right.",
+          )}
         </div>
         <div className="agent-tool-list">
           {CHECKABLE_TOOL_IDS.map((id) => {
@@ -327,7 +365,11 @@ function AgentsSettings({
                   }}
                   title={info?.path ?? ""}
                 >
-                  {avail == null ? "확인 중…" : info?.available ? "✓ 사용 가능" : "✗ 미설치"}
+                  {avail == null
+                    ? text("확인 중…", "Checking…")
+                    : info?.available
+                      ? text("✓ 사용 가능", "✓ Available")
+                      : text("✗ 미설치", "✗ Not installed")}
                 </span>
               </label>
             );
@@ -337,8 +379,8 @@ function AgentsSettings({
 
       <label className="agent-toggle-row">
         <div>
-          <div className="agent-row-title">작업표시줄 사용량 표시</div>
-          <div className="agent-row-sub">하단 바에 Codex/Claude 사용량·한도를 표시합니다.</div>
+          <div className="agent-row-title">{text("작업표시줄 사용량 표시", "Show usage status bar")}</div>
+          <div className="agent-row-sub">{text("하단 바에 Codex/Claude 사용량·한도를 표시합니다.", "Show Codex and Claude usage limits in the bottom bar.")}</div>
         </div>
         <input
           type="checkbox"
@@ -348,14 +390,17 @@ function AgentsSettings({
       </label>
 
       <div className="agent-block">
-        <div className="agent-row-title">Qwen 리전 (나라)</div>
+        <div className="agent-row-title">{text("Qwen 리전 (나라)", "Qwen region")}</div>
         <div className="agent-row-sub">
-          Qwen Code(~/.qwen/settings.json)의 ModelStudio 엔드포인트 리전. 계정 지역과 맞춰야 합니다.
+          {text(
+            "Qwen Code(~/.qwen/settings.json)의 ModelStudio 엔드포인트 리전. 계정 지역과 맞춰야 합니다.",
+            "ModelStudio endpoint region in Qwen Code (~/.qwen/settings.json). It must match your account region.",
+          )}
         </div>
         {qwen == null ? (
-          <div className="agent-hint">불러오는 중…</div>
+          <div className="agent-hint">{text("불러오는 중…", "Loading…")}</div>
         ) : !qwen.available ? (
-          <div className="agent-hint">~/.qwen/settings.json 이 없습니다 (Qwen 미설정).</div>
+          <div className="agent-hint">{text("~/.qwen/settings.json 이 없습니다 (Qwen 미설정).", "~/.qwen/settings.json was not found (Qwen is not configured).")}</div>
         ) : (
           <div className="agent-region-row">
             {qwen.regions.map((r) => (
@@ -407,10 +452,12 @@ export function SettingsModal({
   showUsageBar: boolean;
   onShowUsageBarChange: (show: boolean) => void;
   buildVariant: "standard" | "company" | "store";
-  updateProvider: "github" | "microsoft-store";
+  updateProvider: "github" | "local-developer" | "microsoft-store";
   onClose: () => void;
 }) {
   useNativeViewOcclusion();
+  const { preference: languagePreference, language, setPreference, text } =
+    useAppLanguage();
 
   const [tab, setTab] = useState<SettingsCategory>("general");
   const [search, setSearch] = useState("");
@@ -447,6 +494,13 @@ export function SettingsModal({
   });
   const [install, setInstall] = useState<InstallState>({ status: "idle" });
   const [storeLaunch, setStoreLaunch] = useState<StoreLaunchState>({ status: "idle" });
+  const [developerUpdateDirectory, setDeveloperUpdateDirectoryState] =
+    useState<string | null>(null);
+  const [developerUpdateSource, setDeveloperUpdateSource] =
+    useState<"configured" | "environment" | "none">("none");
+  const [developerUpdate, setDeveloperUpdate] = useState<DeveloperUpdateState>({
+    status: "idle",
+  });
   const [sound, setSound] = useState<NotificationSoundConfig>(() =>
     loadNotificationSound()
   );
@@ -515,6 +569,21 @@ export function SettingsModal({
 
   useEffect(refreshConversationStorage, []);
 
+  useEffect(() => {
+    if (buildVariant !== "standard") return;
+    void getDeveloperUpdateSettings()
+      .then((settings) => {
+        setDeveloperUpdateDirectoryState(settings.directory);
+        setDeveloperUpdateSource(settings.source);
+      })
+      .catch((error) => {
+        setDeveloperUpdate({
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, [buildVariant]);
+
   const applyConversationStoragePath = async (nextPath: string | null) => {
     setConversationStorageBusy(true);
     setConversationStorageError(null);
@@ -545,7 +614,7 @@ export function SettingsModal({
 
   const handleResetConversationStorage = () => {
     if (!conversationStorage?.custom) return;
-    if (!window.confirm("기존 대화 저장소를 기본 Local AppData 경로로 안전하게 복사할까요?")) return;
+    if (!window.confirm(text("기존 대화 저장소를 기본 Local AppData 경로로 안전하게 복사할까요?", "Safely copy the existing conversation store back to the default Local AppData location?"))) return;
     void applyConversationStoragePath(null);
   };
 
@@ -877,7 +946,7 @@ export function SettingsModal({
             ? err.message
             : typeof err === "string"
               ? err
-              : "Hook 복구에 실패했습니다.",
+              : text("Hook 복구에 실패했습니다.", "Hook repair failed."),
       });
     }
   };
@@ -901,7 +970,7 @@ export function SettingsModal({
             ? err.message
             : typeof err === "string"
               ? err
-              : "진단 번들을 저장하지 못했습니다.",
+              : text("진단 번들을 저장하지 못했습니다.", "Could not save the diagnostic bundle."),
       });
     }
   };
@@ -962,7 +1031,54 @@ export function SettingsModal({
             ? error.message
             : typeof error === "string"
               ? error
-              : "Microsoft Store를 열 수 없습니다.",
+              : text("Microsoft Store를 열 수 없습니다.", "Could not open Microsoft Store."),
+      });
+    }
+  };
+
+  const handlePickDeveloperUpdateDirectory = async () => {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (typeof selected !== "string" || !selected) return;
+      const settings = await setDeveloperUpdateDirectory(selected);
+      setDeveloperUpdateDirectoryState(settings.directory);
+      setDeveloperUpdateSource(settings.source);
+      setDeveloperUpdate({ status: "idle" });
+    } catch (error) {
+      setDeveloperUpdate({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const handleCheckDeveloperUpdate = async () => {
+    setDeveloperUpdate({ status: "checking" });
+    try {
+      const result = await checkDeveloperUpdate();
+      setDeveloperUpdateDirectoryState(result.directory);
+      setDeveloperUpdateSource(result.source);
+      setDeveloperUpdate(
+        result.update
+          ? { status: "available", update: result.update }
+          : { status: "current" }
+      );
+    } catch (error) {
+      setDeveloperUpdate({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const handleInstallDeveloperUpdate = async (update: DeveloperUpdate) => {
+    setDeveloperUpdate({ status: "installing", update });
+    try {
+      await installDeveloperUpdate();
+    } catch (error) {
+      setDeveloperUpdate({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -1023,12 +1139,15 @@ export function SettingsModal({
   const isBusy =
     updateCheck.status === "checking" ||
     install.status === "downloading" ||
-    install.status === "installing";
+    install.status === "installing" ||
+    developerUpdate.status === "checking" ||
+    developerUpdate.status === "installing";
 
   const query = search.trim().toLowerCase();
   const matchesSearch = (entry: NavEntry) =>
     !query ||
     entry.label.toLowerCase().includes(query) ||
+    entry.labelKo.toLowerCase().includes(query) ||
     entry.keywords.toLowerCase().includes(query);
   const activeEntry =
     NAV_ENTRIES.find((entry) => entry.id === tab) ?? NAV_ENTRIES[0];
@@ -1040,6 +1159,7 @@ export function SettingsModal({
     const firstHit = NAV_ENTRIES.find(
       (entry) =>
         entry.label.toLowerCase().includes(next) ||
+        entry.labelKo.toLowerCase().includes(next) ||
         entry.keywords.toLowerCase().includes(next)
     );
     if (firstHit) setTab(firstHit.id);
@@ -1059,14 +1179,16 @@ export function SettingsModal({
         <aside className="app-settings-side">
           <div className="app-settings-side-head">
             <span className="app-settings-brand">M</span>
-            <h2 id="app-settings-title" className="modal-title">Settings</h2>
+            <h2 id="app-settings-title" className="modal-title">
+              {text("설정", "Settings")}
+            </h2>
           </div>
           <label className="app-settings-search">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
             <input
               type="search"
               value={search}
-              placeholder="설정 검색…"
+              placeholder={text("설정 검색…", "Search settings…")}
               onChange={(e) => handleSearch(e.target.value)}
             />
           </label>
@@ -1078,7 +1200,13 @@ export function SettingsModal({
               if (entries.length === 0) return null;
               return (
                 <div className="app-settings-nav-group" key={group}>
-                  <div className="app-settings-nav-label">{group}</div>
+                  <div className="app-settings-nav-label">
+                    {group === "Workspace"
+                      ? text("작업 공간", "Workspace")
+                      : group === "Services"
+                        ? text("서비스", "Services")
+                        : text("정보", "Info")}
+                  </div>
                   {entries.map((entry) => (
                     <button
                       key={entry.id}
@@ -1088,7 +1216,7 @@ export function SettingsModal({
                       onClick={() => setTab(entry.id)}
                     >
                       <span className="app-settings-nav-icon">{entry.icon}</span>
-                      {entry.label}
+                      {language === "ko" ? entry.labelKo : entry.label}
                     </button>
                   ))}
                 </div>
@@ -1097,17 +1225,21 @@ export function SettingsModal({
           </nav>
           <div className="app-settings-side-foot">
             <span className="app-settings-ver">v{APP_VERSION}</span>
-            <button className="btn-primary" onClick={onClose}>Done</button>
+            <button className="btn-primary" onClick={onClose}>{text("완료", "Done")}</button>
           </div>
         </aside>
 
         <div className="app-settings-main">
         <div className="app-settings-content-head">
           <div>
-            <h2 className="modal-title">{activeEntry.title}</h2>
-            <div className="app-settings-content-sub">{activeEntry.sub}</div>
+            <h2 className="modal-title">
+              {language === "ko" ? activeEntry.titleKo : activeEntry.title}
+            </h2>
+            <div className="app-settings-content-sub">
+              {language === "ko" ? activeEntry.sub : activeEntry.subEn}
+            </div>
           </div>
-          <button className="app-icon-btn" onClick={onClose} title="Close">
+          <button className="app-icon-btn" onClick={onClose} title={text("닫기", "Close")}>
             ×
           </button>
         </div>
@@ -1116,7 +1248,33 @@ export function SettingsModal({
         {tab === "general" && (
         <>
         <div className="app-settings-section">
-          <div className="field-label">Theme</div>
+          <div className="field-label">{text("언어", "Language")}</div>
+          <div className="app-theme-options" role="radiogroup" aria-label={text("앱 언어", "App language")}>
+            {LANGUAGE_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={option.id === languagePreference}
+                className={`app-theme-option ${
+                  option.id === languagePreference ? "app-theme-option-active" : ""
+                }`}
+                onClick={() => setPreference(option.id)}
+              >
+                {language === "ko" ? option.ko : option.en}
+              </button>
+            ))}
+          </div>
+          <div className="app-update-message">
+            {text(
+              "선택한 언어는 즉시 적용되며 이 PC에 저장됩니다.",
+              "The selected language is applied immediately and saved on this PC.",
+            )}
+          </div>
+        </div>
+
+        <div className="app-settings-section">
+          <div className="field-label">{text("테마", "Theme")}</div>
           <div className="app-theme-options">
             {APP_THEMES.map((option) => (
               <button
@@ -1133,7 +1291,7 @@ export function SettingsModal({
         </div>
 
         <div className="app-settings-section">
-          <div className="field-label">Notification sound</div>
+          <div className="field-label">{text("알림음", "Notification sound")}</div>
           <div className="app-theme-options">
             {SOUND_MODES.map((option) => (
               <button
@@ -1155,13 +1313,13 @@ export function SettingsModal({
               >
                 {sound.customPath
                   ? tailPath(sound.customPath)
-                  : "No file selected"}
+                  : text("선택한 파일 없음", "No file selected")}
               </span>
               <button
                 className="btn-secondary app-sound-pick-btn"
                 onClick={handlePickCustomFile}
               >
-                Choose...
+                {text("선택…", "Choose…")}
               </button>
             </div>
           )}
@@ -1184,7 +1342,7 @@ export function SettingsModal({
               onClick={handleTestSound}
               disabled={sound.mode === "custom" && !sound.customPath}
             >
-              Test
+              {text("테스트", "Test")}
             </button>
           </div>
           <label className="app-checkbox-row">
@@ -1195,7 +1353,10 @@ export function SettingsModal({
                 applySound({ ...sound, osNotification: e.target.checked })
               }
             />
-            Windows 알림 표시 (소리 중복 방지: 앱 사운드가 켜져 있으면 무음)
+            {text(
+              "Windows 알림 표시 (소리 중복 방지: 앱 사운드가 켜져 있으면 무음)",
+              "Show Windows notifications (silent while app sound is enabled to avoid duplicates)",
+            )}
           </label>
         </div>
 
@@ -1211,12 +1372,18 @@ export function SettingsModal({
                   onDesktopPetEnabledChange(event.target.checked)
                 }
               />
-              <span>화면 위에 작업 상태 펫 표시</span>
+              <span>{text("화면 위에 작업 상태 펫 표시", "Show the status pet above other windows")}</span>
             </label>
             <div className="app-update-message">
               {desktopPetAvailable
-                ? "작업 중에는 움직이고, 완료되면 세션 이름과 완료 배지를 표시합니다. 펫 아래의 점을 끌어서 이동할 수 있습니다."
-                : "Desktop Pet은 중복 표시를 막기 위해 주 MultiAgent 창에서만 설정할 수 있습니다."}
+                ? text(
+                    "작업 중에는 움직이고, 완료되면 세션 이름과 완료 배지를 표시합니다. 펫 아래의 점을 끌어서 이동할 수 있습니다.",
+                    "The pet moves while work is in progress and shows the session name and completion badge when done. Drag the dot below it to reposition.",
+                  )
+                : text(
+                    "Desktop Pet은 중복 표시를 막기 위해 주 MultiAgent 창에서만 설정할 수 있습니다.",
+                    "Desktop Pet can only be configured in the main MultiAgent window to prevent duplicates.",
+                  )}
             </div>
             <div className="app-sound-actions">
               <button
@@ -1224,7 +1391,7 @@ export function SettingsModal({
                 disabled={!desktopPetAvailable || !desktopPetEnabled}
                 onClick={onResetDesktopPetPosition}
               >
-                위치 초기화
+                {text("위치 초기화", "Reset position")}
               </button>
             </div>
           </div>
@@ -1244,19 +1411,19 @@ export function SettingsModal({
 
         {tab === "data" && (
         <div className="app-settings-section">
-          <div className="field-label">대화·산출물 저장 위치</div>
+          <div className="field-label">{text("대화·산출물 저장 위치", "Conversation and artifact storage")}</div>
           <div className="app-about-card">
             <div className="app-about-row">
-              <span className="app-about-label">현재 위치</span>
+              <span className="app-about-label">{text("현재 위치", "Current location")}</span>
               <span className="app-about-value">
-                {conversationStorage?.custom ? "사용자 지정" : "Local AppData (기본값)"}
+                {conversationStorage?.custom ? text("사용자 지정", "Custom") : text("Local AppData (기본값)", "Local AppData (default)")}
               </span>
             </div>
             <label className="field app-remote-field">
               <span className="field-label">Storage root</span>
               <div className="folder-row">
                 <input
-                  value={conversationStorage?.path ?? "불러오는 중…"}
+                  value={conversationStorage?.path ?? text("불러오는 중…", "Loading…")}
                   readOnly
                   spellCheck={false}
                   title={conversationStorage?.path ?? ""}
@@ -1272,9 +1439,10 @@ export function SettingsModal({
               </div>
             </label>
             <div className="app-update-message">
-              세션별 사용자 메시지·AI 응답·도구 실행·발견된 산출물 경로를 MultiAgent 전용
-              SQLite에 저장합니다. 새 위치를 선택하면 기존 데이터를 검증한 뒤 복사하고,
-              이전 저장소는 백업으로 남깁니다. 전용 빈 폴더를 선택해 주세요.
+              {text(
+                "세션별 사용자 메시지·AI 응답·도구 실행·발견된 산출물 경로를 MultiAgent 전용 SQLite에 저장합니다. 새 위치를 선택하면 기존 데이터를 검증한 뒤 복사하고, 이전 저장소는 백업으로 남깁니다. 전용 빈 폴더를 선택해 주세요.",
+                "MultiAgent stores per-session user messages, AI responses, tool runs, and discovered artifact paths in its own SQLite database. When you select a new location, existing data is validated and copied, while the previous store remains as a backup. Choose a dedicated empty folder.",
+              )}
             </div>
             {conversationStorageError && (
               <div className="app-update-message app-update-error">
@@ -1283,8 +1451,10 @@ export function SettingsModal({
             )}
             {conversationStorage && !conversationStorage.available && (
               <div className="app-update-message app-update-error">
-                저장소 연결 안 됨: {conversationStorage.error}. 원본 Codex·Claude 기록으로 임시 표시하며,
-                이 위치를 다시 선택하거나 다른 전용 폴더로 변경해 주세요.
+                {text(
+                  `저장소 연결 안 됨: ${conversationStorage.error}. 원본 Codex·Claude 기록으로 임시 표시하며, 이 위치를 다시 선택하거나 다른 전용 폴더로 변경해 주세요.`,
+                  `Storage unavailable: ${conversationStorage.error}. Original Codex and Claude records are shown temporarily. Select this location again or choose another dedicated folder.`,
+                )}
               </div>
             )}
             <div className="app-update-actions">
@@ -1293,54 +1463,56 @@ export function SettingsModal({
                 onClick={handleOpenConversationStorage}
                 disabled={!conversationStorage || conversationStorageBusy}
               >
-                폴더 열기
+                {text("폴더 열기", "Open folder")}
               </button>
               <button
                 className="btn-secondary app-update-btn"
                 onClick={handleResetConversationStorage}
                 disabled={!conversationStorage?.custom || conversationStorageBusy}
               >
-                기본 경로 복원
+                {text("기본 경로 복원", "Restore default path")}
               </button>
               <button
                 className="btn-secondary app-update-btn"
                 onClick={refreshConversationStorage}
                 disabled={conversationStorageBusy}
               >
-                {conversationStorageBusy ? "이동 중…" : "새로고침"}
+                {conversationStorageBusy ? text("이동 중…", "Moving…") : text("새로고침", "Refresh")}
               </button>
             </div>
           </div>
 
-          <div className="field-label" style={{ marginTop: 14 }}>저장 현황</div>
+          <div className="field-label" style={{ marginTop: 14 }}>{text("저장 현황", "Storage status")}</div>
           <div className="app-about-card">
             <div className="app-about-row">
-              <span className="app-about-label">대화</span>
+              <span className="app-about-label">{text("대화", "Conversations")}</span>
               <span className="app-about-value">
-                {conversationStorage ? `${conversationStorage.conversations.toLocaleString()}개` : "—"}
+                {conversationStorage ? text(`${conversationStorage.conversations.toLocaleString()}개`, conversationStorage.conversations.toLocaleString()) : "—"}
               </span>
             </div>
             <div className="app-about-row">
-              <span className="app-about-label">대화 블록</span>
+              <span className="app-about-label">{text("대화 블록", "Conversation blocks")}</span>
               <span className="app-about-value">
-                {conversationStorage ? `${conversationStorage.blocks.toLocaleString()}개` : "—"}
+                {conversationStorage ? text(`${conversationStorage.blocks.toLocaleString()}개`, conversationStorage.blocks.toLocaleString()) : "—"}
               </span>
             </div>
             <div className="app-about-row">
-              <span className="app-about-label">산출물 인덱스</span>
+              <span className="app-about-label">{text("산출물 인덱스", "Artifact index")}</span>
               <span className="app-about-value">
-                {conversationStorage ? `${conversationStorage.artifacts.toLocaleString()}개` : "—"}
+                {conversationStorage ? text(`${conversationStorage.artifacts.toLocaleString()}개`, conversationStorage.artifacts.toLocaleString()) : "—"}
               </span>
             </div>
             <div className="app-about-row">
-              <span className="app-about-label">사용 용량</span>
+              <span className="app-about-label">{text("사용 용량", "Storage used")}</span>
               <span className="app-about-value">
                 {conversationStorage ? formatBytes(conversationStorage.bytes) : "—"}
               </span>
             </div>
             <div className="app-update-message">
-              기본 위치는 Windows Local AppData이며 Git 저장소나 설치 파일에는 포함되지 않습니다.
-              원본 Codex·Claude JSONL이 없어져도 이미 수집한 대화는 이 저장소에서 계속 볼 수 있습니다.
+              {text(
+                "기본 위치는 Windows Local AppData이며 Git 저장소나 설치 파일에는 포함되지 않습니다. 원본 Codex·Claude JSONL이 없어져도 이미 수집한 대화는 이 저장소에서 계속 볼 수 있습니다.",
+                "The default location is Windows Local AppData and is not included in Git repositories or installation files. Previously collected conversations remain available here even if the original Codex or Claude JSONL files are removed.",
+              )}
             </div>
           </div>
         </div>
@@ -1351,7 +1523,7 @@ export function SettingsModal({
           <div className="field-label">Keyboard shortcuts</div>
           <div className="app-about-card">
             <div className="app-update-message">
-              버튼을 누른 뒤 새 단축키를 입력하세요. Backspace로 해제하고 Esc로 취소할 수 있습니다.
+              {text("버튼을 누른 뒤 새 단축키를 입력하세요. Backspace로 해제하고 Esc로 취소할 수 있습니다.", "Press a button, then enter a new shortcut. Use Backspace to clear it or Esc to cancel.")}
             </div>
             <KeyboardShortcuts
               shortcuts={commandShortcuts}
@@ -1367,21 +1539,30 @@ export function SettingsModal({
           <div className="app-about-card">
             <div className="app-update-message">
               {hookRepair.status === "idle" &&
-                "실행 중인 PTY와 Codex/Claude Hook 상태를 1분마다 자동 점검합니다. 아래 버튼은 helper·설정·로컬 연결을 즉시 다시 구성합니다. Codex가 변경된 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다."}
-              {hookRepair.status === "running" && "Hook 상태를 점검하고 복구하는 중입니다..."}
+                text(
+                  "실행 중인 PTY와 Codex/Claude Hook 상태를 1분마다 자동 점검합니다. 아래 버튼은 helper·설정·로컬 연결을 즉시 다시 구성합니다. Codex가 변경된 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.",
+                  "Active PTYs and Codex/Claude hooks are checked every minute. The button below immediately repairs the helper, configuration, and local connection. If Codex asks you to review changed hooks, trust the MultiAgent entry in /hooks.",
+                )}
+              {hookRepair.status === "running" && text("Hook 상태를 점검하고 복구하는 중입니다...", "Checking and repairing hooks…")}
               {hookRepair.status === "error" && (
                 <span className="app-update-error">{hookRepair.message}</span>
               )}
               {hookRepair.status === "done" && (
                 <>
-                  활성 {hookRepair.summary.activeSessions}개 중 지원 세션 {hookRepair.summary.supportedSessions}개를 확인했습니다. 복구 {hookRepair.summary.repaired}개, 정상 {hookRepair.summary.alreadyHealthy}개
-                  {hookRepair.summary.serverRestarted ? ", Hook 서버 재연결 완료" : ""}.
+                  {text(
+                    `활성 ${hookRepair.summary.activeSessions}개 중 지원 세션 ${hookRepair.summary.supportedSessions}개를 확인했습니다. 복구 ${hookRepair.summary.repaired}개, 정상 ${hookRepair.summary.alreadyHealthy}개`,
+                    `Checked ${hookRepair.summary.supportedSessions} supported sessions out of ${hookRepair.summary.activeSessions} active sessions. Repaired ${hookRepair.summary.repaired}; already healthy ${hookRepair.summary.alreadyHealthy}`,
+                  )}
+                  {hookRepair.summary.serverRestarted ? text(", Hook 서버 재연결 완료", ", hook server reconnected") : ""}.
                   {hookRepair.summary.skipped > 0
-                    ? ` Hook 미사용 세션 ${hookRepair.summary.skipped}개는 제외했습니다.`
+                    ? text(` Hook 미사용 세션 ${hookRepair.summary.skipped}개는 제외했습니다.`, ` Skipped ${hookRepair.summary.skipped} sessions that do not use hooks.`)
                     : ""}
                   {hookRepair.summary.restartRequired > 0 && (
                     <div className="app-update-error">
-                      Hook 정의 또는 SSH 연결이 바뀐 세션 {hookRepair.summary.restartRequired}개는 다시 열어주세요. Codex가 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.
+                      {text(
+                        `Hook 정의 또는 SSH 연결이 바뀐 세션 ${hookRepair.summary.restartRequired}개는 다시 열어주세요. Codex가 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.`,
+                        `Reopen ${hookRepair.summary.restartRequired} sessions whose hook definitions or SSH connections changed. If Codex asks you to review hooks, trust the MultiAgent entry in /hooks.`,
+                      )}
                     </div>
                   )}
                   {hookRepair.summary.failures.map((failure) => (
@@ -1398,7 +1579,7 @@ export function SettingsModal({
                 onClick={handleHookRepair}
                 disabled={hookRepair.status === "running"}
               >
-                {hookRepair.status === "running" ? "복구 중..." : "Hook 점검 및 복구"}
+                {hookRepair.status === "running" ? text("복구 중...", "Repairing…") : text("Hook 점검 및 복구", "Check and repair hooks")}
               </button>
             </div>
           </div>
@@ -1440,7 +1621,7 @@ export function SettingsModal({
             >
               {monitorError
                 ? `Monitor error: ${monitorError}`
-                : "하나의 로컬 웹에서 세션 모니터링, split 그룹, hook 상태, docs/phase, 사용량을 함께 봅니다."}
+                : text("하나의 로컬 웹에서 세션 모니터링, split 그룹, hook 상태, docs/phase, 사용량을 함께 봅니다.", "View session monitoring, split groups, hook status, docs/phases, and usage together in one local dashboard.")}
             </div>
             <div className="app-update-actions">
               <button
@@ -1489,7 +1670,7 @@ export function SettingsModal({
               <span>Start dashboard when MultiAgent starts</span>
             </label>
             <div className="app-update-message">
-              기본값은 4421입니다. 포트 변경은 다음 Start부터 적용됩니다.
+              {text("기본값은 4421입니다. 포트 변경은 다음 Start부터 적용됩니다.", "The default is 4421. Port changes apply the next time the dashboard starts.")}
             </div>
             <div className="app-update-actions">
               <button
@@ -1516,7 +1697,7 @@ export function SettingsModal({
             >
               {usageError
                 ? `Usage error: ${usageError}`
-                : "Claude/Codex JSONL transcript 사용량은 위 Dashboard 서버 안의 Usage 화면에서 함께 봅니다."}
+                : text("Claude/Codex JSONL transcript 사용량은 위 Dashboard 서버 안의 Usage 화면에서 함께 봅니다.", "Claude and Codex JSONL transcript usage is available on the Usage page of the dashboard above.")}
             </div>
             <div className="app-update-actions">
               <button
@@ -1573,8 +1754,8 @@ export function SettingsModal({
             )}
             <div className="app-update-message">
               {remote.running
-                ? "모바일 리모컨 서버가 준비됐습니다. 위 주소는 이 PC에서 확인할 때 사용하고, 휴대폰에서는 아래 HTTPS 터널 주소를 사용하세요."
-                : "세션 상태·최근 출력·질문을 확인하고 짧은 지시를 보낼 수 있는 모바일 PWA 서버를 켭니다."}
+                ? text("모바일 리모컨 서버가 준비됐습니다. 위 주소는 이 PC에서 확인할 때 사용하고, 휴대폰에서는 아래 HTTPS 터널 주소를 사용하세요.", "The mobile remote server is ready. Use the address above on this PC and the HTTPS tunnel address below on your phone.")
+                : text("세션 상태·최근 출력·질문을 확인하고 짧은 지시를 보낼 수 있는 모바일 PWA 서버를 켭니다.", "Start a mobile PWA server for viewing session status, recent output, and questions, and for sending short instructions.")}
             </div>
             <div className="app-update-actions">
               <button
@@ -1616,10 +1797,10 @@ export function SettingsModal({
               {tunnelError
                 ? `Tunnel error: ${tunnelError}`
                 : tunnelBusy && !tunnel.running
-                  ? "터널 시작 중... 처음이면 cloudflared 다운로드(~60MB) 때문에 오래 걸릴 수 있어요."
+                  ? text("터널 시작 중... 처음이면 cloudflared 다운로드(~60MB) 때문에 오래 걸릴 수 있어요.", "Starting tunnel… The first start may take longer while cloudflared (~60 MB) downloads.")
                   : tunnel.running
-                    ? "휴대폰에서 위 HTTPS 주소를 열고 브라우저 메뉴의 ‘앱 설치’ 또는 ‘홈 화면에 추가’를 선택하세요. Quick tunnel 주소는 다시 켤 때 바뀝니다."
-                    : "Cloudflare Tunnel로 공개 HTTPS 주소를 발급해 외부 인터넷에서 접속할 수 있게 합니다."}
+                    ? text("휴대폰에서 위 HTTPS 주소를 열고 브라우저 메뉴의 ‘앱 설치’ 또는 ‘홈 화면에 추가’를 선택하세요. Quick tunnel 주소는 다시 켤 때 바뀝니다.", "Open the HTTPS address above on your phone and choose Install app or Add to Home Screen in the browser menu. A quick tunnel address changes each time it starts.")
+                    : text("Cloudflare Tunnel로 공개 HTTPS 주소를 발급해 외부 인터넷에서 접속할 수 있게 합니다.", "Create a public HTTPS address with Cloudflare Tunnel for access over the internet.")}
             </div>
             <div className="app-update-actions">
               <button
@@ -1654,7 +1835,7 @@ export function SettingsModal({
               />
             </label>
             <label className="field app-remote-field">
-              <span className="field-label">Owner GitHub username (항상 허용)</span>
+              <span className="field-label">{text("Owner GitHub username (항상 허용)", "Owner GitHub username (always allowed)")}</span>
               <input
                 value={remoteConfig.owner}
                 placeholder="my-github-id"
@@ -1665,12 +1846,12 @@ export function SettingsModal({
             </label>
             <label className="field app-remote-field">
               <span className="field-label">
-                Client Secret (선택 — 고정 도메인일 때 리다이렉트 로그인)
+                {text("Client Secret (선택 — 고정 도메인일 때 리다이렉트 로그인)", "Client Secret (optional — redirect login for a fixed domain)")}
               </span>
               <input
                 type="password"
                 value={remoteConfig.client_secret}
-                placeholder="비우면 Device Flow 사용"
+                placeholder={text("비우면 Device Flow 사용", "Leave empty to use Device Flow")}
                 onChange={(e) =>
                   setRemoteConfig((c) => ({
                     ...c,
@@ -1680,11 +1861,10 @@ export function SettingsModal({
               />
             </label>
             <div className="app-update-message">
-              github.com/settings/developers에서 OAuth App을 만들고 Client ID를
-              입력하세요. Client Secret + Public hostname까지 설정하면 코드 입력
-              없는 리다이렉트 로그인이 되고 (callback URL:
-              https://호스트네임/auth/github/callback), 비우면 Device Flow를 사용합니다.
-              Owner 계정은 승인 없이 항상 접속할 수 있습니다.
+              {text(
+                "github.com/settings/developers에서 OAuth App을 만들고 Client ID를 입력하세요. Client Secret + Public hostname까지 설정하면 코드 입력 없는 리다이렉트 로그인이 되고(callback URL: https://호스트네임/auth/github/callback), 비우면 Device Flow를 사용합니다. Owner 계정은 승인 없이 항상 접속할 수 있습니다.",
+                "Create an OAuth App at github.com/settings/developers and enter its Client ID. Setting both Client Secret and Public hostname enables redirect login without entering a code (callback URL: https://hostname/auth/github/callback); otherwise Device Flow is used. The owner account is always allowed without approval.",
+              )}
             </div>
 
             <div className="app-remote-divider" />
@@ -1692,7 +1872,7 @@ export function SettingsModal({
               <span className="app-about-label">Fixed domain (named tunnel)</span>
             </div>
             <label className="field app-remote-field">
-              <span className="field-label">Cloudflare tunnel token (비우면 quick tunnel)</span>
+              <span className="field-label">{text("Cloudflare tunnel token (비우면 quick tunnel)", "Cloudflare tunnel token (leave empty for a quick tunnel)")}</span>
               <input
                 value={remoteConfig.tunnel_token}
                 placeholder="eyJhIjoi..."
@@ -1715,7 +1895,7 @@ export function SettingsModal({
               />
             </label>
             <label className="field app-remote-field">
-              <span className="field-label">로컬 서버 포트 (0 = 랜덤, named tunnel은 고정 필요)</span>
+              <span className="field-label">{text("로컬 서버 포트 (0 = 랜덤, named tunnel은 고정 필요)", "Local server port (0 = random; a named tunnel requires a fixed port)")}</span>
               <input
                 type="number"
                 min={0}
@@ -1733,9 +1913,10 @@ export function SettingsModal({
               />
             </label>
             <div className="app-update-message">
-              Cloudflare Zero Trust → Networks → Tunnels에서 만든 토큰을
-              입력하면 고정 도메인으로 서비스됩니다. 대시보드의 Public hostname
-              service는 여기 설정한 포트의 http://localhost를 가리켜야 합니다.
+              {text(
+                "Cloudflare Zero Trust → Networks → Tunnels에서 만든 토큰을 입력하면 고정 도메인으로 서비스됩니다. 대시보드의 Public hostname service는 여기 설정한 포트의 http://localhost를 가리켜야 합니다.",
+                "Enter a token created in Cloudflare Zero Trust → Networks → Tunnels to use a fixed domain. The dashboard's Public hostname service must point to http://localhost on the port configured here.",
+              )}
             </div>
             <div className="app-update-actions">
               <button
@@ -1750,7 +1931,7 @@ export function SettingsModal({
             <div className="app-about-row">
               <span className="app-about-label">Access</span>
               <span className="app-about-value">
-                승인 대기 {access.pending.length} · 승인됨 {access.approved.length}
+                {text(`승인 대기 ${access.pending.length} · 승인됨 ${access.approved.length}`, `Pending ${access.pending.length} · Approved ${access.approved.length}`)}
               </span>
             </div>
             {access.pending.map((login) => (
@@ -1762,13 +1943,13 @@ export function SettingsModal({
                   className="btn-primary app-access-btn"
                   onClick={() => handleApprove(login)}
                 >
-                  승인
+                  {text("승인", "Approve")}
                 </button>
                 <button
                   className="btn-secondary app-access-btn"
                   onClick={() => handleRevoke(login)}
                 >
-                  거절
+                  {text("거절", "Reject")}
                 </button>
               </div>
             ))}
@@ -1779,13 +1960,13 @@ export function SettingsModal({
                   className="btn-secondary app-access-btn"
                   onClick={() => handleRevoke(login)}
                 >
-                  해제
+                  {text("해제", "Revoke")}
                 </button>
               </div>
             ))}
             {access.pending.length === 0 && access.approved.length === 0 && (
               <div className="app-update-message">
-                외부 사용자가 GitHub로 로그인하면 여기에 승인 요청이 표시됩니다.
+                {text("외부 사용자가 GitHub로 로그인하면 여기에 승인 요청이 표시됩니다.", "Approval requests appear here when external users sign in with GitHub.")}
               </div>
             )}
           </div>
@@ -1797,16 +1978,17 @@ export function SettingsModal({
           <div className="field-label">External diff program</div>
           <div className="app-about-card">
             <div className="app-update-message">
-              Source Control에서 텍스트 파일을 더블클릭하거나 diff 아이콘(⇄)·우클릭 메뉴를 누르면 이
-              프로그램에 비교할 파일 두 개(변경 전 · 작업 트리)를 인자로 넘겨 실행합니다. HTML과 이미지,
-              바이너리 파일의 더블클릭은 기존처럼 문서 뷰어로 엽니다.
+              {text(
+                "Source Control에서 텍스트 파일을 더블클릭하거나 diff 아이콘(⇄)·우클릭 메뉴를 누르면 이 프로그램에 비교할 파일 두 개(변경 전 · 작업 트리)를 인자로 넘겨 실행합니다. HTML과 이미지, 바이너리 파일의 더블클릭은 기존처럼 문서 뷰어로 엽니다.",
+                "Double-click a text file in Source Control, or use the diff icon (⇄) or context menu, to launch this program with two files to compare (previous version and working tree). HTML, images, and binary files still open in the document viewer.",
+              )}
             </div>
             <label className="field app-remote-field">
               <span className="field-label">Diff program</span>
               <div className="folder-row">
                 <input
                   value={diffTool}
-                  placeholder={`예: "C:\\Program Files\\Beyond Compare 4\\BComp.exe"`}
+                  placeholder={text(`예: "C:\\Program Files\\Beyond Compare 4\\BComp.exe"`, `e.g. "C:\\Program Files\\Beyond Compare 4\\BComp.exe"`)}
                   onChange={(e) => setDiffTool(e.target.value)}
                   spellCheck={false}
                 />
@@ -1820,10 +2002,11 @@ export function SettingsModal({
               </div>
             </label>
             <div className="app-update-message">
-              프로그램만 지정하면 <code>프로그램 "변경전" "작업트리"</code> 형태로 실행됩니다. 인자 순서를
-              직접 정하려면 <code>$LOCAL</code>(변경 전)·<code>$REMOTE</code>(작업 트리)를 쓰세요.
-              예 · Beyond Compare: <code>BComp.exe</code> · WinMerge: <code>WinMergeU.exe</code> ·
-              VS Code(플래그 필요): <code>code --wait --diff "$LOCAL" "$REMOTE"</code>
+              {language === "ko" ? (
+                <>프로그램만 지정하면 <code>프로그램 "변경전" "작업트리"</code> 형태로 실행됩니다. 인자 순서를 직접 정하려면 <code>$LOCAL</code>(변경 전)·<code>$REMOTE</code>(작업 트리)를 쓰세요. 예 · Beyond Compare: <code>BComp.exe</code> · WinMerge: <code>WinMergeU.exe</code> · VS Code(플래그 필요): <code>code --wait --diff "$LOCAL" "$REMOTE"</code></>
+              ) : (
+                <>If you specify only a program, it runs as <code>program "previous" "working-tree"</code>. To control argument order, use <code>$LOCAL</code> (previous) and <code>$REMOTE</code> (working tree). Examples · Beyond Compare: <code>BComp.exe</code> · WinMerge: <code>WinMergeU.exe</code> · VS Code (flag required): <code>code --wait --diff "$LOCAL" "$REMOTE"</code></>
+              )}
             </div>
             <div className="app-update-actions">
               <button className="btn-secondary app-update-btn" onClick={handleSaveDiffTool}>
@@ -1838,13 +2021,13 @@ export function SettingsModal({
         <div className="app-settings-section app-ssh-tab">
           <div className="app-ssh-intro-row">
             <div className="app-update-message">
-              새 프로젝트의 "Run on remote host"에서 선택. 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장).
+              {text("새 프로젝트의 \"Run on remote host\"에서 선택. 인증은 시스템 ssh-agent/키에 위임(비밀번호 미저장).", "Select a host under Run on remote host when creating a project. Authentication is delegated to the system ssh-agent or key; passwords are not stored by default.")}
             </div>
             <button
               className="btn-secondary app-ssh-guide-btn"
               onClick={() => setSshGuideOpen(true)}
             >
-              사용 방법
+              {text("사용 방법", "How to use")}
             </button>
           </div>
 
@@ -1872,7 +2055,7 @@ export function SettingsModal({
               </div>
             ))}
             {sshHosts.length === 0 && (
-              <div className="app-update-message">아직 등록된 호스트가 없습니다.</div>
+              <div className="app-update-message">{text("아직 등록된 호스트가 없습니다.", "No hosts have been registered yet.")}</div>
             )}
           </div>
 
@@ -1990,14 +2173,14 @@ export function SettingsModal({
           ) : (
             <label className="field">
               <span className="field-label">
-                Password{sshPasswordSaved ? " (저장됨 — 비워두면 유지)" : ""}
+                Password{sshPasswordSaved ? text(" (저장됨 — 비워두면 유지)", " (saved — leave empty to keep)") : ""}
               </span>
               <div className="folder-row">
                 <input
                   type="password"
                   value={sshPasswordInput}
                   onChange={(e) => setSshPasswordInput(e.target.value)}
-                  placeholder={sshPasswordSaved ? "•••••••• (저장됨)" : "비밀번호"}
+                  placeholder={sshPasswordSaved ? text("•••••••• (저장됨)", "•••••••• (saved)") : text("비밀번호", "Password")}
                 />
                 {sshPasswordSaved && (
                   <button
@@ -2005,12 +2188,12 @@ export function SettingsModal({
                     className="browse-btn"
                     onClick={handleSshClearPassword}
                   >
-                    지움
+                    {text("지움", "Clear")}
                   </button>
                 )}
               </div>
               <span className="check-hint">
-                로컬에만 저장되며 연결 시 자동 입력됩니다(localStorage·동기화에 포함 안 됨).
+                {text("로컬에만 저장되며 연결 시 자동 입력됩니다(localStorage·동기화에 포함 안 됨).", "Saved only on this device and entered automatically when connecting (not included in localStorage or sync).")}
               </span>
             </label>
           )}
@@ -2103,7 +2286,31 @@ export function SettingsModal({
                     : "Standard"}
               </span>
             </div>
-            {updateCheck.status === "available" && (
+            {buildVariant === "standard" && developerUpdateDirectory && (
+              <div className="app-about-row">
+                <span className="app-about-label">
+                  {text("출력 폴더", "Output folder")}
+                </span>
+                <span
+                  className="app-about-value"
+                  title={developerUpdateDirectory}
+                  style={{ overflowWrap: "anywhere" }}
+                >
+                  {developerUpdateDirectory}
+                </span>
+              </div>
+            )}
+            {buildVariant === "standard" &&
+              (developerUpdate.status === "available" ||
+                developerUpdate.status === "installing") && (
+                <div className="app-about-row">
+                  <span className="app-about-label">Latest</span>
+                  <span className="app-about-value">
+                    v{formatProductVersion(developerUpdate.update.version)}
+                  </span>
+                </div>
+              )}
+            {buildVariant !== "standard" && updateCheck.status === "available" && (
               <div className="app-about-row">
                 <span className="app-about-label">Latest</span>
                 <span className="app-about-value">
@@ -2115,7 +2322,8 @@ export function SettingsModal({
               className={`app-update-message ${
                 updateCheck.status === "error" ||
                 install.status === "error" ||
-                storeLaunch.status === "error"
+                storeLaunch.status === "error" ||
+                developerUpdate.status === "error"
                   ? "app-update-error"
                   : ""
               }`}
@@ -2129,22 +2337,39 @@ export function SettingsModal({
               {install.status === "error" &&
                 `Update install failed: ${install.message}`}
               {updateProvider === "microsoft-store" && storeLaunch.status === "error" &&
-                `Microsoft Store 열기 실패: ${storeLaunch.message}`}
+                text(`Microsoft Store 열기 실패: ${storeLaunch.message}`, `Failed to open Microsoft Store: ${storeLaunch.message}`)}
               {updateProvider === "microsoft-store" && storeLaunch.status !== "error" &&
-                "업데이트는 Microsoft Store에서 자동으로 관리됩니다. 새 버전을 직접 확인하려면 Store 제품 페이지를 여세요."}
-              {updateProvider !== "microsoft-store" && install.status === "idle" &&
+                text("업데이트는 Microsoft Store에서 자동으로 관리됩니다. 새 버전을 직접 확인하려면 Store 제품 페이지를 여세요.", "Updates are managed automatically by Microsoft Store. Open the Store product page to check for a new version manually.")}
+              {buildVariant === "standard" && developerUpdate.status === "idle" &&
+                (developerUpdateDirectory
+                  ? text("출력 폴더에서 새 개발자 빌드를 확인하세요.", "Check the output folder for a newer developer build.")
+                  : text("먼저 개발자 빌드 출력 폴더를 지정하세요.", "Choose the developer build output folder first."))}
+              {buildVariant === "standard" && developerUpdate.status === "checking" &&
+                text("출력 폴더를 확인하는 중입니다...", "Checking the output folder…")}
+              {buildVariant === "standard" && developerUpdate.status === "available" &&
+                text(
+                  `새 설치 파일을 찾았습니다: ${tailPath(developerUpdate.update.path)} (${formatBytes(developerUpdate.update.size)})`,
+                  `A newer installer was found: ${tailPath(developerUpdate.update.path)} (${formatBytes(developerUpdate.update.size)})`,
+                )}
+              {buildVariant === "standard" && developerUpdate.status === "current" &&
+                text("현재 버전보다 새로운 설치 파일이 없습니다.", "No installer newer than the current version was found.")}
+              {buildVariant === "standard" && developerUpdate.status === "installing" &&
+                text("세션을 저장한 뒤 설치 프로그램을 실행합니다...", "Saving sessions, then launching the installer…")}
+              {buildVariant === "standard" && developerUpdate.status === "error" &&
+                text(`로컬 업데이트 실패: ${developerUpdate.message}`, `Local update failed: ${developerUpdate.message}`)}
+              {buildVariant === "company" && install.status === "idle" &&
                 updateCheck.status === "idle" &&
                 "Click Check to see if a new release is available."}
-              {updateProvider !== "microsoft-store" && install.status === "idle" &&
+              {buildVariant === "company" && install.status === "idle" &&
                 updateCheck.status === "checking" &&
                 "Checking for updates..."}
-              {updateProvider !== "microsoft-store" && install.status === "idle" &&
+              {buildVariant === "company" && install.status === "idle" &&
                 updateCheck.status === "available" &&
                 "A newer release is available."}
-              {updateProvider !== "microsoft-store" && install.status === "idle" &&
+              {buildVariant === "company" && install.status === "idle" &&
                 updateCheck.status === "current" &&
                 "You are using the latest release."}
-              {updateProvider !== "microsoft-store" && install.status === "idle" &&
+              {buildVariant === "company" && install.status === "idle" &&
                 updateCheck.status === "error" &&
                 `Update check failed: ${updateCheck.message}`}
             </div>
@@ -2156,12 +2381,44 @@ export function SettingsModal({
                   disabled={storeLaunch.status === "opening"}
                 >
                   {storeLaunch.status === "opening"
-                    ? "Microsoft Store 여는 중..."
-                    : "Microsoft Store에서 업데이트 확인"}
+                    ? text("Microsoft Store 여는 중...", "Opening Microsoft Store…")
+                    : text("Microsoft Store에서 업데이트 확인", "Check for updates in Microsoft Store")}
                 </button>
               </div>
             )}
-            {updateProvider !== "microsoft-store" && <div className="app-update-actions">
+            {buildVariant === "standard" && (
+              <div className="app-update-actions">
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handlePickDeveloperUpdateDirectory}
+                  disabled={isBusy || developerUpdateSource === "environment"}
+                  title={developerUpdateSource === "environment"
+                    ? "MULTIAGENT_DEVELOPER_UPDATE_DIR"
+                    : undefined}
+                >
+                  {text("출력 폴더 선택", "Choose output folder")}
+                </button>
+                <button
+                  className="btn-secondary app-update-btn"
+                  onClick={handleCheckDeveloperUpdate}
+                  disabled={isBusy || !developerUpdateDirectory}
+                >
+                  {developerUpdate.status === "checking"
+                    ? text("확인 중...", "Checking…")
+                    : text("최신 빌드 확인", "Check latest build")}
+                </button>
+                {developerUpdate.status === "available" && (
+                  <button
+                    className="btn-primary app-update-btn"
+                    onClick={() => handleInstallDeveloperUpdate(developerUpdate.update)}
+                    disabled={isBusy}
+                  >
+                    {text("업데이트 설치", "Install update")}
+                  </button>
+                )}
+              </div>
+            )}
+            {buildVariant === "company" && <div className="app-update-actions">
               <button
                 className="btn-secondary app-update-btn"
                 onClick={handleCheckForUpdates}
@@ -2201,13 +2458,16 @@ export function SettingsModal({
               }`}
             >
               {diagnosticExport.status === "idle" &&
-                "앱·터미널·Hook·업데이트 상태와 제한된 로그를 JSON으로 저장합니다. 토큰·비밀번호와 사용자 홈 경로는 자동으로 제거됩니다."}
-              {diagnosticExport.status === "running" && "진단 정보를 수집하는 중입니다..."}
-              {diagnosticExport.status === "cancelled" && "저장을 취소했습니다."}
+                text("앱·터미널·Hook·업데이트 상태와 제한된 로그를 JSON으로 저장합니다. 토큰·비밀번호와 사용자 홈 경로는 자동으로 제거됩니다.", "Save app, terminal, hook, and update status with limited logs as JSON. Tokens, passwords, and user home paths are removed automatically.")}
+              {diagnosticExport.status === "running" && text("진단 정보를 수집하는 중입니다...", "Collecting diagnostics…")}
+              {diagnosticExport.status === "cancelled" && text("저장을 취소했습니다.", "Save was cancelled.")}
               {diagnosticExport.status === "error" && diagnosticExport.message}
               {diagnosticExport.status === "done" && (
                 <>
-                  저장 완료 · 터미널 {diagnosticExport.terminalCount}개 · Hook {diagnosticExport.hookHealthy ? "정상" : "점검 필요"}
+                  {text(
+                    `저장 완료 · 터미널 ${diagnosticExport.terminalCount}개 · Hook ${diagnosticExport.hookHealthy ? "정상" : "점검 필요"}`,
+                    `Saved · ${diagnosticExport.terminalCount} terminal${diagnosticExport.terminalCount === 1 ? "" : "s"} · Hook ${diagnosticExport.hookHealthy ? "healthy" : "needs attention"}`,
+                  )}
                   <div title={diagnosticExport.path}>{diagnosticExport.path}</div>
                 </>
               )}
@@ -2219,8 +2479,8 @@ export function SettingsModal({
                 disabled={diagnosticExport.status === "running"}
               >
                 {diagnosticExport.status === "running"
-                  ? "수집 중..."
-                  : "진단 번들 저장"}
+                  ? text("수집 중...", "Collecting…")
+                  : text("진단 번들 저장", "Save diagnostic bundle")}
               </button>
             </div>
           </div>

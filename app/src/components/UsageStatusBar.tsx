@@ -9,6 +9,7 @@ import {
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke, listen } from "../platform/runtime";
 import type { Agent, Project } from "../types";
+import { useAppLanguage } from "../lib/appLanguage";
 import { PortsMonitor } from "./PortsMonitor";
 import { ResourceMonitor } from "./ResourceMonitor";
 import {
@@ -62,6 +63,7 @@ function DetailWindow({
   window: UsageRateLimitWindow;
   now: number;
 }) {
+  const { language, text } = useAppLanguage();
   return (
     <div className="usage-detail-window">
       <div className="usage-detail-window-heading">
@@ -70,9 +72,9 @@ function DetailWindow({
       <UsageProgress window={window} large />
       <div className="usage-detail-window-meta">
         <span className={`usage-tone-${usageTone(window.usedPercent)}`}>
-          {formatUsagePercent(window.usedPercent)} 사용
+          {text(`${formatUsagePercent(window.usedPercent)} 사용`, `${formatUsagePercent(window.usedPercent)} used`)}
         </span>
-        <span>{formatResetRemaining(window.resetsAt, now)}</span>
+        <span>{formatResetRemaining(window.resetsAt, now, language)}</span>
       </div>
     </div>
   );
@@ -87,6 +89,7 @@ function ProviderLimitDetails({
   providerLabel: string;
   now: number;
 }) {
+  const { language, text } = useAppLanguage();
   const shortName = usageLimitShortName(limit, providerLabel);
   const windows = [limit.primary, limit.secondary].filter(
     (window): window is UsageRateLimitWindow => Boolean(window)
@@ -98,8 +101,8 @@ function ProviderLimitDetails({
           key={`${window.windowMinutes ?? "unknown"}-${index}`}
           heading={
             shortName ||
-            formatUsageWindow(window.windowMinutes) ||
-            "사용 한도"
+            formatUsageWindow(window.windowMinutes, language) ||
+            text("사용 한도", "Usage limit")
           }
           window={window}
           now={now}
@@ -108,8 +111,8 @@ function ProviderLimitDetails({
       {(limit.credits.unlimited || limit.credits.hasCredits) && (
         <div className="usage-detail-credit">
           {limit.credits.unlimited
-            ? "추가 사용량 무제한"
-            : `추가 사용량 ${limit.credits.balance ?? "확인 가능"}`}
+            ? text("추가 사용량 무제한", "Unlimited extra usage")
+            : text(`추가 사용량 ${limit.credits.balance ?? "확인 가능"}`, `Extra usage ${limit.credits.balance ?? "available"}`)}
         </div>
       )}
     </section>
@@ -129,6 +132,7 @@ function ProviderPopover({
   left: number;
   onClose: () => void;
 }) {
+  const { language, text } = useAppLanguage();
   useNativeViewOcclusion();
 
   const planType = provider.limits.find((limit) => limit.planType)?.planType;
@@ -137,7 +141,7 @@ function ProviderPopover({
       className="usage-provider-popover"
       style={{ left }}
       role="dialog"
-      aria-label={`${provider.label} 사용량`}
+      aria-label={text(`${provider.label} 사용량`, `${provider.label} usage`)}
     >
       <div className="usage-popover-heading">
         <div>
@@ -151,10 +155,10 @@ function ProviderPopover({
             {provider.label}
             {planType && <em className="usage-provider-plan">{planType}</em>}
           </strong>
-          <span>{formatUpdatedAgo(summary?.updatedAt ?? 0, now)}</span>
+          <span>{formatUpdatedAgo(summary?.updatedAt ?? 0, now, language)}</span>
         </div>
         <button type="button" onClick={onClose}>
-          닫기
+          {text("닫기", "Close")}
         </button>
       </div>
       <div className="usage-popover-body">
@@ -180,6 +184,7 @@ export function UsageStatusBar({
   projects: Project[];
   onSelectProject: (projectId: string) => void;
 }) {
+  const { text } = useAppLanguage();
   const [summary, setSummary] = useState<UsageRateLimitSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -261,11 +266,11 @@ export function UsageStatusBar({
   const limits = summary?.limits ?? [];
   const providers = useMemo(() => groupUsageProviders(limits), [limits]);
   const statusText = loading
-    ? "사용량 불러오는 중"
+    ? text("사용량 불러오는 중", "Loading usage")
     : error
-      ? "사용량 확인 실패"
+      ? text("사용량 확인 실패", "Could not load usage")
       : limits.length === 0
-        ? "사용량 준비 중"
+        ? text("사용량 준비 중", "Usage data is not ready")
         : null;
 
   const toggleProvider = (
@@ -303,7 +308,7 @@ export function UsageStatusBar({
                   : ""
               }`}
               onClick={(event) => toggleProvider(event, provider.key)}
-              title={`${provider.label} 사용량 상세`}
+              title={text(`${provider.label} 사용량 상세`, `${provider.label} usage details`)}
             >
               <span
                 className="usage-provider-icon"
@@ -349,7 +354,7 @@ export function UsageStatusBar({
         disabled={refreshing}
         onClick={() => void load(true)}
       >
-        {refreshing ? "갱신 중" : "새로고침"}
+        {refreshing ? text("갱신 중", "Refreshing") : text("새로고침", "Refresh")}
       </button>
       {openProvider && openPopover && (
         <ProviderPopover

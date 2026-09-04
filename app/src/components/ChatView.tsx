@@ -17,6 +17,7 @@ import type { AppThemeId } from "../lib/appTheme";
 import { mergeChatHistory } from "../lib/chatHistory";
 import type { ChatBlock, ChatBlocksResult, ChatDiffLine, ConversationArtifact } from "../platform/ipcContract";
 import type { AgentStatus } from "../types";
+import { useAppLanguage } from "../lib/appLanguage";
 
 // While the agent is working, composer sends are queued and drained one at a
 // time once it's ready for input (with a short cooldown so a message doesn't
@@ -110,13 +111,14 @@ function artifactBytes(bytes: number) {
 }
 
 function ConversationArtifacts({ artifacts }: { artifacts: ConversationArtifact[] }) {
+  const { text } = useAppLanguage();
   if (!artifacts.length) return null;
   const openArtifact = (artifact: ConversationArtifact) => {
     void invoke("open_local_path", { path: artifact.path }).catch(() => {});
   };
   return (
     <details className="chat-artifacts">
-      <summary>결과물 · {artifacts.length}개</summary>
+      <summary>{text(`결과물 · ${artifacts.length}개`, `Artifacts · ${artifacts.length}`)}</summary>
       <div className="chat-artifact-list">
         {artifacts.map((artifact) => {
           const name = artifact.path.split(/[\\/]/).pop() || artifact.path;
@@ -224,14 +226,19 @@ export function groupAssistantBlocks(run: ChatBlock[]): AssistantSegment[] {
 }
 
 function ToolGroup({ tools }: { tools: ToolPair[] }) {
+  const { text } = useAppLanguage();
   const failed = tools.filter((tool) => tool.isError).length;
   const finished = tools.filter((tool) => tool.output !== undefined || tool.diff).length;
   return (
     <details className="chat-work chat-work-tools">
       <summary>
-        <span>작업 {tools.length}개</span>
+        <span>{text(`작업 ${tools.length}개`, `Tasks ${tools.length}`)}</span>
         <span className={`chat-work-meta ${failed ? "err" : ""}`}>
-          {failed ? `오류 ${failed}` : finished === tools.length ? "완료" : "진행 중"}
+          {failed
+            ? text(`오류 ${failed}`, `Errors ${failed}`)
+            : finished === tools.length
+              ? text("완료", "Complete")
+              : text("진행 중", "In progress")}
         </span>
       </summary>
       <div className="chat-tools">
@@ -247,7 +254,7 @@ function ToolGroup({ tools }: { tools: ToolPair[] }) {
               </summary>
               {tool.diff && <ChatDiff diff={tool.diff} />}
               {(tool.output !== undefined || !tool.diff) && (
-                <pre className={tool.isError ? "err" : ""}>{tool.output ?? "(출력 없음)"}</pre>
+                <pre className={tool.isError ? "err" : ""}>{tool.output ?? text("(출력 없음)", "(no output)")}</pre>
               )}
             </details>
           );
@@ -266,6 +273,7 @@ function assistantLabel(tool?: string) {
 }
 
 function AssistantTurn({ run, tool }: { run: ChatBlock[]; tool?: string }) {
+  const { text } = useAppLanguage();
   const segments = groupAssistantBlocks(run);
   return (
     <div className="chat-turn assistant">
@@ -280,7 +288,7 @@ function AssistantTurn({ run, tool }: { run: ChatBlock[]; tool?: string }) {
         if (block.kind === "reasoning") {
           return (
             <details key={`r${sourceIndex}`} className="chat-work">
-              <summary>추론</summary>
+              <summary>{text("추론", "Reasoning")}</summary>
               <pre className="chat-reason">{block.text}</pre>
             </details>
           );
@@ -295,7 +303,7 @@ function AssistantTurn({ run, tool }: { run: ChatBlock[]; tool?: string }) {
           );
         }
         if (block.kind === "image") {
-          return <div key={`i${sourceIndex}`} className="chat-md chat-image-note">🖼 이미지</div>;
+          return <div key={`i${sourceIndex}`} className="chat-md chat-image-note">🖼 {text("이미지", "Image")}</div>;
         }
         return null;
       })}
@@ -321,6 +329,7 @@ export function ChatView({
   assistantMessage?: string | null;
   folder?: string;
 }) {
+  const { text } = useAppLanguage();
   const storeKey = `${agentId}:${sessionId || "unbound"}`;
   const [blocks, setBlocks] = useState<ChatBlock[]>([]);
   const blocksRef = useRef<ChatBlock[]>([]);
@@ -756,23 +765,23 @@ export function ChatView({
     <div className="chat-view">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         {status === "unsupported" && (
-          <div className="chat-empty">대화 보기를 지원하지 않는 세션입니다 (codex/claude).</div>
+          <div className="chat-empty">{text("대화 보기를 지원하지 않는 세션입니다 (codex/claude).", "This session does not support conversation view (codex/claude).")}</div>
         )}
-        {status === "loading" && <div className="chat-empty">대화를 불러오는 중…</div>}
+        {status === "loading" && <div className="chat-empty">{text("대화를 불러오는 중…", "Loading conversation…")}</div>}
         {status === "empty" && !pending.length && (
-          <div className="chat-empty">아직 대화 기록이 없습니다.</div>
+          <div className="chat-empty">{text("아직 대화 기록이 없습니다.", "There is no conversation history yet.")}</div>
         )}
         {status === "ready" && historyAvailable && (
           <button type="button" className="chat-more" onClick={loadOlder} disabled={loadingOlder}>
             {loadingOlder
-              ? "이전 대화를 불러오는 중…"
+              ? text("이전 대화를 불러오는 중…", "Loading earlier conversation…")
               : hidden > 0
-                ? `▲ 이전 대화 더 보기 (${hidden})`
-                : "▲ 저장된 이전 대화 더 보기"}
+                ? text(`▲ 이전 대화 더 보기 (${hidden})`, `▲ Show earlier conversation (${hidden})`)
+                : text("▲ 저장된 이전 대화 더 보기", "▲ Show saved earlier conversation")}
           </button>
         )}
         {indexing && (
-          <div className="chat-indexing">이전 대화를 저장소에 정리하는 중… 최근 대화는 바로 볼 수 있습니다.</div>
+          <div className="chat-indexing">{text("이전 대화를 저장소에 정리하는 중… 최근 대화는 바로 볼 수 있습니다.", "Indexing earlier conversation in storage… Recent conversation is available immediately.")}</div>
         )}
         <div className="chat-thread">
           <ConversationArtifacts artifacts={artifacts} />
@@ -789,15 +798,19 @@ export function ChatView({
                 <i />
                 <i />
               </span>
-              {agentStatus === "recovering" ? "복구 중…" : initializing ? "시작 중…" : "작업 중…"}
+              {agentStatus === "recovering"
+                ? text("복구 중…", "Recovering…")
+                : initializing
+                  ? text("시작 중…", "Starting…")
+                  : text("작업 중…", "Working…")}
               {!initializing && (
                 <button
                   type="button"
                   className="chat-stop"
                   onClick={interrupt}
-                  title="진행 취소 (Esc)"
+                  title={text("진행 취소 (Esc)", "Cancel progress (Esc)")}
                 >
-                  ■ 중단
+                  ■ {text("중단", "Stop")}
                 </button>
               )}
             </div>
@@ -806,7 +819,7 @@ export function ChatView({
       </div>
       {showJumpToLatest && (
         <button type="button" className="chat-jump-latest" onClick={jumpToLatest}>
-          ↓ 최신 대화로 이동
+          ↓ {text("최신 대화로 이동", "Jump to latest")}
         </button>
       )}
       {showPrompt && prompt && (
@@ -832,8 +845,8 @@ export function ChatView({
       {queue.length > 0 && (
         <div className="chat-queue">
           <div className="chat-queue-head">
-            예약 대기열 {queue.length}
-            {busy && <span className="chat-queue-hint">· 대기 상태가 되면 순서대로 전송</span>}
+            {text(`예약 대기열 ${queue.length}`, `Queued ${queue.length}`)}
+            {busy && <span className="chat-queue-hint">{text("· 대기 상태가 되면 순서대로 전송", "· sent in order when ready")}</span>}
           </div>
           {queue.map((t, i) => (
             <div key={`q${i}`} className="chat-queue-item">
@@ -841,7 +854,7 @@ export function ChatView({
               <button
                 type="button"
                 className="chat-queue-cancel"
-                title="예약 취소"
+                title={text("예약 취소", "Cancel queued message")}
                 onClick={() => cancelQueued(i)}
               >
                 ×
@@ -876,6 +889,7 @@ function ChatComposer({
   tool?: string;
   folder?: string;
 }) {
+  const { text: localize } = useAppLanguage();
   const [text, setText] = useState(() => draftStore.get(storageKey) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
     () => attachStore.get(storageKey) ?? []
@@ -1097,14 +1111,14 @@ function ChatComposer({
             a.kind === "image" ? (
               <div key={`img-${i}`} className="chat-attachment" title={a.path}>
                 {a.dataUrl ? (
-                  <img src={a.dataUrl} alt="첨부 이미지" />
+                  <img src={a.dataUrl} alt={localize("첨부 이미지", "Attached image")} />
                 ) : (
                   <span className="chat-attachment-file">🖼</span>
                 )}
                 <button
                   type="button"
                   className="chat-attachment-remove"
-                  title="첨부 제거"
+                  title={localize("첨부 제거", "Remove attachment")}
                   onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
                 >
                   ×
@@ -1117,11 +1131,11 @@ function ChatComposer({
                 title={a.text.slice(0, 2000)}
               >
                 <span className="chat-attachment-texticon">📄</span>
-                붙여넣은 텍스트 · {a.text.length.toLocaleString()}자
+                {localize(`붙여넣은 텍스트 · ${a.text.length.toLocaleString()}자`, `Pasted text · ${a.text.length.toLocaleString()} characters`)}
                 <button
                   type="button"
                   className="chat-attachment-textremove"
-                  title="첨부 제거"
+                  title={localize("첨부 제거", "Remove attachment")}
                   onClick={() => updateAttachments((arr) => arr.filter((_, j) => j !== i))}
                 >
                   ×
@@ -1165,8 +1179,8 @@ function ChatComposer({
           onDrop={onDrop}
           placeholder={
             busy
-              ? "작업 중 — Enter로 예약(대기열에 추가) · Ctrl+Enter 줄바꿈"
-              : "이 세션으로 전송…  (Enter 전송 · Ctrl+Enter 줄바꿈 · /명령 @파일)"
+              ? localize("작업 중 — Enter로 예약(대기열에 추가) · Ctrl+Enter 줄바꿈", "Working — Enter queues · Ctrl+Enter inserts a line break")
+              : localize("이 세션으로 전송…  (Enter 전송 · Ctrl+Enter 줄바꿈 · /명령 @파일)", "Send to this session… (Enter sends · Ctrl+Enter line break · /command @file)")
           }
           rows={1}
         />
@@ -1176,7 +1190,7 @@ function ChatComposer({
           onClick={send}
           disabled={!canSend}
         >
-          {busy ? "예약" : "전송"}
+          {busy ? localize("예약", "Queue") : localize("전송", "Send")}
         </button>
       </div>
     </div>

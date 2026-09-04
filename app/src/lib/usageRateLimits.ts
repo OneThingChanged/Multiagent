@@ -40,12 +40,12 @@ export function formatUsagePercent(value: number) {
   return `${percent >= 10 ? Math.round(percent) : Math.round(percent * 10) / 10}%`;
 }
 
-export function formatUsageWindow(minutes: number | null) {
-  if (!minutes || minutes <= 0) return "사용 한도";
-  if (minutes === 10_080) return "주간 한도";
-  if (minutes % 1_440 === 0) return `${minutes / 1_440}일 한도`;
-  if (minutes % 60 === 0) return `${minutes / 60}시간 한도`;
-  return `${minutes}분 한도`;
+export function formatUsageWindow(minutes: number | null, language: "ko" | "en" = "ko") {
+  if (!minutes || minutes <= 0) return language === "ko" ? "사용 한도" : "Usage limit";
+  if (minutes === 10_080) return language === "ko" ? "주간 한도" : "Weekly limit";
+  if (minutes % 1_440 === 0) return language === "ko" ? `${minutes / 1_440}일 한도` : `${minutes / 1_440}-day limit`;
+  if (minutes % 60 === 0) return language === "ko" ? `${minutes / 60}시간 한도` : `${minutes / 60}-hour limit`;
+  return language === "ko" ? `${minutes}분 한도` : `${minutes}-minute limit`;
 }
 
 function pad2(value: number) {
@@ -59,24 +59,25 @@ function pad2(value: number) {
 // the value is absolute (nothing to recompute as the clock ticks).
 export function formatResetRemaining(
   resetsAt: number | null,
-  _nowMs = Date.now()
+  _nowMs = Date.now(),
+  language: "ko" | "en" = "ko",
 ) {
-  if (!resetsAt) return "초기화 시간 미확인";
+  if (!resetsAt) return language === "ko" ? "초기화 시간 미확인" : "Reset time unavailable";
   const d = new Date(resetsAt * 1000);
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad2(d.getHours())}:${pad2(
-    d.getMinutes()
-  )} 초기화`;
+  return language === "ko"
+    ? `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad2(d.getHours())}:${pad2(d.getMinutes())} 초기화`
+    : `Resets ${d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
 }
 
-export function formatUpdatedAgo(updatedAt: number, nowMs = Date.now()) {
-  if (!updatedAt) return "아직 갱신되지 않음";
+export function formatUpdatedAgo(updatedAt: number, nowMs = Date.now(), language: "ko" | "en" = "ko") {
+  if (!updatedAt) return language === "ko" ? "아직 갱신되지 않음" : "Not updated yet";
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - updatedAt) / 1000));
-  if (elapsedSeconds < 60) return "방금 갱신";
+  if (elapsedSeconds < 60) return language === "ko" ? "방금 갱신" : "Updated just now";
   const minutes = Math.floor(elapsedSeconds / 60);
-  if (minutes < 60) return `${minutes}분 전 갱신`;
+  if (minutes < 60) return language === "ko" ? `${minutes}분 전 갱신` : `Updated ${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전 갱신`;
-  return `${Math.floor(hours / 24)}일 전 갱신`;
+  if (hours < 24) return language === "ko" ? `${hours}시간 전 갱신` : `Updated ${hours}h ago`;
+  return language === "ko" ? `${Math.floor(hours / 24)}일 전 갱신` : `Updated ${Math.floor(hours / 24)}d ago`;
 }
 
 export function usageLimitLabel(limit: UsageRateLimit) {

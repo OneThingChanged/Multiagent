@@ -17,6 +17,7 @@ import { computeDropZone } from "../lib/terminal";
 import { PaneSlot } from "./PaneSlot";
 import type { RenderCtx } from "./PaneSlot";
 import { Splitter } from "./Splitter";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function parsePanePath(value: string | undefined) {
   if (value === undefined) return null;
@@ -147,6 +148,7 @@ export function TerminalArea({
   onOpenFolderPath: (agentId: string, path: string) => void;
   onOpenTerminalPath: (agentId: string, path: string) => void;
 }) {
+  const { text } = useAppLanguage();
   const fallbackDocumentAgentId = firstSessionInLayout(
     layout,
     new Set(agents.map((agent) => agent.id))
@@ -317,7 +319,7 @@ export function TerminalArea({
             onDragEnd();
           }}
         >
-          세션을 선택하세요
+          {text("세션을 선택하세요", "Select a session")}
         </div>
       )}
     </main>

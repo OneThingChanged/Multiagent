@@ -7,6 +7,7 @@ import type {
   SessionStorageEntry,
   SessionStorageQuery,
 } from "../platform/ipcContract";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function storageKey(aiToolId: string, sessionId: string) {
   return `${aiToolId}:${sessionId.toLowerCase()}`;
@@ -44,6 +45,7 @@ export function SessionStorageList({
   scope?: "project" | "current";
   onSessionDeleted?: (aiToolId: string, sessionId: string) => void;
 }) {
+  const { text } = useAppLanguage();
   const queries = useMemo<SessionStorageQuery[]>(() => {
     const seen = new Set<string>();
     const next: SessionStorageQuery[] = [];
@@ -163,9 +165,12 @@ export function SessionStorageList({
 
   async function remove(agent: Agent | null, entry: SessionStorageEntry) {
     const key = storageKey(entry.aiToolId, entry.sessionId);
-    const displayName = agent?.name ?? `세션 ${entry.sessionId.slice(0, 8)}`;
+    const displayName = agent?.name ?? text(`세션 ${entry.sessionId.slice(0, 8)}`, `Session ${entry.sessionId.slice(0, 8)}`);
     const confirmed = window.confirm(
-      `“${displayName}” 기록의 JSONL ${formatBytes(entry.bytes)}를 휴지통으로 이동할까요?\n\n${entry.primaryPath ?? entry.sessionId}`
+      text(
+        `“${displayName}” 기록의 JSONL ${formatBytes(entry.bytes)}를 휴지통으로 이동할까요?\n\n${entry.primaryPath ?? entry.sessionId}`,
+        `Move ${formatBytes(entry.bytes)} of JSONL history for “${displayName}” to the Recycle Bin?\n\n${entry.primaryPath ?? entry.sessionId}`,
+      ),
     );
     if (!confirmed) return;
     setDeletingKey(key);
@@ -194,13 +199,13 @@ export function SessionStorageList({
   return (
     <section className="session-storage-section">
       <div className="session-storage-heading">
-        <span>JSONL 카탈로그</span>
-        <span>{loading ? "계산 중…" : formatBytes(totalBytes)}</span>
+        <span>{text("JSONL 카탈로그", "JSONL catalog")}</span>
+        <span>{loading ? text("계산 중…", "Calculating…") : formatBytes(totalBytes)}</span>
       </div>
       <div className="session-storage-hint">
         {scope === "project"
-          ? "MultiAgent 카탈로그에서 이 프로젝트(cwd)에 속한 모든 세션 기록을 표시합니다."
-          : "선택한 세션에 연결된 현재 sessionId 기록 하나만 표시합니다."}
+          ? text("MultiAgent 카탈로그에서 이 프로젝트(cwd)에 속한 모든 세션 기록을 표시합니다.", "Shows all session history associated with this project (cwd) in the MultiAgent catalog.")
+          : text("선택한 세션에 연결된 현재 sessionId 기록 하나만 표시합니다.", "Shows only the current sessionId history associated with the selected session.")}
       </div>
       {error && <div className="session-storage-error">{error}</div>}
       <div className="session-storage-list">
@@ -213,29 +218,29 @@ export function SessionStorageList({
           const key = entry
             ? storageKey(entry.aiToolId, entry.sessionId)
             : row.key;
-          const displayName = agent?.name ?? `기록 ${entry?.sessionId.slice(0, 8) ?? "—"}`;
+          const displayName = agent?.name ?? text(`기록 ${entry?.sessionId.slice(0, 8) ?? "—"}`, `History ${entry?.sessionId.slice(0, 8) ?? "—"}`);
           return (
             <div className="session-storage-card" key={row.key}>
               <div className="session-storage-card-head">
                 <span className="session-storage-name">{displayName}</span>
                 <span className="session-storage-tool">{toolForId(aiToolId).label}</span>
                 {!agent && entry && (
-                  <span className="session-storage-unlinked">미연결 기록</span>
+                  <span className="session-storage-unlinked">{text("미연결 기록", "Unlinked history")}</span>
                 )}
                 <span className="session-storage-size">
                   {entry ? formatBytes(entry.bytes) : "—"}
                 </span>
               </div>
               {!supported ? (
-                <div className="session-storage-empty">이 도구는 JSONL 조회를 지원하지 않습니다.</div>
+                <div className="session-storage-empty">{text("이 도구는 JSONL 조회를 지원하지 않습니다.", "This tool does not support JSONL lookup.")}</div>
               ) : agent?.sshHostId ? (
-                <div className="session-storage-empty">원격 세션 저장소 조회는 아직 지원하지 않습니다.</div>
+                <div className="session-storage-empty">{text("원격 세션 저장소 조회는 아직 지원하지 않습니다.", "Remote session storage lookup is not supported yet.")}</div>
               ) : !sessionId ? (
-                <div className="session-storage-empty">연결된 현재 세션 기록이 없습니다.</div>
+                <div className="session-storage-empty">{text("연결된 현재 세션 기록이 없습니다.", "There is no linked current session history.")}</div>
               ) : loading ? (
-                <div className="session-storage-empty">세션 파일을 확인하고 있습니다…</div>
+                <div className="session-storage-empty">{text("세션 파일을 확인하고 있습니다…", "Checking session files…")}</div>
               ) : !entry ? (
-                <div className="session-storage-empty">현재 sessionId와 일치하는 JSONL을 찾지 못했습니다.</div>
+                <div className="session-storage-empty">{text("현재 sessionId와 일치하는 JSONL을 찾지 못했습니다.", "No JSONL file matches the current sessionId.")}</div>
               ) : (
                 <>
                   <div className="session-storage-meta session-props-mono" title={entry.sessionId}>
@@ -246,7 +251,7 @@ export function SessionStorageList({
                   </div>
                   <div className="session-storage-footer">
                     <span>
-                      {entry.fileCount > 1 ? `${entry.fileCount}개 파일 합산 · ` : ""}
+                      {entry.fileCount > 1 ? text(`${entry.fileCount}개 파일 합산 · `, `${entry.fileCount} files combined · `) : ""}
                       {formatDate(entry.updatedAt)}
                     </span>
                     <div className="session-storage-actions">
@@ -255,22 +260,22 @@ export function SessionStorageList({
                         type="button"
                         onClick={() => void reveal(entry)}
                       >
-                        위치 열기
+                        {text("위치 열기", "Open location")}
                       </button>
                       <button
                         className="btn-danger session-storage-button"
                         type="button"
                         disabled={active || deletingKey === key}
-                        title={active ? "실행 중인 세션은 먼저 비활성화해야 합니다." : "휴지통으로 이동"}
+                        title={active ? text("실행 중인 세션은 먼저 비활성화해야 합니다.", "Deactivate the running session first.") : text("휴지통으로 이동", "Move to Recycle Bin")}
                         onClick={() => void remove(agent, entry)}
                       >
-                        {deletingKey === key ? "이동 중…" : "삭제"}
+                        {deletingKey === key ? text("이동 중…", "Moving…") : text("삭제", "Delete")}
                       </button>
                     </div>
                   </div>
                   {active && (
                     <div className="session-storage-active-note">
-                      실행 중인 세션은 비활성화한 뒤 삭제할 수 있습니다.
+                      {text("실행 중인 세션은 비활성화한 뒤 삭제할 수 있습니다.", "Deactivate a running session before deleting its history.")}
                     </div>
                   )}
                 </>
@@ -280,7 +285,7 @@ export function SessionStorageList({
         })}
         {!loading && displayRows.length === 0 && (
           <div className="session-storage-empty">
-            {scope === "project" ? "이 프로젝트의 카탈로그 기록이 없습니다." : "등록된 세션이 없습니다."}
+            {scope === "project" ? text("이 프로젝트의 카탈로그 기록이 없습니다.", "There is no catalog history for this project.") : text("등록된 세션이 없습니다.", "There are no registered sessions.")}
           </div>
         )}
       </div>

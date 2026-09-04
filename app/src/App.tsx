@@ -119,6 +119,7 @@ import {
 import { loadAppTheme, saveAppTheme } from "./lib/appTheme";
 import type { AppThemeId } from "./lib/appTheme";
 import { IS_COMPANY_BUILD } from "./lib/appInfo";
+import { useAppLanguage } from "./lib/appLanguage";
 import {
   LS_REOPEN_AGENTS,
   persistStorageSnapshot,
@@ -215,7 +216,7 @@ type RuntimeFlags = {
   open_agent_id?: string | null;
   build_variant?: "standard" | "company" | "store";
   remote_enabled?: boolean;
-  update_provider?: "github" | "microsoft-store";
+  update_provider?: "github" | "local-developer" | "microsoft-store";
 };
 
 type AgentWindowUsage = {
@@ -556,6 +557,7 @@ function computeInitialReopen(
 }
 
 function App() {
+  const { language, text } = useAppLanguage();
   const workspace = workspaceWindowContext();
   migrateLegacyWorkspaceStorage(workspace);
   // One-shot bootstrap: read localStorage exactly once at mount.
@@ -1545,9 +1547,9 @@ function App() {
         try {
           localStorage.setItem(LS_ALWAYS_ON_TOP, String(previous));
         } catch {}
-        pushToast("", "창 고정", `상시 최상단 설정 실패: ${String(error)}`);
+        pushToast("", text("창 고정", "Always on top"), text(`상시 최상단 설정 실패: ${String(error)}`, `Could not change always-on-top: ${String(error)}`));
       });
-  }, [pushToast]);
+  }, [pushToast, text]);
 
   const handleDesktopPetEnabledChange = useCallback((enabled: boolean) => {
     saveDesktopPetEnabled(enabled);
@@ -1556,9 +1558,9 @@ function App() {
 
   const resetDesktopPetPosition = useCallback(() => {
     invoke("reset_desktop_pet_position").catch((error) => {
-      pushToast("", "Desktop Pet", `위치를 초기화할 수 없습니다: ${String(error)}`);
+      pushToast("", "Desktop Pet", text(`위치를 초기화할 수 없습니다: ${String(error)}`, `Could not reset the position: ${String(error)}`));
     });
-  }, [pushToast]);
+  }, [pushToast, text]);
 
   const openNewAppWindow = useCallback((agentId?: string | null) => {
     const id = agentId ?? null;
@@ -1582,9 +1584,9 @@ function App() {
       });
     }
     invoke("open_new_app_window", { agentId: id }).catch((error) => {
-      pushToast("", "새 창", `새 창을 열 수 없습니다: ${String(error)}`);
+      pushToast("", text("새 창", "New window"), text(`새 창을 열 수 없습니다: ${String(error)}`, `Could not open a new window: ${String(error)}`));
     });
-  }, [pushToast]);
+  }, [pushToast, text]);
 
   // Clicking a completion surface focuses the app and jumps to the session.
   // The desktop pet itself is non-focusable, so it must explicitly focus main.
@@ -1691,7 +1693,7 @@ function App() {
           agentId: id,
           sessionKey,
           title: `${projectName} / ${exitingAgent.name}`,
-          body: "작업 중 PTY가 종료되었습니다. 세션 상태를 확인해 주세요.",
+          body: text("작업 중 PTY가 종료되었습니다. 세션 상태를 확인해 주세요.", "The PTY exited while work was in progress. Check the session status."),
           createdAt: Date.now(),
         });
       }
@@ -1720,8 +1722,8 @@ function App() {
         playNotificationSound();
         pushToast(
           "",
-          "원격 접속 요청",
-          `GitHub @${e.payload.login} — 설정 > Remote access에서 승인하세요`
+          text("원격 접속 요청", "Remote access request"),
+          text(`GitHub @${e.payload.login} — 설정 > Remote access에서 승인하세요`, `GitHub @${e.payload.login} — approve this request in Settings > Remote access`)
         );
       }).then(track);
     }
@@ -1759,8 +1761,8 @@ function App() {
               nextAgent.activity?.interactiveQuestion?.trim() ||
               nextAgent.activity?.lastPrompt?.trim() ||
               (kind === "waiting"
-                ? "사용자 응답 또는 권한 승인을 기다리고 있습니다."
-                : "작업이 차단되었습니다. 세션을 확인해 주세요.");
+                ? text("사용자 응답 또는 권한 승인을 기다리고 있습니다.", "Waiting for a user response or permission approval.")
+                : text("작업이 차단되었습니다. 세션을 확인해 주세요.", "Work is blocked. Check the session."));
             pushAttention({
               dedupeKey: `${kind}:${sessionKey}`,
               kind,
@@ -1856,8 +1858,8 @@ function App() {
               sessionKey,
               title,
               body: completedQuestion?.trim()
-                ? `완료 · ${completedQuestion.trim()}`
-                : "작업이 끝났습니다.",
+                ? text(`완료 · ${completedQuestion.trim()}`, `Completed · ${completedQuestion.trim()}`)
+                : text("작업이 끝났습니다.", "Work completed."),
               createdAt: nextAgent.activity?.receivedAt || Date.now(),
             });
             // Hook events are process-wide, but completion sounds/toasts belong
@@ -1869,9 +1871,9 @@ function App() {
             ) {
               playNotificationSound(
                 loadNotificationSound(),
-                `${projectName} ${currentAgent.name} 작업이 끝났어요`
+                text(`${projectName} ${currentAgent.name} 작업이 끝났어요`, `${projectName} ${currentAgent.name} completed its work`)
               );
-              pushToast(currentAgent.id, title, "작업이 끝났어요");
+              pushToast(currentAgent.id, title, text("작업이 끝났어요", "Work completed"));
               // When the owning workspace isn't focused, flash its taskbar icon
               // and route the native notification back to the owner.
               const soundConfig = loadNotificationSound();
@@ -1917,6 +1919,7 @@ function App() {
     pushToast,
     remoteEnabled,
     resolveSessionAttention,
+    text,
   ]);
 
   // A lost Stop hook must not leave the UI and desktop pet spinning forever.
@@ -1945,7 +1948,7 @@ function App() {
           agentId: agent.id,
           sessionKey,
           title: `${projectName} / ${agent.name}`,
-          body: "Hook 상태가 오래되어 현재 작업 상태를 다시 확인해야 합니다.",
+          body: text("Hook 상태가 오래되어 현재 작업 상태를 다시 확인해야 합니다.", "The hook status is stale. Check the current work status again."),
           createdAt: activity.receivedAt,
         });
       }
@@ -1961,7 +1964,7 @@ function App() {
       );
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [pushAttention]);
+  }, [pushAttention, text]);
 
   // Keep the close handshake isolated from the frequently-changing PTY/hook
   // listeners. That prevents an effect cleanup race from leaving Electron to
@@ -2030,10 +2033,10 @@ function App() {
         closing = false;
         pushToast(
           "",
-          "종료 취소",
+          text("종료 취소", "Close cancelled"),
           event.payload?.message
-            ? `저장 후 종료를 완료하지 못했습니다: ${event.payload.message}`
-            : "저장 후 종료를 완료하지 못했습니다."
+            ? text(`저장 후 종료를 완료하지 못했습니다: ${event.payload.message}`, `Could not save and close: ${event.payload.message}`)
+            : text("저장 후 종료를 완료하지 못했습니다.", "Could not save and close.")
         );
       }
     )
@@ -2045,7 +2048,7 @@ function App() {
       unsubscribe?.();
       cancelUnsubscribe?.();
     };
-  }, [pushToast, remoteEnabled, runtimeFlags]);
+  }, [pushToast, remoteEnabled, runtimeFlags, text]);
 
   const dismissTransientMenus = useCallback(() => {
     setContextMenu(null);
@@ -2185,8 +2188,8 @@ function App() {
             const agent = agentsRef.current.find((item) => item.id === agentId);
             pushToast(
               agentId,
-              agent?.name ?? "세션",
-              "이미 다른 창에서 사용 중입니다."
+              agent?.name ?? text("세션", "Session"),
+              text("이미 다른 창에서 사용 중입니다.", "This session is already in use in another window.")
             );
             return;
           }
@@ -2210,12 +2213,12 @@ function App() {
           const agent = agentsRef.current.find((item) => item.id === agentId);
           pushToast(
             agentId,
-            agent?.name ?? "세션",
-            `세션을 열 수 없습니다: ${String(error)}`
+            agent?.name ?? text("세션", "Session"),
+            text(`세션을 열 수 없습니다: ${String(error)}`, `Could not open the session: ${String(error)}`)
           );
         });
     },
-    [pushToast, selectAgent]
+    [pushToast, selectAgent, text]
   );
 
   const selectScreen = useCallback(
@@ -2484,7 +2487,7 @@ function App() {
           pushToast(
             "",
             project.name,
-            "새 프로젝트의 첫 세션 소유권을 확보하지 못했습니다."
+            text("새 프로젝트의 첫 세션 소유권을 확보하지 못했습니다.", "Could not claim the first session for the new project.")
           );
           return;
         }
@@ -2499,12 +2502,13 @@ function App() {
         pushToast(
           "",
           project.name,
-          `새 프로젝트를 만들 수 없습니다: ${String(error)}`
+          text(`새 프로젝트를 만들 수 없습니다: ${String(error)}`, `Could not create the new project: ${String(error)}`)
         );
       });
   }, [
     applyGroupOp,
     pushToast,
+    text,
   ]);
 
   const createProjectFolder = useCallback((machineKey: string, name: string) => {
@@ -2538,15 +2542,15 @@ function App() {
       (project) => project.projectFolderId === id
     ).length;
     const childLine = childCount
-      ? `\n포함된 프로젝트 ${childCount}개는 미분류로 이동합니다.`
+      ? text(`\n포함된 프로젝트 ${childCount}개는 미분류로 이동합니다.`, `\n${childCount} contained projects will be moved to Uncategorized.`)
       : "";
-    if (!window.confirm(`"${folder.name}" 폴더를 삭제할까요?${childLine}`)) {
+    if (!window.confirm(text(`"${folder.name}" 폴더를 삭제할까요?${childLine}`, `Delete the “${folder.name}” folder?${childLine}`))) {
       return;
     }
     removedProjectFolderIdsRef.current.add(id);
     setProjectFolders((current) => current.filter((item) => item.id !== id));
     setProjects((current) => unassignProjectFolder(current, id));
-  }, []);
+  }, [text]);
 
   const reorderProjectFolder = useCallback(
     (draggedId: string, targetId: string, before: boolean) => {
@@ -2590,16 +2594,16 @@ function App() {
       );
       if (foreignMembers.length > 0) {
         window.alert(
-          `다른 작업창에서 사용 중인 세션 ${foreignMembers.length}개가 있습니다. 해당 창에서 세션을 닫거나 비활성화한 뒤 프로젝트를 삭제해 주세요.`
+          text(`다른 작업창에서 사용 중인 세션 ${foreignMembers.length}개가 있습니다. 해당 창에서 세션을 닫거나 비활성화한 뒤 프로젝트를 삭제해 주세요.`, `${foreignMembers.length} sessions are in use in another window. Close or deactivate them there before deleting the project.`)
         );
         return;
       }
       const sessionLine =
         members.length > 0
-          ? `\n세션 ${members.length}개도 함께 삭제됩니다.`
+          ? text(`\n세션 ${members.length}개도 함께 삭제됩니다.`, `\n${members.length} sessions will also be deleted.`)
           : "";
       const ok = window.confirm(
-        `"${project.name}" 프로젝트를 삭제할까요?${sessionLine}\n이 동작은 되돌릴 수 없습니다.`
+        text(`"${project.name}" 프로젝트를 삭제할까요?${sessionLine}\n이 동작은 되돌릴 수 없습니다.`, `Delete the “${project.name}” project?${sessionLine}\nThis action cannot be undone.`)
       );
       if (!ok) return;
 
@@ -2649,7 +2653,7 @@ function App() {
         setActivePath(null);
       }
     },
-    [applyGroupOp]
+    [applyGroupOp, text]
   );
 
   const createAgent = useCallback(
@@ -2661,7 +2665,7 @@ function App() {
         (candidate) => candidate.id === (options.projectId ?? activeProjectIdRef.current)
       );
       if (!project) {
-        return { created: false, error: "세션을 생성할 프로젝트를 찾을 수 없습니다." };
+        return { created: false, error: text("세션을 생성할 프로젝트를 찾을 수 없습니다.", "Could not find a project for the new session.") };
       }
       const id = options.agentId ?? crypto.randomUUID();
       const tool = toolForId(payload.aiToolId);
@@ -2704,7 +2708,7 @@ function App() {
           agentId: id,
         });
         if (!claimed) {
-          const error = "새 세션 소유권을 확보하지 못했습니다.";
+          const error = text("새 세션 소유권을 확보하지 못했습니다.", "Could not claim the new session.");
           pushToast("", project.name, error);
           return { created: false, error };
         }
@@ -2716,12 +2720,12 @@ function App() {
         addAgent();
         return { created: true, id };
       } catch (reason) {
-        const error = `새 세션을 만들 수 없습니다: ${String(reason)}`;
+        const error = text(`새 세션을 만들 수 없습니다: ${String(reason)}`, `Could not create the new session: ${String(reason)}`);
         pushToast("", project.name, error);
         return { created: false, error };
       }
     },
-    [applyGroupOp, pushToast]
+    [applyGroupOp, pushToast, text]
   );
 
   const renameAgent = useCallback((id: string, name: string) => {
@@ -2828,7 +2832,7 @@ function App() {
 
       const pinCount = Object.keys(pins).length;
       if (pinCount === 0) {
-        pushToast(agentId, targetAgent.name, "저장된 세션 ID가 없습니다.");
+        pushToast(agentId, targetAgent.name, text("저장된 세션 ID가 없습니다.", "There is no saved session ID."));
         return;
       }
 
@@ -2842,10 +2846,10 @@ function App() {
       pushToast(
         agentId,
         targetAgent.name,
-        `그룹 세션 ${pinCount}개를 고정했습니다.`
+        text(`그룹 세션 ${pinCount}개를 고정했습니다.`, `Pinned ${pinCount} group sessions.`)
       );
     },
-    [agents, groups, pushToast]
+    [agents, groups, pushToast, text]
   );
 
   const clearContextGroupSessionPins = useCallback(
@@ -2861,9 +2865,9 @@ function App() {
             : g
         )
       );
-      pushToast(agentId, targetAgent.name, "그룹 세션 고정을 해제했습니다.");
+      pushToast(agentId, targetAgent.name, text("그룹 세션 고정을 해제했습니다.", "Unpinned the group sessions."));
     },
-    [agents, groups, pushToast]
+    [agents, groups, pushToast, text]
   );
 
   const relinkSession = useCallback(
@@ -2875,7 +2879,7 @@ function App() {
       );
       const folder = agent.folder || project?.folder || "";
       if (!folder) {
-        pushToast(agentId, agent.name, "폴더 정보가 없어 재등록할 수 없습니다.");
+        pushToast(agentId, agent.name, text("폴더 정보가 없어 재등록할 수 없습니다.", "The session cannot be relinked because folder information is missing."));
         return;
       }
       invoke<string | null>("relink_cli_session", {
@@ -2885,7 +2889,7 @@ function App() {
       })
         .then((sessionId) => {
           if (!sessionId) {
-            pushToast(agentId, agent.name, "찾을 수 있는 최근 세션이 없습니다.");
+            pushToast(agentId, agent.name, text("찾을 수 있는 최근 세션이 없습니다.", "No recent session could be found."));
             return;
           }
           setAgents((prev) =>
@@ -2896,14 +2900,14 @@ function App() {
           pushToast(
             agentId,
             agent.name,
-            `세션 재등록: ${sessionId.slice(0, 8)} (다음 실행부터 적용)`
+            text(`세션 재등록: ${sessionId.slice(0, 8)} (다음 실행부터 적용)`, `Session relinked: ${sessionId.slice(0, 8)} (applies on next launch)`)
           );
         })
         .catch((err) => {
-          pushToast(agentId, agent.name, `재등록 실패: ${String(err)}`);
+          pushToast(agentId, agent.name, text(`재등록 실패: ${String(err)}`, `Relink failed: ${String(err)}`));
         });
     },
-    [pushToast]
+    [pushToast, text]
   );
 
   const onContextAction = useCallback(
@@ -3182,10 +3186,10 @@ function App() {
         });
         showBrowserTab(result.browserId, ownerAgentId, path);
       } catch (error) {
-        pushToast("", "브라우저 열기 실패", String(error));
+        pushToast("", text("브라우저 열기 실패", "Could not open browser"), String(error));
       }
     },
-    [pushToast, showBrowserTab]
+    [pushToast, showBrowserTab, text]
   );
 
   useEffect(() => {
@@ -3243,10 +3247,10 @@ function App() {
         }
         openDocTab(project.id, relativePath, agentId);
       } catch {
-        pushToast(agentId, agent.name, "문서 파일을 열 수 없습니다.");
+        pushToast(agentId, agent.name, text("문서 파일을 열 수 없습니다.", "Could not open the document file."));
       }
     },
-    [openDocTab, pushToast]
+    [openDocTab, pushToast, text]
   );
 
   const handleOpenImagePath = useCallback((agentId: string, path: string) => {
@@ -3268,10 +3272,10 @@ function App() {
       try {
         await invoke("open_folder_path", { folder: project.folder, path });
       } catch (error) {
-        pushToast(agentId, agent.name, `폴더를 열 수 없습니다: ${String(error)}`);
+        pushToast(agentId, agent.name, text(`폴더를 열 수 없습니다: ${String(error)}`, `Could not open the folder: ${String(error)}`));
       }
     },
-    [pushToast]
+    [pushToast, text]
   );
 
   const handleOpenTerminalPath = useCallback(
@@ -3328,10 +3332,10 @@ function App() {
 
         await invoke("reveal_local_path", { path: resolved.path });
       } catch (error) {
-        pushToast(agentId, agent.name, `경로를 열 수 없습니다: ${String(error)}`);
+        pushToast(agentId, agent.name, text(`경로를 열 수 없습니다: ${String(error)}`, `Could not open the path: ${String(error)}`));
       }
     },
-    [openDocTab, pushToast]
+    [openDocTab, pushToast, text]
   );
 
   // Spawn an agent's PTY without it being the visible pane — used to reopen
@@ -3346,19 +3350,19 @@ function App() {
     ) => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
       if (!agent) {
-        return { ok: false, error: "세션을 찾을 수 없습니다.", statusCode: 404 as const };
+        return { ok: false, error: text("세션을 찾을 수 없습니다.", "Session not found."), statusCode: 404 as const };
       }
       let entry = termsRef.current.get(agentId);
       if (entry?.spawned && entry.spawnPromise) {
         try {
           const result = await entry.spawnPromise;
           return result.cancelled
-            ? { ok: false, error: "세션 활성화가 취소되었습니다.", statusCode: 409 as const }
+            ? { ok: false, error: text("세션 활성화가 취소되었습니다.", "Session activation was cancelled."), statusCode: 409 as const }
             : { ok: true };
         } catch (error) {
           return {
             ok: false,
-            error: `세션을 활성화하지 못했습니다: ${String(error)}`,
+            error: text(`세션을 활성화하지 못했습니다: ${String(error)}`, `Could not activate the session: ${String(error)}`),
             statusCode: 500 as const,
           };
         }
@@ -3442,7 +3446,7 @@ function App() {
             setAgentStatus(agentId, "idle");
             return {
               ok: false,
-              error: "세션 활성화가 취소되었습니다.",
+              error: text("세션 활성화가 취소되었습니다.", "Session activation was cancelled."),
               statusCode: 409 as const,
             };
           }
@@ -3455,7 +3459,7 @@ function App() {
         setAgentStatus(agentId, "exited");
         return {
           ok: false,
-          error: `세션을 활성화하지 못했습니다: ${String(err)}`,
+          error: text(`세션을 활성화하지 못했습니다: ${String(err)}`, `Could not activate the session: ${String(err)}`),
           statusCode: 500 as const,
         };
       }
@@ -3468,6 +3472,7 @@ function App() {
       clearAgentStartupReadyTimer,
       setAgentStatus,
       setAgentSessionId,
+      text,
     ]
   );
 
@@ -3498,7 +3503,7 @@ function App() {
       if (!agentsRef.current.some((agent) => agent.id === payload.id)) {
         void complete({
           ok: false,
-          error: "세션을 찾을 수 없습니다.",
+          error: text("세션을 찾을 수 없습니다.", "Session not found."),
           statusCode: 404,
         });
         return;
@@ -3507,7 +3512,7 @@ function App() {
         .then(complete)
         .catch((reason) => complete({
           ok: false,
-          error: `세션 활성화 결과를 처리하지 못했습니다: ${String(reason)}`,
+          error: text(`세션 활성화 결과를 처리하지 못했습니다: ${String(reason)}`, `Could not process the session activation result: ${String(reason)}`),
           statusCode: 500,
         }));
     }).then(track);
@@ -3542,7 +3547,7 @@ function App() {
       if (!projectExists) {
         void complete({
           ok: false,
-          error: "세션을 생성할 프로젝트가 더 이상 존재하지 않습니다.",
+          error: text("세션을 생성할 프로젝트가 더 이상 존재하지 않습니다.", "The project for this session no longer exists."),
           statusCode: 409,
         });
         return;
@@ -3550,14 +3555,14 @@ function App() {
       if (!toolAllowed) {
         void complete({
           ok: false,
-          error: "선택한 AI 도구가 비활성화되어 있습니다.",
+          error: text("선택한 AI 도구가 비활성화되어 있습니다.", "The selected AI tool is disabled."),
           statusCode: 409,
         });
         return;
       }
       const name = payload.name?.trim();
       if (!name) {
-        void complete({ ok: false, error: "세션 이름이 비어 있습니다.", statusCode: 400 });
+        void complete({ ok: false, error: text("세션 이름이 비어 있습니다.", "The session name is empty."), statusCode: 400 });
         return;
       }
       void createAgent(
@@ -3572,7 +3577,7 @@ function App() {
         : { ok: false, error: result.error, statusCode: 409 }
       )).catch((reason) => complete({
         ok: false,
-        error: `세션 생성 결과를 처리하지 못했습니다: ${String(reason)}`,
+        error: text(`세션 생성 결과를 처리하지 못했습니다: ${String(reason)}`, `Could not process the session creation result: ${String(reason)}`),
         statusCode: 500,
       }));
     }).then(track);
@@ -3596,6 +3601,7 @@ function App() {
     remoteEnabled,
     renameAgent,
     spawnAgentInBackground,
+    text,
   ]);
 
   // Startup reopen prompt answers.
@@ -3751,13 +3757,16 @@ function App() {
     const commandItems: QuickOpenItem[] = COMMAND_DEFINITIONS.map((command) => ({
       id: `command:${command.id}`,
       kind: "command",
-      title: command.title,
-      subtitle: [command.description, commandShortcuts[command.id]].filter(Boolean).join(" · "),
+      title: language === "ko" ? command.title : command.titleEn,
+      subtitle: [
+        language === "ko" ? command.description : command.descriptionEn,
+        commandShortcuts[command.id],
+      ].filter(Boolean).join(" · "),
       searchText: command.keywords,
       commandId: command.id,
     }));
     return [...projectItems, ...sessionItems, ...screenItems, ...documentItems, ...commandItems];
-  }, [agents, commandShortcuts, groups, projects, quickDocuments]);
+  }, [agents, commandShortcuts, groups, language, projects, quickDocuments]);
 
   const handleQuickOpenSelect = useCallback((item: QuickOpenItem) => {
     setQuickOpen(false);
@@ -3989,7 +3998,7 @@ function App() {
         onProjectContextMenu={onSidebarProjectContextMenu}
         onProjectFolderContextMenu={onSidebarProjectFolderContextMenu}
         sessionPickerMode={false}
-        detachedLabel="사용 중"
+        detachedLabel={text("사용 중", "In use")}
       />
       {workspaceMode === "browser-hub" ? (
         <BrowserHub
@@ -4073,7 +4082,7 @@ function App() {
           showUsageBar={showUsageBar}
           onShowUsageBarChange={handleShowUsageBarChange}
           buildVariant={runtimeFlags?.build_variant ?? "standard"}
-          updateProvider={runtimeFlags?.update_provider ?? "github"}
+          updateProvider={runtimeFlags?.update_provider ?? "local-developer"}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -4120,8 +4129,8 @@ function App() {
             <ProjectFolderModal
               title={
                 projectFolderEditor.mode === "create"
-                  ? "새 프로젝트 폴더"
-                  : "프로젝트 폴더 이름 변경"
+                  ? text("새 프로젝트 폴더", "New project folder")
+                  : text("프로젝트 폴더 이름 변경", "Rename project folder")
               }
               defaultName={folder?.name}
               machineLabel={machineLabel}
@@ -4350,7 +4359,7 @@ function App() {
               pushToast(
                 visibleTabContextMenu.agentId,
                 tabContextDocument.projectName,
-                `탐색기에서 파일을 표시할 수 없습니다: ${String(error)}`
+                text(`탐색기에서 파일을 표시할 수 없습니다: ${String(error)}`, `Could not reveal the file in File Explorer: ${String(error)}`)
               );
             });
           }}

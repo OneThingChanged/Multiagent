@@ -35,6 +35,9 @@ sources:
   - id: desktop-manifest
     resource: ../app/package.json
     title: "Desktop updater and packaging configuration"
+  - id: store-guide
+    resource: microsoft-store-release-guide.md
+    title: "Microsoft Store release status and operating procedure"
 ---
 
 # Known limitations
@@ -94,10 +97,20 @@ manifests carry the installer SHA-512 and Electron Updater verifies it, but a
 fresh manual installation can still show an unknown-publisher warning. Revisit
 this limitation when a trusted Windows code-signing certificate is configured.[^desktop-manifest]
 
-The Store MSIX pipeline is implemented but has not yet completed Partner Center
-identity binding, WACK, or Store certification. A development MSIX does not
-remove warnings for public users; only the Microsoft-signed Store result closes
-that distribution limitation.
+The Store MSIX pipeline has completed Partner Center identity binding, package
+validation, private certification, and a real Store installation for version
+`1.6.26.0`. The public `1.7.0.0` certification was cancelled before rollout;
+Submission 3 is back in draft while the validated `1.7.2.0` replacement waits
+for an administrator-run WACK and a separate Store deployment request. Treat
+general public availability and the higher-version Store update path as
+unverified until the replacement publishes and is installed from Store.[^store-guide]
+
+The public `MultiagentSite` support and privacy endpoints are prepared, but the
+current Store submission still needs a later metadata update to replace links
+that referenced the now-private source repository. Until that update publishes,
+some Store listing support links may require repository access. A private
+privacy-policy URL is also a certification risk and should be replaced through
+a corrected submission after explicit approval to cancel the active review.[^store-guide]
 
 ## Review policy
 
@@ -114,3 +127,4 @@ do not keep completed fixes here as “implemented candidates.”
 [^usage-service]: Local usage derivation
 [^runtime-variant]: Variant restrictions
 [^desktop-manifest]: Desktop updater and packaging configuration
+[^store-guide]: Microsoft Store release status and operating procedure

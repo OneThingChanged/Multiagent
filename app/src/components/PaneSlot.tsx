@@ -65,6 +65,7 @@ import {
   beginTerminalSync,
   completeTerminalSync,
 } from "../lib/terminalDelivery";
+import { useAppLanguage } from "../lib/appLanguage";
 
 function sameTerminalLink(a: TerminalMouseLink | null, b: TerminalMouseLink | null) {
   return !!a && !!b && a.kind === b.kind && a.text === b.text;
@@ -122,6 +123,7 @@ export function PaneSlot({
   path: Path;
   ctx: RenderCtx;
 }) {
+  const { text } = useAppLanguage();
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingTabDragRef = useRef<PendingTabDrag | null>(null);
   const suppressNextTabClickRef = useRef(false);
@@ -323,7 +325,7 @@ export function PaneSlot({
           return;
         }
       }
-      throw new Error("터미널 출력 동기화를 완료하지 못했습니다.");
+      throw new Error(text("터미널 출력 동기화를 완료하지 못했습니다.", "Could not finish synchronizing terminal output."));
     };
 
     const apply = () => {
@@ -608,6 +610,7 @@ export function PaneSlot({
     ctx.onOpenFolderPath,
     ctx.onOpenTerminalPath,
     ctx.sessionPins,
+    text,
   ]);
 
   useEffect(() => {
@@ -837,7 +840,7 @@ export function PaneSlot({
                   e.stopPropagation();
                   ctx.onTabContextMenu(path, tabAgentId, e.clientX, e.clientY);
                 }}
-                title="Google · 내장 브라우저"
+                title={text("Google · 내장 브라우저", "Google · Embedded browser")}
               >
                 <span className="tab-doc-icon tab-doc-icon-browser">WEB</span>
                 <span className="tab-name">Google</span>
@@ -975,7 +978,7 @@ export function PaneSlot({
               title={tabAgent.name}
             >
               {tabAgent.pinned && (
-                <span className="tab-pin" title="고정된 탭">
+                <span className="tab-pin" title={text("고정된 탭", "Pinned tab")}>
                   📌
                 </span>
               )}
@@ -1011,8 +1014,8 @@ export function PaneSlot({
             ctx.setActivePath(path);
             ctx.onOpenBrowser(path, paneSessionAgentId);
           }}
-          title="Google을 새 내장 브라우저 탭으로 열기"
-          aria-label="브라우저 탭 열기"
+          title={text("Google을 새 내장 브라우저 탭으로 열기", "Open Google in a new embedded browser tab")}
+          aria-label={text("브라우저 탭 열기", "Open browser tab")}
         >
           +
         </button>
@@ -1026,9 +1029,9 @@ export function PaneSlot({
               ctx.setActivePath(path);
               ctx.onToggleChat(activeAgentId);
             }}
-            title={chatMode ? "터미널 뷰로 전환" : "대화(채팅) 뷰로 전환"}
+            title={chatMode ? text("터미널 뷰로 전환", "Switch to terminal view") : text("대화(채팅) 뷰로 전환", "Switch to conversation view")}
           >
-            {chatMode ? "⌗ 터미널" : "💬 대화"}
+            {chatMode ? text("⌗ 터미널", "⌗ Terminal") : text("💬 대화", "💬 Chat")}
           </button>
         )}
       </div>

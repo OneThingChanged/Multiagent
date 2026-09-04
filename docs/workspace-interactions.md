@@ -39,6 +39,9 @@ sources:
   - id: settings
     resource: ../app/src/components/SettingsModal.tsx
     title: "Settings surface"
+  - id: app-language
+    resource: ../app/src/lib/appLanguage.tsx
+    title: "Application language preference"
   - id: session-storage-ui
     resource: ../app/src/components/SessionStorageList.tsx
     title: "Session JSONL storage catalog UI"
@@ -152,6 +155,12 @@ uses a verified database migration; resetting returns to the application-data
 default. Launch-only settings apply on the next PTY start rather than mutating
 an existing process.[^settings][^conversation-store]
 
+The General settings page provides System default, Korean, and English language
+choices. The preference is stored locally, applies immediately to all React
+surfaces, and updates the document language. System default resolves Korean
+for a Korean OS/browser locale and English otherwise; isolated previews retain
+the historical Korean fallback.[^settings][^app-language]
+
 Completion attention is visual and can also drive desktop/Remote notifications.
 Notification state must never be treated as authoritative work completion; hook
 state remains the source for activity.
@@ -169,6 +178,7 @@ The domain invariants behind these interactions are documented in
 [^file-tree]: File tree panel
 [^document-viewer]: Document viewer
 [^settings]: Settings surface
+[^app-language]: Application language preference
 [^session-storage-ui]: Session JSONL storage catalog UI
 [^session-storage-service]: Session JSONL metadata catalog
 [^conversation-store]: Per-session conversation store

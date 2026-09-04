@@ -6,6 +6,7 @@ import type {
   ResourceSessionUsage,
   ResourceUsageResult,
 } from "../platform/ipcContract";
+import { useAppLanguage } from "../lib/appLanguage";
 
 // Orca-style Resource Manager: the status-bar segment shows the app's total
 // memory; the popover breaks it down per project → session (PTY process
@@ -48,6 +49,7 @@ export function ResourceMonitor({
   projects: Project[];
   onRefreshUsage?: () => void | Promise<void>;
 }) {
+  const { text } = useAppLanguage();
   const [usage, setUsage] = useState<ResourceUsageResult | null>(null);
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,8 +105,8 @@ export function ResourceMonitor({
         group = {
           projectId,
           name: projectId
-            ? projectById.get(projectId)?.name ?? "삭제된 프로젝트"
-            : "기타 세션",
+            ? projectById.get(projectId)?.name ?? text("삭제된 프로젝트", "Deleted project")
+            : text("기타 세션", "Other sessions"),
           cpuPercent: 0,
           memoryBytes: 0,
           sessions: [],
@@ -123,7 +125,7 @@ export function ResourceMonitor({
     }
     list.sort((a, b) => b.memoryBytes - a.memoryBytes);
     return list;
-  }, [agents, projects, usage]);
+  }, [agents, projects, text, usage]);
 
   const sessionsMemory = useMemo(
     () =>
@@ -171,7 +173,7 @@ export function ResourceMonitor({
               disabled={refreshing}
               onClick={() => void refresh()}
             >
-              {refreshing ? "갱신 중" : "새로고침"}
+              {refreshing ? text("갱신 중", "Refreshing") : text("새로고침", "Refresh")}
             </button>
           </div>
           <div className="resource-popover-summary">
@@ -179,21 +181,21 @@ export function ResourceMonitor({
             <span>·</span>
             <b>{formatBytes(usage?.total_memory_bytes ?? 0)}</b>
             <span>·</span>
-            <span>시스템 RAM의 {systemPercent}%</span>
+            <span>{text(`시스템 RAM의 ${systemPercent}%`, `${systemPercent}% of system RAM`)}</span>
           </div>
           <div className="resource-popover-columns">
-            <span>이름</span>
+            <span>{text("이름", "Name")}</span>
             <span>CPU</span>
-            <span>메모리</span>
+            <span>{text("메모리", "Memory")}</span>
           </div>
           <div className="resource-popover-body">
             {usage && !usage.sampled && (
               <div className="resource-empty">
-                프로세스 정보를 수집하지 못했습니다.
+                {text("프로세스 정보를 수집하지 못했습니다.", "Could not collect process information.")}
               </div>
             )}
             {usage?.sampled && groups.length === 0 && (
-              <div className="resource-empty">실행 중인 로컬 세션이 없습니다.</div>
+              <div className="resource-empty">{text("실행 중인 로컬 세션이 없습니다.", "No local sessions are running.")}</div>
             )}
             {groups.map((group) => (
               <div key={group.projectId ?? "__unknown__"}>
@@ -233,7 +235,7 @@ export function ResourceMonitor({
             ))}
             {usage?.sampled && (
               <div className="resource-row resource-row-app">
-                <span className="resource-name">앱 프로세스 (UI 등)</span>
+                <span className="resource-name">{text("앱 프로세스 (UI 등)", "App processes (UI, etc.)")}</span>
                 <span className="resource-cpu" />
                 <span className="resource-mem">{formatBytes(appSelfMemory)}</span>
               </div>

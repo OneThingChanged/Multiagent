@@ -3,6 +3,7 @@ import { docKindForPath } from "../lib/docTabs";
 import { invoke } from "../platform/runtime";
 import type { DocumentBrowserSnapshot } from "../platform/ipcContract";
 import { EmbeddedDocumentBrowser } from "./EmbeddedDocumentBrowser";
+import { useAppLanguage } from "../lib/appLanguage";
 
 type BrowserHubProps = {
   browsers: DocumentBrowserSnapshot[];
@@ -58,6 +59,7 @@ export function BrowserHub({
   onCreateBrowser,
   onCloseBrowser,
 }: BrowserHubProps) {
+  const { text } = useAppLanguage();
   const [attachedBrowserId, setAttachedBrowserId] = useState<string | null>(null);
   const [attachRequest, setAttachRequest] = useState(0);
   const [busyBrowserId, setBusyBrowserId] = useState<string | null>(null);
@@ -117,12 +119,12 @@ export function BrowserHub({
   };
 
   return (
-    <main className="terminal-area browser-hub" aria-label="브라우저 모아보기">
-      <div className="browser-hub-tabs" role="tablist" aria-label="열린 브라우저 탭">
+    <main className="terminal-area browser-hub" aria-label={text("브라우저 모아보기", "Browser hub")}>
+      <div className="browser-hub-tabs" role="tablist" aria-label={text("열린 브라우저 탭", "Open browser tabs")}>
         {browsers.map((browser) => {
           const active = browser.browserId === selectedBrowserId;
           const agentName = browser.agentId
-            ? agentNames.get(browser.agentId) ?? "연결된 세션"
+            ? agentNames.get(browser.agentId) ?? text("연결된 세션", "Connected session")
             : null;
           const title = browserHubTabTitle(browser);
           const isHtmlDocument = isHtmlDocumentBrowser(browser);
@@ -145,15 +147,15 @@ export function BrowserHub({
                   {isHtmlDocument ? "HTML" : "WEB"}
                 </span>
                 <span className="browser-hub-tab-title">{title}</span>
-                {browser.loading && <span className="browser-hub-tab-loading" aria-label="불러오는 중" />}
+                {browser.loading && <span className="browser-hub-tab-loading" aria-label={text("불러오는 중", "Loading")} />}
                 {agentName && <span className="browser-hub-tab-agent">{agentName}</span>}
               </button>
               <button
                 className="browser-hub-tab-close"
                 onClick={() => closeBrowser(browser.browserId)}
                 disabled={busyBrowserId === browser.browserId}
-                aria-label={`${title} 닫기`}
-                title="브라우저 닫기"
+                aria-label={text(`${title} 닫기`, `Close ${title}`)}
+                title={text("브라우저 닫기", "Close browser")}
               >
                 ×
               </button>
@@ -164,13 +166,13 @@ export function BrowserHub({
           className="browser-hub-new-tab"
           onClick={createBrowser}
           disabled={creating}
-          title="새 브라우저"
-          aria-label="새 브라우저"
+          title={text("새 브라우저", "New browser")}
+          aria-label={text("새 브라우저", "New browser")}
         >
           +
         </button>
         <span className="browser-hub-tab-spacer" />
-        <span className="browser-hub-count">{browsers.length}개</span>
+        <span className="browser-hub-count">{text(`${browsers.length}개`, String(browsers.length))}</span>
       </div>
 
       <div className="browser-hub-content">
@@ -178,18 +180,18 @@ export function BrowserHub({
           <EmbeddedDocumentBrowser
             key={selectedBrowser.browserId}
             browserId={selectedBrowser.browserId}
-            documentPath={selectedBrowser.url || selectedBrowser.relativePath || "새 브라우저"}
+            documentPath={selectedBrowser.url || selectedBrowser.relativePath || text("새 브라우저", "New browser")}
             active
           />
         ) : selectedBrowser ? (
-          <div className="browser-hub-empty">브라우저 연결 중…</div>
+          <div className="browser-hub-empty">{text("브라우저 연결 중…", "Connecting to browser…")}</div>
         ) : (
           <div className="browser-hub-empty">
             <span className="browser-hub-empty-icon" aria-hidden="true">WEB</span>
-            <strong>열린 브라우저가 없습니다</strong>
-            <span>새 탭을 열면 에이전트와 함께 사용하는 브라우저가 여기에 모입니다.</span>
+            <strong>{text("열린 브라우저가 없습니다", "No browsers are open")}</strong>
+            <span>{text("새 탭을 열면 에이전트와 함께 사용하는 브라우저가 여기에 모입니다.", "Browsers shared with agents appear here when you open a new tab.")}</span>
             <button onClick={createBrowser} disabled={creating}>
-              {creating ? "여는 중…" : "새 브라우저 열기"}
+              {creating ? text("여는 중…", "Opening…") : text("새 브라우저 열기", "Open new browser")}
             </button>
           </div>
         )}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
+import { useAppLanguage } from "../lib/appLanguage";
 
 export function ProjectFolderModal({
   title,
@@ -15,6 +16,7 @@ export function ProjectFolderModal({
   onSave: (name: string) => void;
 }) {
   useNativeViewOcclusion();
+  const { text } = useAppLanguage();
 
   const [name, setName] = useState(defaultName);
   const trimmedName = name.trim();
@@ -27,11 +29,11 @@ export function ProjectFolderModal({
       <div className="modal">
         <h2 className="modal-title">{title}</h2>
         <label className="field">
-          <span className="field-label">위치</span>
+          <span className="field-label">{text("위치", "Location")}</span>
           <span className="check-hint">{machineLabel}</span>
         </label>
         <label className="field">
-          <span className="field-label">폴더 이름</span>
+          <span className="field-label">{text("폴더 이름", "Folder name")}</span>
           <input
             autoFocus
             value={name}
@@ -40,19 +42,19 @@ export function ProjectFolderModal({
               if (event.key === "Enter") submit();
               if (event.key === "Escape") onCancel();
             }}
-            placeholder="예: 업무 프로젝트"
+            placeholder={text("예: 업무 프로젝트", "e.g. Work projects")}
           />
         </label>
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onCancel}>
-            취소
+            {text("취소", "Cancel")}
           </button>
           <button
             className="btn-primary"
             disabled={!trimmedName}
             onClick={submit}
           >
-            저장
+            {text("저장", "Save")}
           </button>
         </div>
       </div>

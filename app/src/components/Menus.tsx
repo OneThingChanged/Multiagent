@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
+import { useAppLanguage } from "../lib/appLanguage";
 import type {
   ContextMenuState,
   ProjectFolderContextMenuState,
@@ -45,6 +46,7 @@ export function ProjectFolderContextMenu({
   onAction: (action: "rename" | "delete") => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  const { text } = useAppLanguage();
   return (
     <>
       <div
@@ -62,14 +64,14 @@ export function ProjectFolderContextMenu({
         onContextMenu={(event) => event.preventDefault()}
       >
         <button className="ctx-item" onClick={() => onAction("rename")}>
-          폴더 이름 변경
+          {text("폴더 이름 변경", "Rename folder")}
         </button>
         <div className="ctx-separator" />
         <button
           className="ctx-item ctx-item-danger"
           onClick={() => onAction("delete")}
         >
-          폴더 삭제
+          {text("폴더 삭제", "Delete folder")}
         </button>
       </div>
     </>
@@ -86,6 +88,7 @@ export function ProjectContextMenu({
   onAction: (action: "rename" | "delete" | "properties") => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  const { text } = useAppLanguage();
   return (
     <>
       <div
@@ -103,33 +106,33 @@ export function ProjectContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={() => onAction("rename")}>
-          프로젝트 이름 변경
+          {text("프로젝트 이름 변경", "Rename project")}
         </button>
         <button className="ctx-item" onClick={() => onAction("properties")}>
-          속성
+          {text("속성", "Properties")}
         </button>
         <div className="ctx-separator" />
         <button
           className="ctx-item ctx-item-danger"
           onClick={() => onAction("delete")}
         >
-          프로젝트 삭제
+          {text("프로젝트 삭제", "Delete project")}
         </button>
       </div>
     </>
   );
 }
 
-export const TAB_COLORS: { name: string; value: string }[] = [
-  { name: "파랑", value: "#4c8bf5" },
-  { name: "보라", value: "#a371f7" },
-  { name: "분홍", value: "#f778ba" },
-  { name: "빨강", value: "#f85149" },
-  { name: "주황", value: "#e3742f" },
-  { name: "노랑", value: "#d29922" },
-  { name: "초록", value: "#3fb950" },
-  { name: "청록", value: "#2dd4bf" },
-  { name: "회색", value: "#8b949e" },
+export const TAB_COLORS: { name: string; nameEn: string; value: string }[] = [
+  { name: "파랑", nameEn: "Blue", value: "#4c8bf5" },
+  { name: "보라", nameEn: "Purple", value: "#a371f7" },
+  { name: "분홍", nameEn: "Pink", value: "#f778ba" },
+  { name: "빨강", nameEn: "Red", value: "#f85149" },
+  { name: "주황", nameEn: "Orange", value: "#e3742f" },
+  { name: "노랑", nameEn: "Yellow", value: "#d29922" },
+  { name: "초록", nameEn: "Green", value: "#3fb950" },
+  { name: "청록", nameEn: "Teal", value: "#2dd4bf" },
+  { name: "회색", nameEn: "Gray", value: "#8b949e" },
 ];
 
 export function TabContextMenu({
@@ -172,6 +175,7 @@ export function TabContextMenu({
   onRevealInExplorer: () => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  const { language, text } = useAppLanguage();
   const run = (action: () => void) => () => {
     action();
     onDismiss();
@@ -193,16 +197,16 @@ export function TabContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={run(() => onSplit("h"))}>
-          오른쪽으로 분할
+          {text("오른쪽으로 분할", "Split right")}
         </button>
         <button className="ctx-item" onClick={run(() => onSplit("v"))}>
-          아래로 분할
+          {text("아래로 분할", "Split down")}
         </button>
         {canRevealInExplorer && (
           <>
             <div className="ctx-separator" />
             <button className="ctx-item" onClick={run(onRevealInExplorer)}>
-              탐색기에서 보기
+              {text("탐색기에서 보기", "Reveal in File Explorer")}
             </button>
           </>
         )}
@@ -210,36 +214,38 @@ export function TabContextMenu({
           <>
             <div className="ctx-separator" />
             <button className="ctx-item" onClick={run(onToggleChat)}>
-              {chatMode ? "⌗ 터미널 뷰로 보기" : "💬 대화(채팅) 뷰로 보기"}
+              {chatMode
+                ? text("⌗ 터미널 뷰로 보기", "⌗ Show terminal view")
+                : text("💬 대화(채팅) 뷰로 보기", "💬 Show chat view")}
             </button>
           </>
         )}
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={run(onTogglePin)}>
-          {pinned ? "탭 고정 해제" : "탭 고정"}
+          {pinned ? text("탭 고정 해제", "Unpin tab") : text("탭 고정", "Pin tab")}
         </button>
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={run(onCloseTab)}>
-          닫기 <span className="ctx-shortcut">Ctrl+W</span>
+          {text("닫기", "Close")} <span className="ctx-shortcut">Ctrl+W</span>
         </button>
         <button className="ctx-item" onClick={run(onCloseOthers)}>
-          다른 탭 닫기
+          {text("다른 탭 닫기", "Close other tabs")}
         </button>
         <button className="ctx-item" onClick={run(onCloseRight)}>
-          오른쪽 탭 모두 닫기
+          {text("오른쪽 탭 모두 닫기", "Close tabs to the right")}
         </button>
         <button className="ctx-item" onClick={run(onReopen)} disabled={!canReopen}>
-          최근 닫은 탭 다시 열기 <span className="ctx-shortcut">Ctrl+Shift+T</span>
+          {text("최근 닫은 탭 다시 열기", "Reopen closed tab")} <span className="ctx-shortcut">Ctrl+Shift+T</span>
         </button>
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={run(onRename)}>
-          이름 변경
+          {text("이름 변경", "Rename")}
         </button>
-        <div className="ctx-color-label">탭 색상</div>
+        <div className="ctx-color-label">{text("탭 색상", "Tab color")}</div>
         <div className="ctx-color-row">
           <button
             className={`ctx-color-swatch ctx-color-none ${!tabColor ? "ctx-color-active" : ""}`}
-            title="색상 없음"
+            title={text("색상 없음", "No color")}
             onClick={run(() => onSetColor(null))}
           />
           {TAB_COLORS.map((color) => (
@@ -247,7 +253,7 @@ export function TabContextMenu({
               key={color.value}
               className={`ctx-color-swatch ${tabColor === color.value ? "ctx-color-active" : ""}`}
               style={{ background: color.value }}
-              title={color.name}
+              title={language === "ko" ? color.name : color.nameEn}
               onClick={run(() => onSetColor(color.value))}
             />
           ))}
@@ -275,6 +281,7 @@ export function TerminalContextMenu({
   onSelectAll: () => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(x, y);
+  const { text } = useAppLanguage();
   return (
     <>
       <div
@@ -292,14 +299,14 @@ export function TerminalContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={onCopy} disabled={!hasSelection}>
-          복사 (Ctrl+C)
+          {text("복사", "Copy")} (Ctrl+C)
         </button>
         <button className="ctx-item" onClick={onPaste}>
-          붙여넣기 (Ctrl+V)
+          {text("붙여넣기", "Paste")} (Ctrl+V)
         </button>
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={onSelectAll}>
-          모두 선택
+          {text("모두 선택", "Select all")}
         </button>
       </div>
     </>
@@ -328,6 +335,7 @@ export function ContextMenu({
   ) => void;
 }) {
   const { ref, pos } = useClampedMenuPosition(state.x, state.y);
+  const { text } = useAppLanguage();
   return (
     <>
       <div
@@ -345,51 +353,51 @@ export function ContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       >
         <button className="ctx-item" onClick={() => onAction("open")}>
-          전환 (현재 그룹으로 이동)
+          {text("전환 (현재 그룹으로 이동)", "Switch (move to current group)")}
         </button>
         <button className="ctx-item" onClick={() => onAction("open-new-window")}>
-          새 창에서 열기
+          {text("새 창에서 열기", "Open in new window")}
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("tab")}
           disabled={!hasActive || !canPlaceInActive}
         >
-          탭으로 추가
+          {text("탭으로 추가", "Add as tab")}
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("split-h")}
           disabled={!hasActive || !canPlaceInActive}
         >
-          오른쪽 분할
+          {text("오른쪽 분할", "Split right")}
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("split-v")}
           disabled={!hasActive || !canPlaceInActive}
         >
-          아래로 분할
+          {text("아래로 분할", "Split down")}
         </button>
         <button className="ctx-item" onClick={() => onAction("rename")}>
-          세션 별명 변경
+          {text("세션 별명 변경", "Rename session")}
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("deactivate")}
           disabled={!canDeactivate}
         >
-          세션 비활성화
+          {text("세션 비활성화", "Deactivate session")}
         </button>
         <button className="ctx-item" onClick={() => onAction("relink")}>
-          현재 세션으로 재등록
+          {text("현재 세션으로 재등록", "Relink to current session")}
         </button>
         <div className="ctx-separator" />
         <button
           className="ctx-item ctx-item-danger"
           onClick={() => onAction("delete")}
         >
-          세션 삭제
+          {text("세션 삭제", "Delete session")}
         </button>
         <div className="ctx-separator" />
         <button
@@ -397,18 +405,18 @@ export function ContextMenu({
           onClick={() => onAction("pin-session")}
           disabled={!canPinSession}
         >
-          현재 세션으로 그룹 고정
+          {text("현재 세션으로 그룹 고정", "Pin group to this session")}
         </button>
         <button
           className="ctx-item"
           onClick={() => onAction("clear-session-pin")}
           disabled={!isSessionLocked}
         >
-          그룹 세션 고정 해제
+          {text("그룹 세션 고정 해제", "Unpin group sessions")}
         </button>
         <div className="ctx-separator" />
         <button className="ctx-item" onClick={() => onAction("properties")}>
-          속성
+          {text("속성", "Properties")}
         </button>
       </div>
     </>

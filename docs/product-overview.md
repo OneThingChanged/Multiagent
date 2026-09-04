@@ -65,15 +65,17 @@ constrained WebView; it does not embed the desktop runtime.[^mobile-manifest]
 * always-on shared browser tabs controlled through a fixed MCP tool surface;
 * local token accounting plus provider account-limit snapshots;
 * loopback Dashboard, authenticated Remote access, and MiraControl integration;
-* Standard and Company installers with SHA-512 updater manifests plus a
-  separately signed Android APK.
+* a Standard developer installer updated from a chosen local output folder, a
+  Company installer on its private GitHub updater, and a separately signed
+  Android APK.
 
 ## Product variants
 
-Standard enables the external Remote/tunnel path and packages a verified APK
-for download. Company uses a distinct application identity, retains the
-loopback Dashboard, rejects external Remote/tunnel operations, and excludes the
-APK.[^runtime-variant]
+Standard enables the external Remote/tunnel path, packages a verified APK for
+download, and discovers newer x64 NSIS installers in a configured local output
+folder. Company uses a distinct application identity and private GitHub updater,
+retains the loopback Dashboard, rejects external Remote/tunnel operations, and
+excludes the APK. Store uses its own identity and Microsoft-managed updates.[^runtime-variant]
 
 Implementation boundaries are defined in [System architecture](system-architecture.md); exact
 interaction behavior belongs in [Workspace interactions](workspace-interactions.md).
