@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type {
   Agent,
   AgentRuntimeStatus,
@@ -8,7 +8,6 @@ import type {
 import * as groupOps from "../lib/groupOps";
 import { applyAgentRuntimeStatus } from "../lib/agentActivity";
 import { clearScrollback } from "../lib/scrollback";
-import { sessionDeletionMessage } from "../lib/sessionLifecycle";
 import { invoke } from "../platform/runtime";
 import { isElectronRuntime } from "../platform/electronBridge";
 
@@ -50,6 +49,8 @@ export function useSessionLifecycleActions({
   beforeDeleteConfirm,
   afterDeleteSettled,
 }: SessionLifecycleOptions) {
+  const [pendingDeletion, setPendingDeletion] = useState<Agent | null>(null);
+  const deletingRef = useRef(false);
   const recoverExitedAgent = useCallback(async (agentId: string) => {
     const wasIdle =
       agentsRef.current.find((agent) => agent.id === agentId)?.status === "idle";
@@ -143,7 +144,8 @@ export function useSessionLifecycleActions({
     [setAgents]
   );
 
-  const removeAgent = useCallback(async (agentId: string) => {
+  const removeAgent = useCallback((agentId: string) => {
+    if (deletingRef.current) return;
     const agent = agentsRef.current.find(
       (candidate) => candidate.id === agentId
     );
@@ -154,16 +156,26 @@ export function useSessionLifecycleActions({
       );
       return;
     }
-    // The context-menu backdrop must be removed from the committed DOM before
-    // opening the blocking native confirmation dialog. Otherwise the queued
-    // React update can leave an invisible full-window click blocker behind.
+    // Keep confirmation in the renderer so dismissal does not cross the
+    // blocking native dialog focus boundary.
     beforeDeleteConfirm?.();
-    if (!window.confirm(sessionDeletionMessage(agent.name))) {
-      afterDeleteSettled?.();
-      return;
-    }
+    setPendingDeletion(agent);
+  }, [agentsRef, beforeDeleteConfirm, detachedAgentIdsRef]);
 
+  const cancelDeletion = useCallback(() => {
+    setPendingDeletion(null);
+    afterDeleteSettled?.();
+  }, [afterDeleteSettled]);
+
+  const confirmDeletion = useCallback(async () => {
+    if (!pendingDeletion || deletingRef.current) return;
+    const agentId = pendingDeletion.id;
+    deletingRef.current = true;
+    setPendingDeletion(null);
     try {
+      // Revalidate ownership after the user has considered confirmation.
+      if (!agentsRef.current.some((agent) => agent.id === agentId) ||
+          detachedAgentIdsRef.current.has(agentId)) return;
       removedAgentIdsRef.current.add(agentId);
       await invoke(
         isElectronRuntime() ? "terminal_session_action" : "kill_pty",
@@ -182,16 +194,14 @@ export function useSessionLifecycleActions({
         current.filter((agent) => agent.id !== agentId)
       );
     } finally {
-      // Confirmation dialogs take keyboard focus even when deletion succeeds.
-      // The caller clears any remaining transient blockers and focuses the
-      // surviving active terminal after React has committed the new layout.
+      deletingRef.current = false;
       afterDeleteSettled?.();
     }
   }, [
     agentsRef,
     afterDeleteSettled,
     applyGroupOp,
-    beforeDeleteConfirm,
+    pendingDeletion,
     detachedAgentIdsRef,
     removedAgentIdsRef,
     setAgents,
@@ -204,5 +214,8 @@ export function useSessionLifecycleActions({
     setAgentStatus,
     setAgentSessionId,
     removeAgent,
+    pendingDeletion,
+    confirmDeletion,
+    cancelDeletion,
   };
 }

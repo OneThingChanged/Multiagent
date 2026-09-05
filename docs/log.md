@@ -1,5 +1,10 @@
 # OKF Update Log
 
+## 2026-09-06
+
+* **Local Standard update 1.7.3.0**: Synchronized desktop/mobile versions (Android versionCode 13), built the signed APK and Standard NSIS installer, and verified packaged runtime/lifecycle plus local update discovery from 1.7.2.0. Desktop tests (414), mobile tests (24), and mobile typecheck passed. Installer installation on the user's running workspace remains pending; this update has no new GitHub Release or Store submission.
+* **Session deletion form focus**: Replaced blocking native session confirmation with an in-app modal and prevented delayed terminal focus recovery from interrupting forms. Build, focused unit tests, and an isolated Electron deletion/cancellation form-focus smoke passed; the installed-app reproduction remains unverified.
+
 ## 2026-09-04
 
 * **Local Standard developer updates**: Separated Standard from GitHub updates, added a persisted output-folder picker and strict highest-version `MultiAgent-Setup-X.Y.Z.0-x64.exe` discovery, and routed installation through the session-saving close handshake. `1.7.2.0` is the final Standard GitHub transition release; later Standard builds are installed directly from local output while Store remains Microsoft-managed and Company retains its private GitHub updater.

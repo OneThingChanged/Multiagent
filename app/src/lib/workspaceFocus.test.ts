@@ -22,6 +22,26 @@ const state: GroupState = {
 };
 
 describe("workspace focus recovery", () => {
+  it("does not steal focus when a form or modal opens during recovery", () => {
+    const queued: FrameRequestCallback[] = [];
+    const focus = vi.fn();
+    let formOpen = false;
+    let mounted = false;
+    scheduleActiveTerminalFocus({
+      getState: () => state,
+      getTarget: () => mounted ? { focus } : null,
+      shouldFocus: () => !formOpen,
+      requestFrame: (callback) => queued.push(callback),
+      cancelFrame: vi.fn(),
+    });
+    queued.shift()?.(0);
+    formOpen = true;
+    mounted = true;
+    queued.shift()?.(16);
+    expect(focus).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(0);
+  });
+
   it("resolves the surviving active terminal from committed group state", () => {
     expect(activeAgentIdForGroupState(state)).toBe("survivor");
   });

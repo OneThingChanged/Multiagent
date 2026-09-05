@@ -79,10 +79,13 @@ worker to Codex Luna with max reasoning. The creation dialog keeps these
 choices editable, including explicitly disabling both workers; launch-only
 worker settings take effect when the PTY starts.[^app-shell]
 
-Before permanent deletion opens its native confirmation dialog, MultiAgent
-commits removal of context-menu and drag backdrops. Whether confirmation is
-cancelled or deletion finishes, transient interaction state is cleared again
-and the surviving active terminal is focused after its pane mounts. Layout
+Permanent deletion uses an in-app confirmation modal instead of blocking
+`window.confirm()`, keeping form interaction within the renderer. MultiAgent
+first commits removal of context-menu and drag backdrops. Whether confirmation
+is cancelled or deletion finishes, transient interaction state is cleared again
+and the surviving active terminal is focused after its pane mounts, unless a
+modal or form control has taken focus. Confirmation rechecks session ownership
+and guards against duplicate deletion requests. Layout
 state and imperative refs advance together so deletion cannot leave keyboard or
 pointer input bound to the removed session.[^session-lifecycle-actions][^workspace-focus]
 

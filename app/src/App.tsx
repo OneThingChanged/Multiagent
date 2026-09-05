@@ -166,6 +166,7 @@ import { TopBar } from "./components/TopBar";
 import { TerminalArea } from "./components/TerminalArea";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { NewProjectModal } from "./components/NewProjectModal";
+import { DeleteSessionModal } from "./components/DeleteSessionModal";
 import { ToastContainer } from "./components/Toast";
 import {
   ContextMenu,
@@ -2064,8 +2065,7 @@ function App() {
   }, [dismissTransientMenus]);
 
   const flushTransientInteractionState = useCallback(() => {
-    // Session deletion opens a blocking native confirmation dialog. Commit the
-    // menu removal first so its fixed backdrop cannot survive the dialog.
+    // Commit menu removal before showing confirmation or restoring focus.
     flushSync(clearTransientInteractionState);
   }, [clearTransientInteractionState]);
 
@@ -2079,6 +2079,9 @@ function App() {
       getTarget: (agentId) => termsRef.current.get(agentId)?.term,
       requestFrame: window.requestAnimationFrame.bind(window),
       cancelFrame: window.cancelAnimationFrame.bind(window),
+      shouldFocus: () => !document.querySelector(".modal-backdrop") &&
+        !(document.activeElement instanceof HTMLElement &&
+          document.activeElement.closest('input, select, textarea:not(.xterm-helper-textarea), [contenteditable="true"]')),
     });
   }, []);
 
@@ -2117,6 +2120,9 @@ function App() {
     setAgentStatus,
     setAgentSessionId,
     removeAgent,
+    pendingDeletion,
+    confirmDeletion,
+    cancelDeletion,
   } = useSessionLifecycleActions({
     agentsRef,
     detachedAgentIdsRef,
@@ -4092,6 +4098,10 @@ function App() {
           onYes={confirmReopen}
           onNo={dismissReopen}
         />
+      )}
+      {pendingDeletion && (
+        <DeleteSessionModal name={pendingDeletion.name}
+          onConfirm={confirmDeletion} onCancel={cancelDeletion} />
       )}
       {showProjectModal && (
         <NewProjectModal

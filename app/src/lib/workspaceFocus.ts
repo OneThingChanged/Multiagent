@@ -21,19 +21,21 @@ export function scheduleActiveTerminalFocus({
   requestFrame,
   cancelFrame,
   maxAttempts = 4,
+  shouldFocus = () => true,
 }: {
   getState: () => GroupState;
   getTarget: (agentId: string) => FocusTarget | null | undefined;
   requestFrame: (callback: FrameRequestCallback) => number;
   cancelFrame: (handle: number) => void;
   maxAttempts?: number;
+  shouldFocus?: () => boolean;
 }) {
   let cancelled = false;
   let frameHandle: number | null = null;
   let attempts = 0;
 
   const tryFocus = () => {
-    if (cancelled) return;
+    if (cancelled || !shouldFocus()) return;
     attempts += 1;
     const agentId = activeAgentIdForGroupState(getState());
     const target = agentId ? getTarget(agentId) : null;
