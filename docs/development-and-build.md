@@ -123,6 +123,11 @@ Store builds remain Microsoft Store-managed. The optional
 an automated developer environment; when present, the Settings picker is
 disabled.
 
+Small changes increment the fourth product-version component at the Git commit
+boundary, for example `1.7.3.0` → `1.7.3.1`. Rebuilding the same commit retains
+its version. The local updater distinguishes these revisions even though the
+npm compatibility version remains `1.7.3`.
+
 ### Microsoft Store package
 
 The development path uses a placeholder identity and a self-signed certificate

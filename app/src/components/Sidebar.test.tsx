@@ -77,6 +77,17 @@ function stubSidebarState(values: Record<string, string>) {
 }
 
 describe("Sidebar", () => {
+  it("keeps dormant restored sessions visible with a blue standby marker in active-only mode", () => {
+    stubSidebarState({ "multiagent.activeOnly.v1": "true" });
+    const html = renderSidebar(
+      [{ id: "p", name: "Project", folder: "C:/p", createdAt: 1 }],
+      [{ ...agent("dormant", "p"), deferredStart: true }],
+    );
+    expect(html).toContain("DORMANT");
+    expect(html).toContain("status-standby");
+    expect(html).not.toContain("status-running");
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows projects that do not have sessions yet", () => {

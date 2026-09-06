@@ -8,8 +8,8 @@ function parseReleaseVersion(value) {
   if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 65_535)) {
     throw new Error(`Release version component is outside 0-65535: ${normalized}`);
   }
-  if (parts[0] === 0 || parts[3] !== 0) {
-    throw new Error(`Release version must start at 1 or higher and use revision 0: ${normalized}`);
+  if (parts[0] === 0) {
+    throw new Error(`Release version must start at 1 or higher: ${normalized}`);
   }
   return parts;
 }

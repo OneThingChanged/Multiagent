@@ -9,6 +9,7 @@ const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 
 module.exports = {
   ...base,
+  buildVersion: releaseVersion,
   extraMetadata: {
     ...base.extraMetadata,
     multiAgentReleaseVersion: releaseVersion,

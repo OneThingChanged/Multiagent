@@ -70,10 +70,7 @@ import {
   makeGitHistoryTabId,
   parseGitHistoryTabId,
 } from "./lib/gitHistoryTabs";
-import {
-  loadBootstrap,
-  loadStoredView,
-} from "./lib/persistence";
+import { loadBootstrap } from "./lib/persistence";
 import type { Bootstrap } from "./lib/persistence";
 import { applyTerminalTheme, createEntry, notifyDone } from "./lib/terminal";
 import { playNotificationSound, loadNotificationSound, shouldSilenceOsNotification } from "./lib/notificationSound";
@@ -178,7 +175,6 @@ import { FileTreePanel } from "./components/FileTreePanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { RenameSessionModal } from "./components/RenameSessionModal";
 import { RenameProjectModal } from "./components/RenameProjectModal";
-import { ReopenSessionsModal } from "./components/ReopenSessionsModal";
 import { SearchBar } from "./components/SearchBar";
 import { ImageViewer } from "./components/ImageViewer";
 import { SessionPropertiesModal } from "./components/SessionPropertiesModal";
@@ -218,6 +214,7 @@ type RuntimeFlags = {
   build_variant?: "standard" | "company" | "store";
   remote_enabled?: boolean;
   update_provider?: "github" | "local-developer" | "microsoft-store";
+  live_agent_ids?: string[];
 };
 
 type AgentWindowUsage = {
@@ -424,6 +421,7 @@ function agentFromStored(
       existing?.lastSessionId,
     status: existing?.status ?? "idle",
     runtimeStatus: existing?.runtimeStatus ?? "idle",
+    deferredStart: existing?.deferredStart ?? (existing ? undefined : true),
     activity: existing?.activity,
     sshHostId: project.sshHostId,
     remoteFolder: project.remoteFolder,
@@ -518,45 +516,6 @@ function relativeIfInside(folder: string, absolutePath: string): string | null {
   return null;
 }
 
-// Startup reopen prompt: the previously-active group (with sessions) is restored
-// only after the user confirms, instead of auto-resuming on launch.
-type ReopenPending = {
-  agentIds: string[];
-  groupId: string | null;
-  path: Path | null;
-  projectId: string | null;
-  count: number;
-};
-
-function computeInitialReopen(
-  boot: Bootstrap,
-  viewKey: string,
-  enabled: boolean
-): ReopenPending | null {
-  if (!enabled) return null;
-  // Reopen every session that was running at the last close (recorded in
-  // LS_REOPEN_AGENTS), not just the previously-active group. loadBootstrap
-  // starts with no active group, so read the saved view for which group to show.
-  let remembered: string[] = [];
-  try {
-    const raw = localStorage.getItem(LS_REOPEN_AGENTS);
-    if (raw) remembered = JSON.parse(raw) as string[];
-  } catch {
-    remembered = [];
-  }
-  const existing = new Set(boot.agents.map((a) => a.id));
-  const agentIds = remembered.filter((id) => existing.has(id));
-  if (agentIds.length === 0) return null;
-  const view = loadStoredView(boot.groups, viewKey);
-  return {
-    agentIds,
-    groupId: view.activeGroupId,
-    path: view.activePath,
-    projectId: view.activeProjectId,
-    count: agentIds.length,
-  };
-}
-
 function App() {
   const { language, text } = useAppLanguage();
   const workspace = workspaceWindowContext();
@@ -572,9 +531,6 @@ function App() {
   }
   const boot = bootstrapRef.current;
 
-  const [pendingReopen, setPendingReopen] = useState<ReopenPending | null>(() =>
-    computeInitialReopen(boot, workspace.viewKey, workspace.restore)
-  );
   const startupReadyTimersRef = useRef<Map<string, number>>(new Map());
   const clearAgentStartupReadyTimer = useCallback((agentId: string) => {
     const timer = startupReadyTimersRef.current.get(agentId);
@@ -593,7 +549,9 @@ function App() {
   const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(
     boot.projectFolders
   );
-  const [agents, setAgents] = useState<Agent[]>(boot.agents);
+  const [agents, setAgents] = useState<Agent[]>(() =>
+    boot.agents.map((agent) => ({ ...agent, deferredStart: true }))
+  );
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   // A document tab may be dragged into its own split, where its leaf no longer
   // contains the terminal that opened it. Keep the source session association
@@ -616,13 +574,12 @@ function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     boot.activeProjectId
   );
-  // When a reopen prompt is pending, don't restore the active group yet (that
-  // would auto-spawn its sessions) — wait for the user's answer.
+  // Restore the layout immediately; cold-start sessions remain placeholders.
   const [activeGroupId, setActiveGroupId] = useState<string | null>(
-    pendingReopen || !workspace.resumeLive ? null : boot.activeGroupId
+    workspace.restore || workspace.resumeLive ? boot.activeGroupId : null
   );
   const [activePath, setActivePath] = useState<Path | null>(
-    pendingReopen || !workspace.resumeLive ? null : boot.activePath
+    workspace.restore || workspace.resumeLive ? boot.activePath : null
   );
   const [workspaceMode, setWorkspaceMode] = useState<"sessions" | "browser-hub">(
     "sessions"
@@ -836,7 +793,13 @@ function App() {
     let cancelled = false;
     invoke<RuntimeFlags>("runtime_flags")
       .then((flags) => {
-        if (!cancelled) setRuntimeFlags(flags);
+        if (cancelled) return;
+        // Reattach only processes that survived in the tray. Dormant sessions
+        // must not start just because another session is still running.
+        const liveIds = new Set(flags.live_agent_ids ?? []);
+        setAgents((current) => current.map((agent) => liveIds.has(agent.id)
+          ? applyAgentRuntimeStatus(agent, "running") : agent));
+        setRuntimeFlags(flags);
       })
       .catch(() => {
         if (!cancelled) {
@@ -1302,9 +1265,6 @@ function App() {
 
   useEffect(() => {
     if (!runtimeFlags) return;
-    // While the startup reopen prompt is open we deliberately hold activeGroupId
-    // at null; don't persist that, or we'd lose the group to reopen.
-    if (pendingReopen) return;
     writeLocalStorageIfChanged(
       storedViewJsonRef,
       workspace.viewKey,
@@ -1315,7 +1275,6 @@ function App() {
     activeGroupId,
     activePath,
     runtimeFlags,
-    pendingReopen,
     workspace.viewKey,
   ]);
 
@@ -1981,6 +1940,7 @@ function App() {
       try {
         const running = agentsRef.current
           .filter((agent) => {
+            if (agent.deferredStart) return true;
             if (agent.status === "exited" || agent.status === "idle") return false;
             return Boolean(termsRef.current.get(agent.id)?.spawned);
           })
@@ -2158,10 +2118,22 @@ function App() {
     return agent;
   }, []);
 
+  const activateDeferredAgent = useCallback((agentId: string) => {
+    const next = agentsRef.current.map((agent) =>
+      agent.id === agentId && agent.deferredStart
+        ? { ...agent, deferredStart: undefined }
+        : agent
+    );
+    if (!next.some((agent, index) => agent !== agentsRef.current[index])) return;
+    agentsRef.current = next;
+    setAgents(next);
+  }, []);
+
   const selectAgent = useCallback(
     (agentId: string) => {
       // Block opening a session that is detached to another window.
       if (detachedAgentIdsRef.current.has(agentId)) return;
+      activateDeferredAgent(agentId);
       acknowledgeAgentCompletion(agentId);
       const agent = activateAgentProject(agentId);
       const current = agentsRef.current.find((a) => a.id === agentId);
@@ -2175,6 +2147,7 @@ function App() {
     },
     [
       acknowledgeAgentCompletion,
+      activateDeferredAgent,
       activateAgentProject,
       applyGroupOp,
       recoverExitedAgent,
@@ -2230,6 +2203,7 @@ function App() {
   const selectScreen = useCallback(
     (groupId: string, agentId: string) => {
       if (detachedAgentIdsRef.current.has(agentId)) return;
+      activateDeferredAgent(agentId);
       activateAgentProject(agentId);
       applyGroupOp((state) =>
         groupOps.selectGroup(state, groupId, agentId)
@@ -2237,7 +2211,7 @@ function App() {
       const current = agentsRef.current.find((agent) => agent.id === agentId);
       if (current?.status === "exited") recoverExitedAgent(agentId);
     },
-    [activateAgentProject, applyGroupOp, recoverExitedAgent]
+    [activateAgentProject, activateDeferredAgent, applyGroupOp, recoverExitedAgent]
   );
 
   useEffect(() => {
@@ -2266,8 +2240,6 @@ function App() {
     );
   }, []);
 
-  // Startup reopen handlers are defined after the terminal-path handlers, which
-  // they depend on (see spawnAgentInBackground / confirmReopen below).
 
   const openAsTab = useCallback(
     (agentId: string) => {
@@ -2437,11 +2409,12 @@ function App() {
 
   const setActiveTabInPane = useCallback(
     (path: Path, agentId: string) => {
+      activateDeferredAgent(agentId);
       acknowledgeAgentCompletion(agentId);
       activateAgentProject(agentId);
       applyGroupOp((s) => groupOps.setActiveTabInPane(s, path, agentId));
     },
-    [acknowledgeAgentCompletion, activateAgentProject, applyGroupOp]
+    [acknowledgeAgentCompletion, activateAgentProject, activateDeferredAgent, applyGroupOp]
   );
 
   const performDrop = useCallback(
@@ -3344,9 +3317,8 @@ function App() {
     [openDocTab, pushToast, text]
   );
 
-  // Spawn an agent's PTY without it being the visible pane — used to reopen
-  // every previously-running session at startup, including ones in groups that
-  // aren't currently shown. The terminal renders into its (detached) element at
+  // Explicit Remote activation can start a session without making it visible.
+  // The terminal renders into its (detached) element at
   // a default size; when the user later opens it, PaneSlot reattaches the same
   // entry and resizes (it skips re-spawning because entry.spawned is already set).
   const spawnAgentInBackground = useCallback(
@@ -3610,34 +3582,6 @@ function App() {
     text,
   ]);
 
-  // Startup reopen prompt answers.
-  const confirmReopen = useCallback(() => {
-    const pending = pendingReopen;
-    setPendingReopen(null);
-    if (!pending) return;
-    if (pending.groupId) {
-      setActiveGroupId(pending.groupId);
-      setActivePath(pending.path);
-    }
-    if (pending.projectId) setActiveProjectId(pending.projectId);
-    // Resume every session that was running at close, including ones in groups
-    // that aren't currently visible. Setting entry.spawned synchronously here
-    // means PaneSlot won't double-spawn the ones in the shown group.
-    for (const id of pending.agentIds) {
-      void spawnAgentInBackground(id, { recovering: true });
-    }
-  }, [pendingReopen, spawnAgentInBackground]);
-
-  const dismissReopen = useCallback(() => {
-    try {
-      localStorage.removeItem(LS_REOPEN_AGENTS);
-    } catch {
-      // ignore
-    }
-    invoke("reopen_state_clear").catch(() => {});
-    setPendingReopen(null);
-  }, []);
-
   const setActivePathForPane = useCallback(
     (path: Path | null) => {
       if (!path) {
@@ -3652,11 +3596,12 @@ function App() {
       const agentId =
         leaf && leaf.type === "leaf" ? activeAgentInLeaf(leaf) : null;
       if (agentId) {
+        activateDeferredAgent(agentId);
         activateAgentProject(agentId);
       }
       setActivePath(path);
     },
-    [activateAgentProject, groups]
+    [activateAgentProject, activateDeferredAgent, groups]
   );
 
   const executeCommand = useCallback((commandId: CommandId) => {
@@ -4090,13 +4035,6 @@ function App() {
           buildVariant={runtimeFlags?.build_variant ?? "standard"}
           updateProvider={runtimeFlags?.update_provider ?? "local-developer"}
           onClose={() => setSettingsOpen(false)}
-        />
-      )}
-      {pendingReopen && (
-        <ReopenSessionsModal
-          count={pendingReopen.count}
-          onYes={confirmReopen}
-          onNo={dismissReopen}
         />
       )}
       {pendingDeletion && (

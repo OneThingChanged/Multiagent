@@ -82,10 +82,17 @@ GitHub Release channel only. It does not authorize a Store MSIX build,
 verification, Partner Center upload, or certification submission. Microsoft
 Store delivery starts only after a separate, explicit Store deployment request.
 
-GitHub and Microsoft Store releases that represent the same product release use
-the same four-part `X.Y.Z.0` version. Certification delay may separate their
-publication dates, but it must not produce a different Store version for the
-same release.
+Product versions use four parts, `X.Y.Z.R`. Minor fixes and improvements increment
+only `R`, once per Git commit containing the change. Include the version update
+in that same commit; rebuilding or verifying it does not increment the version.
+The first such revision is `1.7.3.1`. npm compatibility versions retain `X.Y.Z`;
+desktop product metadata, installer names, and Android versionName retain all
+four parts. Increment Android versionCode when producing the revised APK.
+
+Standard's local updater compares all four parts. Company GitHub updater metadata
+still uses three-part semver, and the current Store validator requires revision
+zero. A local revision does not authorize publication to either channel; resolve
+their version constraints separately when that channel's deployment is requested.
 
 The source repository is private. Standard is an owner-only developer build
 updated from a configured local output directory. Company retains its private

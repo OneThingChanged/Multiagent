@@ -24,6 +24,12 @@ function agent(status: Agent["status"] = "running"): Agent {
 }
 
 describe("agent activity state v2", () => {
+  it("treats deferred sessions as inactive until explicitly started", () => {
+    const deferred = { ...agent("idle"), deferredStart: true };
+    expect(isAgentRuntimeActive(deferred)).toBe(false);
+    expect(applyAgentRuntimeStatus(deferred, "starting").deferredStart).toBeUndefined();
+  });
+
   it("keeps process state separate from work completion", () => {
     const working = applyAgentHookEvent(
       agent(),

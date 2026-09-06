@@ -2752,6 +2752,21 @@ body,
 .status-idle {
   background: var(--app-soft-text);
 }
+.status-standby {
+  background: #58a6ff;
+}
+.session-standby {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--app-soft-text);
+}
+.session-standby p {
+  margin: 0;
+}
 .status-starting {
   background: var(--app-warning);
 }

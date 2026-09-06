@@ -87,6 +87,7 @@ export function applyAgentRuntimeStatus(
   return {
     ...agent,
     runtimeStatus,
+    deferredStart: undefined,
     activity,
     status: deriveAgentStatus(runtimeStatus, activity, now),
   };

@@ -4614,6 +4614,7 @@ async function invokeCommand(event, command, rawArgs) {
         build_variant: runtimeVariant.id,
         remote_enabled: runtimeVariant.remoteEnabled,
         update_provider: runtimeVariant.updateProvider,
+        live_agent_ids: [...terminalSessions.keys()],
       };
     case "renderer_ready": {
       const runtime = runtimeByWebContents.get(event.sender.id);

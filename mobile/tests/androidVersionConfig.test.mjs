@@ -10,6 +10,8 @@ import {
 } from "../scripts/android-version-config.mjs";
 
 test("requires the mobile package and Expo versions to match", () => {
+  assert.equal(assertMobileSourceVersions("1.7.3", "1.7.3.1", "1.7.3.1"), "1.7.3.1");
+  assert.throws(() => assertMobileSourceVersions("1.7.3", "1.7.3.65536", "1.7.3.65536"));
   assert.equal(
     assertMobileSourceVersions("1.0.0", "1.0.0.0", "1.0.0.0"),
     "1.0.0.0",

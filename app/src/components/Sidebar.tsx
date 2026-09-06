@@ -440,7 +440,7 @@ export function Sidebar({
       result = result
         .map((s) => ({
           ...s,
-          members: s.members.filter(isAgentRuntimeActive),
+          members: s.members.filter((agent) => agent.deferredStart || isAgentRuntimeActive(agent)),
         }))
         .filter((s) => s.members.length > 0);
       return result.length > 0 ? result : null;
@@ -644,7 +644,8 @@ export function Sidebar({
         }}
       >
         <div className="agent-row-top">
-          <span className={`status status-${a.status}`} />
+          <span className={`status status-${a.deferredStart ? "standby" : a.status}`}
+            title={a.deferredStart ? text("대기 · 클릭하면 시작", "Standby · click to start") : undefined} />
           <span
             className="agent-tool-icon"
             style={{ color: toolForId(a.aiToolId).iconColor }}

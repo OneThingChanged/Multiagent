@@ -74,6 +74,13 @@ deletion is a separate confirmed action from the session context menu. Project
 creation can create an initial session using the tool and dangerous-mode choice
 made in the creation flow.[^app-shell]
 
+After a full restart, saved sessions and Screen layouts appear immediately as
+standby placeholders with a steady blue dot. Selecting a session, tab, or pane
+starts only that session; merely displaying other panes in a split does not
+start their processes. Standby entries stay visible under the active-only
+sidebar filter. Returning from the tray reconnects sessions confirmed live by
+the host and keeps the others dormant.[^app-shell][^pane-slot][^sidebar]
+
 New Codex sessions default both the documentation/Markdown worker and the HTML
 worker to Codex Luna with max reasoning. The creation dialog keeps these
 choices editable, including explicitly disabling both workers; launch-only

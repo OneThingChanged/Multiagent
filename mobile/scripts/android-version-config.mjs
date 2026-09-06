@@ -5,10 +5,11 @@ export function assertMobileSourceVersions(packageVersion, expoVersion, releaseV
   const normalizedPackageVersion = String(packageVersion || "").trim();
   const normalizedExpoVersion = String(expoVersion || "").trim();
   const normalizedReleaseVersion = String(releaseVersion || "").trim();
-  const releaseMatch = normalizedReleaseVersion.match(/^(\d+)\.(\d+)\.(\d+)\.0$/);
-  if (!releaseMatch || Number(releaseMatch[1]) < 1) {
+  const releaseMatch = normalizedReleaseVersion.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!releaseMatch || Number(releaseMatch[1]) < 1 ||
+      releaseMatch.slice(1).some(part => Number(part) > 65_535)) {
     throw new Error(
-      `mobile/package.json must contain a four-part release version ending in .0; received ${normalizedReleaseVersion || "empty"}.`,
+      `mobile/package.json must contain a four-part release version with components in 0-65535 and major >= 1; received ${normalizedReleaseVersion || "empty"}.`,
     );
   }
   const expectedPackageVersion = releaseMatch.slice(1, 4).join(".");

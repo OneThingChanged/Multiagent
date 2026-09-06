@@ -2,6 +2,9 @@
 
 ## 2026-09-06
 
+* **1.7.3.1 local build verification**: Built the signed Android APK and Standard installer with Windows file version 1.7.3.1. Desktop tests (417), mobile tests (24), lazy-session Electron smoke, packaged runtime/lifecycle checks, and local update detection from 1.7.3.0 passed. The installer remains Authenticode-unsigned; applying it to the user's installation is pending.
+* **Commit revision policy / 1.7.3.1**: Minor changes now increment only the fourth product-version component per Git commit; repeated builds retain the version. Desktop and Android validators accept nonzero revisions, npm remains 1.7.3, and Android versionCode is 14. Documented the existing Company/Store channel constraints separately.
+* **Start restored sessions on selection**: Removed the bulk reopen prompt and startup spawning loop. Saved layouts now show blue standby placeholders without xterm/PTY allocation, and only selected sessions start. Tray restoration uses host-confirmed live IDs. An isolated Electron split-pane smoke verified zero startup allocations and one spawn per selected session.
 * **Local Standard update 1.7.3.0**: Synchronized desktop/mobile versions (Android versionCode 13), built the signed APK and Standard NSIS installer, and verified packaged runtime/lifecycle plus local update discovery from 1.7.2.0. Desktop tests (414), mobile tests (24), and mobile typecheck passed. Installer installation on the user's running workspace remains pending; this update has no new GitHub Release or Store submission.
 * **Session deletion form focus**: Replaced blocking native session confirmation with an in-app modal and prevented delayed terminal focus recovery from interrupting forms. Build, focused unit tests, and an isolated Electron deletion/cancellation form-focus smoke passed; the installed-app reproduction remains unverified.
 

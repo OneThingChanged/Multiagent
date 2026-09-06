@@ -164,6 +164,8 @@ export type Agent = {
   tabColor?: string;
   status: AgentStatus;
   runtimeStatus?: AgentRuntimeStatus;
+  // Runtime-only: show restored sessions without allocating a terminal/PTY.
+  deferredStart?: boolean;
   activity?: AgentActivity;
   createdAt: number;
   lastSessionId?: string;

@@ -9,6 +9,12 @@ tags:
 status: stable
 stale_after: 2026-11-30
 sources:
+  - id: app-shell
+    resource: ../app/src/App.tsx
+    title: "On-demand workspace restoration and explicit activation"
+  - id: pane-slot
+    resource: ../app/src/components/PaneSlot.tsx
+    title: "Standby placeholders and terminal allocation guard"
   - id: terminal-service
     resource: ../app/electron/services/terminal-session-service.mjs
     title: "PTY lifecycle service"
@@ -51,6 +57,17 @@ spawned.[^lifecycle]
 
 ## Start and provider resume
 
+On a cold desktop start, saved sessions and the previous Screen layout return
+without allocating xterm instances or PTYs. Restored sessions show a steady
+blue standby marker and a placeholder; clicking a session, tab, or its pane
+starts only that session through the normal provider-resume path. Other panes
+in the same split remain dormant. Standby sessions remain visible under the
+sidebar's active-only filter but are not reported as running processes.[^app-shell][^pane-slot]
+
+Returning from the tray reattaches only IDs confirmed live by the main process;
+having one live PTY does not activate the remaining dormant sessions. Explicit
+Remote activation continues to support starting a session in the background.[^app-shell]
+
 Spawning resolves the local or SSH command, provider session ID, terminal
 compatibility flags, dangerous mode, and optional content-worker settings.
 Local Codex and Claude sessions resume through provider session identifiers;
@@ -74,8 +91,9 @@ remaining permanently busy.[^activity][^hook-service]
 
 Closing a workspace window can leave sessions owned by the tray process. A full
 application exit cannot preserve OS processes: live sessions are journaled,
-their process trees are closed, and the next launch reconstructs them using
-provider resume metadata.[^reopen-journal][^spawn]
+their process trees are closed, and the next launch restores their placeholders.
+Processes are reconstructed on selection using provider resume
+metadata.[^reopen-journal][^spawn]
 
 The provider transcript remains the canonical provider resume record.
 MultiAgent incrementally indexes its complete JSONL lines into a session-isolated
@@ -98,6 +116,8 @@ of silently opening an empty replacement database.[^conversation-store]
   input instead of sending to an ambiguous process.
 
 [^terminal-service]: PTY lifecycle service
+[^app-shell]: On-demand workspace restoration and explicit activation
+[^pane-slot]: Standby placeholders and terminal allocation guard
 [^session-index]: Provider transcript and session index
 [^spawn]: Spawn and resume command construction
 [^activity]: Runtime and hook activity state
