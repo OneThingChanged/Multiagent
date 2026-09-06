@@ -88,6 +88,9 @@ export function applyAgentRuntimeStatus(
     ...agent,
     runtimeStatus,
     deferredStart: undefined,
+    resumeEligible: runtimeStatus === "idle" ? false
+      : runtimeStatus === "running" || runtimeStatus === "starting" || runtimeStatus === "recovering"
+        ? true : agent.resumeEligible,
     activity,
     status: deriveAgentStatus(runtimeStatus, activity, now),
   };
@@ -195,6 +198,7 @@ export function applyAgentHookEvent(
   return {
     ...agent,
     lastSessionId: providerSessionId || agent.lastSessionId,
+    resumeEligible: runtimeStatus === "running" ? true : agent.resumeEligible,
     runtimeStatus,
     activity,
     status: deriveAgentStatus(runtimeStatus, activity, now),

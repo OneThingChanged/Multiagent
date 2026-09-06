@@ -59,7 +59,12 @@ spawned.[^lifecycle]
 
 On a cold desktop start, saved sessions and the previous Screen layout return
 without allocating xterm instances or PTYs. Restored sessions show a steady
-blue standby marker and a placeholder; clicking a session, tab, or its pane
+blue standby marker only when previously activated or already in standby.
+Never-started and explicitly deactivated sessions remain gray/inactive, with
+terminal allocation still deferred. A persisted eligibility flag preserves
+standby through repeated restarts independently of the live-process journal;
+explicit deactivation clears it. Legacy records use the remembered running IDs
+only when the flag is absent. Clicking a session, tab, or its pane
 starts only that session through the normal provider-resume path. Other panes
 in the same split remain dormant. Standby sessions remain visible under the
 sidebar's active-only filter but are not reported as running processes.[^app-shell][^pane-slot]

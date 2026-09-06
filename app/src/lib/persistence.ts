@@ -166,6 +166,7 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
           c.lastSessionId ?? c.lastClaudeSessionId ?? c.lastResumeToken,
         status: "idle" as AgentStatus,
         runtimeStatus: "idle",
+        resumeEligible: typeof c.resumeEligible === "boolean" ? c.resumeEligible : undefined,
         // Derived from the owning project (not persisted on the agent).
         sshHostId: project.sshHostId,
         remoteFolder: project.remoteFolder,

@@ -166,6 +166,8 @@ export type Agent = {
   runtimeStatus?: AgentRuntimeStatus;
   // Runtime-only: show restored sessions without allocating a terminal/PTY.
   deferredStart?: boolean;
+  // Persisted: previously activated or in standby, cleared by deactivation.
+  resumeEligible?: boolean;
   activity?: AgentActivity;
   createdAt: number;
   lastSessionId?: string;
@@ -175,6 +177,7 @@ export type Agent = {
 };
 
 export type StoredAgent = {
+  resumeEligible?: boolean;
   id: string;
   projectId?: string;
   name: string;

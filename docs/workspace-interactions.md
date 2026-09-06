@@ -74,8 +74,12 @@ deletion is a separate confirmed action from the session context menu. Project
 creation can create an initial session using the tool and dangerous-mode choice
 made in the creation flow.[^app-shell]
 
-After a full restart, saved sessions and Screen layouts appear immediately as
-standby placeholders with a steady blue dot. Selecting a session, tab, or pane
+After a full restart, saved Screen layouts appear without starting processes.
+Only previously activated or already-standby sessions have a steady blue dot;
+never-started and explicitly deactivated sessions remain gray/inactive.
+Standby eligibility is persisted separately from the allocation guard, so an
+unclicked standby session stays blue through repeated restarts. Explicit
+deactivation clears that eligibility. Selecting a session, tab, or pane
 starts only that session; merely displaying other panes in a split does not
 start their processes. Standby entries stay visible under the active-only
 sidebar filter. Returning from the tray reconnects sessions confirmed live by

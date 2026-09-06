@@ -106,6 +106,7 @@ import { useAttentionState } from "./hooks/useAttentionState";
 import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
 import { useNativeViewOcclusion } from "./hooks/useNativeViewOcclusion";
 import { scheduleActiveTerminalFocus } from "./lib/workspaceFocus";
+import { isStandbySession, parseRememberedSessionIds, restoreStandbyEligibility } from "./lib/sessionStandby";
 import type { QuickOpenItem } from "./lib/quickOpen";
 import {
   clearScrollback,
@@ -290,6 +291,7 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     tabColor: agent.tabColor || undefined,
     createdAt: agent.createdAt,
     lastSessionId: agent.lastSessionId,
+    resumeEligible: agent.resumeEligible ?? isAgentRuntimeActive(agent),
   };
 }
 
@@ -422,6 +424,8 @@ function agentFromStored(
     status: existing?.status ?? "idle",
     runtimeStatus: existing?.runtimeStatus ?? "idle",
     deferredStart: existing?.deferredStart ?? (existing ? undefined : true),
+    resumeEligible: typeof stored.resumeEligible === "boolean"
+      ? stored.resumeEligible : existing?.resumeEligible ?? false,
     activity: existing?.activity,
     sshHostId: project.sshHostId,
     remoteFolder: project.remoteFolder,
@@ -549,9 +553,14 @@ function App() {
   const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(
     boot.projectFolders
   );
-  const [agents, setAgents] = useState<Agent[]>(() =>
-    boot.agents.map((agent) => ({ ...agent, deferredStart: true }))
-  );
+  const [agents, setAgents] = useState<Agent[]>(() => {
+    const remembered = parseRememberedSessionIds(readLocalStorageValue(LS_REOPEN_AGENTS));
+    return boot.agents.map((agent) => ({
+      ...agent,
+      deferredStart: true,
+      resumeEligible: restoreStandbyEligibility(agent, remembered),
+    }));
+  });
   const [groups, setGroups] = useState<Group[]>(boot.groups);
   // A document tab may be dragged into its own split, where its leaf no longer
   // contains the terminal that opened it. Keep the source session association
@@ -1940,7 +1949,7 @@ function App() {
       try {
         const running = agentsRef.current
           .filter((agent) => {
-            if (agent.deferredStart) return true;
+            if (isStandbySession(agent)) return true;
             if (agent.status === "exited" || agent.status === "idle") return false;
             return Boolean(termsRef.current.get(agent.id)?.spawned);
           })
@@ -2121,7 +2130,7 @@ function App() {
   const activateDeferredAgent = useCallback((agentId: string) => {
     const next = agentsRef.current.map((agent) =>
       agent.id === agentId && agent.deferredStart
-        ? { ...agent, deferredStart: undefined }
+        ? { ...agent, deferredStart: undefined, resumeEligible: true }
         : agent
     );
     if (!next.some((agent, index) => agent !== agentsRef.current[index])) return;

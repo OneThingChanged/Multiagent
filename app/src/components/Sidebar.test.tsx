@@ -78,14 +78,26 @@ function stubSidebarState(values: Record<string, string>) {
 
 describe("Sidebar", () => {
   it("keeps dormant restored sessions visible with a blue standby marker in active-only mode", () => {
-    stubSidebarState({ "multiagent.activeOnly.v1": "true" });
+    stubSidebarState({ "multiagent.activeOnly.v1": "1" });
     const html = renderSidebar(
       [{ id: "p", name: "Project", folder: "C:/p", createdAt: 1 }],
-      [{ ...agent("dormant", "p"), deferredStart: true }],
+      [{ ...agent("dormant", "p"), deferredStart: true, resumeEligible: true }],
     );
     expect(html).toContain("DORMANT");
     expect(html).toContain("status-standby");
     expect(html).not.toContain("status-running");
+  });
+
+  it("hides never-started and deactivated sessions from active-only without blue markers", () => {
+    const projects = [{ id: "p", name: "Project", folder: "C:/p", createdAt: 1 }];
+    const inactive = { ...agent("never-started", "p"), deferredStart: true, resumeEligible: false };
+    stubSidebarState({ "multiagent.activeOnly.v1": "1" });
+    expect(renderSidebar(projects, [inactive])).not.toContain("NEVER-STARTED");
+    stubSidebarState({ "multiagent.activeOnly.v1": "0" });
+    const html = renderSidebar(projects, [inactive]);
+    expect(html).toContain("NEVER-STARTED");
+    expect(html).toContain("status-idle");
+    expect(html).not.toContain("status-standby");
   });
 
   afterEach(() => vi.unstubAllGlobals());

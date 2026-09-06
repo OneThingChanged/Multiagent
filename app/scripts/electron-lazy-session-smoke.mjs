@@ -31,12 +31,12 @@ try {
         const [agents, setAgents] = useState(['one', 'two'].map(id => ({
           id, name: id, projectId: 'project', folder: 'C:/test', aiToolId: 'none',
           aiLabel: 'Shell', dangerous: false, createdAt: 1, status: 'idle',
-          runtimeStatus: 'idle', deferredStart: true,
+          runtimeStatus: 'idle', deferredStart: true, resumeEligible: id === 'one',
         })));
         const termsRef = useRef(new Map());
         window.termCount = () => termsRef.current.size;
         const select = (path, id) => setAgents(current => current.map(agent =>
-          agent.id === id ? { ...agent, deferredStart: undefined } : agent));
+            agent.id === id ? { ...agent, deferredStart: undefined, resumeEligible: true } : agent));
         const ctx = { agents, projects: [], theme: 'dark', sessionPins: null,
           activePath: [0], dragState: null, dropTarget: null, termsRef,
           setAgentStatus: (id, status) => setAgents(current => current.map(agent =>
@@ -75,6 +75,8 @@ try {
           const spawns = () => window.calls.filter(call => call.command === 'spawn_pty');
           await tick();
           check(document.querySelectorAll('.session-standby').length === 2, 'Restored panes must be placeholders');
+          check(document.querySelectorAll('.session-standby .status-standby').length === 1, 'Only previously active session should be blue');
+          check(document.querySelectorAll('.session-standby .status-idle').length === 1, 'Never-started session must stay gray');
           check(window.termCount() === 0 && spawns().length === 0, 'Startup allocated a terminal or PTY');
           document.querySelector('.session-standby button').click(); await tick();
           check(window.termCount() === 1 && spawns().length === 1 && spawns()[0].args.id === 'one', 'Click must start only one session');

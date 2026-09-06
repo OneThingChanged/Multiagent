@@ -990,7 +990,7 @@ export function PaneSlot({
                 {tool.icon}
               </span>
               <span className="tab-name">{tabAgent.name}</span>
-              {tabAgent.deferredStart && <span className="status status-standby"
+              {tabAgent.deferredStart && tabAgent.resumeEligible && <span className="status status-standby"
                 title={text("대기 · 클릭하면 시작", "Standby · click to start")} />}
               {tabAgent.dangerous && (
                 <span className="tab-danger" title="Dangerous mode">
@@ -1052,9 +1052,11 @@ export function PaneSlot({
       />
       {activeAgent?.deferredStart && (
         <div className="session-standby">
-          <span className="status status-standby" />
+          <span className={`status status-${activeAgent.resumeEligible ? "standby" : "idle"}`} />
           <strong>{activeAgent.name}</strong>
-          <p>{text("대기 중 · 클릭하면 이전 세션을 이어서 시작합니다.", "Standby · click to resume this session.")}</p>
+          <p>{activeAgent.resumeEligible
+            ? text("대기 중 · 클릭하면 이전 세션을 이어서 시작합니다.", "Standby · click to resume this session.")
+            : text("비활성 세션 · 클릭하면 시작합니다.", "Inactive session · click to start.")}</p>
           <button className="btn-primary" onClick={(event) => {
             event.stopPropagation();
             ctx.onSelectTab(path, activeAgent.id);
