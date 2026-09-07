@@ -1,9 +1,9 @@
 {
   "name": "multiagent-mobile",
-  "description": "Native Android client for the MultiAgent Remote service.",
+  "description": "Native Android client for the Acedia Remote service.",
   "private": true,
-  "version": "1.7.3",
-  "multiAgentReleaseVersion": "1.7.3.3",
+  "version": "1.8.0",
+  "multiAgentReleaseVersion": "1.8.0.0",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

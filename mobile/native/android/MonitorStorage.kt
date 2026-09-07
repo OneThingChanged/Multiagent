@@ -54,7 +54,7 @@ class MonitorStorage(private val context: Context) {
     val profileId = storedProfileId.ifBlank { profileIdForUrl("${baseUrl.trimEnd('/')}/") }
     if (baseUrl.isBlank() || !TOKEN_PATTERN.matches(token)) return null
     if (profileId.isNotBlank() && !PROFILE_ID_PATTERN.matches(profileId)) return null
-    val fallbackName = Uri.parse(baseUrl).host ?: "MultiAgent PC"
+    val fallbackName = Uri.parse(baseUrl).host ?: "Acedia PC"
     val profileName = json.optString("profileName", fallbackName).trim().take(60).ifBlank { fallbackName }
     return MonitorConfig(profileId, profileName, baseUrl, token, json.optLong("cursor", 0L).coerceAtLeast(0L))
   }

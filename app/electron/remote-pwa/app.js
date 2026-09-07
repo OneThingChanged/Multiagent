@@ -5382,7 +5382,7 @@ addEventListener("beforeinstallprompt", (event) => {
   deferredInstallPrompt = event;
   ui.installButton.hidden = false;
 });
-addEventListener("appinstalled", () => { ui.installButton.hidden = true; showToast("MultiAgent Remote를 설치했습니다."); });
+addEventListener("appinstalled", () => { ui.installButton.hidden = true; showToast("Acedia Remote를 설치했습니다."); });
 addEventListener("online", () => { if (nativePageActive) void fetchState(); });
 addEventListener("offline", () => { setConnection("offline", "오프라인"); });
 addEventListener("popstate", (event) => {

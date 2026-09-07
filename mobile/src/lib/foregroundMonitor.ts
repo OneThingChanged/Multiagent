@@ -48,7 +48,7 @@ export async function startForegroundMonitor(
   }
   if (!await ensureNotificationPermission()) {
     await revokeIssuedToken(baseUrl, token);
-    return { ok: false, active: false, error: "휴대폰 설정에서 MultiAgent 알림 권한을 허용해 주세요." };
+    return { ok: false, active: false, error: "휴대폰 설정에서 Acedia 알림 권한을 허용해 주세요." };
   }
   try {
     const result = await native.startMonitoring(profileId, profileName, baseUrl, token, cursor);

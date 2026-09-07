@@ -29,7 +29,7 @@ export function DeleteSessionModal({ name, onConfirm, onCancel }: {
         aria-labelledby="delete-session-title" aria-describedby="delete-session-message">
         <h2 className="modal-title" id="delete-session-title">{text("세션 삭제", "Delete session")}</h2>
         <p className="modal-text" id="delete-session-message" style={{ whiteSpace: "pre-line" }}>
-          {text(sessionDeletionMessage(name), `Delete the “${name}” session?\nThis stops the running process and removes it from MultiAgent.\nThis cannot be undone.`)}
+          {text(sessionDeletionMessage(name), `Delete the “${name}” session?\nThis stops the running process and removes it from Acedia.\nThis cannot be undone.`)}
         </p>
         <div className="modal-actions">
           <button className="btn-secondary" autoFocus onClick={onCancel}>{text("취소", "Cancel")}</button>

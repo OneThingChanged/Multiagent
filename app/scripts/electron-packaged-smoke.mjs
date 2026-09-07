@@ -19,7 +19,7 @@ const executable = path.join(
   "electron-dist",
   ...(variant === "standard" ? [] : [variant]),
   "win-unpacked",
-  company ? "MultiAgentCompany.exe" : "MultiAgent.exe"
+  company ? "AcediaCompany.exe" : "Acedia.exe"
 );
 const marker = "MULTIAGENT_ELECTRON_BRIDGE_OK";
 const variantMarker = `variant=${variant}`;
@@ -42,12 +42,16 @@ for (const entry of [
     process.exit(1);
   }
 }
-const apkEntry = "\\electron\\remote-pwa\\downloads\\MultiAgent-Mobile.apk";
-if (asarEntries.has(apkEntry)) {
-  console.error("Packaged app unexpectedly contains a source-tree Remote APK.");
-  process.exit(1);
+for (const apkEntry of [
+  "\\electron\\remote-pwa\\downloads\\Acedia-Mobile.apk",
+  "\\electron\\remote-pwa\\downloads\\MultiAgent-Mobile.apk",
+]) {
+  if (asarEntries.has(apkEntry)) {
+    console.error("Packaged app unexpectedly contains a source-tree Remote APK.");
+    process.exit(1);
+  }
 }
-const stagedApk = path.join(path.dirname(executable), "resources", "mobile", "MultiAgent-Mobile.apk");
+const stagedApk = path.join(path.dirname(executable), "resources", "mobile", "Acedia-Mobile.apk");
 if ((company || store) && fs.existsSync(stagedApk)) {
   console.error(`${variant} package unexpectedly contains the verified Remote APK resource.`);
   process.exit(1);

@@ -157,7 +157,7 @@ export class RemoteDeviceMonitorService {
       id: ++this.cursor,
       type: safeType,
       agentId: id.slice(0, 128),
-      title: (clean(title) || "MultiAgent").slice(0, 120),
+      title: (clean(title) || "Acedia").slice(0, 120),
       body: safeType === "agent-question" ? "응답이 필요합니다." : "작업이 완료되었습니다.",
       createdAt: now,
     };

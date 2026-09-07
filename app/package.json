@@ -1,10 +1,10 @@
 {
   "name": "app",
-  "description": "MultiAgent desktop terminal workspace",
-  "author": "MultiAgent",
+  "description": "Acedia desktop terminal workspace",
+  "author": "Acedia",
   "private": true,
-  "version": "1.7.3",
-  "multiAgentReleaseVersion": "1.7.3.3",
+  "version": "1.8.0",
+  "multiAgentReleaseVersion": "1.8.0.0",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -69,8 +69,8 @@
   "main": "electron/main.mjs",
   "build": {
     "appId": "com.jintae.multiagent.electron",
-    "productName": "MultiAgent",
-    "executableName": "MultiAgent",
+    "productName": "Acedia",
+    "executableName": "Acedia",
     "extraMetadata": {
       "multiAgentVariant": "standard"
     },
@@ -101,9 +101,9 @@
       ]
     },
     "nsis": {
-      "artifactName": "MultiAgent-Setup-1.7.3.3-${arch}.${ext}",
-      "shortcutName": "MultiAgent",
-      "uninstallDisplayName": "MultiAgent 1.7.3.3",
+      "artifactName": "Acedia-Setup-1.8.0.0-${arch}.${ext}",
+      "shortcutName": "Acedia",
+      "uninstallDisplayName": "Acedia 1.8.0.0",
       "include": "electron/installer.nsh"
     },
     "publish": [

@@ -37,7 +37,7 @@ export function DesktopPetPage() {
   const lastNotificationRef = useRef<string | null>(null);
 
   useEffect(() => {
-    document.title = "MultiAgent Desktop Pet";
+    document.title = "Acedia Desktop Pet";
     document.documentElement.classList.add("desktop-pet-document");
     document.body.classList.add("desktop-pet-document");
 
@@ -142,13 +142,13 @@ export function DesktopPetPage() {
     <div
       className={`desktop-pet-shell ${celebrating ? "desktop-pet-celebrate" : ""}`}
       data-status={update.status}
-      title={text("MultiAgent 열기", "Open MultiAgent")}
+      title={text("Acedia 열기", "Open Acedia")}
       onClick={activate}
       onContextMenu={openContextMenu}
     >
       <div className={`desktop-pet-bubble ${bubbleVisible ? "visible" : ""}`}>
         <div className="desktop-pet-bubble-title">
-          {update.title || "MultiAgent"}
+          {update.title || "Acedia"}
         </div>
         <div className="desktop-pet-bubble-body">
           {update.body || text("작업이 끝났어요", "Work completed")}

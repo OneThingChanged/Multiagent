@@ -1,9 +1,10 @@
 const VARIANTS = Object.freeze({
   standard: Object.freeze({
     id: "standard",
-    displayName: "MultiAgent",
+    displayName: "Acedia",
     appUserModelId: "com.jintae.multiagent.electron",
     localDataDirectory: "com.jintae.multiagent",
+    userDataDirectory: "MultiAgent",
     updaterChannel: "latest",
     remoteEnabled: true,
     updateProvider: "local-developer",
@@ -11,9 +12,10 @@ const VARIANTS = Object.freeze({
   }),
   company: Object.freeze({
     id: "company",
-    displayName: "MultiAgentCompany",
+    displayName: "AcediaCompany",
     appUserModelId: "com.jintae.multiagent.company.electron",
     localDataDirectory: "com.jintae.multiagent.company",
+    userDataDirectory: "MultiAgentCompany",
     updaterChannel: "latest-company",
     remoteEnabled: false,
     updateProvider: "github",
@@ -21,7 +23,7 @@ const VARIANTS = Object.freeze({
   }),
   store: Object.freeze({
     id: "store",
-    displayName: "MultiAgent",
+    displayName: "Acedia",
     appUserModelId: null,
     localDataDirectory: "com.jintae.multiagent.store",
     userDataDirectory: "MultiAgent Store",

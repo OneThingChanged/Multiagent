@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Microsoft Store 배포 운영 가이드
-description: "MultiAgent의 Microsoft Store용 MSIX 빌드, 검증, Partner Center 제출, 인증, 공개 및 업데이트 절차."
+description: "Acedia의 Microsoft Store용 MSIX 빌드, 검증, Partner Center 제출, 인증, 공개 및 업데이트 절차."
 tags:
   - release
   - windows
@@ -57,7 +57,7 @@ sources:
 
 # Microsoft Store 배포 운영 가이드
 
-이 문서는 MultiAgent의 **Microsoft Store 채널만** 다루는 실무 런북이다.
+이 문서는 Acedia의 **Microsoft Store 채널만** 다루는 실무 런북이다.
 Standard 개발자 NSIS와 Company GitHub 배포는 [전체 릴리스 플레이북](release-playbook.md)을
 따른다. `deploy live` 또는 GitHub Release 요청만으로 Store 제출까지 진행하지
 않으며, Store 빌드·업로드·인증 제출은 별도 요청으로 취급한다.[^release-playbook]
@@ -66,7 +66,7 @@ Standard 개발자 NSIS와 Company GitHub 배포는 [전체 릴리스 플레이�
 
 | 항목 | 값 |
 | --- | --- |
-| 제품 | MultiAgent |
+| 제품 | Acedia (기존 이름: MultiAgent) |
 | Partner Center 제품 ID | `9NVBSGNRTPLR` |
 | 패키지 Identity Name | `jintaenate.MultiAgent` |
 | 현재 Store 설치 확인 버전 | `1.6.26.0` |
@@ -178,9 +178,9 @@ npm run release:verify:store
 
 빌더는 `app/electron-dist/store/`에 다음 파일을 만든다.[^store-builder]
 
-- `MultiAgent-Store-Release-X.Y.Z.0-x64.msix`
-- `MultiAgent-Store-Release-X.Y.Z.0-x64.metadata.json`
-- 최신 산출물을 가리키는 `MultiAgent-Store-Release.metadata.json`
+- `Acedia-Store-Release-X.Y.Z.0-x64.msix`
+- `Acedia-Store-Release-X.Y.Z.0-x64.metadata.json`
+- 최신 산출물을 가리키는 `Acedia-Store-Release.metadata.json`
 
 검증기는 MSIX 해시, Identity, 버전, x64 아키텍처, 실행 파일,
 `packagedClassicApp`, `mediumIL`, `runFullTrust`, 서명 상태와 금지 파일을
@@ -199,7 +199,7 @@ Certification Kit을 실행한다.
 ```powershell
 cd "K:\AI\MultiAgent\app"
 pwsh -NoLogo -NoProfile -File .\scripts\test-electron-store-wack.ps1 `
-  -MetadataPath .\electron-dist\store\MultiAgent-Store-Release.metadata.json
+  -MetadataPath .\electron-dist\store\Acedia-Store-Release.metadata.json
 ```
 
 성공 시 `app/electron-dist/store/wack-report.xml`을 생성한다. 보고서 수정 시각이
@@ -227,7 +227,7 @@ Partner Center 업로드 전에 위 명령을 관리자 PowerShell에서 실행�
 
 ### 파일 업로드 제약
 
-MultiAgent 내장 브라우저 자동화는 일반 DOM의 버튼, 드롭다운, 체크박스,
+Acedia 내장 브라우저 자동화는 일반 DOM의 버튼, 드롭다운, 체크박스,
 라디오 버튼과 텍스트 입력을 처리할 수 있지만 운영체제 네이티브 파일 선택기는
 현재 제어하지 않는다. MSIX와 Store 이미지 업로드는 일반 Chrome에서 해당
 Partner Center URL을 열어 파일을 직접 선택한다.
@@ -260,13 +260,13 @@ Partner Center URL을 열어 파일을 직접 선택한다.
   URL, 실제 기능에 맞는 제품 선언을 유지한다.
 - **Age ratings**: IARC 질문을 실제 기능 기준으로 답하고 Preview 결과를 저장한다.
 - **Store listings**: 한국어와 영어 설명, 기능, 스크린샷을 확인한다. 대표
-  스크린샷은 `app/store/listing/screenshots/multiagent-store-primary.png`이다.
+  스크린샷은 `app/store/listing/screenshots/acedia-store-primary.png`이다.
 - **Submission options**: 인증 통과 즉시 게시를 선택하고 `runFullTrust`
   설명을 저장한다.[^submission-options]
 
 ## 7. `runFullTrust` 설명
 
-`runFullTrust`는 관리자 권한 상승 요청이 아니다. MultiAgent가 UWP 샌드박스
+`runFullTrust`는 관리자 권한 상승 요청이 아니다. Acedia가 UWP 샌드박스
 밖에서 사용자가 선택한 PowerShell, Command Prompt, Git, CLI 에이전트와
 PTY를 실행하고 프로젝트 파일을 다루기 위해 필요한 packaged classic app
 capability다. 앱은 `allowElevation`을 선언하지 않으며 드라이버나 Windows
@@ -274,22 +274,22 @@ capability다. 앱은 `allowElevation`을 선언하지 않으며 드라이버나
 
 Partner Center의 restricted capability 입력란에는 다음 설명을 사용한다.
 
-> MultiAgent is an Electron desktop workspace and terminal manager. The
+> Acedia is an Electron desktop workspace and terminal manager. The
 > runFullTrust capability is required to start user-selected local Windows
 > shells and development tools, including PowerShell, Command Prompt, Git, and
 > configured CLI agents; create terminal/PTY sessions; exchange standard input
 > and output; monitor child-process and local-port status; and access project
 > files in folders selected by the user. Every process launch is initiated by
 > an explicit user action or by a session or automation the user has
-> configured. MultiAgent does not request administrator elevation, install
+> configured. Acedia does not request administrator elevation, install
 > drivers or services, change Windows security settings, or execute hidden
 > processes. This capability is limited to the app's core terminal and
 > workspace-management functions, which cannot operate inside the UWP sandbox.
 > Reviewers can test it by adding a local project folder, creating a terminal
-> session, running 'echo MultiAgent test', and closing the session.
+> session, running 'echo Acedia test', and closing the session.
 
 `runFullTrust` 경고는 추가 심사 대상이라는 안내이며 그 자체가 패키지 검증
-실패는 아니다. 이 capability를 제거하면 MultiAgent의 핵심 터미널과 프로세스
+실패는 아니다. 이 capability를 제거하면 Acedia의 핵심 터미널과 프로세스
 기능이 깨지므로 구체적인 인증 거절 사유 없이 제거하지 않는다.
 
 ## 8. 제출 직전과 인증 중 확인
@@ -344,7 +344,7 @@ Microsoft Entra ID 인증이 필요하다.[^msstore-cli]
 
 ```powershell
 msstore publish "K:\AI\MultiAgent\app" `
-  --inputFile "K:\AI\MultiAgent\app\electron-dist\store\MultiAgent-Store-Release-X.Y.Z.0-x64.msix" `
+  --inputFile "K:\AI\MultiAgent\app\electron-dist\store\Acedia-Store-Release-X.Y.Z.0-x64.msix" `
   --appId 9NVBSGNRTPLR `
   --noCommit
 ```

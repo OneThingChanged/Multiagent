@@ -35,7 +35,7 @@ async function render() {
 }
 
 void render().catch((error: unknown) => {
-  console.error("[MultiAgent] renderer startup failed", error);
+  console.error("[Acedia] renderer startup failed", error);
   const root = document.getElementById("root");
   if (!root) return;
   const fallback = document.createElement("div");
@@ -44,8 +44,8 @@ void render().catch((error: unknown) => {
   copy.className = "startup-fallback-copy";
   const title = document.createElement("strong");
   title.textContent = navigator.languages?.some((locale) => /^ko(?:-|$)/i.test(locale))
-    ? "MultiAgent를 시작하지 못했습니다"
-    : "Could not start MultiAgent";
+    ? "Acedia를 시작하지 못했습니다"
+    : "Could not start Acedia";
   const detail = document.createElement("span");
   detail.textContent = error instanceof Error ? error.message : String(error);
   copy.append(title, detail);

@@ -1,12 +1,12 @@
-# OneThingChanged MultiAgent
+# OneThingChanged Acedia
 
 [English](README.md) | **한국어**
 
-[![Version](https://img.shields.io/badge/version-1.7.3.3-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.8.0.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
-**모든 AI 에이전트 터미널을 하나의 워크스페이스에서.** MultiAgent는 Claude Code, Codex, Qwen, Cline 같은 여러 AI 에이전트 CLI 세션을 프로젝트 단위의 탭과 분할 화면으로 묶어 한 Windows 데스크톱 앱에서 실행·관리하는 도구입니다. hook 기반 상태 감지, 세션 resume, 채팅 뷰, 폰 원격 접속, 토큰 사용량 추적까지 지원합니다.
+**모든 AI 에이전트 터미널을 하나의 워크스페이스에서.** Acedia는 Claude Code, Codex, Qwen, Cline 같은 여러 AI 에이전트 CLI 세션을 프로젝트 단위의 탭과 분할 화면으로 묶어 한 Windows 데스크톱 앱에서 실행·관리하는 도구입니다. hook 기반 상태 감지, 세션 resume, 채팅 뷰, 폰 원격 접속, 토큰 사용량 추적까지 지원합니다.
 
 터미널 창을 여러 개 띄우고 왔다 갔다 하는 대신, 프로젝트를 한 번만 등록하고 그 안에 별명 있는 세션을 만들어 한 창에서 전환·분할·모니터링하세요.
 

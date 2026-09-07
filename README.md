@@ -1,12 +1,12 @@
-# OneThingChanged MultiAgent
+# OneThingChanged Acedia
 
 **English** | [한국어](README.ko.md)
 
-[![Version](https://img.shields.io/badge/version-1.7.3.3-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.8.0.0-blue)](https://github.com/OneThingChanged/Multiagent/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)](https://github.com/OneThingChanged/Multiagent)
 
-**One workspace for every AI agent terminal.** MultiAgent runs and organizes multiple AI-agent CLI sessions — Claude Code, Codex, Qwen, Cline — as project-scoped tabs and split panes in a single Windows desktop app, with hook-based status detection, session resume, a chat view, remote phone access, and token-usage tracking.
+**One workspace for every AI agent terminal.** Acedia runs and organizes multiple AI-agent CLI sessions — Claude Code, Codex, Qwen, Cline — as project-scoped tabs and split panes in a single Windows desktop app, with hook-based status detection, session resume, a chat view, remote phone access, and token-usage tracking.
 
 Instead of juggling a pile of terminal windows, you register each project once, then launch named sessions inside it — switching, splitting, and monitoring everything from one window.
 

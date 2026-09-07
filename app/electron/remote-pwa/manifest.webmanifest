@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "MultiAgent Remote",
-  "short_name": "MultiAgent",
-  "description": "MultiAgent 작업 상태와 Screen을 확인하고 질문에 답하는 모바일 리모컨",
+  "name": "Acedia Remote",
+  "short_name": "Acedia",
+  "description": "Acedia 작업 상태와 Screen을 확인하고 질문에 답하는 모바일 리모컨",
   "lang": "ko",
   "start_url": "/?source=pwa",
   "scope": "/",

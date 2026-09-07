@@ -77,7 +77,7 @@ export function sessionWorkerDeveloperInstructions(
   settings: SessionWorkerSettings
 ): string {
   const lines = [
-    "MultiAgent configured parallel content workers for this session.",
+    "Acedia configured parallel content workers for this session.",
     "Delegate only bounded work that can run independently. Never let workers edit the same file concurrently. The primary agent owns integration and final verification.",
   ];
 
@@ -87,11 +87,11 @@ export function sessionWorkerDeveloperInstructions(
   ) => {
     if (preset === "codex-luna-max") {
       lines.push(
-        `For ${label}, spawn the matching MultiAgent worker role. It runs with gpt-5.6-luna and max reasoning effort. Give it exact target files, constraints, and expected output.`
+        `For ${label}, spawn the matching Acedia worker role. It runs with gpt-5.6-luna and max reasoning effort. Give it exact target files, constraints, and expected output.`
       );
     } else if (preset === "claude-opus") {
       lines.push(
-        `For ${label}, spawn the matching MultiAgent worker role and have it invoke the installed Claude Code CLI using claude -p --model opus --effort max --no-session-persistence --safe-mode --tools Read,Write,Edit,Glob,Grep --permission-mode acceptEdits. Use claude.cmd on Windows only when the normal launcher is blocked. Pass the bounded prompt through stdin rather than a command-line argument. Include exact target files, constraints, and necessary project guidance, wait for its result, then verify all changes. Never add a dangerous permission flag. If Claude is unavailable or not authenticated, report that and continue safely with the primary agent.`
+        `For ${label}, spawn the matching Acedia worker role and have it invoke the installed Claude Code CLI using claude -p --model opus --effort max --no-session-persistence --safe-mode --tools Read,Write,Edit,Glob,Grep --permission-mode acceptEdits. Use claude.cmd on Windows only when the normal launcher is blocked. Pass the bounded prompt through stdin rather than a command-line argument. Include exact target files, constraints, and necessary project guidance, wait for its result, then verify all changes. Never add a dangerous permission flag. If Claude is unavailable or not authenticated, report that and continue safely with the primary agent.`
       );
     }
   };

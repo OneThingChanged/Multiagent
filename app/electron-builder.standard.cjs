@@ -22,12 +22,13 @@ module.exports = {
     ...(base.extraResources || []),
     {
       from: path.resolve(verified.apkPath),
-      to: "mobile/MultiAgent-Mobile.apk",
+      to: "mobile/Acedia-Mobile.apk",
     },
   ],
   nsis: {
     ...base.nsis,
-    artifactName: `MultiAgent-Setup-${releaseVersion}-\${arch}.\${ext}`,
-    uninstallDisplayName: `MultiAgent ${releaseVersion}`,
+    artifactName: `Acedia-Setup-${releaseVersion}-\${arch}.\${ext}`,
+    shortcutName: "Acedia",
+    uninstallDisplayName: `Acedia ${releaseVersion}`,
   },
 };

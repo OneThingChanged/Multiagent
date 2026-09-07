@@ -1,4 +1,4 @@
-const CACHE_NAME = "multiagent-remote-v58";
+const CACHE_NAME = "multiagent-remote-v59";
 const STATIC_ASSETS = [
   "/",
   "/pwa/styles.css",
@@ -84,7 +84,7 @@ self.addEventListener("push", (event) => {
   const agentId = /^[A-Za-z0-9._:-]{1,128}$/.test(candidateAgentId)
     ? candidateAgentId
     : null;
-  const title = payload.title || "MultiAgent";
+  const title = payload.title || "Acedia";
   event.waitUntil(self.registration.showNotification(title, {
     body: payload.body || "작업이 완료되었습니다.",
     tag: payload.tag || (agentId ? `done:${agentId}` : "multiagent:done"),

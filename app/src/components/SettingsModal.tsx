@@ -1382,8 +1382,8 @@ export function SettingsModal({
                     "The pet moves while work is in progress and shows the session name and completion badge when done. Drag the dot below it to reposition.",
                   )
                 : text(
-                    "Desktop Pet은 중복 표시를 막기 위해 주 MultiAgent 창에서만 설정할 수 있습니다.",
-                    "Desktop Pet can only be configured in the main MultiAgent window to prevent duplicates.",
+                    "Desktop Pet은 중복 표시를 막기 위해 주 Acedia 창에서만 설정할 수 있습니다.",
+                    "Desktop Pet can only be configured in the main Acedia window to prevent duplicates.",
                   )}
             </div>
             <div className="app-sound-actions">
@@ -1444,8 +1444,8 @@ export function SettingsModal({
             </label>
             <div className="app-update-message">
               {text(
-                "세션별 사용자 메시지·AI 응답·도구 실행·발견된 산출물 경로를 MultiAgent 전용 SQLite에 저장합니다. 새 위치를 선택하면 기존 데이터를 검증한 뒤 복사하고, 이전 저장소는 백업으로 남깁니다. 전용 빈 폴더를 선택해 주세요.",
-                "MultiAgent stores per-session user messages, AI responses, tool runs, and discovered artifact paths in its own SQLite database. When you select a new location, existing data is validated and copied, while the previous store remains as a backup. Choose a dedicated empty folder.",
+                "세션별 사용자 메시지·AI 응답·도구 실행·발견된 산출물 경로를 Acedia 전용 SQLite에 저장합니다. 새 위치를 선택하면 기존 데이터를 검증한 뒤 복사하고, 이전 저장소는 백업으로 남깁니다. 전용 빈 폴더를 선택해 주세요.",
+                "Acedia stores per-session user messages, AI responses, tool runs, and discovered artifact paths in its own SQLite database. When you select a new location, existing data is validated and copied, while the previous store remains as a backup. Choose a dedicated empty folder.",
               )}
             </div>
             {conversationStorageError && (
@@ -1544,8 +1544,8 @@ export function SettingsModal({
             <div className="app-update-message">
               {hookRepair.status === "idle" &&
                 text(
-                  "실행 중인 PTY와 Codex/Claude Hook 상태를 1분마다 자동 점검합니다. 아래 버튼은 helper·설정·로컬 연결을 즉시 다시 구성합니다. Codex가 변경된 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.",
-                  "Active PTYs and Codex/Claude hooks are checked every minute. The button below immediately repairs the helper, configuration, and local connection. If Codex asks you to review changed hooks, trust the MultiAgent entry in /hooks.",
+                  "실행 중인 PTY와 Codex/Claude Hook 상태를 1분마다 자동 점검합니다. 아래 버튼은 helper·설정·로컬 연결을 즉시 다시 구성합니다. Codex가 변경된 Hook 검토를 알리면 /hooks에서 Acedia 항목을 확인해 신뢰해야 합니다.",
+                  "Active PTYs and Codex/Claude hooks are checked every minute. The button below immediately repairs the helper, configuration, and local connection. If Codex asks you to review changed hooks, trust the Acedia entry in /hooks.",
                 )}
               {hookRepair.status === "running" && text("Hook 상태를 점검하고 복구하는 중입니다...", "Checking and repairing hooks…")}
               {hookRepair.status === "error" && (
@@ -1564,8 +1564,8 @@ export function SettingsModal({
                   {hookRepair.summary.restartRequired > 0 && (
                     <div className="app-update-error">
                       {text(
-                        `Hook 정의 또는 SSH 연결이 바뀐 세션 ${hookRepair.summary.restartRequired}개는 다시 열어주세요. Codex가 Hook 검토를 알리면 /hooks에서 MultiAgent 항목을 확인해 신뢰해야 합니다.`,
-                        `Reopen ${hookRepair.summary.restartRequired} sessions whose hook definitions or SSH connections changed. If Codex asks you to review hooks, trust the MultiAgent entry in /hooks.`,
+                        `Hook 정의 또는 SSH 연결이 바뀐 세션 ${hookRepair.summary.restartRequired}개는 다시 열어주세요. Codex가 Hook 검토를 알리면 /hooks에서 Acedia 항목을 확인해 신뢰해야 합니다.`,
+                        `Reopen ${hookRepair.summary.restartRequired} sessions whose hook definitions or SSH connections changed. If Codex asks you to review hooks, trust the Acedia entry in /hooks.`,
                       )}
                     </div>
                   )}
@@ -1671,7 +1671,7 @@ export function SettingsModal({
                   }))
                 }
               />
-              <span>Start dashboard when MultiAgent starts</span>
+              <span>Start dashboard when Acedia starts</span>
             </label>
             <div className="app-update-message">
               {text("기본값은 4421입니다. 포트 변경은 다음 Start부터 적용됩니다.", "The default is 4421. Port changes apply the next time the dashboard starts.")}

@@ -32,7 +32,7 @@
   <Applications>
     <Application
       Id="MultiAgent"
-      Executable="app\MultiAgent.exe"
+      Executable="app\Acedia.exe"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements

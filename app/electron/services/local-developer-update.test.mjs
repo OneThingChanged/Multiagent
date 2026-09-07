@@ -32,6 +32,8 @@ describe("local developer updates", () => {
   });
 
   it("accepts only standard x64 installer names", () => {
+    expect(parseDeveloperInstallerName("Acedia-Setup-1.8.0.0-x64.exe"))
+      .toMatchObject({ version: "1.8.0.0" });
     expect(parseDeveloperInstallerName("MultiAgent-Setup-1.7.3.0-x64.exe"))
       .toMatchObject({ version: "1.7.3.0" });
     expect(parseDeveloperInstallerName("MultiAgent-Store-Release-1.7.3.0-x64.msix")).toBeNull();
@@ -45,7 +47,7 @@ describe("local developer updates", () => {
     for (const name of [
       "MultiAgent-Setup-1.7.1.0-x64.exe",
       "MultiAgent-Setup-1.7.3.0-x64.exe",
-      "MultiAgent-Setup-1.8.0.0-x64.exe",
+      "Acedia-Setup-1.8.0.0-x64.exe",
       "MultiAgent-Setup-9.0.0.0-arm64.exe",
     ]) {
       await fsPromises.writeFile(path.join(output, name), name);

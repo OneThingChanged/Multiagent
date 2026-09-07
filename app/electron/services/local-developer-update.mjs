@@ -2,7 +2,9 @@ import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 
-const INSTALLER_PATTERN = /^MultiAgent-Setup-(\d+)\.(\d+)\.(\d+)\.(\d+)-x64\.exe$/i;
+// Accept the legacy name so existing output folders remain valid during the
+// MultiAgent -> Acedia transition.
+const INSTALLER_PATTERN = /^(?:Acedia|MultiAgent)-Setup-(\d+)\.(\d+)\.(\d+)\.(\d+)-x64\.exe$/i;
 
 export function parseProductVersion(value) {
   if (typeof value !== "string") return null;

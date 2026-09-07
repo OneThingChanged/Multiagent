@@ -63,7 +63,7 @@ export function ConnectionScreen({
           )}
           <View style={styles.hero}>
             <Image source={require("../../assets/icon.png")} style={styles.logo} />
-            <Text style={styles.title}>MultiAgent Mobile</Text>
+            <Text style={styles.title}>Acedia Mobile</Text>
             <Text style={styles.subtitle}>
               여러 PC의 Remote를 등록하고 동시에 알림을 받을 수 있습니다.
             </Text>
@@ -154,7 +154,7 @@ export function ConnectionScreen({
           <View style={styles.guide}>
             <Text style={styles.guideTitle}>PC마다 별도 주소가 필요합니다</Text>
             <Text style={styles.guideText}>
-              각 PC의 MultiAgent 설정 → Remote에서 HTTPS 터널을 켠 다음 표시되는 주소를 등록하세요.
+              각 PC의 Acedia 설정 → Remote에서 HTTPS 터널을 켠 다음 표시되는 주소를 등록하세요.
             </Text>
             <Text style={styles.guideNote}>
               로그인과 기기 승인은 PC별로 한 번씩 진행합니다. 외부 연결은 HTTPS만 허용합니다.

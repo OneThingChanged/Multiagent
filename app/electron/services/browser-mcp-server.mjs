@@ -1,4 +1,4 @@
-// Minimal stdio MCP bridge for the browser owned by MultiAgent. It deliberately
+// Minimal stdio MCP bridge for the browser owned by Acedia. It deliberately
 // has no Electron dependency: the child inherits MULTIAGENT_PORT, token and
 // agent id from the PTY that launched Codex/Claude, then talks only to the
 // authenticated loopback integration API.
@@ -27,12 +27,12 @@ const targetSchema = {
 const tools = [
   {
     name: "browser_tabs",
-    description: "List the tabs available to the current MultiAgent session.",
+    description: "List the tabs available to the current Acedia session.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "browser_open",
-    description: "Open a new visible tab in the session's shared MultiAgent browser. Defaults to Google when URL is omitted.",
+    description: "Open a new visible tab in the session's shared Acedia browser. Defaults to Google when URL is omitted.",
     inputSchema: { type: "object", properties: { url: { type: "string" } }, additionalProperties: false },
   },
   {
@@ -159,7 +159,7 @@ function errorResult(message) {
 
 async function callBrowser(action, body = {}, method = "POST") {
   if (!baseUrl || !token || !agentId) {
-    throw new Error("MultiAgent browser bridge environment is missing");
+    throw new Error("Acedia browser bridge environment is missing");
   }
   const response = await fetch(`${baseUrl}/${action}`, {
     method,

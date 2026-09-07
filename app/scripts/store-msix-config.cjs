@@ -70,8 +70,8 @@ function loadStoreIdentity({ appDir, appVersion, development = false, identityFi
       identityName: "com.jintae.multiagent.store.dev",
       publisher: "CN=MultiAgent Development",
       publisherDisplayName: "MultiAgent Development",
-      displayName: "MultiAgent Dev",
-      description: "Multi-agent terminal and project workspace development build",
+      displayName: "Acedia Dev",
+      description: "Acedia AI-agent terminal and project workspace development build",
       productId: null,
       packageVersion: semverToStoreVersion(appVersion),
     };
@@ -109,7 +109,7 @@ function loadStoreIdentity({ appDir, appVersion, development = false, identityFi
     publisherDisplayName: requiredText(raw.publisherDisplayName, "publisherDisplayName"),
     displayName: requiredText(raw.displayName, "displayName"),
     description: requiredText(
-      raw.description || "Multi-agent terminal and project workspace",
+      raw.description || "Acedia AI-agent terminal and project workspace",
       "description"
     ),
     productId,

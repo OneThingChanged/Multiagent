@@ -38,7 +38,7 @@ class MultiAgentMonitorModule(
         throw IllegalArgumentException("잘못된 PC 프로필입니다.")
       }
       val baseUrl = validateBaseUrl(baseUrlValue)
-      val profileName = profileNameValue.trim().take(60).ifBlank { Uri.parse(baseUrl).host ?: "MultiAgent PC" }
+      val profileName = profileNameValue.trim().take(60).ifBlank { Uri.parse(baseUrl).host ?: "Acedia PC" }
       if (!MonitorStorage.TOKEN_PATTERN.matches(token)) throw IllegalArgumentException("잘못된 기기 토큰입니다.")
       val previous = storage.loadAll().find {
         it.profileId == profileId || it.baseUrl.equals(baseUrl, ignoreCase = true)
@@ -113,7 +113,7 @@ class MultiAgentMonitorModule(
       }
       val baseUrl = validateBaseUrl(baseUrlValue)
       val profileName = profileNameValue.trim().take(60)
-        .ifBlank { Uri.parse(baseUrl).host ?: "MultiAgent PC" }
+        .ifBlank { Uri.parse(baseUrl).host ?: "Acedia PC" }
       if (!MonitorStorage.TOKEN_PATTERN.matches(token)) {
         throw IllegalArgumentException("잘못된 모바일 조회 토큰입니다.")
       }

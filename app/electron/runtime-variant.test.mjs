@@ -9,9 +9,10 @@ describe("Electron runtime variant", () => {
   it("uses the standard identity and update channel by default", () => {
     expect(resolveRuntimeVariant()).toMatchObject({
       id: "standard",
-      displayName: "MultiAgent",
+      displayName: "Acedia",
       appUserModelId: "com.jintae.multiagent.electron",
       localDataDirectory: "com.jintae.multiagent",
+      userDataDirectory: "MultiAgent",
       updaterChannel: "latest",
       remoteEnabled: true,
       updateProvider: "local-developer",
@@ -22,9 +23,10 @@ describe("Electron runtime variant", () => {
   it("uses the Company identity, data folder, and update channel", () => {
     expect(resolveRuntimeVariant({ packageVariant: "company" })).toMatchObject({
       id: "company",
-      displayName: "MultiAgentCompany",
+      displayName: "AcediaCompany",
       appUserModelId: "com.jintae.multiagent.company.electron",
       localDataDirectory: "com.jintae.multiagent.company",
+      userDataDirectory: "MultiAgentCompany",
       updaterChannel: "latest-company",
       remoteEnabled: false,
       updateProvider: "github",
@@ -35,7 +37,7 @@ describe("Electron runtime variant", () => {
   it("uses isolated data and Microsoft Store managed updates for Store builds", () => {
     expect(resolveRuntimeVariant({ packageVariant: "store" })).toMatchObject({
       id: "store",
-      displayName: "MultiAgent",
+      displayName: "Acedia",
       appUserModelId: null,
       localDataDirectory: "com.jintae.multiagent.store",
       userDataDirectory: "MultiAgent Store",
@@ -77,21 +79,21 @@ describe("Electron runtime variant", () => {
     const releaseVersion = packageMetadata.multiAgentReleaseVersion;
 
     expect(standardBuild).toMatchObject({
-      productName: "MultiAgent",
-      executableName: "MultiAgent",
+      productName: "Acedia",
+      executableName: "Acedia",
       nsis: {
-        shortcutName: "MultiAgent",
-        uninstallDisplayName: `MultiAgent ${releaseVersion}`,
-        artifactName: `MultiAgent-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
+        shortcutName: "Acedia",
+        uninstallDisplayName: `Acedia ${releaseVersion}`,
+        artifactName: `Acedia-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
       },
     });
     expect(companyBuild).toMatchObject({
-      productName: "MultiAgentCompany",
-      executableName: "MultiAgentCompany",
+      productName: "AcediaCompany",
+      executableName: "AcediaCompany",
       nsis: {
-        shortcutName: "MultiAgentCompany",
-        uninstallDisplayName: `MultiAgentCompany ${releaseVersion}`,
-        artifactName: `MultiAgentCompany-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
+        shortcutName: "AcediaCompany",
+        uninstallDisplayName: `AcediaCompany ${releaseVersion}`,
+        artifactName: `AcediaCompany-Setup-${releaseVersion}-${"${arch}.${ext}"}`,
       },
     });
   });

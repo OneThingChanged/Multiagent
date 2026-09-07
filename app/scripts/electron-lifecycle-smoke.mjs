@@ -22,7 +22,7 @@ const electronPath = packaged
   ? path.join(
       outputDir,
       "win-unpacked",
-      company ? "MultiAgentCompany.exe" : "MultiAgent.exe"
+      company ? "AcediaCompany.exe" : "Acedia.exe"
     )
   : require("electron");
 const electronArgs = packaged ? [] : [path.join(appRoot, "electron", "main.mjs")];

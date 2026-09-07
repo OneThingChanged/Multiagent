@@ -12,21 +12,22 @@ import { RemotePushService } from "./remote-push-service.mjs";
 
 const DASHBOARD_HTML = String.raw`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>MultiAgent Dashboard</title><style>
+<title>Acedia Dashboard</title><style>
 body{margin:0;background:#0d1117;color:#c9d1d9;font:14px system-ui}header{padding:18px 24px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between}main{padding:18px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}.working{border-color:#d29922}.done{border-color:#238636}small{color:#8b949e}pre{white-space:pre-wrap;max-height:38vh;overflow:auto;background:#090c10;padding:10px;border-radius:6px}input{width:calc(100% - 80px);background:#0d1117;color:#fff;border:1px solid #30363d;padding:8px}button{padding:8px;background:#238636;color:white;border:0;border-radius:5px}</style></head>
-<body><header><b id="title">MultiAgent</b><small id="updated">연결 중…</small></header><main id="cards"></main>
+<body><header><b id="title">Acedia</b><small id="updated">연결 중…</small></header><main id="cards"></main>
 <script>
 const cards=document.getElementById('cards');const esc=s=>String(s??'');
-async function load(){try{const r=await fetch('/api/state');if(r.status===401){location.href='/auth/github';return}const state=await r.json();document.getElementById('title').textContent=state.title||'MultiAgent';document.getElementById('updated').textContent=new Date().toLocaleTimeString();const agents=state.agents||state.sessions||[];cards.replaceChildren(...agents.map(a=>{const d=document.createElement('section');d.className='card '+(a.status==='working'?'working':a.status==='done'?'done':'');const h=document.createElement('b');h.textContent=a.name||a.id;const meta=document.createElement('p');meta.textContent=[a.project||a.projectName,a.tool||a.aiToolId,a.status].filter(Boolean).join(' · ');const out=document.createElement('pre');out.textContent=a.output||a.lastOutput||'';d.append(h,meta,out);if(state.remote){const row=document.createElement('div');const input=document.createElement('input');input.placeholder='명령 또는 메시지';const btn=document.createElement('button');btn.textContent='전송';btn.onclick=async()=>{await fetch('/api/input',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:a.id,data:input.value+'\\r'})});input.value=''};row.append(input,btn);d.append(row)}return d}));}catch(e){document.getElementById('updated').textContent='연결 오류'}}
+async function load(){try{const r=await fetch('/api/state');if(r.status===401){location.href='/auth/github';return}const state=await r.json();document.getElementById('title').textContent=state.title||'Acedia';document.getElementById('updated').textContent=new Date().toLocaleTimeString();const agents=state.agents||state.sessions||[];cards.replaceChildren(...agents.map(a=>{const d=document.createElement('section');d.className='card '+(a.status==='working'?'working':a.status==='done'?'done':'');const h=document.createElement('b');h.textContent=a.name||a.id;const meta=document.createElement('p');meta.textContent=[a.project||a.projectName,a.tool||a.aiToolId,a.status].filter(Boolean).join(' · ');const out=document.createElement('pre');out.textContent=a.output||a.lastOutput||'';d.append(h,meta,out);if(state.remote){const row=document.createElement('div');const input=document.createElement('input');input.placeholder='명령 또는 메시지';const btn=document.createElement('button');btn.textContent='전송';btn.onclick=async()=>{await fetch('/api/input',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:a.id,data:input.value+'\\r'})});input.value=''};row.append(input,btn);d.append(row)}return d}));}catch(e){document.getElementById('updated').textContent='연결 오류'}}
 load();setInterval(load,1500);
 </script></body></html>`;
 
 const REMOTE_PWA_DIR = fileURLToPath(new URL("../remote-pwa/", import.meta.url));
-const REMOTE_MOBILE_APK_URL = "/downloads/MultiAgent-Mobile.apk";
+const REMOTE_MOBILE_APK_URL = "/downloads/Acedia-Mobile.apk";
+const LEGACY_REMOTE_MOBILE_APK_URL = "/downloads/MultiAgent-Mobile.apk";
 const DEFAULT_REMOTE_MOBILE_APK_PATH = path.join(
   REMOTE_PWA_DIR,
   "downloads",
-  "MultiAgent-Mobile.apk",
+  "Acedia-Mobile.apk",
 );
 
 function remoteMobileSessionStatus(agent) {
@@ -314,7 +315,7 @@ function sendRemoteMobileApk(request, response, apkPath) {
   response.writeHead(range ? 206 : 200, {
     "accept-ranges": "bytes",
     "cache-control": "private, no-store",
-    "content-disposition": 'attachment; filename="MultiAgent-Mobile.apk"',
+    "content-disposition": 'attachment; filename="Acedia-Mobile.apk"',
     "content-length": end - start + 1,
     "content-type": "application/vnd.android.package-archive",
     "cross-origin-resource-policy": "same-origin",
@@ -1648,7 +1649,7 @@ export class RemoteDashboardService {
       ? this.view.projects.find((entry) => entry.id === viewAgent?.projectId)
       : null;
     const projectName = String(
-      agent?.project || agent?.projectName || project?.name || "MultiAgent",
+      agent?.project || agent?.projectName || project?.name || "Acedia",
     ).trim();
     const agentName = String(agent?.name || payload.id).trim();
     const notification = {
@@ -1743,7 +1744,7 @@ export class RemoteDashboardService {
 
   async githubLoginFromToken(token) {
     const userResponse = await this.fetchImpl("https://api.github.com/user", {
-      headers: { authorization: `Bearer ${token}`, "user-agent": "MultiAgent" },
+      headers: { authorization: `Bearer ${token}`, "user-agent": "Acedia" },
       signal: AbortSignal.timeout(15_000),
     });
     const login = String((await userResponse.json()).login || "");
@@ -1900,7 +1901,7 @@ export class RemoteDashboardService {
     if (url.pathname === "/auth/start") {
       const githubResponse = await this.fetchImpl("https://github.com/login/device/code", {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "MultiAgent" },
+        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "Acedia" },
         body: new URLSearchParams({ client_id: this.config.client_id, scope: "read:user" }),
         signal: AbortSignal.timeout(15_000),
       });
@@ -1916,7 +1917,7 @@ export class RemoteDashboardService {
     }
     const tokenResponse = await this.fetchImpl("https://github.com/login/oauth/access_token", {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "MultiAgent" },
+      headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded", "user-agent": "Acedia" },
       body: new URLSearchParams({
         client_id: this.config.client_id,
         device_code: deviceCode,
@@ -2041,7 +2042,7 @@ export class RemoteDashboardService {
           if (request.method === "GET" && url.pathname === "/") {
             if (login) {
               response.writeHead(403, { "content-type": "text/html; charset=utf-8" })
-                .end(`<meta charset="utf-8"><title>승인 대기</title><body style="background:#0d1117;color:#c9d1d9;font:16px system-ui;padding:40px"><h2>GitHub @${login.replace(/[<>&"']/g, "")}</h2><p>MultiAgent 앱에서 원격 접속 요청을 승인해 주세요.</p></body>`);
+                .end(`<meta charset="utf-8"><title>승인 대기</title><body style="background:#0d1117;color:#c9d1d9;font:16px system-ui;padding:40px"><h2>GitHub @${login.replace(/[<>&"']/g, "")}</h2><p>Acedia 앱에서 원격 접속 요청을 승인해 주세요.</p></body>`);
             } else {
               response.writeHead(302, { location: "/login" }).end();
             }
@@ -2054,7 +2055,7 @@ export class RemoteDashboardService {
         })) return;
         if (
           ["GET", "HEAD"].includes(request.method) &&
-          url.pathname === REMOTE_MOBILE_APK_URL
+          [REMOTE_MOBILE_APK_URL, LEGACY_REMOTE_MOBILE_APK_URL].includes(url.pathname)
         ) {
           sendRemoteMobileApk(request, response, this.mobileApkPath);
           return;
@@ -2145,7 +2146,7 @@ export class RemoteDashboardService {
         if (request.method === "GET" && url.pathname === "/api/state") {
           const runtime = this.stateProvider?.() ?? {};
           sendJson(response, 200, {
-            title: "MultiAgent Remote",
+            title: "Acedia Remote",
             remote: true,
             pwa: true,
             generatedAt: new Date().toISOString(),
@@ -2486,7 +2487,7 @@ export class TunnelService {
       );
     }
     if (process.platform !== "win32") {
-      throw new Error("cloudflared를 PATH 또는 MultiAgent 데이터 폴더에 설치해 주세요.");
+      throw new Error("cloudflared를 PATH 또는 Acedia 데이터 폴더에 설치해 주세요.");
     }
     if (this.downloadPromise) return this.downloadPromise;
     this.downloadPromise = (async () => {
@@ -2496,7 +2497,7 @@ export class TunnelService {
         const response = await this.fetchImpl(
           "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe",
           {
-            headers: { "user-agent": "MultiAgent" },
+            headers: { "user-agent": "Acedia" },
             redirect: "follow",
             signal: AbortSignal.timeout(120_000),
           }

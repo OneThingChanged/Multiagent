@@ -6,8 +6,8 @@ const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 module.exports = {
   ...base,
   appId: "com.jintae.multiagent.company.electron",
-  productName: "MultiAgentCompany",
-  executableName: "MultiAgentCompany",
+  productName: "AcediaCompany",
+  executableName: "AcediaCompany",
   extraMetadata: {
     multiAgentVariant: "company",
     multiAgentReleaseVersion: releaseVersion,
@@ -25,9 +25,9 @@ module.exports = {
   ],
   nsis: {
     ...base.nsis,
-    artifactName: `MultiAgentCompany-Setup-${releaseVersion}-\${arch}.\${ext}`,
-    shortcutName: "MultiAgentCompany",
-    uninstallDisplayName: `MultiAgentCompany ${releaseVersion}`,
+    artifactName: `AcediaCompany-Setup-${releaseVersion}-\${arch}.\${ext}`,
+    shortcutName: "AcediaCompany",
+    uninstallDisplayName: `AcediaCompany ${releaseVersion}`,
   },
   publish: [
     {

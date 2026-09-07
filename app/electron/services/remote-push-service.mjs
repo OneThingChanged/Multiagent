@@ -189,7 +189,7 @@ export class RemotePushService {
       : "작업이 완료되었습니다.";
     const notification = {
       type: safeType,
-      title: (clean(title) || "MultiAgent").slice(0, 120),
+      title: (clean(title) || "Acedia").slice(0, 120),
       // Never put prompts, terminal output, file paths, or tool input on a lock screen.
       body: safeBody,
       tag: `${safeType === "agent-question" ? "question" : "done"}:${id}`,

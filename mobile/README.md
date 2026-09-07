@@ -1,6 +1,6 @@
-# MultiAgent Mobile
+# Acedia Mobile
 
-Android client shell for the desktop MultiAgent Remote service. The native app
+Android client shell for the desktop Acedia Remote service. The native app
 stores multiple approved PC profiles and loads the selected PC's mobile-first
 Remote PWA in a constrained WebView. Registered PCs can keep independent
 background monitor connections while only one WebView is visible. The launch
@@ -45,7 +45,7 @@ in Git. Approved Remote browser users then see an `APK` button in the top bar.
 
 ## Connection
 
-1. Desktop MultiAgent → Settings → Remote.
+1. Desktop Acedia → Settings → Remote.
 2. Start the Remote server and HTTPS tunnel.
 3. Enter a PC name and its HTTPS tunnel URL in the mobile app.
 4. Complete the existing GitHub device login and desktop approval flow.
@@ -91,7 +91,7 @@ its native session token and its optional notification-monitor token.
 The APK does not use Firebase, FCM, Expo Push, or an external notification
 account. After GitHub login and desktop approval, tapping the Remote notification
 button issues a revocable notification-only token and starts an Android
-`remoteMessaging` Foreground Service. Android displays an ongoing “MultiAgent
+`remoteMessaging` Foreground Service. Android displays an ongoing “Acedia
 monitoring” notification while the service independently long-polls every PC
 whose native notification button was enabled. Completion/question events
 include the profile name and create privacy-safe local notifications; tapping

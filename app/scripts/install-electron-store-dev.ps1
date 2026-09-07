@@ -1,5 +1,5 @@
 param(
-  [string]$MetadataPath = (Join-Path $PSScriptRoot '..\electron-dist\store\MultiAgent-Store-Dev.metadata.json')
+  [string]$MetadataPath = (Join-Path $PSScriptRoot '..\electron-dist\store\Acedia-Store-Dev.metadata.json')
 )
 
 $ErrorActionPreference = 'Stop'

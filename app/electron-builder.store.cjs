@@ -6,8 +6,8 @@ const { releaseVersion } = resolveReleaseVersions(packageMetadata);
 module.exports = {
   ...base,
   appId: "com.jintae.multiagent.store.electron",
-  productName: "MultiAgent",
-  executableName: "MultiAgent",
+  productName: "Acedia",
+  executableName: "Acedia",
   extraMetadata: {
     multiAgentVariant: "store",
     multiAgentReleaseVersion: releaseVersion,

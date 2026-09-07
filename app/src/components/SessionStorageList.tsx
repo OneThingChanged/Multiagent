@@ -204,7 +204,7 @@ export function SessionStorageList({
       </div>
       <div className="session-storage-hint">
         {scope === "project"
-          ? text("MultiAgent 카탈로그에서 이 프로젝트(cwd)에 속한 모든 세션 기록을 표시합니다.", "Shows all session history associated with this project (cwd) in the MultiAgent catalog.")
+          ? text("Acedia 카탈로그에서 이 프로젝트(cwd)에 속한 모든 세션 기록을 표시합니다.", "Shows all session history associated with this project (cwd) in the Acedia catalog.")
           : text("선택한 세션에 연결된 현재 sessionId 기록 하나만 표시합니다.", "Shows only the current sessionId history associated with the selected session.")}
       </div>
       {error && <div className="session-storage-error">{error}</div>}

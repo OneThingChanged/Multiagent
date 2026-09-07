@@ -210,7 +210,7 @@ export default function App() {
       {booting ? (
         <View style={styles.boot}>
           <ActivityIndicator color="#55e4d4" size="large" />
-          <Text style={styles.bootText}>MultiAgent 연결 준비 중…</Text>
+          <Text style={styles.bootText}>Acedia 연결 준비 중…</Text>
         </View>
       ) : (
         <View style={styles.app}>

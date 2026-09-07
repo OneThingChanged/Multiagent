@@ -17,7 +17,7 @@ const appDir = fileURLToPath(new URL("..", import.meta.url));
 const development = process.argv.includes("--dev");
 const modeName = development ? "Dev" : "Release";
 const outputDir = join(appDir, "electron-dist", "store");
-const metadataPath = join(outputDir, `MultiAgent-Store-${modeName}.metadata.json`);
+const metadataPath = join(outputDir, `Acedia-Store-${modeName}.metadata.json`);
 const unpackDir = join(outputDir, `verify-${modeName.toLowerCase()}-unpacked`);
 
 function fail(message) {
@@ -52,7 +52,7 @@ if (unpack.status !== 0) {
 }
 
 const manifestPath = join(unpackDir, "AppxManifest.xml");
-const executablePath = join(unpackDir, "app", "MultiAgent.exe");
+const executablePath = join(unpackDir, "app", "Acedia.exe");
 if (!existsSync(manifestPath) || !existsSync(executablePath)) {
   fail("manifest or packaged executable is missing");
 }
@@ -62,7 +62,7 @@ for (const expected of [
   `Publisher="${metadata.publisher.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"`,
   `Version="${metadata.packageVersion}"`,
   'ProcessorArchitecture="x64"',
-  'Executable="app\\MultiAgent.exe"',
+  'Executable="app\\Acedia.exe"',
   'uap10:RuntimeBehavior="packagedClassicApp"',
   'uap10:TrustLevel="mediumIL"',
   '<rescap:Capability Name="runFullTrust"',

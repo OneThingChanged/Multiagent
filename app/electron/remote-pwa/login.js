@@ -96,7 +96,7 @@ try {
   mode = await requestJson("/auth/mode", { headers: {} });
   if (!mode.configured) {
     loginTitle.textContent = "PC에서 GitHub Client ID를 설정해 주세요";
-    loginDescription.textContent = "MultiAgent 설정 → Remote PWA → GitHub OAuth에 Client ID가 필요합니다.";
+    loginDescription.textContent = "Acedia 설정 → Remote PWA → GitHub OAuth에 Client ID가 필요합니다.";
     startButton.hidden = true;
   } else if (mode.web) {
     loginTitle.textContent = "GitHub 웹 로그인";

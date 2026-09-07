@@ -162,7 +162,7 @@ class MultiAgentMonitorService : Service() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     notifications.createNotificationChannel(NotificationChannel(
       MONITOR_CHANNEL,
-      "MultiAgent 백그라운드 모니터링",
+      "Acedia 백그라운드 모니터링",
       NotificationManager.IMPORTANCE_LOW,
     ).apply { description = "여러 Remote 작업 상태 연결을 유지합니다." })
     notifications.createNotificationChannel(NotificationChannel(
@@ -195,7 +195,7 @@ class MultiAgentMonitorService : Service() {
 
   private fun monitorNotification(state: String) = NotificationCompat.Builder(this, MONITOR_CHANNEL)
     .setSmallIcon(R.drawable.multiagent_notification_icon)
-    .setContentTitle("MultiAgent 모니터링 중")
+    .setContentTitle("Acedia 모니터링 중")
     .setContentText(state)
     .setContentIntent(launchIntent())
     .setOngoing(true)
@@ -207,7 +207,7 @@ class MultiAgentMonitorService : Service() {
     val agentId = event.optString("agentId")
     if (!Regex("^[A-Za-z0-9._:-]{1,128}$").matches(agentId)) return
     val type = event.optString("type")
-    val title = event.optString("title", "MultiAgent").take(120)
+    val title = event.optString("title", "Acedia").take(120)
     val body = if (type == "agent-question") "응답이 필요합니다." else "작업이 완료되었습니다."
     notifications.notify(
       "${config.profileId}:${type}:${agentId}".hashCode(),

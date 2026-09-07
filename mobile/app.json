@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "MultiAgent Mobile",
+    "name": "Acedia Mobile",
     "slug": "multiagent-mobile",
-    "version": "1.7.3.3",
+    "version": "1.8.0.0",
     "scheme": "multiagent",
     "orientation": "default",
     "icon": "./assets/icon.png",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.onethingchanged.multiagent.mobile",
-      "versionCode": 16,
+      "versionCode": 17,
       "adaptiveIcon": {
         "backgroundColor": "#06101A",
         "foregroundImage": "./assets/android-icon-foreground.png",

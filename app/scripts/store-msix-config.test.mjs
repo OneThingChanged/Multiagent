@@ -40,7 +40,7 @@ describe("Microsoft Store MSIX configuration", () => {
       identityName: "jintaenate.MultiAgent",
       publisher: "CN=Test",
       publisherDisplayName: "jintaenate",
-      displayName: "MultiAgent",
+      displayName: "Acedia",
       productId: "9NVBSGNRTPLR",
     };
     try {
@@ -76,12 +76,12 @@ describe("Microsoft Store MSIX configuration", () => {
         identityName: "Publisher.MultiAgent",
         publisher: 'CN=A&B "Studio"',
         packageVersion: "1.6.26.0",
-        displayName: "MultiAgent <Store>",
+        displayName: "Acedia <Store>",
         publisherDisplayName: "Studio",
         description: "Description",
       }
     );
     expect(rendered).toContain('Publisher="CN=A&amp;B &quot;Studio&quot;"');
-    expect(rendered).toContain("MultiAgent &lt;Store&gt;");
+    expect(rendered).toContain("Acedia &lt;Store&gt;");
   });
 });

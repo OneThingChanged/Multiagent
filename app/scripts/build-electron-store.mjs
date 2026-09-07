@@ -52,10 +52,10 @@ const appStageDir = join(stagingDir, "app");
 const manifestTemplatePath = join(appDir, "store", "Package.appxmanifest.template.xml");
 const manifestPath = join(stagingDir, "AppxManifest.xml");
 const modeName = development ? "Dev" : "Release";
-const artifactBase = `MultiAgent-Store-${modeName}-${identity.packageVersion}-x64`;
+const artifactBase = `Acedia-Store-${modeName}-${identity.packageVersion}-x64`;
 const artifactPath = join(outputDir, `${artifactBase}.msix`);
 const metadataPath = join(outputDir, `${artifactBase}.metadata.json`);
-const stableMetadataPath = join(outputDir, `MultiAgent-Store-${modeName}.metadata.json`);
+const stableMetadataPath = join(outputDir, `Acedia-Store-${modeName}.metadata.json`);
 const builder = join(appDir, "node_modules", "electron-builder", "cli.js");
 const npm = process.env.npm_execpath
   ? { command: process.execPath, prefix: [process.env.npm_execpath] }
@@ -112,7 +112,7 @@ run(npm.command, [...npm.prefix, "run", "build"], {
 });
 run(process.execPath, [builder, "--dir", "--config", "electron-builder.store.cjs"]);
 
-if (!existsSync(join(packagedDir, "MultiAgent.exe"))) {
+if (!existsSync(join(packagedDir, "Acedia.exe"))) {
   throw new Error(`Electron Store layout was not created: ${packagedDir}`);
 }
 resetGeneratedDirectory(stagingDir);

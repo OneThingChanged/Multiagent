@@ -46,7 +46,7 @@ export function TopBar({
       <div className="topbar-inner">
         <span className="topbar-logo" aria-hidden="true">
           <img className="topbar-logo-img" src="/app-icon.png" alt="" />
-          MultiAgent
+          Acedia
         </span>
         <button
           type="button"

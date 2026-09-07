@@ -77,9 +77,9 @@ run(builder, process.argv.includes("--dir")
 
 const mobileOutput = join(appDir, "electron-dist", "mobile");
 mkdirSync(mobileOutput, { recursive: true });
-copyFileSync(verified.apkPath, join(mobileOutput, "MultiAgent-Mobile.apk"));
+copyFileSync(verified.apkPath, join(mobileOutput, "Acedia-Mobile.apk"));
 writeFileSync(
-  join(mobileOutput, "MultiAgent-Mobile.metadata.json"),
+  join(mobileOutput, "Acedia-Mobile.metadata.json"),
   `${JSON.stringify({
     packageName: verified.packageName,
     versionCode: verified.versionCode,
@@ -97,9 +97,9 @@ writeFileSync(
     releaseVersion,
     tagName: `v${releaseVersion}`,
     updaterVersion,
-    installer: `MultiAgent-Setup-${releaseVersion}-x64.exe`,
+    installer: `Acedia-Setup-${releaseVersion}-x64.exe`,
     updaterMetadata: "latest.yml",
-    mobileApk: "mobile/MultiAgent-Mobile.apk",
+    mobileApk: "mobile/Acedia-Mobile.apk",
   }, null, 2)}\n`,
   "utf8",
 );

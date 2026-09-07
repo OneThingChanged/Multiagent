@@ -101,6 +101,7 @@ const runtimeVariant = runtimeVariantModule.resolveRuntimeVariant({
   environmentVariant: process.env.MULTIAGENT_BUILD_VARIANT,
   packageVariant,
 });
+const productName = runtimeVariant.displayName || "Acedia";
 const isCompanyBuild = runtimeVariant.id === "company";
 const isStoreBuild = runtimeVariant.id === "store";
 const devUrl = process.env.MULTIAGENT_DEV_URL?.trim() || null;
@@ -789,7 +790,7 @@ function dashboardPwaState() {
 
 let monitorService;
 monitorService = new LocalDashboardService({
-  title: "MultiAgent Monitor",
+  title: `${productName} Monitor`,
   defaultPort: 4421,
   baseDir: hookBaseDir,
   configName: "monitor-config.json",
@@ -798,7 +799,7 @@ monitorService = new LocalDashboardService({
 });
 let usageDashboard;
 usageDashboard = new LocalDashboardService({
-  title: "MultiAgent Usage",
+  title: `${productName} Usage`,
   defaultPort: 3141,
   baseDir: hookBaseDir,
   configName: "usage-config.json",
@@ -809,7 +810,7 @@ usageDashboard = new LocalDashboardService({
 });
 const configuredMobileApkPath = asString(process.env.MULTIAGENT_MOBILE_APK_PATH).trim();
 const remoteMobileApkPath = app.isPackaged
-  ? path.join(process.resourcesPath, "mobile", "MultiAgent-Mobile.apk")
+  ? path.join(process.resourcesPath, "mobile", "Acedia-Mobile.apk")
   : configuredMobileApkPath || undefined;
 let remoteService;
 remoteService = new RemoteDashboardService({
@@ -1150,7 +1151,7 @@ async function loadRenderer(win, query = {}) {
 function ensureBrowserHostWindow() {
   if (browserHostWindow && !browserHostWindow.isDestroyed()) return browserHostWindow;
   const host = new BrowserWindow({
-    title: "MultiAgent Browser Host",
+    title: `${productName} Browser Host`,
     x: -32_000,
     y: -32_000,
     // Hidden does not mean zero-sized: Remote capture and background MCP tabs
@@ -2297,7 +2298,7 @@ function createAppWindow({
   resumeWorkspace = false,
 } = {}) {
   const win = new BrowserWindow({
-    title: "MultiAgent",
+    title: productName,
     width: 1200,
     height: 800,
     minWidth: 760,
@@ -2425,7 +2426,7 @@ function positionPet() {
 function ensurePetWindow() {
   if (petWindow && !petWindow.isDestroyed()) return petWindow;
   petWindow = new BrowserWindow({
-    title: "MultiAgent Desktop Pet",
+    title: `${productName} Desktop Pet`,
     width: 184,
     height: 176,
     frame: false,
@@ -2508,10 +2509,10 @@ function createTray() {
     image = null;
   }
   tray = new Tray(image && !image.isEmpty() ? image : iconPath);
-  tray.setToolTip(runtimeVariant.displayName || "MultiAgent");
+  tray.setToolTip(productName);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "MultiAgent 열기", click: () => showWorkspaceWindow() },
+      { label: `${productName} 열기`, click: () => showWorkspaceWindow() },
       {
         label: "새 작업창",
         click: () =>
@@ -5333,10 +5334,10 @@ async function invokeCommand(event, command, rawArgs) {
     case "export_diagnostics": {
       const suffix = new Date().toISOString().replace(/[:.]/g, "-");
       const options = {
-        title: "MultiAgent 진단 번들 저장",
+        title: `${productName} 진단 번들 저장`,
         defaultPath: path.join(
           app.getPath("documents"),
-          `MultiAgent-diagnostics-${suffix}.json`
+          `Acedia-diagnostics-${suffix}.json`
         ),
         filters: [{ name: "JSON", extensions: ["json"] }],
       };

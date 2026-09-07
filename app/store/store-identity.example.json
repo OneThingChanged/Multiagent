@@ -2,7 +2,7 @@
   "identityName": "00000Publisher.MultiAgent",
   "publisher": "CN=00000000-0000-0000-0000-000000000000",
   "publisherDisplayName": "Your Partner Center publisher name",
-  "displayName": "MultiAgent",
-  "description": "Multi-agent terminal and project workspace",
+  "displayName": "Acedia",
+  "description": "Acedia AI-agent terminal and project workspace",
   "productId": "9XXXXXXXXXXX"
 }

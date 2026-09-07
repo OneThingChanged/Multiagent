@@ -216,7 +216,7 @@ describe("Electron dashboard server", () => {
 
     expect(page.status).toBe(200);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
-    expect(pageBody).toContain("MultiAgent Remote");
+    expect(pageBody).toContain("Acedia Remote");
     expect(pageBody).toContain("/manifest.webmanifest");
     expect(pageBody).toContain("Remote Monitor");
     expect(pageBody).toContain("interactive-widget=resizes-content");
@@ -385,14 +385,14 @@ describe("Electron dashboard server", () => {
     expect(manifestBody.display).toBe("standalone");
     expect(worker.headers.get("service-worker-allowed")).toBe("/");
     expect(workerBody).toContain("notificationclick");
-    expect(workerBody).toContain('multiagent-remote-v58');
+    expect(workerBody).toContain('multiagent-remote-v59');
     expect(workerBody).toContain('addEventListener("push"');
     expect(workerBody).toContain('url.pathname.startsWith("/downloads/")');
     expect(workerBody).toContain('url.pathname.startsWith("/preview/")');
     expect(stateBody.pwa).toBe(true);
     expect(stateBody.mobileApp).toEqual({
       available: true,
-      downloadUrl: "/downloads/MultiAgent-Mobile.apk",
+      downloadUrl: "/downloads/Acedia-Mobile.apk",
       filename: "MultiAgent-Mobile.apk",
       size: 10,
       architecture: "arm64-v8a",
@@ -424,7 +424,7 @@ describe("Electron dashboard server", () => {
     expect(invalidUsage.status).toBe(400);
     expect(apkDownload.status).toBe(200);
     expect(apkDownload.headers.get("content-type")).toBe("application/vnd.android.package-archive");
-    expect(apkDownload.headers.get("content-disposition")).toContain("MultiAgent-Mobile.apk");
+    expect(apkDownload.headers.get("content-disposition")).toContain("Acedia-Mobile.apk");
     expect(apkBody).toBe("0123456789");
     expect(apkHead.status).toBe(200);
     expect(apkHead.headers.get("content-length")).toBe("10");
@@ -460,7 +460,7 @@ describe("Electron dashboard server", () => {
     const loginBody = await externalLogin.text();
     // The heading text is set at runtime by login.js per auth mode; assert on
     // stable markup instead (brand + the elements login.js drives).
-    expect(loginBody).toContain("MultiAgent Remote");
+    expect(loginBody).toContain("Acedia Remote");
     expect(loginBody).toContain('id="startLogin"');
     expect(loginBody).toContain('id="deviceCode"');
   });

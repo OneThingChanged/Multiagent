@@ -51,7 +51,7 @@ class MobileSessionStorage(private val context: Context) {
     val token = json.optString("token")
     if (!MonitorStorage.PROFILE_ID_PATTERN.matches(profileId)) return null
     if (!MonitorStorage.TOKEN_PATTERN.matches(token) || baseUrl.isBlank()) return null
-    val fallbackName = Uri.parse(baseUrl).host ?: "MultiAgent PC"
+    val fallbackName = Uri.parse(baseUrl).host ?: "Acedia PC"
     val profileName = json.optString("profileName", fallbackName)
       .trim()
       .take(60)

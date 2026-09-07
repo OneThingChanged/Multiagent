@@ -64,7 +64,7 @@ sources:
 
 ## Goal and release decision
 
-MultiAgent has a Store-managed Windows distribution channel in addition to the
+Acedia has a Store-managed Windows distribution channel in addition to the
 existing Standard and Company NSIS releases. Microsoft will sign and deliver
 the submitted MSIX after certification; Store-managed updates are separate
 from `electron-updater`. The first Store release was restricted to a private
@@ -112,7 +112,7 @@ upload, completed submission options, and certification remain pending.
 
 | Item | Current value |
 | --- | --- |
-| Store product | MultiAgent |
+| Store product | Acedia (formerly MultiAgent) |
 | Store product ID | `9NVBSGNRTPLR` |
 | Submitted package | `app/electron-dist/store/MultiAgent-Store-Release-1.6.26.0-x64.msix` |
 | Package version / architecture | `1.6.26.0` / `x64` |
@@ -171,7 +171,7 @@ The first private-audience submission has these sections marked complete:
 
 The Store listing screenshot is retained at:
 
-`app/store/listing/screenshots/multiagent-store-primary.png`
+`app/store/listing/screenshots/acedia-store-primary.png`
 
 The listing asset is a 1672×941 PNG and is within the Store screenshot size
 limit. Store-logo assets are included in the package; optional Store poster and
@@ -192,7 +192,7 @@ core application.
 
 The application is declared as a packaged classic Electron app with
 `uap10:RuntimeBehavior="packagedClassicApp"` and
-`uap10:TrustLevel="mediumIL"`. This capability is required for MultiAgent to
+`uap10:TrustLevel="mediumIL"`. This capability is required for Acedia to
 launch user-selected Win32 command-line tools, terminal/PTY child processes,
 Git commands, and development utilities; exchange standard input/output;
 monitor processes and local ports; and access files in project folders selected
@@ -310,7 +310,7 @@ marked as pending below are post-publication verification or later enhancements:
 2. **Optional in-app Store check — deferred:** ordinary Store updates and the
    product-page button are sufficient for the initial public release. A later
    native bridge may use the Windows Store package-update APIs to check and
-   request installation inside MultiAgent.[^store-package-updates]
+   request installation inside Acedia.[^store-package-updates]
 3. **Version mapping — decided:** keep the four-part MSIX package version strictly higher
    for every Partner Center submission and record its mapping to the product
    version. The unified baseline uses desktop compatibility version `1.7.0`
