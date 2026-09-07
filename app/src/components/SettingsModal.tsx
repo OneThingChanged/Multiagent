@@ -1,3 +1,4 @@
+import { CodexAccountsPanel } from "./CodexAccounts";
 import { useEffect, useState, type ReactNode } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { invoke } from "../platform/runtime";
@@ -1401,12 +1402,15 @@ export function SettingsModal({
         )}
 
         {tab === "agents" && (
+          <>
+          <CodexAccountsPanel />
           <AgentsSettings
             disabledTools={disabledTools}
             onToggleTool={onToggleTool}
             showUsageBar={showUsageBar}
             onShowUsageBarChange={onShowUsageBarChange}
           />
+          </>
         )}
 
         {tab === "data" && (

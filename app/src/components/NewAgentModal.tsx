@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CodexAccountSelect } from "./CodexAccounts";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { AI_TOOLS, toolForId } from "../types";
 import type { NewAgentPayload, Project } from "../types";
@@ -31,6 +32,7 @@ export function NewAgentModal({
   const [aiToolId, setAiToolId] = useState<string>(() =>
     defaultAiToolId(disabledTools)
   );
+  const [codexAccountId, setCodexAccountId] = useState("default");
   const [dangerous, setDangerous] = useState(false);
   const [workerSettings, setWorkerSettings] = useState<
     SessionWorkerSettings | undefined
@@ -45,6 +47,7 @@ export function NewAgentModal({
     onCreate({
       name: name.trim(),
       aiToolId,
+      codexAccountId: !project?.sshHostId && aiToolId === "codex" ? codexAccountId : undefined,
       dangerous: dangerous && supportsDangerous,
       workerSettings: aiToolId === "codex" ? workerSettings : undefined,
     });
@@ -94,6 +97,8 @@ export function NewAgentModal({
             ))}
           </select>
         </label>
+
+        {aiToolId === "codex" && !project?.sshHostId && <CodexAccountSelect value={codexAccountId} onChange={setCodexAccountId} />}
 
         {supportsDangerous && (
           <label className="field-check">

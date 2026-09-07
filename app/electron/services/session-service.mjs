@@ -271,7 +271,7 @@ export class SessionService {
   }
 
   transcriptRoots(aiToolId) {
-    if (aiToolId === "codex") return [path.join(os.homedir(), ".codex", "sessions")];
+    if (aiToolId === "codex") return this.codexRoots?.() ?? [path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions")];
     if (aiToolId === "claude") return [path.join(os.homedir(), ".claude", "projects")];
     return [];
   }
@@ -380,11 +380,13 @@ export class SessionService {
     preferredSessionId,
     agentId = null,
     allowFolderFallback = true,
+    transcriptRoot = null,
   }) {
     const tool = String(aiToolId || "").toLowerCase();
     if (tool !== "codex" && tool !== "claude") return null;
     const preferred = String(preferredSessionId || "").trim();
-    const note = agentId ? this.notes.get(agentId) : null;
+    const candidateNote = agentId ? this.notes.get(agentId) : null;
+    const note = !transcriptRoot || (candidateNote?.transcriptPath && isInsideRoot(candidateNote.transcriptPath, transcriptRoot)) ? candidateNote : null;
     const notedSessionId =
       note?.sessionId && (!note.cwd || sameFolder(note.cwd, folder))
         ? String(note.sessionId).trim()
@@ -402,7 +404,7 @@ export class SessionService {
       return notedSessionId;
     }
     if (!preferred && !allowFolderFallback) return null;
-    const entries = await this.scan(tool);
+    const entries = (await this.scan(tool)).filter((entry) => !transcriptRoot || isInsideRoot(entry.transcriptPath, transcriptRoot));
     if (preferred) {
       const exact = entries.find(
         (entry) =>

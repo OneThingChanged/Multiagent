@@ -102,3 +102,10 @@ describe("usage provider grouping", () => {
     expect(usageLimitShortName(limitOf("codex", null), "Codex")).toBe("");
   });
 });
+
+
+it("shows different Codex accounts as separate labeled provider groups", () => {
+  const groups = groupUsageProviders([limitOf("codex", null), limitOf("codex:a", "Codex · Personal"), limitOf("codex:b", "Codex · Work")]);
+  expect(groups.map((g) => g.label)).toEqual(["Codex", "Codex · Personal", "Codex · Work"]);
+  expect(groups.every((g) => g.limits.length === 1)).toBe(true);
+});

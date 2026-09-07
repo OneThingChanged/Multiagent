@@ -33,6 +33,7 @@ import {
   prepareMiraControlInput,
 } from "./services/miracontrol-integration.mjs";
 import { ReopenJournal } from "./services/reopen-journal.mjs";
+import { CodexAccounts } from "./services/codex-accounts.mjs";
 import { SessionService } from "./services/session-service.mjs";
 import { ConversationStoreManager } from "./services/conversation-store.mjs";
 import { submitPtyMessage } from "./services/pty-submit.mjs";
@@ -332,7 +333,24 @@ const reopenJournal = new ReopenJournal(
 if (process.platform === "win32" && runtimeVariant.appUserModelId) {
   app.setAppUserModelId(runtimeVariant.appUserModelId);
 }
+const codexAccounts = new CodexAccounts(app.getPath("userData"), {
+  startLogin: (env) => {
+    const native = process.platform === "win32" ? findExecutableOnPath("codex.exe") : null;
+    if (native) return nodePty.spawn(native, ["login", "-c", "cli_auth_credentials_store=file"],
+      { name: "xterm-256color", cols: 120, rows: 30, cwd: os.homedir(), env });
+    const executable = defaultShell(null);
+    const command = process.platform === "win32"
+      ? "codex.cmd login -c cli_auth_credentials_store=file"
+      : "codex login -c cli_auth_credentials_store=file";
+    return nodePty.spawn(executable, process.platform === "win32"
+      ? ["-NoLogo", "-NoProfile", "-Command", command] : ["-lc", command],
+      { name: "xterm-256color", cols: 120, rows: 30, cwd: os.homedir(), env });
+  },
+});
+const accountSwitches = new Set();
+const accountBindings = new Map();
 const sessionService = new SessionService(app.getPath("userData"));
+sessionService.codexRoots = () => codexAccounts.roots();
 const hookBaseDir = process.env.MULTIAGENT_LOCAL_DATA?.trim() || path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
   runtimeVariant.localDataDirectory
@@ -347,6 +365,12 @@ const browserMcpScriptPath = app.isPackaged
 
 function publishAgentHookEvent(eventName, payload) {
   if (eventName === "agent:hook-event" && payload?.id) {
+    const binding = accountBindings.get(payload.id);
+    const hookTranscript = normalizeTranscriptPath(payload.transcript_path);
+    if (binding && hookTranscript && !isInside(
+      path.join(codexAccounts.home(binding.accountId), "sessions"),
+      hookTranscript,
+    )) return;
     // Remote/monitor views only need concise state. Keep tool input and the
     // full assistant response inside the local renderer/pet contract.
     monitorHooks.set(payload.id, {
@@ -619,6 +643,7 @@ function writeMiraControlAgentInput({
 }
 
 const usageIndex = new UsageService(path.join(hookBaseDir, "usage.db"), sessionService);
+usageIndex.codexAccountForPath = (sourcePath) => codexAccounts.accountForPath(sourcePath);
 
 async function browserUsageSummary(refresh = false, historySelection = null) {
   // Local totals should not wait for a live account request. Claude's usage
@@ -2768,6 +2793,7 @@ async function testPasswordSshConnection(ssh, password) {
 async function spawnPty(args, event) {
   const id = asString(args.id).trim();
   if (!id) throw new Error("PTY id가 비어 있습니다.");
+  if (accountSwitches.has(id)) throw new Error("계정 변경 중입니다. 잠시 후 다시 열어 주세요.");
   if (terminalSessions.has(id)) return { reattached: true };
   const spawnGeneration = terminalSessions.beginSpawn(id);
 
@@ -2816,12 +2842,26 @@ async function spawnPty(args, event) {
   if (!ssh && (aiToolId === "codex" || aiToolId === "claude" || aiToolId === "qwen") && cwd) {
     await hookService.setupProject(cwd, aiToolId);
   }
+  const accountEnv = !ssh && aiToolId === "codex"
+    ? codexAccounts.environment(args.codexAccountId) : process.env;
+  if (!ssh && aiToolId === "codex" && codexAccounts.login && codexAccounts.login.id === args.codexAccountId) {
+    throw new Error("Codex 로그인 완료 후 세션을 열어 주세요.");
+  }
+  const binding = accountBindings.get(id);
+  if (!ssh && aiToolId === "codex" && binding && binding.accountId !== (args.codexAccountId || "default")) {
+    throw new Error("계정 선택이 변경되었습니다. 세션을 다시 열어 주세요.");
+  }
   const ptyCols = asPositiveInt(args.cols, 120);
   const ptyRows = asPositiveInt(args.rows, 30);
   const outputFilter =
     aiToolId === "codex"
       ? new CodexScrollbackFilter(ptyRows, ptyCols)
       : new PassThroughTerminalFilter();
+  if (terminalSessions.generations.get(id) !== spawnGeneration || accountSwitches.has(id)) {
+    outputFilter.dispose();
+    if (reversePort) remotePorts.delete(reversePort);
+    return { reattached: false, cancelled: true };
+  }
   let processHandle;
   try {
     processHandle = nodePty.spawn(executable, shellArgs, {
@@ -2830,7 +2870,7 @@ async function spawnPty(args, event) {
       rows: ptyRows,
       cwd,
       env: {
-        ...process.env,
+        ...accountEnv,
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         MULTIAGENT_AGENT_ID: id,
@@ -2849,6 +2889,7 @@ async function spawnPty(args, event) {
     id,
     name: asString(args.name).trim() || id,
     process: processHandle,
+    codexAccountId: !ssh && aiToolId === "codex" ? args.codexAccountId || "default" : null,
     initTimer: null,
     aiToolId,
     cwd,
@@ -3002,8 +3043,8 @@ const MAX_CHAT_BLOCKS = 400;
 const chatTranscriptCache = new Map();
 async function readChatTranscript(tool, transcriptPath) {
   const toolId = asString(tool);
-  const root = chatSessionRoot(toolId);
-  if (!root) throw new Error("지원하지 않는 도구입니다.");
+  const roots = toolId === "codex" ? codexAccounts.roots() : [chatSessionRoot(toolId)].filter(Boolean);
+  if (!roots.length) throw new Error("지원하지 않는 도구입니다.");
   const requested = normalizeTranscriptPath(asString(transcriptPath));
   if (!requested || !fs.existsSync(requested)) {
     return { blocks: [], truncated: false, missing: true };
@@ -3017,8 +3058,8 @@ async function readChatTranscript(tool, transcriptPath) {
     }
     throw error;
   }
-  const rootReal = fs.existsSync(root) ? fs.realpathSync(root) : root;
-  if (!isInside(rootReal, resolved)) throw new Error("허용되지 않은 트랜스크립트 경로입니다.");
+  const allowed = roots.some((root) => isInside(fs.existsSync(root) ? fs.realpathSync(root) : root, resolved));
+  if (!allowed) throw new Error("허용되지 않은 트랜스크립트 경로입니다.");
   const stat = await fsPromises.stat(resolved);
   const cached = chatTranscriptCache.get(resolved);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
@@ -3083,8 +3124,11 @@ function resolveChatTranscriptBySession(preferredTool, sessionId) {
   const other = preferredTool === "codex" ? "claude" : "codex";
   const tools = preferredTool ? [preferredTool, other] : ["claude", "codex"];
   for (const tool of tools) {
-    const found = findTranscriptBySessionId(chatSessionRoot(tool), tool, sessionId);
-    if (found) return { path: found, tool };
+    const roots = tool === "codex" ? codexAccounts.roots() : [chatSessionRoot(tool)];
+    for (const root of roots) {
+      const found = findTranscriptBySessionId(root, tool, sessionId);
+      if (found) return { path: found, tool };
+    }
   }
   return null;
 }
@@ -3120,13 +3164,12 @@ async function chatBlocksForAgent(agentId, sessionIdArg, options = {}) {
   const metadata = conversationMetadataForAgent(id);
   const catalogAgent = metadata.catalogAgent;
   const declaredTool = metadata.provider;
-  // The frontend passes the agent's own CLI session id (provider/last session),
-  // which survives restarts — the authoritative key for its transcript.
-  const sessionId =
-    asString(sessionIdArg).trim() ||
-    agentSessionIds.get(id) ||
-    catalogAgent?.lastSessionId ||
-    null;
+  // A just-switched account overrides stale renderer/catalog snapshots until
+  // its own hook or scoped startup lookup reports the selected conversation.
+  const binding = accountBindings.get(id);
+  const sessionId = binding
+    ? agentSessionIds.get(id) || binding.sessionId || null
+    : asString(sessionIdArg).trim() || agentSessionIds.get(id) || catalogAgent?.lastSessionId || null;
 
   let transcriptPath = normalizeTranscriptPath(agentTranscripts.get(id));
   let tool = agentTranscriptTool.get(id) || declaredTool;
@@ -5189,16 +5232,56 @@ async function invokeCommand(event, command, rawArgs) {
       return null;
     case "read_audio_file":
       return [...(await fsPromises.readFile(resolveExistingPath("", args.path)))];
-    case "resolve_cli_session":
-      return sessionService.resolve({
+    case "codex_accounts_switch": {
+      const id = asString(args.id).trim();
+      if (!id || ptys.has(id) || accountSwitches.has(id)) throw new Error("세션을 비활성화한 뒤 계정을 변경하세요.");
+      const runtime = runtimeByWebContents.get(event.sender.id);
+      if (runtime?.workspace_window && !claimAgentForWindow(id, event.sender.id)) {
+        throw new Error("이 세션은 다른 작업창에서 사용 중입니다.");
+      }
+      const root = path.join(codexAccounts.home(args.accountId), "sessions");
+      accountSwitches.add(id);
+      terminalSessions.beginSpawn(id);
+      try {
+        const sessionId = await sessionService.resolve({ aiToolId: "codex", folder: args.folder,
+          preferredSessionId: args.sessionId, transcriptRoot: root, allowFolderFallback: false });
+        if (ptys.has(id)) throw new Error("세션을 비활성화한 뒤 계정을 변경하세요.");
+        accountBindings.set(id, { accountId: args.accountId, sessionId });
+        agentTranscripts.delete(id);
+        agentTranscriptTool.delete(id);
+        agentSessionIds.delete(id);
+        transcriptMissUntil.delete(id);
+        monitorHooks.delete(id);
+        return sessionId;
+      } finally { accountSwitches.delete(id); }
+    }
+    case "codex_accounts_list": return codexAccounts.list();
+    case "codex_accounts_create": return codexAccounts.create(args.label);
+    case "codex_accounts_login":
+      if ([...ptys.values()].some((entry) => entry.codexAccountId === args.accountId)) {
+        throw new Error("이 계정의 세션을 비활성화한 뒤 로그인하세요.");
+      }
+      return codexAccounts.beginLogin(args.accountId);
+    case "codex_accounts_cancel_login": codexAccounts.cancelLogin(); return null;
+    case "resolve_cli_session": {
+      const sessionId = await sessionService.resolve({
         aiToolId: args.aiToolId,
         folder: args.folder,
         preferredSessionId: args.preferredSessionId,
+        transcriptRoot: args.aiToolId === "codex" ? path.join(codexAccounts.home(args.codexAccountId), "sessions") : null,
         agentId: args.agentId,
         // Automatic startup must not attach a different agent's newest
         // conversation merely because both agents share the same folder.
         allowFolderFallback: false,
       });
+      const binding = accountBindings.get(args.agentId);
+      if (binding && !ptys.has(args.agentId) && binding.accountId === (args.codexAccountId || "default")) {
+        binding.sessionId = sessionId;
+        agentSessionIds.delete(args.agentId);
+        agentTranscripts.delete(args.agentId);
+      }
+      return sessionId;
+    }
     case "resolve_cline_session":
       return resolveClineSession(args.folder);
     case "relink_cli_session":
@@ -5206,6 +5289,7 @@ async function invokeCommand(event, command, rawArgs) {
         aiToolId: args.aiToolId,
         folder: args.folder,
         preferredSessionId: null,
+        transcriptRoot: args.aiToolId === "codex" ? path.join(codexAccounts.home(args.codexAccountId), "sessions") : null,
         agentId: args.agentId,
         allowFolderFallback: true,
       });
@@ -5420,6 +5504,7 @@ ipcMain.on("multiagent:emit", (_event, eventName, payload) => {
 });
 
 app.on("before-quit", (event) => {
+  codexAccounts.cancelLogin();
   if (
     singleInstanceLockAcquired &&
     !forceClosing &&

@@ -146,6 +146,8 @@ export type SshHost = {
 };
 
 export type Agent = {
+  codexAccountId?: string;
+  codexAccountSessions?: Record<string, string>;
   id: string;
   projectId: string;
   name: string;
@@ -177,6 +179,8 @@ export type Agent = {
 };
 
 export type StoredAgent = {
+  codexAccountId?: string;
+  codexAccountSessions?: Record<string, string>;
   resumeEligible?: boolean;
   id: string;
   projectId?: string;
@@ -240,6 +244,7 @@ export type TerminalEntry = {
 };
 
 export type NewAgentPayload = {
+  codexAccountId?: string;
   name: string;
   aiToolId: string;
   dangerous: boolean;
@@ -247,6 +252,7 @@ export type NewAgentPayload = {
 };
 
 export type NewProjectPayload = {
+  codexAccountId?: string;
   name: string;
   folder: string;
   aiToolId: string;

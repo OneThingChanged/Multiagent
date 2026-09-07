@@ -1,5 +1,10 @@
 const INVOKE_COMMANDS = Object.freeze([
   "runtime_flags",
+  "codex_accounts_switch",
+  "codex_accounts_list",
+  "codex_accounts_create",
+  "codex_accounts_login",
+  "codex_accounts_cancel_login",
   "renderer_ready",
   "spawn_pty",
   "attach_terminal",
@@ -227,8 +232,20 @@ function assertInvokeRequest(command, rawArgs) {
   assertAllowed(invokeSet, command, "command");
   const args = assertObject(rawArgs);
   switch (command) {
+    case "codex_accounts_create":
+      if (typeof args.label !== "string" || !args.label.trim() || args.label.length > 80) throw new TypeError("Invalid Codex account label");
+      break;
+    case "codex_accounts_switch":
+      assertId(args);
+      assertPathString(args.folder, "Codex session folder", true);
+      if (args.sessionId != null && (typeof args.sessionId !== "string" || !SESSION_STORAGE_ID_RE.test(args.sessionId))) throw new TypeError("Invalid Codex session id");
+      // falls through
+    case "codex_accounts_login":
+      if (typeof args.accountId !== "string" || (args.accountId !== "default" && !SESSION_STORAGE_ID_RE.test(args.accountId))) throw new TypeError("Invalid Codex account id");
+      break;
     case "spawn_pty":
       assertId(args);
+      if (args.codexAccountId != null && (typeof args.codexAccountId !== "string" || (args.codexAccountId !== "default" && !SESSION_STORAGE_ID_RE.test(args.codexAccountId)))) throw new TypeError("Invalid Codex account id");
       assertPositiveInteger(args.cols, "terminal cols");
       assertPositiveInteger(args.rows, "terminal rows");
       break;

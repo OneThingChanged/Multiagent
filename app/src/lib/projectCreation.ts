@@ -46,6 +46,7 @@ export function buildNewProjectWithFirstAgent(
     folder: project.folder,
     aiToolId: tool.id,
     aiLabel: tool.label,
+    codexAccountId: !sshHostId && tool.id === "codex" ? payload.codexAccountId : undefined,
     dangerous: payload.dangerous && !!tool.dangerousFlag,
     workerSettings: defaultSessionWorkerSettings(tool.id),
     status: "starting",

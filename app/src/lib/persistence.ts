@@ -139,7 +139,7 @@ function loadStoredProjectFolders(): ProjectFolder[] {
   }
 }
 
-function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[] {
+export function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[] {
   const byId = new Map(projects.map((project) => [project.id, project]));
   const byFolder = new Map(projects.map((project) => [project.folder, project]));
 
@@ -154,6 +154,8 @@ function loadStoredAgents(rawAgents: StoredAgent[], projects: Project[]): Agent[
         folder: project.folder,
         aiToolId: c.aiToolId,
         aiLabel: toolForId(c.aiToolId).label,
+        codexAccountId: c.codexAccountId,
+        codexAccountSessions: c.codexAccountSessions,
         dangerous: !!c.dangerous,
         useAltScreen: c.useAltScreen || undefined,
         workerSettings: normalizeSessionWorkerSettings(c.workerSettings),

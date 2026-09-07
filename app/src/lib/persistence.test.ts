@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Group, LayoutNode } from "../types";
 import { collectAgentIds, makeLeaf } from "./layout";
-import { normalizeStoredGroups } from "./persistence";
+import { loadStoredAgents, normalizeStoredGroups } from "./persistence";
 
 function split(agentIds: string[]): LayoutNode {
   return {
@@ -145,5 +145,15 @@ describe("normalizeStoredGroups", () => {
     expect(
       normalized.filter((group) => collectAgentIds(group.layout).has("a"))
     ).toHaveLength(1);
+  });
+});
+
+
+describe("Codex account persistence", () => {
+  it("restores account binding and per-account conversations on cold start", () => {
+    const restored = loadStoredAgents([{ id: "a", projectId: "p", name: "A", folder: "project", aiToolId: "codex", createdAt: 0,
+      codexAccountId: "work", codexAccountSessions: { default: "old", work: "new" }, lastSessionId: "new" }],
+      [{ id: "p", name: "P", folder: "project", createdAt: 0 }]);
+    expect(restored[0]).toMatchObject({ codexAccountId: "work", codexAccountSessions: { default: "old", work: "new" }, lastSessionId: "new" });
   });
 });

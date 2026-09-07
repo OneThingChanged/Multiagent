@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CodexAccountSelect } from "./CodexAccounts";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import { openDialog } from "../platform/plugins";
 import {
@@ -32,6 +33,7 @@ export function NewProjectModal({
   const [name, setName] = useState(defaultName);
   const [folder, setFolder] = useState("");
   const [aiToolId, setAiToolId] = useState("");
+  const [codexAccountId, setCodexAccountId] = useState("default");
   const [dangerous, setDangerous] = useState(false);
   const [remote, setRemote] = useState(false);
   const [sshHosts] = useState(() => loadSshHosts());
@@ -82,6 +84,7 @@ export function NewProjectModal({
         name: name.trim(),
         folder: folder.trim(),
         aiToolId,
+        codexAccountId: aiToolId === "codex" ? codexAccountId : undefined,
         dangerous: dangerous && supportsDangerous,
         projectFolderId: projectFolderId || undefined,
       });
@@ -132,6 +135,8 @@ export function NewProjectModal({
             {text("프로젝트를 만들면 선택한 도구로 Session 1이 바로 시작됩니다.", "Creating the project starts Session 1 with the selected tool.")}
           </span>
         </label>
+
+        {aiToolId === "codex" && !remote && <CodexAccountSelect value={codexAccountId} onChange={setCodexAccountId} />}
 
         {supportsDangerous && (
           <label className="field-check">

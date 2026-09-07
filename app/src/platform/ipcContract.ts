@@ -1,4 +1,9 @@
 export type RuntimeCommand =
+  | "codex_accounts_switch"
+  | "codex_accounts_list"
+  | "codex_accounts_create"
+  | "codex_accounts_login"
+  | "codex_accounts_cancel_login"
   | "runtime_flags" | "renderer_ready" | "spawn_pty"
   | "attach_terminal" | "detach_terminal" | "terminal_session_action"
   | "write_pty" | "resize_pty" | "kill_pty" | "confirm_close"
@@ -90,6 +95,7 @@ export type TerminalReplay = Required<
 export type SpawnTerminalResult = { reattached: boolean; cancelled?: boolean };
 
 export type SpawnTerminalArgs = {
+  codexAccountId?: string;
   id: string;
   shell: string | null;
   cwd: string;

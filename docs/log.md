@@ -1,5 +1,11 @@
 # OKF Update Log
 
+## 2026-09-07
+
+* **1.7.3.3 local update**: User confirmed Codex account login/use in the development app. Built the Standard local installer and signed APK; npm remains 1.7.3 and Android versionCode is 16. Desktop tests (433), mobile tests (24), mobile typecheck, account UI/standby smoke tests, packaged runtime/lifecycle checks, and local update discovery from 1.7.3.2 passed. Windows installer file version is 1.7.3.3 and Authenticode status is NotSigned. Installation remains user-controlled.
+
+* **Codex account profiles**: Added isolated local login homes, account management in Agents settings, account selectors for new and existing sessions, per-profile conversation recovery, and separate quota snapshots. Account bindings survive cold starts. Live account switching is blocked, stale startup generations are cancelled, and existing default-login behavior is preserved. Real two-account browser OAuth remains unverified; source/build and isolated tests are covered separately. No release or version bump is included in this implementation step.
+
 ## 2026-09-06
 
 * **1.7.3.2 local update**: Released the standby eligibility correction as the next commit revision; npm remains 1.7.3 and Android versionCode is 15. Tests (422), the mixed standby/inactive Electron smoke, signed APK build, Standard installer build, packaged runtime/lifecycle checks, and local update discovery from 1.7.3.1 passed. Installation on the user's workspace is pending.

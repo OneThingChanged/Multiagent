@@ -112,6 +112,7 @@ export async function buildSpawnArgs(
             aiToolId: agent.aiToolId,
             folder: agent.folder,
             agentId: agent.id,
+            codexAccountId: agent.codexAccountId,
             agentName: agent.name,
             preferredSessionId: candidateSessionId,
           });
@@ -160,6 +161,9 @@ export async function buildSpawnArgs(
     );
     if (agent.dangerous && tool.dangerousFlag) {
       cmd = `${cmd} ${tool.dangerousFlag}`;
+    }
+    if (agent.aiToolId === "codex" && agent.codexAccountId && agent.codexAccountId !== "default" && !sshHost) {
+      cmd += " -c cli_auth_credentials_store=file";
     }
     initCommand = cmd;
   }

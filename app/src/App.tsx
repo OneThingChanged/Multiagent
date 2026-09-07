@@ -1,3 +1,4 @@
+import { switchCodexAccount } from "./lib/codexAccounts";
 import {
   useCallback,
   useEffect,
@@ -290,6 +291,8 @@ function storedAgentFromAgent(agent: Agent): StoredAgent {
     pinned: agent.pinned || undefined,
     tabColor: agent.tabColor || undefined,
     createdAt: agent.createdAt,
+    codexAccountId: agent.codexAccountId,
+    codexAccountSessions: agent.codexAccountSessions,
     lastSessionId: agent.lastSessionId,
     resumeEligible: agent.resumeEligible ?? isAgentRuntimeActive(agent),
   };
@@ -410,6 +413,8 @@ function agentFromStored(
     folder: project.folder,
     aiToolId,
     aiLabel: toolForId(aiToolId).label,
+    codexAccountId: stored.codexAccountId,
+    codexAccountSessions: stored.codexAccountSessions,
     dangerous: !!stored.dangerous,
     useAltScreen: stored.useAltScreen || undefined,
     workerSettings: normalizeSessionWorkerSettings(stored.workerSettings),
@@ -420,7 +425,7 @@ function agentFromStored(
       stored.lastSessionId ??
       stored.lastClaudeSessionId ??
       stored.lastResumeToken ??
-      existing?.lastSessionId,
+      ((stored.codexAccountId || "default") === (existing?.codexAccountId || "default") ? existing?.lastSessionId : undefined),
     status: existing?.status ?? "idle",
     runtimeStatus: existing?.runtimeStatus ?? "idle",
     deferredStart: existing?.deferredStart ?? (existing ? undefined : true),
@@ -2671,6 +2676,7 @@ function App() {
             folder: project.folder,
             aiToolId: tool.id,
             aiLabel: tool.label,
+            codexAccountId: !project.sshHostId && tool.id === "codex" ? payload.codexAccountId : undefined,
             dangerous: payload.dangerous && !!tool.dangerousFlag,
             workerSettings:
               tool.id === "codex"
@@ -2872,6 +2878,7 @@ function App() {
       }
       invoke<string | null>("relink_cli_session", {
         aiToolId: agent.aiToolId,
+        codexAccountId: agent.codexAccountId,
         folder,
         agentName: agent.name,
       })
@@ -3417,6 +3424,7 @@ function App() {
             cwd,
             initCommand,
             aiToolId: agent.aiToolId,
+            codexAccountId: agent.codexAccountId,
             ssh,
             cols: 120,
             rows: 30,
@@ -4184,6 +4192,25 @@ function App() {
                   prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
                 )
               }
+              onAccountChange={async (accountId) => {
+                const current = agentsRef.current.find((a) => a.id === target.id);
+                if (!current || (current.codexAccountId || "default") === accountId) return;
+                const next = switchCodexAccount(current, accountId);
+                const sessionId = await invoke<string | null>("codex_accounts_switch", {
+                  id: current.id, accountId, folder: current.folder, sessionId: next.lastSessionId,
+                });
+                const entry = termsRef.current.get(current.id);
+                try { entry?.term.dispose(); } catch { /* already disposed */ }
+                termsRef.current.delete(current.id);
+                clearScrollback(current.id);
+                setAgents((prev) => prev.map((a) => a.id === current.id
+                  ? { ...switchCodexAccount(a, accountId), lastSessionId: sessionId || undefined } : a));
+                setGroups((prev) => prev.map((g) => {
+                  if (!g.sessionPins?.[current.id]) return g;
+                  const sessionPins = { ...g.sessionPins }; delete sessionPins[current.id];
+                  return { ...g, sessionPins };
+                }));
+              }}
               onSessionDeleted={clearDeletedSessionReferences}
               disabledTools={disabledTools}
               onClose={() => setPropertiesAgentId(null)}

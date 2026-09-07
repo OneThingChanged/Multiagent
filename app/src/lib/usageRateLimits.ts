@@ -120,6 +120,7 @@ const PROVIDER_META: Record<string, Omit<UsageProviderMeta, "key">> = {
 
 export function usageProviderKey(limit: UsageRateLimit) {
   const id = limit.limitId.toLowerCase();
+  if (id.startsWith("codex:")) return id;
   if (id === "codex" || id.startsWith("codex")) return "codex";
   if (id === "claude" || id.startsWith("claude")) return "claude";
   if (id === "gemini" || id.startsWith("gemini")) return "gemini";
@@ -136,10 +137,10 @@ export function groupUsageProviders(
     const key = usageProviderKey(limit);
     let group = byKey.get(key);
     if (!group) {
-      const meta = PROVIDER_META[key];
+      const meta = PROVIDER_META[key.startsWith("codex:") ? "codex" : key];
       group = {
         key,
-        label: meta?.label ?? usageLimitLabel(limit),
+        label: key.startsWith("codex:") ? usageLimitLabel(limit) : meta?.label ?? usageLimitLabel(limit),
         icon: meta?.icon ?? "•",
         iconColor: meta?.iconColor ?? "#8b949e",
         limits: [],

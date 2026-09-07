@@ -1,3 +1,4 @@
+import { CodexAccountSelect } from "./CodexAccounts";
 import { useEffect, useId, useRef, useState } from "react";
 import { useNativeViewOcclusion } from "../hooks/useNativeViewOcclusion";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -53,6 +54,7 @@ export function SessionPropertiesModal({
   agent,
   project,
   onUpdateAgent,
+  onAccountChange,
   onSessionDeleted,
   disabledTools = [],
   onClose,
@@ -65,6 +67,7 @@ export function SessionPropertiesModal({
       Pick<Agent, "dangerous" | "useAltScreen" | "workerSettings">
     >
   ) => void;
+  onAccountChange?: (accountId: string) => Promise<void>;
   onSessionDeleted?: (aiToolId: string, sessionId: string) => void;
   disabledTools?: string[];
   onClose: () => void;
@@ -80,6 +83,8 @@ export function SessionPropertiesModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const [accountError, setAccountError] = useState("");
+  const [changingAccount, setChangingAccount] = useState(false);
   const tool = toolForId(agent.aiToolId);
   const supportsDangerous = !!tool.dangerousFlag;
   const supportsAltScreen = agent.aiToolId === "codex";
@@ -260,6 +265,17 @@ export function SessionPropertiesModal({
             tabIndex={0}
           >
             <div className="session-props-toggles">
+              {supportsWorkers && !sshHostId && onAccountChange && <>
+                <CodexAccountSelect value={agent.codexAccountId}
+                  disabled={changingAccount || !(agent.deferredStart || agent.status === "idle" || agent.status === "exited")}
+                  onChange={(accountId) => {
+                    setChangingAccount(true); setAccountError("");
+                    void onAccountChange(accountId).catch((e) => setAccountError(String(e)))
+                      .finally(() => setChangingAccount(false));
+                  }} />
+                <p className="check-hint">세션을 비활성화한 뒤 계정을 변경하세요. 처음 선택한 계정은 새 대화를 시작하며, 원래 계정으로 돌아오면 해당 계정의 대화를 복원합니다.</p>
+                {accountError && <p role="alert">{accountError}</p>}
+              </> }
               {supportsDangerous && (
                 <label className="session-props-toggle">
                   <input

@@ -153,6 +153,14 @@ describe("buildSpawnArgs resume recovery", () => {
     );
   });
 
+  it("scopes managed account resume lookup and forces file credentials", async () => {
+    invokeMock.mockResolvedValueOnce("work-session");
+    const result = await buildSpawnArgs({ ...agent, codexAccountId: "work" }, null, vi.fn());
+    expect(invokeMock).toHaveBeenCalledWith("resolve_cli_session", expect.objectContaining({ codexAccountId: "work" }));
+    expect(result.initCommand).toContain("codex resume work-session");
+    expect(result.initCommand).toContain("-c cli_auth_credentials_store=file");
+  });
+
   it("applies worker settings when an existing Codex session is resumed", async () => {
     invokeMock.mockResolvedValueOnce("existing-session");
 

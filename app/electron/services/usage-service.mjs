@@ -511,6 +511,11 @@ export class UsageService {
   captureRateLimits(item, sourcePath = null) {
     const snapshot = this.rateLimitSnapshot(item, sourcePath);
     if (!snapshot) return false;
+    const account = this.codexAccountForPath?.(sourcePath);
+    if (snapshot.limitId === "codex" && account) {
+      snapshot.limitId = `codex:${account.id}`;
+      snapshot.limitName = `Codex · ${account.label}`;
+    }
     this.writeRateLimitSnapshot(snapshot);
     return true;
   }

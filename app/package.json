@@ -4,7 +4,7 @@
   "author": "MultiAgent",
   "private": true,
   "version": "1.7.3",
-  "multiAgentReleaseVersion": "1.7.3.2",
+  "multiAgentReleaseVersion": "1.7.3.3",
   "multiAgentVariant": "standard",
   "type": "module",
   "scripts": {
@@ -101,9 +101,9 @@
       ]
     },
     "nsis": {
-      "artifactName": "MultiAgent-Setup-1.7.3.2-${arch}.${ext}",
+      "artifactName": "MultiAgent-Setup-1.7.3.3-${arch}.${ext}",
       "shortcutName": "MultiAgent",
-      "uninstallDisplayName": "MultiAgent 1.7.3.2",
+      "uninstallDisplayName": "MultiAgent 1.7.3.3",
       "include": "electron/installer.nsh"
     },
     "publish": [

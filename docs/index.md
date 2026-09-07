@@ -16,6 +16,7 @@ configuration that supports it.
 
 ## Sessions and integrations
 
+* [Codex account profiles](codex-accounts.md) - Independent local logins, session account selection, and account-scoped recovery and quotas.
 * [Session lifecycle and resume](session-lifecycle-and-resume.md) - PTY startup, hooks, cancellation, shutdown, and provider resume.
 * [Local Dashboard](local-dashboard.md) - Loopback monitoring, terminal, document, and usage surfaces.
 * [MiraControl integration](miracontrol-integration.md) - Authenticated session state, activation, and guarded input API.
